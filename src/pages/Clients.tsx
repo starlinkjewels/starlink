@@ -250,13 +250,18 @@ export function ClientsPage() {
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
           const manager = employees.find(e => e.id === c.accountManagerId);
           return (
-            <div key={c.id} className="card-luxe p-5 flex flex-col">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="font-display text-lg text-brand-dark truncate">{c.companyName}</p>
-                  <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
+            <div key={c.id} className="card-luxe card-hover p-5 flex flex-col">
+              <div className="flex items-start gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display text-lg grid place-items-center shrink-0 ring-1 ring-primary/10">
+                  {(c.companyName || "?").charAt(0).toUpperCase()}
                 </div>
-                <StatusBadge status={c.status} />
+                <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
+                  <div className="min-w-0">
+                    <p className="font-display text-lg text-brand-dark truncate leading-tight">{c.companyName}</p>
+                    <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
+                  </div>
+                  <StatusBadge status={c.status} />
+                </div>
               </div>
 
               {user!.role === "admin" && (
@@ -315,10 +320,10 @@ export function ClientsPage() {
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
                     {c.status === "active" ? "Deactivate" : "Activate"}
                   </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg" title="Send password reset email">
+                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
                     <KeyRound className="h-3.5 w-3.5" />
                   </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg text-destructive">
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
                     <Trash2 className="h-3.5 w-3.5" />
                   </AsyncButton>
                 </div>

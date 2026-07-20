@@ -168,10 +168,23 @@
 }
 
 @utility card-luxe {
-  background: var(--color-card);
+  background:
+    linear-gradient(180deg, color-mix(in oklab, var(--color-card) 92%, white) 0%, var(--color-card) 42%);
   border-radius: 1.25rem;
   box-shadow: var(--shadow-luxe);
-  border: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+  border: 1px solid color-mix(in oklab, var(--color-border) 55%, transparent);
+}
+
+/* Interactive cards: subtle lift + ring on hover. Add to clickable cards. */
+@utility card-hover {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+@utility card-hover {
+  &:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 18px 50px -16px rgb(23 59 120 / 0.28), 0 6px 16px -6px rgb(23 59 120 / 0.12);
+    border-color: color-mix(in oklab, var(--color-primary) 35%, transparent);
+  }
 }
 
 @utility btn-hero {

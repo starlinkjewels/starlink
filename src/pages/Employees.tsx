@@ -131,61 +131,66 @@ export function EmployeesPage() {
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(u => {
           const pending = pendingCount(u.id);
+          const initials = u.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();
           return (
-            <div key={u.id} className="card-luxe p-5 flex items-start gap-3">
-              <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white font-semibold grid place-items-center shrink-0 text-lg">
-                {u.name.charAt(0)}
-              </div>
-              <div className="min-w-0 flex-1">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold truncate">{u.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{u.email}</p>
+            <div key={u.id} className="card-luxe card-hover p-5">
+              {/* Header */}
+              <div className="flex items-start gap-3.5">
+                <div className="relative shrink-0">
+                  <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary to-brand-dark text-white font-semibold grid place-items-center text-lg shadow-md ring-2 ring-white/70">
+                    {initials || u.name.charAt(0)}
                   </div>
-                  <StatusBadge status={u.status} />
+                  <span className={`absolute -bottom-1 -right-1 h-4 w-4 rounded-full border-2 border-white ${u.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
                 </div>
-                <div className="flex items-center gap-2 mt-2">
-                  <p className="text-xs inline-block px-2 py-0.5 rounded-full bg-secondary">{u.department}</p>
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    <Users className="h-3 w-3" /> {clientCount(u.id)} client{clientCount(u.id) !== 1 ? "s" : ""}
-                  </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-start justify-between gap-2">
+                    <p className="font-semibold text-[15px] leading-tight truncate">{u.name}</p>
+                    <StatusBadge status={u.status} />
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">{u.email}</p>
+                  <div className="flex items-center gap-2 mt-2.5">
+                    <span className="text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary">{u.department}</span>
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Users className="h-3 w-3" /> {clientCount(u.id)} client{clientCount(u.id) !== 1 ? "s" : ""}
+                    </span>
+                  </div>
                 </div>
+              </div>
 
-                <div className="flex gap-2 mt-3">
-                  <Button asChild size="sm" className="btn-hero rounded-lg flex-1 gap-1.5">
-                    <Link to={`/employees/${u.id}`}>
-                      <Eye className="h-3.5 w-3.5" /> View
-                    </Link>
-                  </Button>
+              <div className="h-px bg-border/60 my-4" />
 
-                  {/* Tasks button */}
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setTasksPanelUser(u.id)}
-                    className="rounded-lg flex-1 gap-1.5 relative"
-                  >
-                    <ListTodo className="h-3.5 w-3.5 text-primary" />
-                    Tasks
-                    {pending > 0 && (
-                      <span className="ml-1 inline-flex items-center justify-center h-4.5 h-[18px] min-w-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">
-                        {pending}
-                      </span>
-                    )}
-                  </Button>
-                </div>
-
-                <div className="flex gap-2 mt-2">
-                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
-                    {u.status === "active" ? "Deactivate" : "Activate"}
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg" title="Send password reset email">
-                    <KeyRound className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                </div>
+              {/* Actions */}
+              <div className="flex items-center gap-2">
+                <Button asChild size="sm" className="btn-hero rounded-lg flex-1 gap-1.5">
+                  <Link to={`/employees/${u.id}`}>
+                    <Eye className="h-3.5 w-3.5" /> View
+                  </Link>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setTasksPanelUser(u.id)}
+                  className="rounded-lg flex-1 gap-1.5 relative"
+                >
+                  <ListTodo className="h-3.5 w-3.5 text-primary" />
+                  Tasks
+                  {pending > 0 && (
+                    <span className="ml-1 inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">
+                      {pending}
+                    </span>
+                  )}
+                </Button>
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
+                  {u.status === "active" ? "Deactivate" : "Activate"}
+                </AsyncButton>
+                <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
+                  <KeyRound className="h-3.5 w-3.5" />
+                </AsyncButton>
+                <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove access">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </AsyncButton>
               </div>
             </div>
           );
