@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,7 +21,7 @@ export function ClientHistoryPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
 
   const client = db.clients.find(c => c.id === id);
   // Employees may only open clients assigned to them — not the whole client base.

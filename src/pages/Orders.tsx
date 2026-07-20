@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -24,7 +25,7 @@ function lastTrackingStep(o: Order): string {
 
 export function OrdersPage() {
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>("all");
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);

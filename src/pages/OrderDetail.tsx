@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -78,7 +79,7 @@ export function OrderDetailPage() {
   const [priceValue, setPriceValue] = useState("");
   const [priceShipping, setPriceShipping] = useState("");
 
-  const db = loadDb();
+  const db = useDb();
   const order = db.orders.find(o => o.id === id);
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/orders" className="text-primary underline">Back</Link></div>;
 

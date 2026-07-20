@@ -151,10 +151,16 @@ export function NewOrderPage() {
       const num = `SLJ-${new Date().getFullYear()}-${String(1000 + d.orders.length + 1).padStart(4, "0")}`;
       const advance = Number(f.advanceAmount) || 0;
 
+      // Assign the order to an employee so it shows in their views: the creating
+      // employee, otherwise the client's account manager (if any).
+      const managerId = d.clients.find(c => c.id === clientId)?.accountManagerId;
+      const assignedEmployeeId = isEmployee ? user!.id : managerId;
+
       const order: Order = {
         id: orderId,
         orderNumber: num,
         clientId,
+        assignedEmployeeId,
         contactPerson: user!.name,
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
         metal: f.metal as Order["metal"],

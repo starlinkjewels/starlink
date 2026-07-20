@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { TasksPanel } from "@/components/TasksPanel";
@@ -13,7 +14,7 @@ import { motion } from "framer-motion";
 export function EmployeeDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const db = loadDb();
+  const db = useDb();
   const [tasksOpen, setTasksOpen] = useState(false);
 
   const employee = db.users.find(u => u.id === id && u.role === "employee");

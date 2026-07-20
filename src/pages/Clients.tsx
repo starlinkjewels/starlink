@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, uid, type Client } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -109,7 +110,7 @@ function printLabel(c: Client) {
 
 export function ClientsPage() {
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -141,8 +142,11 @@ export function ClientsPage() {
       // Create the client's Firebase Auth account (password lives in Auth).
       const authUid = await createAuthUser(email, f.password!);
       const id = uid("c_");
+      // An employee who creates a client becomes its account manager (so they
+      // can see and work with it). Admin keeps whatever manager was selected.
+      const accountManagerId = user!.role === "employee" ? user!.id : f.accountManagerId;
       updateDb(d => {
-        d.clients.unshift({ ...f, id, username: email, email, status: "active", createdAt: new Date().toISOString() } as Client);
+        d.clients.unshift({ ...f, id, accountManagerId, username: email, email, status: "active", createdAt: new Date().toISOString() } as Client);
         d.users.push({
           id: uid("u_"), authUid, username: email, password: "", role: "client",
           name: f.ownerName || f.companyName!, email, phone: f.phone,

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, uid, type User } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -21,7 +22,7 @@ const DEPTS = ["Sales","CAD","Design","Production","Diamond Setting","Polishing"
 const PAGE_SIZE = 9;
 
 export function EmployeesPage() {
-  const db = loadDb();
+  const db = useDb();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);

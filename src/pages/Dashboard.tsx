@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
 import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck } from "lucide-react";
 import { Link } from "react-router-dom";
@@ -20,7 +21,7 @@ function lastTrackingStep(o: Order): string {
 
 export function Dashboard() {
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
   const orders = useMemo(() => currentUserOrders(db, user!), [db, user]);
 
   const today = new Date().toDateString();

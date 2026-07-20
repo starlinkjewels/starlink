@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { loadDb } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
@@ -8,7 +9,7 @@ import { Package, Users, Briefcase, FileText } from "lucide-react";
 export function SearchPage() {
   const { user } = useAuth();
   const [q, setQ] = useState("");
-  const db = loadDb();
+  const db = useDb();
   const ql = q.toLowerCase();
   const orders = q ? db.orders.filter(o =>
     o.orderNumber.toLowerCase().includes(ql) ||

@@ -1,6 +1,7 @@
 import { useState, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, totalAdvance, orderTotal } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
 import {
   TrendingUp, Download, Filter, X, DollarSign,
@@ -55,7 +56,7 @@ function downloadCSV(rows: IncomeRow[]) {
 /* ─── Page ───────────────────────────────────────────────────── */
 export function IncomePage() {
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
 
   /* Filters */
   const [dateFrom, setDateFrom] = useState("");

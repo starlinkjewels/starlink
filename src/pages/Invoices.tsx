@@ -1,5 +1,6 @@
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
 import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock } from "lucide-react";
 import { usePagination } from "@/hooks/usePagination";
@@ -7,7 +8,7 @@ import { PaginationBar } from "@/components/PaginationBar";
 
 export function InvoicesPage() {
   const { user } = useAuth();
-  const db = loadDb();
+  const db = useDb();
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
