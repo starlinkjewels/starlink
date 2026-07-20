@@ -1,17 +1,34 @@
+import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
-import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock } from "lucide-react";
+import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search } from "lucide-react";
+import { Input } from "@/components/ui/input";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 
 export function InvoicesPage() {
   const { user } = useAuth();
   const db = useDb();
+  const [q, setQ] = useState("");
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
+
+  // Search by invoice #, linked order #, client name, or status.
+  const ql = q.trim().toLowerCase();
+  if (ql) {
+    list = list.filter(inv => {
+      const o = db.orders.find(x => x.id === inv.orderId);
+      const client = o ? db.clients.find(c => c.id === o.clientId) : undefined;
+      const statusText = inv.paid ? "paid" : "pending";
+      return inv.number.toLowerCase().includes(ql)
+        || (o?.orderNumber ?? "").toLowerCase().includes(ql)
+        || (client?.companyName ?? "").toLowerCase().includes(ql)
+        || statusText.includes(ql);
+    });
+  }
   list = [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 
   // Orders with advances (all roles see their own)
@@ -51,9 +68,18 @@ export function InvoicesPage() {
 
       {/* Invoices section */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="font-semibold text-brand-dark">All Invoices</h2>
-          {list.length > 0 && <p className="text-xs text-muted-foreground">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
+        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
+          <h2 className="font-semibold text-brand-dark shrink-0">All Invoices</h2>
+          <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+            <Input
+              value={q}
+              onChange={e => setQ(e.target.value)}
+              placeholder="Search invoice, order, client…"
+              className="pl-9 h-9 rounded-xl text-sm"
+            />
+          </div>
+          {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
         </div>
 
         {/* Desktop table */}
@@ -107,7 +133,7 @@ export function InvoicesPage() {
                 );
               })}
               {list.length === 0 && (
-                <tr><td colSpan={7} className="p-12 text-center text-muted-foreground">No invoices yet.</td></tr>
+                <tr><td colSpan={7} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</td></tr>
               )}
             </tbody>
           </table>
@@ -161,7 +187,7 @@ export function InvoicesPage() {
             );
           })}
           {list.length === 0 && (
-            <div className="p-12 text-center text-muted-foreground">No invoices yet.</div>
+            <div className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</div>
           )}
         </div>
 
