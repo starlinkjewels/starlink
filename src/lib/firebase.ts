@@ -5,6 +5,7 @@
 // below. The web API key/config below is public by design (client SDK config);
 // access is governed by Firestore/Storage security rules, not by hiding this.
 import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
+import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import {
@@ -41,6 +42,31 @@ export function isAdminEmail(email?: string | null): boolean {
 }
 
 export const app: FirebaseApp = initializeApp(firebaseConfig);
+
+/**
+ * App Check — makes Firebase reject any request that doesn't come from THIS app,
+ * so a copied config can't be used from a script/Postman/other site. This is the
+ * real protection for a public client config (the config itself is not secret).
+ *
+ * SETUP (then it activates automatically):
+ *  1. Firebase Console → App Check → Apps → register this web app with
+ *     reCAPTCHA v3, and copy the reCAPTCHA v3 **site key**.
+ *  2. Paste it below (or set VITE_RECAPTCHA_SITE_KEY in the build env).
+ *  3. App Check → APIs → set Firestore & Storage to "Enforced".
+ * Left empty, App Check stays OFF and nothing changes.
+ */
+const RECAPTCHA_SITE_KEY =
+  (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined) || "";
+if (RECAPTCHA_SITE_KEY) {
+  try {
+    initializeAppCheck(app, {
+      provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
+      isTokenAutoRefreshEnabled: true,
+    });
+  } catch (e) {
+    console.error("[firebase] App Check init failed:", e);
+  }
+}
 
 // getFirestore(app, databaseId) targets the named database instead of "(default)".
 export const db: Firestore = getFirestore(app, DATABASE_ID);
