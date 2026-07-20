@@ -132,8 +132,8 @@ export function printInvoice(
   .to .name { font-weight: bold; font-size: 11.5px; text-transform: uppercase; }
   .meta { border: 1px solid #333; font-size: 10.5px; min-width: 200px; }
   .meta table { width: 100%; border-collapse: collapse; }
-  .meta td { padding: 4px 8px; }
-  .meta td:first-child { white-space: nowrap; border-right: 1px solid #333; }
+  .meta td { padding: 5px 10px; }
+  .meta td:first-child { white-space: nowrap; border-right: 1px solid #333; font-weight: bold; }
   .meta tr:not(:last-child) td { border-bottom: 1px solid #333; }
   .meta td:last-child { text-align: right; font-weight: bold; }
 
