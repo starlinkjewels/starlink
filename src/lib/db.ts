@@ -363,6 +363,13 @@ function eq(a: unknown, b: unknown): boolean {
 // stale server echo mid-write.
 const writePending: Record<string, number> = {};
 
+// A "client"-scoped session only ever mirrors ITS OWN messages (merged from two
+// separate from/to queries — see subscribeAll), never the full collection. Diffing
+// that partial mirror against remote would read every other conversation's messages
+// as "deleted" and wipe them from Firestore for everyone. Track the scope so persist()
+// can skip delete-detection for "messages" unless we truly hold the complete collection.
+let messagesScopeIsFull = true;
+
 let seeded = false;      // becomes true once cache has been populated from Firestore
 let persistQueue: Promise<void> = Promise.resolve();
 
@@ -393,6 +400,9 @@ async function persist() {
         touched.add(col); ops++;
       }
     }
+    // Skip delete-detection for "messages" when this session only holds a partial
+    // mirror of the collection (client scope) — see `messagesScopeIsFull` above.
+    if (col === "messages" && !messagesScopeIsFull) continue;
     for (const [id] of prevMap) {
       if (!curMap.has(id)) { batch.delete(doc(fsdb, col, id)); touched.add(col); ops++; }
     }
@@ -560,6 +570,7 @@ export function stopDb() {
   idxSeeded = false;
   startPromise = null;
   seeded = false;
+  messagesScopeIsFull = true;
   emit();
 }
 
@@ -578,6 +589,7 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
 /** Subscribe according to scope; resolves after each stream has fired once. */
 function subscribeAll(scope: Scope): Promise<void> {
   const client = scope.kind === "client" ? scope : null;
+  messagesScopeIsFull = !client;
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];

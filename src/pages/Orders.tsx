@@ -35,7 +35,8 @@ export function OrdersPage() {
     if (status !== "all") list = list.filter(o => o.status === status);
     if (q) list = list.filter(o =>
       o.orderNumber.toLowerCase().includes(q.toLowerCase()) ||
-      o.jewelleryType.toLowerCase().includes(q.toLowerCase())
+      o.jewelleryType.toLowerCase().includes(q.toLowerCase()) ||
+      (o.designNumber ?? "").toLowerCase().includes(q.toLowerCase())
     );
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   }, [db, user, q, status]);

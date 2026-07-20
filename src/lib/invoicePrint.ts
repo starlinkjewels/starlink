@@ -21,11 +21,19 @@ export function printInvoice(
   const bal      = balanceDue(order);
   const shipping = order.shippingCharge || 0;
 
-  const description = [
+  const baseDescription = [
     order.productKarats,
     order.jewelleryType.toUpperCase(),
     order.metal !== "Gold" ? order.metal.toUpperCase() : "",
   ].filter(Boolean).join(" ") || `${order.jewelleryType} - ${order.metal}`.toUpperCase();
+
+  const weightDetails = [
+    order.actualGrossWeight   ? `Gross Weight: ${order.actualGrossWeight}g`     : "",
+    order.actualNetWeight     ? `Net Weight: ${order.actualNetWeight}g`         : "",
+    order.actualDiamondWeight ? `Diamond Weight: ${order.actualDiamondWeight}ct` : "",
+  ].filter(Boolean).join(", ");
+
+  const description = baseDescription + (weightDetails ? ` (${weightDetails})` : "");
 
   const stockId   = order.designNumber || order.orderNumber;
   const weight    = order.diamondWeight ? `${order.diamondWeight}CT` : "—";

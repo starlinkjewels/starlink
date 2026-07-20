@@ -70,9 +70,8 @@ export function OrderDetailPage() {
   const [actGrossW, setActGrossW] = useState("");
   const [actNetW, setActNetW] = useState("");
   const [actDiamW, setActDiamW] = useState("");
-  const [actMetalR, setActMetalR] = useState("");
-  const [actDiamR, setActDiamR] = useState("");
-  const [actMaking, setActMaking] = useState("");
+  const [actOrderValue, setActOrderValue] = useState("");
+  const [actShipping, setActShipping] = useState("");
 
   // Pricing form (admin/employee set the order value — client never sets this)
   const [showPricing, setShowPricing] = useState(false);
@@ -159,29 +158,24 @@ export function OrderDetailPage() {
   const saveActualDetails = () => {
     const nw = parseFloat(actNetW);
     const dw = parseFloat(actDiamW);
-    const mr = parseFloat(actMetalR);
-    const dr = parseFloat(actDiamR);
     const gw = parseFloat(actGrossW) || 0;
-    const mc = parseFloat(actMaking) || 0;
+    const val = parseFloat(actOrderValue);
+    const ship = parseFloat(actShipping) || 0;
     if (!nw || nw <= 0) { toast.error("Enter actual net weight"); return; }
     if (!dw || dw <= 0) { toast.error("Enter actual diamond weight"); return; }
-    if (!mr || mr <= 0) { toast.error("Enter metal rate ($/g)"); return; }
-    if (!dr || dr <= 0) { toast.error("Enter diamond rate ($/ct)"); return; }
-    const finalAmount = Math.round((nw * mr) + (dw * dr) + mc);
+    if (!val || val <= 0) { toast.error("Enter a valid order value"); return; }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.actualGrossWeight   = gw || undefined;
       o.actualNetWeight     = nw;
       o.actualDiamondWeight = dw;
-      o.actualMetalRate     = mr;
-      o.actualDiamondRate   = dr;
-      o.actualMakingCharges = mc || undefined;
-      o.amount = finalAmount;
+      o.amount = val;
+      o.shippingCharge = ship;
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: "Order Finalized",
-        body: `${o.orderNumber} final amount confirmed: ${fmtMoney(finalAmount)}`,
+        body: `${o.orderNumber} final amount confirmed: ${fmtMoney(val)}${ship > 0 ? ` + ${fmtMoney(ship)} shipping` : ""}`,
         type: "info", read: false, createdAt: new Date().toISOString(),
       });
     });
@@ -398,7 +392,7 @@ export function OrderDetailPage() {
                 <h3 className="font-display text-lg text-brand-dark">Actual Weights & Final Pricing</h3>
                 <p className="text-xs text-muted-foreground">
                   {order.actualNetWeight
-                    ? "Actual details on file — order value calculated from these"
+                    ? "Actual weight and final order value on file"
                     : "Fill in after the piece is ready (post Final Approval)"}
                 </p>
               </div>
@@ -410,9 +404,8 @@ export function OrderDetailPage() {
                   setActGrossW(order.actualGrossWeight ? String(order.actualGrossWeight) : "");
                   setActNetW(order.actualNetWeight ? String(order.actualNetWeight) : "");
                   setActDiamW(order.actualDiamondWeight ? String(order.actualDiamondWeight) : "");
-                  setActMetalR(order.actualMetalRate ? String(order.actualMetalRate) : String(db.settings.metalRate ?? 65));
-                  setActDiamR(order.actualDiamondRate ? String(order.actualDiamondRate) : String(db.settings.diamondRate ?? 3500));
-                  setActMaking(order.actualMakingCharges ? String(order.actualMakingCharges) : "");
+                  setActOrderValue(order.amount ? String(order.amount) : "");
+                  setActShipping(order.shippingCharge ? String(order.shippingCharge) : "");
                   setShowActualForm(v => !v);
                 }}
               >
@@ -468,24 +461,20 @@ export function OrderDetailPage() {
                 </div>
               </div>
               <div className="rounded-xl border border-border/60 p-3 space-y-2 text-sm">
-                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Price Breakdown</p>
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Pricing</p>
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Metal ({order.actualNetWeight}g × ${order.actualMetalRate}/g)</span>
-                  <span className="font-medium">{fmtMoney(Math.round((order.actualNetWeight ?? 0) * (order.actualMetalRate ?? 0)))}</span>
+                  <span className="text-muted-foreground">Order Value</span>
+                  <span className="font-medium">{fmtMoney(order.amount)}</span>
                 </div>
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Diamond ({order.actualDiamondWeight}ct × ${order.actualDiamondRate}/ct)</span>
-                  <span className="font-medium">{fmtMoney(Math.round((order.actualDiamondWeight ?? 0) * (order.actualDiamondRate ?? 0)))}</span>
-                </div>
-                {(order.actualMakingCharges ?? 0) > 0 && (
+                {(order.shippingCharge ?? 0) > 0 && (
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">Making Charges</span>
-                    <span className="font-medium">{fmtMoney(order.actualMakingCharges ?? 0)}</span>
+                    <span className="text-muted-foreground">Shipping Charge</span>
+                    <span className="font-medium">{fmtMoney(order.shippingCharge)}</span>
                   </div>
                 )}
                 <div className="flex justify-between pt-1.5 border-t border-border/60">
                   <span className="font-semibold">Final Order Value</span>
-                  <span className="font-bold text-primary">{fmtMoney(order.amount)}</span>
+                  <span className="font-bold text-primary">{fmtMoney(orderTotal(order))}</span>
                 </div>
               </div>
             </div>
@@ -498,7 +487,7 @@ export function OrderDetailPage() {
               <div>
                 <p className="text-sm font-medium text-amber-800">Actual details not yet entered</p>
                 <p className="text-xs text-amber-700 mt-0.5">
-                  Enter actual weights and rates after the piece is ready — the system will auto-calculate the final order value.
+                  Enter actual weight and set the order value after the piece is ready.
                 </p>
               </div>
             </div>
@@ -538,59 +527,22 @@ export function OrderDetailPage() {
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Rates & Charges</p>
-                    <div className="grid grid-cols-3 gap-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Pricing</p>
+                    <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Metal Rate ($/g) *</Label>
-                        <Input type="number" step="0.01" min={0} value={actMetalR}
-                          onChange={e => setActMetalR(e.target.value)}
+                        <Label className="text-xs">Order Value ($) *</Label>
+                        <Input type="number" step="0.01" min={0} value={actOrderValue}
+                          onChange={e => setActOrderValue(e.target.value)}
                           className="rounded-xl h-10" placeholder="0" />
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Diamond Rate ($/ct) *</Label>
-                        <Input type="number" step="0.01" min={0} value={actDiamR}
-                          onChange={e => setActDiamR(e.target.value)}
-                          className="rounded-xl h-10" placeholder="0" />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label className="text-xs">Making Charges ($)</Label>
-                        <Input type="number" step="0.01" min={0} value={actMaking}
-                          onChange={e => setActMaking(e.target.value)}
+                        <Label className="text-xs">Shipping Charge ($)</Label>
+                        <Input type="number" step="0.01" min={0} value={actShipping}
+                          onChange={e => setActShipping(e.target.value)}
                           className="rounded-xl h-10" placeholder="0" />
                       </div>
                     </div>
                   </div>
-
-                  {/* Live calculation preview */}
-                  {actNetW && actDiamW && actMetalR && actDiamR && parseFloat(actNetW) > 0 && parseFloat(actDiamW) > 0 && (
-                    <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 space-y-1.5 text-sm">
-                      <p className="text-xs font-semibold text-primary uppercase tracking-wider">Live Calculation</p>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Metal: {actNetW}g × ${actMetalR}/g</span>
-                        <span className="font-medium text-foreground">${Math.round(parseFloat(actNetW) * parseFloat(actMetalR)).toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between text-xs text-muted-foreground">
-                        <span>Diamond: {actDiamW}ct × ${actDiamR}/ct</span>
-                        <span className="font-medium text-foreground">${Math.round(parseFloat(actDiamW) * parseFloat(actDiamR)).toLocaleString()}</span>
-                      </div>
-                      {parseFloat(actMaking) > 0 && (
-                        <div className="flex justify-between text-xs text-muted-foreground">
-                          <span>Making Charges</span>
-                          <span className="font-medium text-foreground">${(parseFloat(actMaking) || 0).toLocaleString()}</span>
-                        </div>
-                      )}
-                      <div className="flex justify-between font-bold pt-1.5 border-t border-primary/20 text-sm">
-                        <span>Final Order Value</span>
-                        <span className="text-primary">
-                          ${(
-                            Math.round(parseFloat(actNetW) * parseFloat(actMetalR)) +
-                            Math.round(parseFloat(actDiamW) * parseFloat(actDiamR)) +
-                            (parseFloat(actMaking) || 0)
-                          ).toLocaleString()}
-                        </span>
-                      </div>
-                    </div>
-                  )}
 
                   <div className="flex gap-2">
                     <AsyncButton size="sm" onClick={saveActualDetails} className="btn-hero rounded-xl">Save &amp; Update Order Value</AsyncButton>
