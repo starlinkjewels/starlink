@@ -128,14 +128,22 @@ export function OrderDetailPage() {
   const addAdvance = () => {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    let paidInFull = false;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (!o.advances) o.advances = [];
-      o.advances.push({ id: uid("adv_"), amount: amt, note: advNote || "Advance payment", recordedBy: user!.id, createdAt: new Date().toISOString() });
+      paidInFull = totalAdvance(o) + amt >= orderTotal(o);
+      const defaultNote = paidInFull ? "Final Payment" : "Advance payment";
+      o.advances.push({ id: uid("adv_"), amount: amt, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString() });
       const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Advance Recorded", body: `${fmtMoney(amt)} advance received for ${o.orderNumber}`, type: "info", read: false, createdAt: new Date().toISOString() });
+      if (clientUser) d.notifications.unshift({
+        id: uid("n_"), userId: clientUser.id,
+        title: paidInFull ? "Order Paid in Full" : "Advance Recorded",
+        body: paidInFull ? `${o.orderNumber} paid in full — final payment of ${fmtMoney(amt)} received` : `${fmtMoney(amt)} advance received for ${o.orderNumber}`,
+        type: "info", read: false, createdAt: new Date().toISOString(),
+      });
     });
-    toast.success("Advance payment recorded");
+    toast.success(paidInFull ? "Final payment recorded — order paid in full" : "Advance payment recorded");
     setAdvAmt(""); setAdvNote(""); setShowAdvForm(false);
   };
 
@@ -732,7 +740,10 @@ export function OrderDetailPage() {
             </div>
             <div>
               <h3 className="font-display text-lg text-brand-dark">Advance Payments</h3>
-              <p className="text-xs text-muted-foreground">{advances.length} payment{advances.length !== 1 ? "s" : ""} recorded</p>
+              <p className="text-xs text-muted-foreground">
+                {advances.length} payment{advances.length !== 1 ? "s" : ""} recorded
+                {advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}
+              </p>
             </div>
           </div>
           {canEditStage() && (

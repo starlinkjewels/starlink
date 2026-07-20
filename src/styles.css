@@ -156,6 +156,9 @@
     text-rendering: optimizeLegibility;
     padding-top: env(safe-area-inset-top);
     padding-bottom: env(safe-area-inset-bottom);
+    /* Block pinch-zoom and double-tap-to-zoom on mobile (viewport meta alone
+       isn't honored by every mobile browser). Still allows normal scrolling. */
+    touch-action: pan-x pan-y;
   }
   h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
 }
