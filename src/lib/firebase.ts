@@ -55,8 +55,10 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  *  3. App Check → APIs → set Firestore & Storage to "Enforced".
  * Left empty, App Check stays OFF and nothing changes.
  */
+// reCAPTCHA v3 SITE key (public — safe to commit). Overridable via env var.
 const RECAPTCHA_SITE_KEY =
-  (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined) || "";
+  (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined)
+  || "6Le2pFwtAAAAALa3qinV6qPapcFGgYiSgp1VeP1Z";
 if (RECAPTCHA_SITE_KEY) {
   try {
     initializeAppCheck(app, {
