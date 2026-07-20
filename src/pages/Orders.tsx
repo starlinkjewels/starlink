@@ -51,7 +51,7 @@ export function OrdersPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Orders</h1>
           <p className="text-sm text-muted-foreground">{total} order{total !== 1 ? "s" : ""}</p>
         </div>
-        {(user!.role === "client" || user!.role === "admin") && (
+        {(user!.role === "client" || user!.role === "admin" || user!.role === "employee") && (
           <Button asChild className="btn-hero h-10 rounded-xl px-4 text-sm">
             <Link to="/orders/new"><Plus className="h-4 w-4 mr-1.5" />New Order</Link>
           </Button>

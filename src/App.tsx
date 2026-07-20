@@ -39,7 +39,7 @@ export function App() {
         <Route element={<Protected><AppLayout /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersPage />} />
-          <Route path="orders/new" element={<Protected roles={["client","admin"]}><NewOrderPage /></Protected>} />
+          <Route path="orders/new" element={<Protected roles={["client","admin","employee"]}><NewOrderPage /></Protected>} />
           <Route path="orders/:id" element={<OrderDetailPage />} />
           <Route path="clients" element={<Protected roles={["admin","employee"]}><ClientsPage /></Protected>} />
           <Route path="clients/:id" element={<Protected roles={["admin","employee"]}><ClientHistoryPage /></Protected>} />

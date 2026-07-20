@@ -123,7 +123,7 @@ export function AppLayout() {
 
   const nav = NAV.filter(n => !n.roles || n.roles.includes(user!.role));
   const moreNav = MORE_NAV.filter(n => !n.roles || n.roles.includes(user!.role));
-  const canCreateOrder = user?.role === "client" || user?.role === "admin";
+  const canCreateOrder = user?.role === "client" || user?.role === "admin" || user?.role === "employee";
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
   const pageTitle = PAGE_TITLES[loc.pathname] ??
