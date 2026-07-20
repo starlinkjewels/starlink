@@ -50,7 +50,7 @@ export function App() {
           <Route path="notifications" element={<NotificationsPage />} />
           <Route path="reports" element={<ReportsPage />} />
           <Route path="search" element={<SearchPage />} />
-          <Route path="settings" element={<Protected roles={["admin","employee"]}><SettingsPage /></Protected>} />
+          <Route path="settings" element={<Protected roles={["admin"]}><SettingsPage /></Protected>} />
           <Route path="expenses" element={<Protected roles={["admin","employee"]}><ExpensesPage /></Protected>} />
           <Route path="income" element={<IncomePage />} />
           <Route path="catalog" element={<CatalogPage />} />

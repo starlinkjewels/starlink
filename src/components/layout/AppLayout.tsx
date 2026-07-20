@@ -20,7 +20,7 @@ const NAV: NavItem[] = [
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reports", label: "Reports", icon: BarChart3 },
-  { to: "/settings", label: "Settings", icon: Settings, roles: ["admin","employee"] },
+  { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
 /* Main 4 tabs always visible on mobile */
@@ -40,7 +40,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
-  { to: "/settings", label: "Settings", icon: Settings, roles: ["admin","employee"] },
+  { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/search", label: "Search", icon: SearchIcon },
   { to: "/profile", label: "My Profile", icon: User },
