@@ -731,7 +731,9 @@ async function uploadInlineMedia(db: DB): Promise<DB> {
 export function currentUserOrders(db: DB, user: User): Order[] {
   if (user.role === "admin") return db.orders;
   if (user.role === "client") return db.orders.filter(o => o.clientId === user.clientId);
-  return db.orders.filter(o => o.assignedEmployeeId === user.id);
+  // Employee: orders assigned to them OR belonging to a client they manage.
+  const myClientIds = new Set(db.clients.filter(c => c.accountManagerId === user.id).map(c => c.id));
+  return db.orders.filter(o => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
 }
 
 export function fmtMoney(n: number) {

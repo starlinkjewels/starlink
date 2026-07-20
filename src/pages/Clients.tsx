@@ -195,7 +195,7 @@ export function ClientsPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Clients</h1>
           <p className="text-sm text-muted-foreground">{total} client{total !== 1 ? "s" : ""}</p>
         </div>
-        {user!.role === "admin" && (
+        {user!.role !== "client" && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Client</Button>
@@ -217,22 +217,26 @@ export function ClientsPage() {
                   </div>
                 ))}
               </div>
-              <div className="mt-3">
-                <Label className="text-xs">Assign Employee (optional)</Label>
-                <Select
-                  value={f.accountManagerId || "__none"}
-                  onValueChange={v => setF({ ...f, accountManagerId: v === "__none" ? undefined : v })}
-                >
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-                    {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-                <p className="text-xs text-muted-foreground mt-1">
-                  If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
-                </p>
-              </div>
+              {user!.role === "admin" ? (
+                <div className="mt-3">
+                  <Label className="text-xs">Assign Employee (optional)</Label>
+                  <Select
+                    value={f.accountManagerId || "__none"}
+                    onValueChange={v => setF({ ...f, accountManagerId: v === "__none" ? undefined : v })}
+                  >
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
+                      {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground mt-3">This client will be added under your account — you'll manage them and their orders.</p>
+              )}
               <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Client"}</Button>
             </DialogContent>
           </Dialog>
@@ -315,7 +319,7 @@ export function ClientsPage() {
                 </Button>
               </div>
 
-              {user!.role === "admin" && (
+              {user!.role !== "client" && (
                 <div className="flex gap-2 mt-2">
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
                     {c.status === "active" ? "Deactivate" : "Activate"}

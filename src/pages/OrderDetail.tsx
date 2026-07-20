@@ -89,7 +89,10 @@ export function OrderDetailPage() {
   const advTotal = totalAdvance(order);
   const balance = balanceDue(order);
 
-  const canEditStage = () => user!.role === "admin" || (user!.role === "employee" && order.assignedEmployeeId === user!.id);
+  // Admin, or the employee who owns this order (assigned to them OR the account
+  // manager of the order's client) — full control of their own clients' orders.
+  const canEditStage = () => user!.role === "admin"
+    || (user!.role === "employee" && (order.assignedEmployeeId === user!.id || client?.accountManagerId === user!.id));
 
   const advanceStep = (idx: number) => {
     updateDb(d => {
@@ -375,7 +378,7 @@ export function OrderDetailPage() {
           </div>
         )}
 
-        {user!.role === "admin" && order.status === "Waiting" && (
+        {canEditStage() && order.status === "Waiting" && (
           <div className="mt-5 flex gap-3">
             <AsyncButton onClick={() => approve(true)} className="btn-hero rounded-xl">Approve Order</AsyncButton>
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
@@ -780,7 +783,7 @@ export function OrderDetailPage() {
               <p className="text-xs text-muted-foreground">{advances.length} payment{advances.length !== 1 ? "s" : ""} recorded</p>
             </div>
           </div>
-          {user!.role === "admin" && (
+          {canEditStage() && (
             <Button size="sm" onClick={() => setShowAdvForm(v => !v)} className="btn-hero rounded-xl gap-2">
               <Plus className="h-4 w-4" /> Add Advance
             </Button>
