@@ -1,0 +1,11 @@
+{
+  "firestore": [
+    {
+      "database": "diamondflow",
+      "rules": "firestore.rules"
+    }
+  ],
+  "storage": {
+    "rules": "storage.rules"
+  }
+}

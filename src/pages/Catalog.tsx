@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
+import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { useAuth } from "@/lib/auth";
 
 /* ─────────────────────────────────────────────────────────────── */
@@ -34,14 +35,6 @@ function compressImage(file: File): Promise<string> {
   });
 }
 
-function readAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload  = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
 
 /* ─────────────────────────────────────────────────────────────── */
 /*  Heart button — shared by item cards & favorites section       */
@@ -467,7 +460,11 @@ export function CatalogPage() {
         const isImage = file.type.startsWith("image/");
         const isVideo = file.type.startsWith("video/");
         if (!isImage && !isVideo) { setError(`"${file.name}" not supported — skipped.`); continue; }
-        const data = isImage ? await compressImage(file) : await readAsBase64(file);
+        // Upload to Firebase Storage — images are compressed first, videos
+        // uploaded as-is. The doc stores only the download URL.
+        const data = isImage
+          ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
+          : await uploadFile(file, `catalog/${currentFolderId}`);
         updateDb(db => {
           db.catalogItems.push({
             id: uid("ci_"), folderId: currentFolderId,

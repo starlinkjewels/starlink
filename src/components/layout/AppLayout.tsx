@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
 import { useEffect, useRef, useState } from "react";
 import { TasksPanel } from "@/components/TasksPanel";
+import { SyncStatus } from "@/components/SyncStatus";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; }
 const NAV: NavItem[] = [
@@ -296,6 +297,8 @@ export function AppLayout() {
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-6">
           <Outlet />
         </motion.main>
+
+        <SyncStatus />
 
         {/* ── Bottom nav (mobile) — 5 items: 4 tabs + More ── */}
         <nav

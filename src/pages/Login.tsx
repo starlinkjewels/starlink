@@ -2,6 +2,9 @@ import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { useAuth } from "@/lib/auth";
+import { auth } from "@/lib/firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,7 +15,7 @@ import { Loader2 } from "lucide-react";
 export function LoginPage() {
   const { user, login } = useAuth();
   const nav = useNavigate();
-  const [username, setUsername] = useState(localStorage.getItem("starlink_remember_user") || "");
+  const [email, setEmail] = useState(localStorage.getItem("starlink_remember_user") || "");
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(!!localStorage.getItem("starlink_remember_user"));
   const [loading, setLoading] = useState(false);
@@ -22,10 +25,10 @@ export function LoginPage() {
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
-    const u = await login(username.trim(), password);
+    const u = await login(email.trim(), password);
     setLoading(false);
     if (!u) { toast.error("Invalid credentials"); return; }
-    if (remember) localStorage.setItem("starlink_remember_user", username); else localStorage.removeItem("starlink_remember_user");
+    if (remember) localStorage.setItem("starlink_remember_user", email); else localStorage.removeItem("starlink_remember_user");
     toast.success(`Welcome, ${u.name}`);
     nav("/", { replace: true });
   };
@@ -43,8 +46,8 @@ export function LoginPage() {
           </div>
           <form onSubmit={submit} className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="u">Username</Label>
-              <Input id="u" value={username} onChange={e => setUsername(e.target.value)} placeholder="admin" required autoFocus />
+              <Label htmlFor="u">Email</Label>
+              <Input id="u" type="email" autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="you@example.com" required autoFocus />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="p">Password</Label>
@@ -55,7 +58,11 @@ export function LoginPage() {
                 <Checkbox checked={remember} onCheckedChange={v => setRemember(!!v)} />
                 <span>Remember me</span>
               </label>
-              <button type="button" onClick={() => toast.info("Contact your account manager to reset your password.")} className="text-primary hover:underline">Forgot?</button>
+              <button type="button" onClick={async () => {
+                if (!email.trim()) { toast.info("Enter your email above first, then tap Forgot."); return; }
+                try { await sendPasswordResetEmail(auth, email.trim()); toast.success("Password reset email sent — check your inbox."); }
+                catch (err) { toast.error(authErrorMessage(err)); }
+              }} className="text-primary hover:underline">Forgot?</button>
             </div>
             <Button type="submit" disabled={loading} className="w-full h-12 btn-hero text-base font-semibold rounded-xl">
               {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Sign In"}

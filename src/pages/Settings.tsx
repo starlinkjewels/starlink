@@ -1,12 +1,16 @@
 import { useRef, useState } from "react";
-import { loadDb, saveDb } from "@/lib/db";
+import { loadDb, saveDb, updateDb, type DB } from "@/lib/db";
+import { uploadDataUrl } from "@/lib/storage";
+import { createAuthUser } from "@/lib/firebase";
+import { authErrorMessage } from "@/lib/authErrors";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Diamond, Weight, Truck, Upload, X, QrCode, Stamp, FileText } from "lucide-react";
+import { Diamond, Weight, Truck, Upload, X, QrCode, Stamp, FileText, ShieldCheck, Loader2 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -42,29 +46,64 @@ export function SettingsPage() {
     const r = new FileReader();
     r.onload = () => {
       try {
-        const d = JSON.parse(r.result as string);
-        localStorage.setItem("starlink_db_v2", JSON.stringify(d));
-        window.dispatchEvent(new Event("starlink-db-updated"));
-        toast.success("Restored");
-        setDb(d);
+        const d = JSON.parse(r.result as string) as DB;
+        // Push the restored data into Firestore (keep the current session).
+        const fresh = loadDb();
+        Object.assign(fresh, d, { session: fresh.session });
+        saveDb(fresh);
+        toast.success("Restored to database");
+        setDb(fresh);
       } catch { toast.error("Invalid file"); }
     };
     r.readAsText(f);
   };
   const clear = () => {
-    if (!confirm("Wipe all data and reload seed?")) return;
-    localStorage.removeItem("starlink_db_v2");
-    location.reload();
+    if (!confirm("Wipe ALL data from the database and reset to the admin seed? This cannot be undone.")) return;
+    const fresh = loadDb();
+    fresh.users = [];
+    fresh.clients = []; fresh.orders = []; fresh.tasks = []; fresh.messages = [];
+    fresh.notifications = []; fresh.invoices = []; fresh.expenses = [];
+    fresh.catalogFolders = []; fresh.catalogItems = []; fresh.catalogFavorites = [];
+    saveDb(fresh); // diff-sync deletes every remote doc; admin is re-seeded on next boot
+    toast.success("Data cleared — reloading");
+    setTimeout(() => location.reload(), 600);
   };
 
+  const [uploadingField, setUploadingField] = useState<string | null>(null);
   const handleImg = async (field: "invoiceQr1" | "invoiceQr2" | "invoiceStamp", file: File) => {
+    setUploadingField(field);
     try {
-      const b64 = await toBase64(file);
-      setDb(prev => ({ ...prev, settings: { ...prev.settings, [field]: b64 } }));
-    } catch { toast.error("Failed to read image"); }
+      const url = await uploadDataUrl(await toBase64(file), "settings");
+      setDb(prev => ({ ...prev, settings: { ...prev.settings, [field]: url } }));
+    } catch { toast.error("Failed to upload image"); }
+    finally { setUploadingField(null); }
   };
 
   const canEditRates = user?.role === "admin" || user?.role === "employee";
+  const isAdmin = user?.role === "admin";
+
+  // Users created under the previous model (password in Firestore, no Auth
+  // account). Admin can provision Firebase Auth logins for them in one click.
+  const [syncing, setSyncing] = useState(false);
+  const pendingLogins = loadDb().users.filter(u => u.role !== "admin" && !u.authUid && !!u.password);
+  const syncLogins = async () => {
+    const targets = loadDb().users.filter(u => u.role !== "admin" && !u.authUid && !!u.password);
+    if (!targets.length) { toast.info("Everyone already has a Firebase login."); return; }
+    setSyncing(true);
+    let ok = 0; const failed: string[] = [];
+    for (const u of targets) {
+      try {
+        const authUid = await createAuthUser(u.email, u.password);
+        updateDb(d => { const x = d.users.find(y => y.id === u.id); if (x) { x.authUid = authUid; x.password = ""; } });
+        ok++;
+      } catch (e) {
+        failed.push(`${u.email} (${authErrorMessage(e)})`);
+      }
+    }
+    setSyncing(false);
+    if (ok) toast.success(`Provisioned ${ok} login${ok !== 1 ? "s" : ""}.`);
+    if (failed.length) toast.error(`${failed.length} failed — recreate them: ${failed.join(", ")}`);
+  };
 
   /* ── small preview card for uploaded images ── */
   const ImgSlot = ({
@@ -79,8 +118,13 @@ export function SettingsPage() {
     <div className="flex flex-col items-center gap-2">
       <div
         className="relative h-24 w-24 rounded-xl border-2 border-dashed border-border hover:border-primary/50 cursor-pointer overflow-hidden transition-colors group"
-        onClick={() => inputRef.current?.click()}
+        onClick={() => { if (uploadingField !== fieldKey) inputRef.current?.click(); }}
       >
+        {uploadingField === fieldKey && (
+          <div className="absolute inset-0 z-10 bg-black/50 grid place-items-center">
+            <Loader2 className="h-5 w-5 text-white animate-spin" />
+          </div>
+        )}
         {value ? (
           <>
             <img src={value} alt={label} className="w-full h-full object-contain p-1" />
@@ -159,7 +203,7 @@ export function SettingsPage() {
             onCheckedChange={v => setDb({ ...db, settings: { ...db.settings, notifications: v } })}
           />
         </label>
-        <Button onClick={save} className="btn-hero rounded-xl w-full">Save Settings</Button>
+        <AsyncButton onClick={save} className="btn-hero rounded-xl w-full">Save Settings</AsyncButton>
       </div>
 
       {/* ── Invoice Branding ── */}
@@ -273,7 +317,7 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <Button onClick={saveInvoice} className="btn-hero rounded-xl w-full">Save Invoice Settings</Button>
+        <AsyncButton onClick={saveInvoice} className="btn-hero rounded-xl w-full">Save Invoice Settings</AsyncButton>
       </div>
 
       {/* Pricing Rates — admin & employee only */}
@@ -354,7 +398,24 @@ export function SettingsPage() {
             </span>
           </div>
 
-          <Button onClick={saveRates} className="btn-hero rounded-xl w-full">Save Pricing Rates</Button>
+          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">Save Pricing Rates</AsyncButton>
+        </div>
+      )}
+
+      {/* Sync logins — admin only, shown only when there is something to migrate */}
+      {isAdmin && pendingLogins.length > 0 && (
+        <div className="card-luxe p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            <h3 className="font-semibold">Secure Logins</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {pendingLogins.length} employee/client account{pendingLogins.length !== 1 ? "s were" : " was"} created before Firebase Authentication.
+            Provision real Auth logins for them (uses their current password). After this, no passwords remain in the database.
+          </p>
+          <Button onClick={syncLogins} disabled={syncing} className="btn-hero rounded-xl w-full">
+            {syncing ? "Provisioning…" : `Provision ${pendingLogins.length} login${pendingLogins.length !== 1 ? "s" : ""}`}
+          </Button>
         </div>
       )}
 
@@ -370,9 +431,9 @@ export function SettingsPage() {
             </span>
           </label>
         </div>
-        <Button variant="outline" onClick={clear} className="rounded-xl w-full text-destructive">
+        <AsyncButton variant="outline" onClick={clear} className="rounded-xl w-full text-destructive">
           Clear Data &amp; Reset Seed
-        </Button>
+        </AsyncButton>
       </div>
     </div>
   );

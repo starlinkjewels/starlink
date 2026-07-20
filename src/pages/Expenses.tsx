@@ -1,6 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, saveDb, uid, fmtMoney, fmtDate } from "@/lib/db";
+import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate } from "@/lib/db";
+import { usePagination } from "@/hooks/usePagination";
+import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -45,7 +47,7 @@ export function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
-  // Live sync with localStorage
+  // Live sync with the Firebase-backed store
   useEffect(() => {
     const refresh = () => setDb(loadDb());
     window.addEventListener("starlink-db-updated", refresh);
@@ -111,7 +113,7 @@ export function ExpensesPage() {
     [db.expenses, staffUsers]
   );
 
-  function handleAdd() {
+  async function handleAdd() {
     setError("");
     if (!form.title.trim()) { setError("Title is required."); return; }
     const amount = parseFloat(form.amount);
@@ -132,6 +134,7 @@ export function ExpensesPage() {
     fresh.expenses = [...fresh.expenses, expense];
     saveDb(fresh);
     setDb(fresh);
+    await flush(); // keep the button in "Saving…" until Firebase confirms
     setForm(EMPTY_FORM);
     setShowAdd(false);
     setSaving(false);
@@ -558,6 +561,7 @@ interface ExpenseListProps {
 }
 
 function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId }: ExpenseListProps) {
+  const { paged, page, setPage, totalPages, start, end } = usePagination(expenses, 12);
   return (
     <div className="card-luxe overflow-hidden">
       {/* Summary bar */}
@@ -584,7 +588,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
 
       {/* List */}
       <div className="divide-y divide-border/40">
-        {expenses.map((exp, i) => {
+        {paged.map((exp, i) => {
           const addedBy = users.find(u => u.id === exp.employeeId);
           const relatedClient = exp.clientId ? clients.find(c => c.id === exp.clientId) : null;
           const canDelete = exp.employeeId === currentUserId;
@@ -644,6 +648,17 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
           );
         })}
       </div>
+
+      {expenses.length > 0 && (
+        <div className="px-4 py-3 border-t border-border/40">
+          <PaginationBar
+            page={page}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            label={`Showing ${start + 1}–${end} of ${expenses.length}`}
+          />
+        </div>
+      )}
     </div>
   );
 }

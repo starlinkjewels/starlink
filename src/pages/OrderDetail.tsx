@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid } from "@/lib/db";
+import { uploadDataUrl } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,6 +15,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice } from "@/lib/invoicePrint";
+import { AsyncButton } from "@/components/AsyncButton";
 
 /** Compress a File to a base64 JPEG ≤800px */
 async function compressImage(file: File): Promise<string> {
@@ -138,9 +140,10 @@ export function OrderDetailPage() {
     setCadUploading(true);
     try {
       const compressed = await compressImage(file);
+      const cadUrl = await uploadDataUrl(compressed, `orders/${order.id}/cad`);
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
-        o.cadImage = compressed;
+        o.cadImage = cadUrl;
         const clientUser = d.users.find(u => u.clientId === o.clientId);
         if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "CAD Design Ready", body: `CAD design uploaded for ${o.orderNumber}. Please review.`, type: "info", read: false, createdAt: new Date().toISOString() });
       });
@@ -337,7 +340,7 @@ export function OrderDetailPage() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <Button size="sm" onClick={savePricing} className="btn-hero rounded-xl">Save & Notify Client</Button>
+                    <AsyncButton size="sm" onClick={savePricing} className="btn-hero rounded-xl">Save &amp; Notify Client</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowPricing(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </motion.div>
@@ -373,8 +376,8 @@ export function OrderDetailPage() {
 
         {user!.role === "admin" && order.status === "Waiting" && (
           <div className="mt-5 flex gap-3">
-            <Button onClick={() => approve(true)} className="btn-hero rounded-xl">Approve Order</Button>
-            <Button variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</Button>
+            <AsyncButton onClick={() => approve(true)} className="btn-hero rounded-xl">Approve Order</AsyncButton>
+            <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
           </div>
         )}
       </div>
@@ -586,7 +589,7 @@ export function OrderDetailPage() {
                   )}
 
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={saveActualDetails} className="btn-hero rounded-xl">Save & Update Order Value</Button>
+                    <AsyncButton size="sm" onClick={saveActualDetails} className="btn-hero rounded-xl">Save &amp; Update Order Value</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowActualForm(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </div>
@@ -754,7 +757,7 @@ export function OrderDetailPage() {
                     </div>
                   </div>
                   <div className="flex gap-2">
-                    <Button size="sm" onClick={saveDispatch} className="btn-hero rounded-xl">Save & Notify Client</Button>
+                    <AsyncButton size="sm" onClick={saveDispatch} className="btn-hero rounded-xl">Save &amp; Notify Client</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowDispatch(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </div>
@@ -880,7 +883,7 @@ export function OrderDetailPage() {
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Button size="sm" onClick={addAdvance} className="btn-hero rounded-xl">Save Payment</Button>
+                  <AsyncButton size="sm" onClick={addAdvance} className="btn-hero rounded-xl">Save Payment</AsyncButton>
                   <Button size="sm" variant="outline" onClick={() => { setShowAdvForm(false); setAdvAmt(""); setAdvNote(""); }} className="rounded-xl">Cancel</Button>
                 </div>
               </div>
@@ -965,7 +968,7 @@ export function OrderDetailPage() {
                   )}
                   {canEditStage() && !isDone && (
                     isActive
-                      ? <Button size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</Button>
+                      ? <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
                 </div>

@@ -2,6 +2,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, TIMELINE_STEPS, type Order } from "@/lib/db";
+import { uploadDataUrl } from "@/lib/storage";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -120,7 +121,7 @@ export function NewOrderPage() {
     setF(prev => ({ ...prev, orderValue: auto }));
   };
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
     if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
@@ -134,13 +135,24 @@ export function NewOrderPage() {
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : f.clientId;
+    const orderId = uid("o_");
+
+    // Upload reference images to Firebase Storage; store their URLs on the order.
+    let imageUrls: string[] = [];
+    try {
+      imageUrls = await Promise.all(images.map(img => uploadDataUrl(img, `orders/${orderId}`)));
+    } catch {
+      toast.error("Failed to upload images. Please try again.");
+      setSaving(false);
+      return;
+    }
 
     updateDb(d => {
       const num = `SLJ-${new Date().getFullYear()}-${String(1000 + d.orders.length + 1).padStart(4, "0")}`;
       const advance = Number(f.advanceAmount) || 0;
 
       const order: Order = {
-        id: uid("o_"),
+        id: orderId,
         orderNumber: num,
         clientId,
         contactPerson: user!.name,
@@ -152,7 +164,7 @@ export function NewOrderPage() {
         metalWeight: 0,
         estimatedGrossWeight: Number(f.estimatedGrossWeight) || undefined,
         estimatedNetWeight: Number(f.estimatedNetWeight) || undefined,
-        images,
+        images: imageUrls,
         designNumber: f.designNumber || undefined,
         productSize: f.productSize || undefined,
         productColor: f.productColor || undefined,

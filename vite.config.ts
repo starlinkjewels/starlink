@@ -31,6 +31,9 @@ export default defineConfig({
       workbox: {
         navigateFallback: "/index.html",
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff2}"],
+        // Firebase SDK grows the main chunk past the default 2 MiB precache
+        // limit — raise it so the service worker can still precache the app.
+        maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
       },
       devOptions: { enabled: false },
     }),

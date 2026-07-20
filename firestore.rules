@@ -1,0 +1,117 @@
+rules_version = '2';
+
+// ─────────────────────────────────────────────────────────────────────────
+// Starlink Jewels / Diamond Flow — role-enforced, client-isolated rules.
+//
+// Every user (admin, employee, client) signs in via Firebase Authentication.
+// Roles/links are read from the `userByAuth/{uid}` index the app maintains
+// automatically (role/status/clientId/appId only — no secrets).
+//
+//   • admin / employee (staff) → full access to business data.
+//   • client → can ONLY read/write their OWN orders, invoices, notifications,
+//     messages and client record. Enforced here, not just in the app.
+//
+// ⚠️ EDIT THE ADMIN EMAIL(S) below to your admin's Firebase Auth email(s), or
+//    the admin's first-login bootstrap writes will be denied.
+// ─────────────────────────────────────────────────────────────────────────
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+
+    // 👇 EDIT: your admin Firebase Auth email(s).
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in ['admin@starlinkjewels.com'];
+    }
+
+    function idxRef() { return /databases/$(database)/documents/userByAuth/$(request.auth.uid); }
+    function hasIdx() { return signedIn() && exists(idxRef()); }
+    function idx()    { return get(idxRef()).data; }
+
+    function isActive()     { return isAdmin() || (hasIdx() && idx().status == 'active'); }
+    function myRole()       { return isAdmin() ? 'admin' : (hasIdx() ? idx().role : 'none'); }
+    function isStaff()      { return isAdmin() || (isActive() && myRole() == 'employee'); }
+    function isClientRole() { return isActive() && myRole() == 'client'; }
+    function myClientId()   { return hasIdx() ? idx().clientId : null; }
+    function myAppId()      { return hasIdx() ? idx().appId : ''; }
+
+    // Role index — read by its owner + admin; written by staff (clients only)
+    // or admin. This is what every function above consults.
+    match /userByAuth/{uid} {
+      allow read:   if isAdmin() || (signedIn() && request.auth.uid == uid);
+      allow create, update: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
+      allow delete: if isAdmin() || isStaff();
+    }
+
+    // User profiles — no passwords. Readable by any active user (names shown in
+    // UI). Admin manages all; staff manage clients; a user may edit their OWN
+    // profile but never change their role/status/link.
+    match /users/{id} {
+      allow read: if isActive();
+      allow create: if isAdmin() || (isStaff() && request.resource.data.role == 'client');
+      allow update: if isAdmin()
+        || (isStaff() && resource.data.role == 'client')
+        || (isActive()
+            && resource.data.authUid == request.auth.uid
+            && request.resource.data.role     == resource.data.role
+            && request.resource.data.status   == resource.data.status
+            && request.resource.data.clientId == resource.data.clientId
+            && request.resource.data.authUid  == resource.data.authUid);
+      allow delete: if isAdmin() || (isStaff() && resource.data.role == 'client');
+    }
+
+    // Client records — staff manage; a client may read ONLY their own record.
+    match /clients/{id} {
+      allow read:  if isStaff() || (isClientRole() && id == myClientId());
+      allow write: if isStaff();
+    }
+
+    // Orders — staff see all; a client only their own (create/read/update).
+    match /orders/{id} {
+      allow read:   if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
+      allow create: if isStaff() || (isClientRole() && request.resource.data.clientId == myClientId());
+      allow update, delete: if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
+    }
+
+    // Invoices — staff manage; a client may read only their own.
+    match /invoices/{id} {
+      allow read:  if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
+      allow write: if isStaff();
+    }
+
+    // Notifications — read/modify only your own; any active user may create one
+    // (e.g. a client's new order notifies the admin).
+    match /notifications/{id} {
+      allow read:   if isStaff() || (isClientRole() && resource.data.userId == myAppId());
+      allow create: if isActive();
+      allow update, delete: if isStaff() || (isClientRole() && resource.data.userId == myAppId());
+    }
+
+    // Messages — a client may read/modify only threads they are part of; may
+    // create only messages they send.
+    match /messages/{id} {
+      allow read:   if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
+      allow create: if isStaff() || (isClientRole() && request.resource.data.fromUserId == myAppId());
+      allow update: if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
+      allow delete: if isStaff();
+    }
+
+    // Staff-only collections — clients never load or touch these.
+    match /tasks/{id}    { allow read, write: if isStaff(); }
+    match /expenses/{id} { allow read, write: if isStaff(); }
+
+    // Shared collections — any active user (catalog is a shared library).
+    match /catalogFolders/{id}  { allow read, write: if isActive(); }
+    match /catalogItems/{id}    { allow read, write: if isActive(); }
+    match /catalogFavorites/{id}{ allow read, write: if isActive(); }
+
+    // App settings / branding — readable by any active user; edited by staff.
+    match /meta/{doc} {
+      allow read:  if isActive();
+      allow write: if isStaff();
+    }
+
+    // Deny everything else by default.
+    match /{document=**} { allow read, write: if false; }
+  }
+}

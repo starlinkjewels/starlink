@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb } from "@/lib/db";
 import { Bell, Info, Package, AlertCircle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 
@@ -47,7 +47,7 @@ export function NotificationsPage() {
           <p className="text-sm text-muted-foreground">{unread} unread · {total} total</p>
         </div>
         {unread > 0 && (
-          <Button variant="outline" onClick={markAll} className="rounded-xl">Mark all read</Button>
+          <AsyncButton variant="outline" onClick={markAll} className="rounded-xl">Mark all read</AsyncButton>
         )}
       </div>
 

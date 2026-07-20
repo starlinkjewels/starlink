@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// Every user signs in via Firebase Authentication, so Storage requires a
+// signed-in user for both reads and writes. This blocks anonymous access with
+// just the public config. (Media has no per-user isolation — any authenticated
+// user can read any object; tighten later if needed.)
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if request.auth != null;
+    }
+  }
+}

@@ -9,6 +9,8 @@ import "./styles.css";
 
 const qc = new QueryClient();
 
+// AuthProvider owns the boot sequence: it shows a splash until Firebase Auth
+// resolves, loads Firestore data only after sign-in, and renders the app.
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>

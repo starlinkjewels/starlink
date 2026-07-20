@@ -3,6 +3,7 @@ import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Send, ArrowLeft } from "lucide-react";
 
 export function MessagesPage() {
@@ -95,7 +96,7 @@ export function MessagesPage() {
           </div>
           <div className="p-3 border-t flex gap-2">
             <Input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder="Type a message..." className="rounded-xl h-11" />
-            <Button onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></Button>
+            <AsyncButton onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></AsyncButton>
           </div>
         </div>
       </div>
@@ -169,7 +170,7 @@ export function MessagesPage() {
             </div>
             <div className="p-3 border-t flex gap-2 shrink-0">
               <Input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder="Type a message..." className="rounded-xl h-11" />
-              <Button onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></Button>
+              <AsyncButton onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></AsyncButton>
             </div>
           </div>
         )}

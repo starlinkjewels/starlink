@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, uid, type User } from "@/lib/db";
+import { auth, createAuthUser } from "@/lib/firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TasksPanel } from "@/components/TasksPanel";
-import { Plus, Trash2, Search, ListTodo, Eye, Users } from "lucide-react";
+import { Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -20,7 +24,8 @@ export function EmployeesPage() {
   const db = loadDb();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
-  const [f, setF] = useState({ name: "", username: "", password: "", email: "", phone: "", department: "Sales" });
+  const [saving, setSaving] = useState(false);
+  const [f, setF] = useState({ name: "", email: "", password: "", phone: "", department: "Sales" });
 
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
@@ -29,17 +34,30 @@ export function EmployeesPage() {
     .filter(u => u.role === "employee")
     .filter(u =>
       u.name.toLowerCase().includes(q.toLowerCase()) ||
-      u.username.toLowerCase().includes(q.toLowerCase())
+      u.email.toLowerCase().includes(q.toLowerCase())
     );
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(emps, PAGE_SIZE);
 
-  const create = () => {
-    if (!f.name || !f.username || !f.password) { toast.error("Fill required fields"); return; }
-    updateDb(d => d.users.push({ id: uid("u_"), role: "employee", status: "active", createdAt: new Date().toISOString(), ...f } as User));
-    toast.success("Employee created");
-    setOpen(false);
-    setF({ name: "", username: "", password: "", email: "", phone: "", department: "Sales" });
+  const create = async () => {
+    if (!f.name || !f.email || !f.password) { toast.error("Fill name, email and password"); return; }
+    const email = f.email.trim().toLowerCase();
+    if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    setSaving(true);
+    try {
+      // Create the Firebase Auth account (password lives in Auth, not Firestore).
+      const authUid = await createAuthUser(email, f.password);
+      updateDb(d => d.users.push({
+        id: uid("u_"), role: "employee", status: "active", createdAt: new Date().toISOString(),
+        authUid, username: email, email, password: "",
+        name: f.name, phone: f.phone, department: f.department,
+      } as User));
+      toast.success("Employee created — they can sign in with their email & password");
+      setOpen(false);
+      setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
+    } catch (e) {
+      toast.error(authErrorMessage(e));
+    } finally { setSaving(false); }
   };
 
   const toggle = (u: User) => {
@@ -47,10 +65,15 @@ export function EmployeesPage() {
     toast.success("Updated");
   };
 
+  const resetPw = async (u: User) => {
+    try { await sendPasswordResetEmail(auth, u.email); toast.success(`Password reset email sent to ${u.email}`); }
+    catch (e) { toast.error(authErrorMessage(e)); }
+  };
+
   const del = (id: string) => {
-    if (!confirm("Delete employee?")) return;
+    if (!confirm("Remove this employee's access? Their login will stop working.")) return;
     updateDb(d => { d.users = d.users.filter(u => u.id !== id); });
-    toast.success("Deleted");
+    toast.success("Access removed");
   };
 
   /** Count pending tasks for an employee */
@@ -75,11 +98,11 @@ export function EmployeesPage() {
           <DialogContent className="max-w-md rounded-2xl">
             <DialogHeader><DialogTitle className="font-display text-2xl">Create Employee</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              {(["name","username","password","email","phone"] as const).map(k => (
+              {(["name","email","password","phone"] as const).map(k => (
                 <div key={k}>
-                  <Label className="text-xs capitalize">{k}</Label>
+                  <Label className="text-xs capitalize">{k === "email" ? "Email (login ID)" : k}</Label>
                   <Input
-                    type={k === "password" ? "password" : "text"}
+                    type={k === "password" ? "password" : k === "email" ? "email" : "text"}
                     value={(f as Record<string,string>)[k]}
                     onChange={e => setF({ ...f, [k]: e.target.value })}
                     className="rounded-xl mt-1"
@@ -93,7 +116,7 @@ export function EmployeesPage() {
                   <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <Button onClick={create} className="btn-hero rounded-xl w-full">Create</Button>
+              <Button onClick={create} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create"}</Button>
             </div>
           </DialogContent>
         </Dialog>
@@ -152,12 +175,15 @@ export function EmployeesPage() {
                 </div>
 
                 <div className="flex gap-2 mt-2">
-                  <Button size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
+                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
                     {u.status === "active" ? "Deactivate" : "Activate"}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg text-destructive">
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg" title="Send password reset email">
+                    <KeyRound className="h-3.5 w-3.5" />
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg text-destructive">
                     <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  </AsyncButton>
                 </div>
               </div>
             </div>

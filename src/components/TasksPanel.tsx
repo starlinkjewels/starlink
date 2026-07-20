@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, updateDb, uid, type Task, type User } from "@/lib/db";
-import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo } from "lucide-react";
 import { toast } from "sonner";
@@ -130,14 +130,14 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                   className="rounded-xl h-10 text-sm flex-1"
                   autoFocus={open}
                 />
-                <Button
+                <AsyncButton
                   size="sm"
                   onClick={addTask}
                   disabled={!newTitle.trim()}
                   className="btn-hero rounded-xl h-10 px-4 shrink-0"
                 >
                   Add
-                </Button>
+                </AsyncButton>
               </div>
             </div>
 

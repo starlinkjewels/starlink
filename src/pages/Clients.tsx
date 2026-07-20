@@ -1,13 +1,17 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, uid, type Client } from "@/lib/db";
+import { auth, createAuthUser } from "@/lib/firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -108,6 +112,7 @@ export function ClientsPage() {
   const db = loadDb();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Client>>({
     companyName: "", ownerName: "", email: "", phone: "",
     country: "USA", zip: "", gstVat: "", address: "", username: "", password: "",
@@ -127,20 +132,37 @@ export function ClientsPage() {
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
-  const create = () => {
-    if (!f.companyName || !f.username || !f.password) { toast.error("Fill required fields"); return; }
-    const id = uid("c_");
-    updateDb(d => {
-      d.clients.unshift({ ...f, id, status: "active", createdAt: new Date().toISOString() } as Client);
-      d.users.push({
-        id: uid("u_"), username: f.username!, password: f.password!, role: "client",
-        name: f.ownerName || f.username!, email: f.email || "", phone: f.phone,
-        status: "active", clientId: id, createdAt: new Date().toISOString(),
+  const create = async () => {
+    if (!f.companyName || !f.email || !f.password) { toast.error("Fill company, email and password"); return; }
+    const email = f.email!.trim().toLowerCase();
+    if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    setSaving(true);
+    try {
+      // Create the client's Firebase Auth account (password lives in Auth).
+      const authUid = await createAuthUser(email, f.password!);
+      const id = uid("c_");
+      updateDb(d => {
+        d.clients.unshift({ ...f, id, username: email, email, status: "active", createdAt: new Date().toISOString() } as Client);
+        d.users.push({
+          id: uid("u_"), authUid, username: email, password: "", role: "client",
+          name: f.ownerName || f.companyName!, email, phone: f.phone,
+          status: "active", clientId: id, createdAt: new Date().toISOString(),
+        });
       });
-    });
-    toast.success(`Client created${f.accountManagerId ? "" : " · handled by Admin"}`);
-    setOpen(false);
-    setF({ companyName: "", ownerName: "", email: "", phone: "", country: "USA", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: undefined });
+      toast.success(`Client created — they can sign in with their email & password${f.accountManagerId ? "" : " · handled by Admin"}`);
+      setOpen(false);
+      setF({ companyName: "", ownerName: "", email: "", phone: "", country: "USA", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: undefined });
+    } catch (e) {
+      toast.error(authErrorMessage(e));
+    } finally { setSaving(false); }
+  };
+
+  const resetPw = async (c: Client) => {
+    const u = loadDb().users.find(x => x.clientId === c.id);
+    const email = u?.email || c.email;
+    if (!email) { toast.error("No login email on file for this client"); return; }
+    try { await sendPasswordResetEmail(auth, email); toast.success(`Password reset email sent to ${email}`); }
+    catch (e) { toast.error(authErrorMessage(e)); }
   };
 
   const toggle = (c: Client) => {
@@ -177,16 +199,16 @@ export function ClientsPage() {
             <DialogContent className="max-w-lg rounded-2xl">
               <DialogHeader><DialogTitle className="font-display text-2xl">Create Client</DialogTitle></DialogHeader>
               <div className="grid grid-cols-2 gap-3 mt-2">
-                {(["companyName","ownerName","email","phone","country","zip","gstVat","address","username","password"] as const).map(k => (
+                {(["companyName","ownerName","email","phone","country","zip","gstVat","address","password"] as const).map(k => (
                   <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
                     <Label className="text-xs capitalize">
-                      {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k.replace(/([A-Z])/g, " $1")}
+                      {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)" : k.replace(/([A-Z])/g, " $1")}
                     </Label>
                     <Input
                       value={(f as Record<string, string>)[k] || ""}
                       onChange={e => setF({ ...f, [k]: e.target.value })}
                       className="rounded-xl mt-1"
-                      type={k === "password" ? "password" : "text"}
+                      type={k === "password" ? "password" : k === "email" ? "email" : "text"}
                     />
                   </div>
                 ))}
@@ -207,7 +229,7 @@ export function ClientsPage() {
                   If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
                 </p>
               </div>
-              <Button onClick={create} className="btn-hero rounded-xl mt-3">Create Client</Button>
+              <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Client"}</Button>
             </DialogContent>
           </Dialog>
         )}
@@ -286,12 +308,15 @@ export function ClientsPage() {
 
               {user!.role === "admin" && (
                 <div className="flex gap-2 mt-2">
-                  <Button size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
+                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
                     {c.status === "active" ? "Deactivate" : "Activate"}
-                  </Button>
-                  <Button size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg text-destructive">
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg" title="Send password reset email">
+                    <KeyRound className="h-3.5 w-3.5" />
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg text-destructive">
                     <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  </AsyncButton>
                 </div>
               )}
             </div>
