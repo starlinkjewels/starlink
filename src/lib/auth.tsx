@@ -5,7 +5,7 @@ import {
 } from "firebase/auth";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { auth } from "./firebase";
+import { auth, isAdminEmail } from "./firebase";
 import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, type User } from "./db";
 
 interface AuthCtx {
@@ -66,20 +66,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const db = loadDb();
     const email = (fb.email ?? "").toLowerCase();
 
-    // 1. Match by stable Auth uid (set when the account was provisioned).
-    const byUid = db.users.find(x => x.authUid === fb.uid);
-    if (byUid) return byUid;
-
-    // 2. A seeded/legacy admin without an authUid, matched by email → adopt uid.
-    const adminByEmail = db.users.find(x => x.role === "admin" && !x.authUid && x.email.toLowerCase() === email);
-    if (adminByEmail) {
-      const id = adminByEmail.id;
-      updateDb(d => { const a = d.users.find(x => x.id === id); if (a) a.authUid = fb.uid; });
-      return { ...adminByEmail, authUid: fb.uid };
-    }
-
-    // 3. Bootstrap: no admin exists yet → this Firebase user becomes the admin.
-    if (!db.users.some(x => x.role === "admin")) {
+    // Admins are defined by the email allowlist (must match firestore.rules).
+    if (isAdminEmail(email)) {
+      // Reuse an existing admin profile for this account/email, or create one.
+      const existing = db.users.find(x => x.authUid === fb.uid)
+        ?? db.users.find(x => x.role === "admin" && x.email.toLowerCase() === email);
+      if (existing) {
+        if (existing.authUid !== fb.uid || existing.role !== "admin" || existing.status !== "active") {
+          const id = existing.id;
+          updateDb(d => { const a = d.users.find(x => x.id === id); if (a) { a.authUid = fb.uid; a.role = "admin"; a.status = "active"; } });
+          return { ...existing, authUid: fb.uid, role: "admin", status: "active" };
+        }
+        return existing;
+      }
       const admin: User = {
         id: uid("u_"), authUid: fb.uid, role: "admin", status: "active",
         username: fb.email ?? "admin", name: fb.displayName || "Administrator",
@@ -89,7 +88,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return admin;
     }
 
-    // 4. Authenticated but not provisioned by an admin → no access.
+    // Everyone else must have been provisioned by an admin (has an authUid).
+    const byUid = db.users.find(x => x.authUid === fb.uid);
+    if (byUid) return byUid;
+
+    // Authenticated but unknown → no access.
     return null;
   }, []);
 

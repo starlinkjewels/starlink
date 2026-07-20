@@ -24,6 +24,22 @@ const firebaseConfig = {
 /** The Firestore named database id this app reads/writes. */
 export const DATABASE_ID = "diamondflow";
 
+/**
+ * Admin accounts, identified by their Firebase Auth email. Anyone signing in
+ * with one of these emails is treated as the admin (full access).
+ *
+ * ⚠️ KEEP THIS IN SYNC with the `isAdmin()` allowlist in firestore.rules — both
+ *    must list the same email(s), or the admin will be blocked by the rules.
+ */
+export const ADMIN_EMAILS = [
+  "marketing.starlinkjewels@gmail.com",
+  "admin@starlinkjewels.com",
+].map(e => e.toLowerCase());
+
+export function isAdminEmail(email?: string | null): boolean {
+  return !!email && ADMIN_EMAILS.includes(email.toLowerCase());
+}
+
 export const app: FirebaseApp = initializeApp(firebaseConfig);
 
 // getFirestore(app, databaseId) targets the named database instead of "(default)".

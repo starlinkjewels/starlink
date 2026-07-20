@@ -19,9 +19,9 @@ service cloud.firestore {
 
     function signedIn() { return request.auth != null; }
 
-    // 👇 EDIT: your admin Firebase Auth email(s).
+    // 👇 EDIT: your admin Firebase Auth email(s) — MUST match ADMIN_EMAILS in src/lib/firebase.ts.
     function isAdmin() {
-      return signedIn() && request.auth.token.email in ['admin@starlinkjewels.com'];
+      return signedIn() && request.auth.token.email in ['marketing.starlinkjewels@gmail.com', 'admin@starlinkjewels.com'];
     }
 
     function idxRef() { return /databases/$(database)/documents/userByAuth/$(request.auth.uid); }
