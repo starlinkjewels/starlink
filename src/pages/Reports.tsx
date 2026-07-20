@@ -432,7 +432,7 @@ export function ReportsPage() {
 
           {/* Desktop table */}
           <div className="hidden sm:block overflow-x-auto">
-            <table className="w-full text-sm">
+            <table className="table-luxe w-full text-sm">
               <thead>
                 <tr className="border-b border-border/60">
                   {["Client","Orders","Dispatched","Delivered","Revenue","Avg Dispatch"].map(h => (

@@ -58,7 +58,7 @@ export function InvoicesPage() {
 
         {/* Desktop table */}
         <div className="hidden md:block">
-          <table className="w-full text-sm">
+          <table className="table-luxe w-full text-sm">
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="text-left px-5 py-3">Invoice</th>
@@ -190,7 +190,7 @@ export function InvoicesPage() {
 
           {/* Desktop table */}
           <div className="hidden md:block">
-            <table className="w-full text-sm">
+            <table className="table-luxe w-full text-sm">
               <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="text-left px-5 py-3">Order</th>

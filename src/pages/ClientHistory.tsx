@@ -254,7 +254,7 @@ export function ClientHistoryPage() {
 
         {/* Desktop table */}
         <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="table-luxe w-full text-sm">
             <thead>
               <tr className="border-b border-border/60 bg-secondary/30">
                 <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground">Order #</th>

@@ -89,7 +89,7 @@ export function OrdersPage() {
             <Link
               key={o.id}
               to={`/orders/${o.id}`}
-              className="card-luxe p-4 hover:shadow-luxe hover:-translate-y-0.5 transition-all block"
+              className="card-luxe card-hover p-4 block"
             >
               {/* ── Row 1: icon · order# · status ── */}
               <div className="flex items-start gap-3">
