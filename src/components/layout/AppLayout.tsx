@@ -146,7 +146,7 @@ export function AppLayout() {
         <div className="px-5 py-5 flex items-center">
           <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-auto object-contain" />
         </div>
-        <nav className="flex-1 px-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
           {nav.map(item => (
             <NavLink key={item.to} to={item.to} end={item.to === "/"}
               className={({ isActive }) =>
