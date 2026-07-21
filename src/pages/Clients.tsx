@@ -31,14 +31,17 @@ function printLabel(c: Client) {
   <title>Shipping Label – ${c.companyName}</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
-    @page { size: A5 portrait; margin: 0; }
+    /* No size + margin:0 → browser prints no date/title/url headers or footers,
+       on whatever paper the printer is set to (A4/A5/Letter). */
+    @page { margin: 0; }
+    html, body { background: #fff; font-family: Arial, Helvetica, sans-serif; }
     body {
-      width: 148mm; height: 210mm;
-      display: flex; align-items: center; justify-content: center;
-      background: #fff; font-family: Arial, Helvetica, sans-serif;
+      min-height: 100vh;
+      padding: 14mm;
+      display: flex; align-items: flex-start; justify-content: center;
     }
     .label {
-      width: 136mm; height: 198mm;
+      width: 100%; max-width: 150mm; min-height: 130mm;
       border: 2.5px solid #1a1a2e;
       border-radius: 6px;
       display: flex; flex-direction: column;
