@@ -289,7 +289,7 @@ export function NewOrderPage() {
               <Select value={f.jewelleryType} onValueChange={v => set("jewelleryType", v)}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Ring","Pendant","Necklace","Bracelet","Earrings","Custom"].map(x =>
+                  {["Ring","Ring + Band","Pendant","Necklace","Bracelet","Earrings","Custom"].map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>

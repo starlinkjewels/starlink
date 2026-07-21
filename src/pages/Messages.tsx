@@ -4,7 +4,7 @@ import { loadDb, updateDb, uid } from "@/lib/db";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
-import { Send, ArrowLeft } from "lucide-react";
+import { Send, ArrowLeft, Trash2 } from "lucide-react";
 
 export function MessagesPage() {
   const { user } = useAuth();
@@ -25,14 +25,38 @@ export function MessagesPage() {
   const [selected, setSelected] = useState<string | null>(contacts[0]?.id || null);
   const [text, setText] = useState("");
   const [mobileView, setMobileView] = useState<"contacts" | "chat">("contacts");
+  const [menuMsg, setMenuMsg] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const thread = db.messages.filter(m => (m.fromUserId === user!.id && m.toUserId === selected) || (m.fromUserId === selected && m.toUserId === user!.id)).sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   useEffect(() => { endRef.current?.scrollIntoView({ behavior: "smooth" }); }, [thread.length]);
+  // Close any open message menu when switching conversations.
+  useEffect(() => { setMenuMsg(null); }, [selected]);
 
   const send = () => {
     if (!text.trim() || !selected) return;
     updateDb(d => { d.messages.push({ id: uid("m_"), fromUserId: user!.id, toUserId: selected, text: text.trim(), createdAt: new Date().toISOString(), read: false }); });
     setText("");
+  };
+
+  // Staff (admin/employee) may delete any message; a client only ones they sent.
+  const canDeleteMsg = (m: { fromUserId: string }) => user!.role !== "client" || m.fromUserId === user!.id;
+
+  const deleteMessage = (id: string) => {
+    updateDb(d => { d.messages = d.messages.filter(m => m.id !== id); });
+    setMenuMsg(null);
+  };
+
+  const clearChat = () => {
+    if (!selected) return;
+    if (!confirm("Delete this conversation? This cannot be undone.")) return;
+    updateDb(d => {
+      d.messages = d.messages.filter(m => {
+        const inThread = (m.fromUserId === user!.id && m.toUserId === selected) || (m.fromUserId === selected && m.toUserId === user!.id);
+        if (!inThread) return true;           // keep other conversations untouched
+        return !canDeleteMsg(m);              // drop only messages we're allowed to delete
+      });
+    });
+    setMenuMsg(null);
   };
 
   const selectedContact = contacts.find(c => c.id === selected);
@@ -73,21 +97,38 @@ export function MessagesPage() {
           {selectedContact && (
             <div className="px-4 py-3 border-b border-border/60 flex items-center gap-3">
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs grid place-items-center shrink-0">{selectedContact.name.charAt(0)}</div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">{selectedContact.name}</p>
                 <p className="text-xs text-muted-foreground capitalize">{selectedContact.role}</p>
               </div>
+              {thread.length > 0 && (
+                <button onClick={clearChat} aria-label="Delete conversation"
+                  className="h-9 w-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors shrink-0">
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              )}
             </div>
           )}
           <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {thread.length === 0 && <p className="text-center text-sm text-muted-foreground py-10">No messages yet — say hello.</p>}
             {thread.map(m => {
               const mine = m.fromUserId === user!.id;
+              const deletable = canDeleteMsg(m);
               return (
                 <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                  <div className={`max-w-[75%] px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"}`}>
-                    <p>{m.text}</p>
-                    <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                  <div className={`flex flex-col gap-1 max-w-[75%] ${mine ? "items-end" : "items-start"}`}>
+                    <div
+                      onClick={() => deletable && setMenuMsg(menuMsg === m.id ? null : m.id)}
+                      className={`px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"} ${deletable ? "cursor-pointer" : ""}`}>
+                      <p>{m.text}</p>
+                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                    </div>
+                    {menuMsg === m.id && deletable && (
+                      <button onClick={() => deleteMessage(m.id)}
+                        className="flex items-center gap-1 text-[11px] font-medium text-destructive bg-destructive/10 hover:bg-destructive/20 px-2 py-1 rounded-lg transition-colors">
+                        <Trash2 className="h-3 w-3" /> Delete
+                      </button>
+                    )}
                   </div>
                 </div>
               );
@@ -146,10 +187,16 @@ export function MessagesPage() {
               {selectedContact && (
                 <>
                   <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-sm grid place-items-center shrink-0">{selectedContact.name.charAt(0)}</div>
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{selectedContact.name}</p>
                     <p className="text-xs text-muted-foreground capitalize">{selectedContact.role}</p>
                   </div>
+                  {thread.length > 0 && (
+                    <button onClick={clearChat} aria-label="Delete conversation"
+                      className="h-9 w-9 rounded-xl flex items-center justify-center text-muted-foreground hover:text-destructive active:bg-destructive/10 transition-colors shrink-0">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  )}
                 </>
               )}
             </div>
@@ -157,11 +204,22 @@ export function MessagesPage() {
               {thread.length === 0 && <p className="text-center text-sm text-muted-foreground py-10">No messages yet — say hello.</p>}
               {thread.map(m => {
                 const mine = m.fromUserId === user!.id;
+                const deletable = canDeleteMsg(m);
                 return (
                   <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
-                    <div className={`max-w-[80%] px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"}`}>
-                      <p>{m.text}</p>
-                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                    <div className={`flex flex-col gap-1 max-w-[80%] ${mine ? "items-end" : "items-start"}`}>
+                      <div
+                        onClick={() => deletable && setMenuMsg(menuMsg === m.id ? null : m.id)}
+                        className={`px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"} ${deletable ? "cursor-pointer" : ""}`}>
+                        <p>{m.text}</p>
+                        <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                      </div>
+                      {menuMsg === m.id && deletable && (
+                        <button onClick={() => deleteMessage(m.id)}
+                          className="flex items-center gap-1 text-[11px] font-medium text-destructive bg-destructive/10 active:bg-destructive/20 px-2.5 py-1.5 rounded-lg transition-colors">
+                          <Trash2 className="h-3 w-3" /> Delete
+                        </button>
+                      )}
                     </div>
                   </div>
                 );

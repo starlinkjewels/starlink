@@ -83,7 +83,7 @@ export interface Order {
   orderNumber: string;
   clientId: string;
   contactPerson: string;
-  jewelleryType: "Ring" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
+  jewelleryType: "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
   metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver";
   diamondType: "Natural" | "Lab Grown";
   quantity: number;
@@ -369,6 +369,9 @@ const writePending: Record<string, number> = {};
 // as "deleted" and wipe them from Firestore for everyone. Track the scope so persist()
 // can skip delete-detection for "messages" unless we truly hold the complete collection.
 let messagesScopeIsFull = true;
+// The signed-in client's app id (User.id) while in client scope, else null.
+// Used to safely allow a client to delete ONLY their own sent messages.
+let clientAppId: string | null = null;
 
 let seeded = false;      // becomes true once cache has been populated from Firestore
 let persistQueue: Promise<void> = Promise.resolve();
@@ -400,11 +403,15 @@ async function persist() {
         touched.add(col); ops++;
       }
     }
-    // Skip delete-detection for "messages" when this session only holds a partial
-    // mirror of the collection (client scope) — see `messagesScopeIsFull` above.
-    if (col === "messages" && !messagesScopeIsFull) continue;
-    for (const [id] of prevMap) {
-      if (!curMap.has(id)) { batch.delete(doc(fsdb, col, id)); touched.add(col); ops++; }
+    for (const [id, prevItem] of prevMap) {
+      if (curMap.has(id)) continue;
+      // A client session only holds a PARTIAL mirror of "messages" (its own
+      // threads). Never infer deletion of a message it doesn't own — otherwise a
+      // partial mirror could wipe other conversations. A client may delete only
+      // messages it sent; staff (full mirror) may delete any.
+      if (col === "messages" && !messagesScopeIsFull &&
+          (prevItem as { fromUserId?: string }).fromUserId !== clientAppId) continue;
+      batch.delete(doc(fsdb, col, id)); touched.add(col); ops++;
     }
   }
 
@@ -571,6 +578,7 @@ export function stopDb() {
   startPromise = null;
   seeded = false;
   messagesScopeIsFull = true;
+  clientAppId = null;
   emit();
 }
 
@@ -590,6 +598,7 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
 function subscribeAll(scope: Scope): Promise<void> {
   const client = scope.kind === "client" ? scope : null;
   messagesScopeIsFull = !client;
+  clientAppId = client ? client.appId : null;
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];

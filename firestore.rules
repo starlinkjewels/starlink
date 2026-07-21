@@ -93,7 +93,8 @@ service cloud.firestore {
       allow read:   if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
       allow create: if isStaff() || (isClientRole() && request.resource.data.fromUserId == myAppId());
       allow update: if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
-      allow delete: if isStaff();
+      // Staff may delete any message; a client may delete only ones they sent.
+      allow delete: if isStaff() || (isClientRole() && resource.data.fromUserId == myAppId());
     }
 
     // Staff-only collections — clients never load or touch these.

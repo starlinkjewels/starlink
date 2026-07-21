@@ -123,28 +123,28 @@ export function ClientHistoryPage() {
 
       {/* Client Profile Card */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-4">
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
+          <div className="flex items-start gap-4 min-w-0">
             <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0">
               <Building2 className="h-7 w-7 text-primary" />
             </div>
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{client.companyName}</h1>
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{client.companyName}</h1>
                 <StatusBadge status={client.status} />
               </div>
-              <p className="text-muted-foreground mt-1">{client.ownerName}</p>
+              <p className="text-muted-foreground mt-1 break-words">{client.ownerName}</p>
             </div>
           </div>
-          <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2">
+          <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2 w-full sm:w-auto shrink-0">
             <Download className="h-4 w-4" /> Export Report
           </Button>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{client.email || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{client.email || "—"}</p></div>
           </div>
           <div className="flex items-start gap-2">
             <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -159,18 +159,18 @@ export function ClientHistoryPage() {
             <div><p className="text-xs text-muted-foreground">GST / VAT</p><p className="font-medium">{client.gstVat || "—"}</p></div>
           </div>
           {client.address && (
-            <div className="col-span-2 flex items-start gap-2">
+            <div className="col-span-2 flex items-start gap-2 min-w-0">
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div><p className="text-xs text-muted-foreground">Address</p><p className="font-medium">{client.address}</p></div>
+              <div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{client.address}</p></div>
             </div>
           )}
           <div className="flex items-start gap-2">
             <Clock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div><p className="text-xs text-muted-foreground">Client Since</p><p className="font-medium">{fmtDate(client.createdAt)}</p></div>
           </div>
-          <div className="flex items-start gap-2">
+          <div className="flex items-start gap-2 min-w-0">
             <FileText className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs">{client.username}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs break-all">{client.username}</p></div>
           </div>
         </div>
       </motion.div>

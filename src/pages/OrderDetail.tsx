@@ -129,21 +129,29 @@ export function OrderDetailPage() {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     let paidInFull = false;
+    let isFirst = false;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (!o.advances) o.advances = [];
+      // First payment on the order is the "advance"; every later collection is a
+      // regular payment; the one that clears the balance is the "final payment".
+      isFirst = o.advances.length === 0;
       paidInFull = totalAdvance(o) + amt >= orderTotal(o);
-      const defaultNote = paidInFull ? "Final Payment" : "Advance payment";
+      const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
       o.advances.push({ id: uid("adv_"), amount: amt, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString() });
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
-        title: paidInFull ? "Order Paid in Full" : "Advance Recorded",
-        body: paidInFull ? `${o.orderNumber} paid in full — final payment of ${fmtMoney(amt)} received` : `${fmtMoney(amt)} advance received for ${o.orderNumber}`,
+        title: paidInFull ? "Order Paid in Full" : isFirst ? "Advance Recorded" : "Payment Recorded",
+        body: paidInFull
+          ? `${o.orderNumber} paid in full — final payment of ${fmtMoney(amt)} received`
+          : isFirst
+          ? `${fmtMoney(amt)} advance received for ${o.orderNumber}`
+          : `${fmtMoney(amt)} payment received for ${o.orderNumber}`,
         type: "info", read: false, createdAt: new Date().toISOString(),
       });
     });
-    toast.success(paidInFull ? "Final payment recorded — order paid in full" : "Advance payment recorded");
+    toast.success(paidInFull ? "Final payment recorded — order paid in full" : isFirst ? "Advance payment recorded" : "Payment recorded");
     setAdvAmt(""); setAdvNote(""); setShowAdvForm(false);
   };
 
@@ -739,16 +747,16 @@ export function OrderDetailPage() {
               <Wallet className="h-5 w-5 text-success" />
             </div>
             <div>
-              <h3 className="font-display text-lg text-brand-dark">Advance Payments</h3>
+              <h3 className="font-display text-lg text-brand-dark">Payments</h3>
               <p className="text-xs text-muted-foreground">
                 {advances.length} payment{advances.length !== 1 ? "s" : ""} recorded
                 {advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}
               </p>
             </div>
           </div>
-          {canEditStage() && (
+          {canEditStage() && balance > 0 && (
             <Button size="sm" onClick={() => setShowAdvForm(v => !v)} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> Add Advance
+              <Plus className="h-4 w-4" /> {advances.length === 0 ? "Add Advance" : "Collect Payment"}
             </Button>
           )}
         </div>
@@ -780,7 +788,7 @@ export function OrderDetailPage() {
                 </div>
               )}
               <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
-                <p className="text-xs text-muted-foreground mb-1">Advance Paid</p>
+                <p className="text-xs text-muted-foreground mb-1">Total Paid</p>
                 <p className="font-semibold text-sm text-success">{fmtMoney(advTotal)}</p>
               </div>
               <div className={`p-3 rounded-xl text-center border ${balance > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
@@ -825,7 +833,7 @@ export function OrderDetailPage() {
               className="overflow-hidden"
             >
               <div className="pt-2 border-t border-border/60 space-y-3">
-                <p className="text-sm font-medium text-brand-dark">Record New Advance</p>
+                <p className="text-sm font-medium text-brand-dark">{advances.length === 0 ? "Record Advance" : "Collect Payment"}</p>
                 <div className="grid md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Amount ($)</Label>
@@ -904,7 +912,7 @@ export function OrderDetailPage() {
         ) : (
           <div className="py-6 text-center text-muted-foreground">
             <DollarSign className="h-8 w-8 mx-auto mb-2 opacity-20" />
-            <p className="text-sm">No advance payments recorded yet.</p>
+            <p className="text-sm">No payments recorded yet.</p>
           </div>
         )}
       </div>

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb } from "@/lib/db";
-import { Bell, Info, Package, AlertCircle } from "lucide-react";
+import { Bell, Info, Package, AlertCircle, Trash2 } from "lucide-react";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -39,6 +39,14 @@ export function NotificationsPage() {
     if (n) n.read = true;
   });
 
+  const deleteOne = (id: string) =>
+    updateDb(d => { d.notifications = d.notifications.filter(n => n.id !== id); });
+
+  const clearAll = () => {
+    if (!confirm("Delete all your notifications? This cannot be undone.")) return;
+    updateDb(d => { d.notifications = d.notifications.filter(n => n.userId !== user!.id); });
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -46,9 +54,16 @@ export function NotificationsPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Notifications</h1>
           <p className="text-sm text-muted-foreground">{unread} unread · {total} total</p>
         </div>
-        {unread > 0 && (
-          <AsyncButton variant="outline" onClick={markAll} className="rounded-xl">Mark all read</AsyncButton>
-        )}
+        <div className="flex items-center gap-2">
+          {unread > 0 && (
+            <AsyncButton variant="outline" onClick={markAll} className="rounded-xl">Mark all read</AsyncButton>
+          )}
+          {total > 0 && (
+            <AsyncButton variant="outline" onClick={clearAll} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30">
+              <Trash2 className="h-4 w-4 mr-1.5" /> Clear all
+            </AsyncButton>
+          )}
+        </div>
       </div>
 
       <div className="space-y-2">
@@ -73,9 +88,17 @@ export function NotificationsPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2">
                 <p className="font-medium text-sm">{n.title}</p>
-                {!n.read && (
-                  <span className="h-2 w-2 rounded-full bg-primary shrink-0 mt-1.5" />
-                )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {!n.read && (
+                    <span className="h-2 w-2 rounded-full bg-primary mt-1.5" />
+                  )}
+                  <button
+                    onClick={(e) => { e.stopPropagation(); deleteOne(n.id); }}
+                    aria-label="Delete notification"
+                    className="p-1 -m-1 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                </div>
               </div>
               <p className="text-sm text-muted-foreground mt-0.5">{n.body}</p>
               <p className="text-xs text-muted-foreground mt-1.5">
