@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -29,6 +29,8 @@ export function OrdersPage() {
   const [sp] = useSearchParams();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
+  const [clientFilter, setClientFilter] = useState<string>("all");
+  const isStaff = user!.role !== "client";
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   // List vs Grid (image) view — remembered per device.
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -43,13 +45,14 @@ export function OrdersPage() {
     let list = currentUserOrders(db, user!);
     if (status === "Pending") list = list.filter(o => o.status === "Waiting" || o.status === "Approved");
     else if (status !== "all") list = list.filter(o => o.status === status);
+    if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
     if (q) list = list.filter(o =>
       o.orderNumber.toLowerCase().includes(q.toLowerCase()) ||
       o.jewelleryType.toLowerCase().includes(q.toLowerCase()) ||
       (o.designNumber ?? "").toLowerCase().includes(q.toLowerCase())
     );
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [db, user, q, status]);
+  }, [db, user, q, status, clientFilter]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
@@ -69,40 +72,52 @@ export function OrdersPage() {
         )}
       </div>
 
-      {/* ── Search + filter ── */}
-      <div className="card-luxe p-3 flex flex-col sm:flex-row gap-2.5">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-9 h-10 rounded-xl" />
-        </div>
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="w-full sm:w-44 h-10 rounded-xl">
-            <Filter className="h-3.5 w-3.5 mr-2 shrink-0" /><SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
-            {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
-              <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* ── View toggle ── */}
-      {total > 0 && (
-        <div className="flex justify-end">
-          <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border/60">
+      {/* ── Search · filters · view toggle ── */}
+      <div className="card-luxe p-3 space-y-2.5">
+        {/* Row 1: search + List/Grid toggle (right) */}
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex-1 min-w-0">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-9 h-10 rounded-xl" />
+          </div>
+          <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border/60 shrink-0">
             <button onClick={() => saveView("list")} aria-label="List view"
-              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              <Rows3 className="h-3.5 w-3.5" /> List
+              className={`flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
             </button>
             <button onClick={() => saveView("grid")} aria-label="Grid view"
-              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              <LayoutGrid className="h-3.5 w-3.5" /> Grid
+              className={`flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
             </button>
           </div>
         </div>
-      )}
+        {/* Row 2: status + client filters */}
+        <div className="flex flex-col sm:flex-row gap-2.5">
+          <Select value={status} onValueChange={setStatus}>
+            <SelectTrigger className="w-full sm:w-48 h-10 rounded-xl">
+              <Filter className="h-3.5 w-3.5 mr-2 shrink-0" /><SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All status</SelectItem>
+              <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
+              {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
+                <SelectItem key={s} value={s}>{s}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {isStaff && (
+            <Select value={clientFilter} onValueChange={setClientFilter}>
+              <SelectTrigger className="w-full sm:w-56 h-10 rounded-xl">
+                <Users className="h-3.5 w-3.5 mr-2 shrink-0" /><SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All clients</SelectItem>
+                {[...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c =>
+                  <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+      </div>
 
       {/* ── Empty state ── */}
       {total === 0 && (
