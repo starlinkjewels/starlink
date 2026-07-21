@@ -429,7 +429,7 @@ export function NewOrderPage() {
                 <Select value={f.productKarats} onValueChange={v => set("productKarats", v)} required>
                   <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
                   <SelectContent>
-                    {["14K","18K","22K","24K"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                    {["9K","10K","14K","18K","22K","24K"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
                   </SelectContent>
                 </Select>
               </Field>

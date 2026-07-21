@@ -115,7 +115,7 @@ export interface Order {
   designNumber?: string;
   productSize?: string;
   productColor?: string;   // "Yellow" | "Rose" | "White"
-  productKarats?: string;  // "14K" | "18K" | "22K" | "24K"
+  productKarats?: string;  // "9K" | "10K" | "14K" | "18K" | "22K" | "24K"
   // Delivery preference
   deliveryTime?: string;
   // Finishing options
