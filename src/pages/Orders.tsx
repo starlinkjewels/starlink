@@ -32,7 +32,7 @@ export function OrdersPage() {
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   // List vs Grid (image) view — remembered per device.
   const [view, setView] = useState<"list" | "grid">(() => {
-    try { return (localStorage.getItem("orders-view") as "list" | "grid") || "list"; } catch { return "list"; }
+    try { return (localStorage.getItem("orders-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => {
     setView(v);
@@ -124,7 +124,14 @@ export function OrdersPage() {
               <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block">
                 <div className="relative aspect-square bg-secondary/50">
                   {img ? (
-                    <img src={img} alt={o.orderNumber} className="w-full h-full object-cover" loading="lazy" />
+                    <img
+                      src={img}
+                      alt={o.orderNumber}
+                      loading="lazy"
+                      decoding="async"
+                      onLoad={e => e.currentTarget.classList.remove("opacity-0")}
+                      className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
+                    />
                   ) : (
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}

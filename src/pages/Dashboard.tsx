@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
-import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck } from "lucide-react";
+import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tooltip, PieChart, Pie, Cell } from "recharts";
 import { StatCard } from "@/components/StatCard";
@@ -26,6 +26,7 @@ export function Dashboard() {
 
   const today = new Date().toDateString();
   const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
+  const forApproval = orders.filter(o => o.status === "Waiting").length;
   const pending = orders.filter(o => o.status === "Waiting" || o.status === "Approved").length;
   const inProd = orders.filter(o => o.status === "In Production").length;
   const ready = orders.filter(o => o.status === "Ready" || o.status === "Dispatched").length;
@@ -96,6 +97,7 @@ export function Dashboard() {
   const stats: [string, string | number, any, string, string?][] = user!.role === "admin"
     ? [
         ["Today's Orders", todayOrders, Clock, "text-primary", "/orders"],
+        ["For Approval", forApproval, ClipboardCheck, "text-warning", "/orders?status=Waiting"],
         ["Pending", pending, Package, "text-warning", "/orders?status=Pending"],
         ["In Production", inProd, Factory, "text-primary", "/orders?status=In%20Production"],
         ["Ready", ready, PackageCheck, "text-brand-light", "/orders?status=Ready"],
@@ -126,7 +128,7 @@ export function Dashboard() {
         <p className="text-sm text-muted-foreground mt-1">Here is what is happening today.</p>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
         {stats.map(([label, val, Icon, color, to], i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
             {to ? (
