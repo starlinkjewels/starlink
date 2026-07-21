@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -30,6 +30,14 @@ export function OrdersPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  // List vs Grid (image) view — remembered per device.
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("orders-view") as "list" | "grid") || "list"; } catch { return "list"; }
+  });
+  const saveView = (v: "list" | "grid") => {
+    setView(v);
+    try { localStorage.setItem("orders-view", v); } catch { /* ignore */ }
+  };
 
   const orders = useMemo(() => {
     let list = currentUserOrders(db, user!);
@@ -80,7 +88,72 @@ export function OrdersPage() {
         </Select>
       </div>
 
-      {/* ── Order cards ── */}
+      {/* ── View toggle ── */}
+      {total > 0 && (
+        <div className="flex justify-end">
+          <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border/60">
+            <button onClick={() => saveView("list")} aria-label="List view"
+              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              <Rows3 className="h-3.5 w-3.5" /> List
+            </button>
+            <button onClick={() => saveView("grid")} aria-label="Grid view"
+              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              <LayoutGrid className="h-3.5 w-3.5" /> Grid
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Empty state ── */}
+      {total === 0 && (
+        <div className="card-luxe p-12 text-center text-muted-foreground">
+          <Package className="h-10 w-10 mx-auto mb-3 opacity-20" />
+          <p>No orders match your filters.</p>
+        </div>
+      )}
+
+      {/* ── Grid (image) view ── */}
+      {view === "grid" && total > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {paged.map(o => {
+            const client = db.clients.find(c => c.id === o.clientId);
+            const done = o.timeline.filter(t => t.status === "done").length;
+            const progress = Math.round(done / o.timeline.length * 100);
+            const img = o.cadImage || o.images?.[0];
+            return (
+              <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block">
+                <div className="relative aspect-square bg-secondary/50">
+                  {img ? (
+                    <img src={img} alt={o.orderNumber} className="w-full h-full object-cover" loading="lazy" />
+                  ) : (
+                    <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
+                  )}
+                  <div className="absolute top-2 left-2"><StatusBadge status={o.status} /></div>
+                </div>
+                <div className="p-3">
+                  <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
+                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                    {o.jewelleryType} · {o.metal}{o.designNumber ? ` · #${o.designNumber}` : ""}
+                  </p>
+                  {user!.role !== "client" && client && (
+                    <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>
+                  )}
+                  <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
+                  </div>
+                  <div className="flex items-center justify-between mt-1.5">
+                    <span className="text-[11px] text-muted-foreground">{progress}%</span>
+                    <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
+                  </div>
+                </div>
+              </Link>
+            );
+          })}
+        </div>
+      )}
+
+      {/* ── List view (order cards) ── */}
+      {view === "list" && total > 0 && (
       <div className="grid gap-3">
         {paged.map(o => {
           const client = db.clients.find(c => c.id === o.clientId);
@@ -178,14 +251,8 @@ export function OrdersPage() {
             </Link>
           );
         })}
-
-        {total === 0 && (
-          <div className="card-luxe p-12 text-center text-muted-foreground">
-            <Package className="h-10 w-10 mx-auto mb-3 opacity-20" />
-            <p>No orders match your filters.</p>
-          </div>
-        )}
       </div>
+      )}
 
       <PaginationBar
         page={page}
