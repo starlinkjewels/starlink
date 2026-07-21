@@ -51,6 +51,9 @@ export interface Client {
   status: "active" | "inactive";
   accountManagerId?: string;
   createdAt: string;
+  // Overpayment carried forward as advance credit — auto-applied (oldest bill
+  // first) whenever a payment is recorded or "Apply Credit" is used.
+  creditBalance?: number;
 }
 
 export const TIMELINE_STEPS = [
@@ -293,6 +296,35 @@ export function orderTotal(order: Order): number {
 
 export function balanceDue(order: Order): number {
   return Math.max(0, orderTotal(order) - totalAdvance(order));
+}
+
+/**
+ * Apply `amount` across the given orders, OLDEST bill first (FIFO), by pushing a
+ * payment (advance) entry onto each order until its balance is cleared. Mutates
+ * the passed order objects (call inside updateDb). Returns the unallocated
+ * leftover — which the caller should carry forward as client credit.
+ */
+export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy: string, at: string): number {
+  let remaining = amount;
+  const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+  for (const o of oldestFirst) {
+    if (remaining <= 0) break;
+    const bal = balanceDue(o);
+    if (bal <= 0) continue;
+    const pay = Math.min(remaining, bal);
+    if (!o.advances) o.advances = [];
+    o.advances.push({ id: uid("adv_"), amount: pay, note: "Payment received", recordedBy, createdAt: at });
+    remaining -= pay;
+  }
+  return Math.round(remaining * 100) / 100; // leftover → credit
+}
+
+/** Client account summary across all their orders (+ carried-forward credit). */
+export function clientAccount(orders: Order[], creditBalance = 0) {
+  const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
+  const allocated = orders.reduce((s, o) => s + totalAdvance(o), 0);
+  const outstanding = Math.max(0, billed - allocated);
+  return { billed, allocated, outstanding, credit: creditBalance, received: allocated + creditBalance };
 }
 
 /** Backward-compat: insert the "Diamond Purchase" step (added after "CAD Approved")

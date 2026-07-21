@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, allocatePaymentFIFO, clientAccount } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
@@ -11,9 +12,10 @@ import { PaginationBar } from "@/components/PaginationBar";
 import {
   ArrowLeft, Package, Search, Mail, Phone, MapPin, Globe,
   FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
-  Download, ExternalLink, Building2, Hash,
+  Download, ExternalLink, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { useAuth } from "@/lib/auth";
 
@@ -54,6 +56,45 @@ export function ClientHistoryPage() {
   // Filters
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  // ── Client account / payments ──
+  const [payAmount, setPayAmount] = useState("");
+  const [showPayForm, setShowPayForm] = useState(false);
+  const account = clientAccount(allOrders, client?.creditBalance || 0);
+
+  const recordPayment = () => {
+    const amt = parseFloat(payAmount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    updateDb(d => {
+      const c = d.clients.find(x => x.id === id);
+      if (!c) return;
+      const clientOrders = d.orders.filter(o => o.clientId === id);
+      const now = new Date().toISOString();
+      // Fold any existing credit in, then allocate oldest-bill-first.
+      const leftover = allocatePaymentFIFO(clientOrders, amt + (c.creditBalance || 0), user!.id, now);
+      c.creditBalance = leftover > 0 ? leftover : undefined;
+      const clientUser = d.users.find(u => u.clientId === id);
+      if (clientUser) d.notifications.unshift({
+        id: uid("n_"), userId: clientUser.id,
+        title: "Payment Received",
+        body: `${fmtMoney(amt)} received and applied to your oldest pending orders.`,
+        type: "info", read: false, createdAt: now,
+      });
+    });
+    toast.success("Payment recorded & allocated to oldest bills");
+    setPayAmount(""); setShowPayForm(false);
+  };
+
+  const applyCredit = () => {
+    updateDb(d => {
+      const c = d.clients.find(x => x.id === id);
+      if (!c || !c.creditBalance || c.creditBalance <= 0) return;
+      const clientOrders = d.orders.filter(o => o.clientId === id);
+      const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance, user!.id, new Date().toISOString());
+      c.creditBalance = leftover > 0 ? leftover : undefined;
+    });
+    toast.success("Credit applied to oldest outstanding bills");
+  };
 
   const filtered = allOrders.filter(o => {
     const matchQ = !q || o.orderNumber.toLowerCase().includes(q.toLowerCase()) || o.jewelleryType.toLowerCase().includes(q.toLowerCase());
@@ -192,6 +233,74 @@ export function ClientHistoryPage() {
             <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
           </motion.div>
         ))}
+      </div>
+
+      {/* ── Account Ledger (payments apply oldest-bill-first) ── */}
+      <div className="card-luxe p-5 space-y-4">
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0">
+              <Wallet className="h-5 w-5 text-success" />
+            </div>
+            <div>
+              <h3 className="font-display text-lg text-brand-dark">Account Ledger</h3>
+              <p className="text-xs text-muted-foreground">Payments clear the oldest bill first; extra becomes credit</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            {account.credit > 0 && account.outstanding > 0 && (
+              <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
+                <CreditCard className="h-4 w-4" /> Apply Credit
+              </Button>
+            )}
+            <Button onClick={() => setShowPayForm(v => !v)} className="btn-hero rounded-xl gap-2">
+              <Plus className="h-4 w-4" /> Record Payment
+            </Button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="p-3 rounded-xl bg-secondary text-center">
+            <p className="text-xs text-muted-foreground mb-1">Total Billed</p>
+            <p className="font-semibold text-sm">{fmtMoney(account.billed)}</p>
+          </div>
+          <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
+            <p className="text-xs text-muted-foreground mb-1">Received</p>
+            <p className="font-semibold text-sm text-success">{fmtMoney(account.allocated)}</p>
+          </div>
+          <div className={`p-3 rounded-xl text-center border ${account.outstanding > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
+            <p className="text-xs text-muted-foreground mb-1">Outstanding</p>
+            <p className={`font-semibold text-sm ${account.outstanding > 0 ? "text-destructive" : "text-success"}`}>
+              {account.outstanding > 0 ? fmtMoney(account.outstanding) : "✓ Cleared"}
+            </p>
+          </div>
+          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
+            <p className="text-xs text-muted-foreground mb-1">Credit (Advance)</p>
+            <p className="font-semibold text-sm text-primary">{fmtMoney(account.credit)}</p>
+          </div>
+        </div>
+
+        {showPayForm && (
+          <div className="pt-2 border-t border-border/60 space-y-2.5">
+            <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
+            <div className="flex flex-col sm:flex-row gap-2.5">
+              <div className="relative flex-1">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="number" min="1" step="0.01" autoFocus
+                  value={payAmount} onChange={e => setPayAmount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && recordPayment()}
+                  className="pl-9 rounded-xl h-10" placeholder="Amount received" />
+              </div>
+              <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
+              <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); }} className="rounded-xl h-10">Cancel</Button>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {account.credit > 0 && <>Includes {fmtMoney(account.credit)} existing credit. </>}
+              Clears the oldest pending bills first; any extra is kept as credit for future orders.
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Invoice Summary */}
