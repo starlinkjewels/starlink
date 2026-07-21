@@ -7,8 +7,9 @@ import { useEffect, useRef, useState } from "react";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 
-interface NavItem { to: string; label: string; icon: any; roles?: string[]; }
+interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
+  { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/orders", label: "Orders", icon: Package },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
@@ -16,7 +17,6 @@ const NAV: NavItem[] = [
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/income", label: "Passbook", icon: BookOpen },
-  { to: "/catalog", label: "Catalog", icon: FolderOpen },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reports", label: "Reports", icon: BarChart3 },
@@ -151,7 +151,11 @@ export function AppLayout() {
             <NavLink key={item.to} to={item.to} end={item.to === "/"}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                 ${isActive ? "bg-primary text-primary-foreground shadow-soft" : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
+                 ${isActive
+                   ? "bg-primary text-primary-foreground shadow-soft"
+                   : item.highlight
+                   ? "bg-gradient-to-r from-primary/10 to-brand-light/10 text-primary ring-1 ring-primary/25 font-semibold hover:from-primary/15 hover:to-brand-light/15"
+                   : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
               <item.icon className="h-4 w-4 shrink-0" />
               <span>{item.label}</span>
               {item.to === "/notifications" && unread > 0 && (
