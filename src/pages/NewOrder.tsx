@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, TIMELINE_STEPS, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, TIMELINE_STEPS, allocatePaymentFIFO, type Order } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -221,6 +221,15 @@ export function NewOrderPage() {
           body: `${order.orderNumber} has been created for your account.`,
           type: "order", read: false, createdAt: new Date().toISOString(),
         });
+
+        // Auto-apply any carried-forward client credit to the oldest bills first.
+        // Only staff sessions may write the client record, so scope this to them.
+        const c = d.clients.find(cl => cl.id === clientId);
+        if (c && (c.creditBalance || 0) > 0) {
+          const clientOrders = d.orders.filter(o => o.clientId === clientId);
+          const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance || 0, user!.id, new Date().toISOString());
+          c.creditBalance = leftover > 0 ? leftover : undefined;
+        }
       }
     });
 

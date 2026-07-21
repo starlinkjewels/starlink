@@ -321,10 +321,17 @@ export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy:
 
 /** Client account summary across all their orders (+ carried-forward credit). */
 export function clientAccount(orders: Order[], creditBalance = 0) {
+  // Outstanding must be summed PER ORDER (capped at 0) — otherwise an order that
+  // was overpaid would wrongly cancel out real balance still due on another order.
+  let outstanding = 0, overpaid = 0;
+  for (const o of orders) {
+    outstanding += balanceDue(o);
+    overpaid += Math.max(0, totalAdvance(o) - orderTotal(o));
+  }
   const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
-  const allocated = orders.reduce((s, o) => s + totalAdvance(o), 0);
-  const outstanding = Math.max(0, billed - allocated);
-  return { billed, allocated, outstanding, credit: creditBalance, received: allocated + creditBalance };
+  const allocated = Math.round((billed - outstanding) * 100) / 100; // money applied to bills
+  const credit = Math.round(((creditBalance || 0) + overpaid) * 100) / 100;
+  return { billed, allocated, outstanding, credit, received: allocated + credit };
 }
 
 /** Backward-compat: insert the "Diamond Purchase" step (added after "CAD Approved")
