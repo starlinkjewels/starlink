@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, allocatePaymentFIFO, clientAccount } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, reconcileClientAccount, clientAccount } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -70,8 +70,9 @@ export function ClientHistoryPage() {
       if (!c) return;
       const clientOrders = d.orders.filter(o => o.clientId === id);
       const now = new Date().toISOString();
-      // Fold any existing credit in, then allocate oldest-bill-first.
-      const leftover = allocatePaymentFIFO(clientOrders, amt + (c.creditBalance || 0), user!.id, now);
+      // Reclaim any over-payment, fold in existing credit + this amount, then
+      // re-allocate oldest-bill-first.
+      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now);
       c.creditBalance = leftover > 0 ? leftover : undefined;
       const clientUser = d.users.find(u => u.clientId === id);
       if (clientUser) d.notifications.unshift({
@@ -88,9 +89,10 @@ export function ClientHistoryPage() {
   const applyCredit = () => {
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
-      if (!c || !c.creditBalance || c.creditBalance <= 0) return;
+      if (!c) return;
       const clientOrders = d.orders.filter(o => o.clientId === id);
-      const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance, user!.id, new Date().toISOString());
+      // Reclaim any per-order over-payment + stored credit, re-allocate oldest first.
+      const leftover = reconcileClientAccount(clientOrders, 0, c.creditBalance || 0, user!.id, new Date().toISOString());
       c.creditBalance = leftover > 0 ? leftover : undefined;
     });
     toast.success("Credit applied to oldest outstanding bills");

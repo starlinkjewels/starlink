@@ -319,6 +319,42 @@ export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy:
   return Math.round(remaining * 100) / 100; // leftover → credit
 }
 
+/**
+ * Enforce the invariant that an order's advances never exceed its total. Trims
+ * the newest advance entries down and returns the reclaimed excess so the caller
+ * can move it to client credit. (Guards against repricing an order below what was
+ * already paid, or an over-sized single payment.)
+ */
+export function capOrderAdvances(o: Order): number {
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  let excess = r2(totalAdvance(o) - orderTotal(o));
+  if (excess <= 0) return 0;
+  const reclaimed = excess;
+  const adv = o.advances || [];
+  for (let i = adv.length - 1; i >= 0 && excess > 0.001; i--) {
+    if (adv[i].amount <= excess + 0.001) {
+      excess = r2(excess - adv[i].amount);
+      adv.splice(i, 1);
+    } else {
+      adv[i].amount = r2(adv[i].amount - excess);
+      excess = 0;
+    }
+  }
+  return reclaimed;
+}
+
+/**
+ * Reconcile a client's account: reclaim any per-order overpayment, add carried
+ * credit and any `extra` new payment, then re-allocate oldest-bill-first.
+ * Mutates the given orders; returns the leftover to store as client credit.
+ */
+export function reconcileClientAccount(orders: Order[], extra: number, creditBalance: number, recordedBy: string, at: string): number {
+  let pool = (extra || 0) + (creditBalance || 0);
+  for (const o of orders) pool += capOrderAdvances(o);
+  pool = Math.round(pool * 100) / 100;
+  return allocatePaymentFIFO(orders, pool, recordedBy, at);
+}
+
 /** Client account summary across all their orders (+ carried-forward credit). */
 export function clientAccount(orders: Order[], creditBalance = 0) {
   // Outstanding must be summed PER ORDER (capped at 0) — otherwise an order that

@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -26,13 +26,15 @@ function lastTrackingStep(o: Order): string {
 export function OrdersPage() {
   const { user } = useAuth();
   const db = useDb();
+  const [sp] = useSearchParams();
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<string>("all");
+  const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
 
   const orders = useMemo(() => {
     let list = currentUserOrders(db, user!);
-    if (status !== "all") list = list.filter(o => o.status === status);
+    if (status === "Pending") list = list.filter(o => o.status === "Waiting" || o.status === "Approved");
+    else if (status !== "all") list = list.filter(o => o.status === status);
     if (q) list = list.filter(o =>
       o.orderNumber.toLowerCase().includes(q.toLowerCase()) ||
       o.jewelleryType.toLowerCase().includes(q.toLowerCase()) ||
@@ -71,6 +73,7 @@ export function OrdersPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All status</SelectItem>
+            <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
             {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
               <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>

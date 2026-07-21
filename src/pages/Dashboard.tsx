@@ -92,29 +92,30 @@ export function Dashboard() {
       .sort((a, b) => b.total - a.total);
   }, [db.users, allExpenses]);
 
-  const stats: [string, string | number, any, string][] = user!.role === "admin"
+  // 5th element = optional link target (clicking the card opens that filtered view).
+  const stats: [string, string | number, any, string, string?][] = user!.role === "admin"
     ? [
-        ["Today's Orders", todayOrders, Clock, "text-primary"],
-        ["Pending", pending, Package, "text-warning"],
-        ["In Production", inProd, Factory, "text-primary"],
-        ["Ready", ready, PackageCheck, "text-brand-light"],
-        ["Completed", completed, CheckCircle2, "text-success"],
-        ["Revenue", fmtMoney(revenue), DollarSign, "text-success"],
-        ["Clients", db.clients.length, Users, "text-primary"],
-        ["Employees", db.users.filter(u => u.role === "employee").length, Briefcase, "text-primary"],
+        ["Today's Orders", todayOrders, Clock, "text-primary", "/orders"],
+        ["Pending", pending, Package, "text-warning", "/orders?status=Pending"],
+        ["In Production", inProd, Factory, "text-primary", "/orders?status=In%20Production"],
+        ["Ready", ready, PackageCheck, "text-brand-light", "/orders?status=Ready"],
+        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
+        ["Revenue", fmtMoney(revenue), DollarSign, "text-success", "/reports"],
+        ["Clients", db.clients.length, Users, "text-primary", "/clients"],
+        ["Employees", db.users.filter(u => u.role === "employee").length, Briefcase, "text-primary", "/employees"],
       ]
     : user!.role === "employee"
     ? [
-        ["Assigned", orders.length, Package, "text-primary"],
-        ["Pending", pending, Clock, "text-warning"],
-        ["In Production", inProd, Factory, "text-primary"],
-        ["Completed", completed, CheckCircle2, "text-success"],
+        ["Assigned", orders.length, Package, "text-primary", "/orders"],
+        ["Pending", pending, Clock, "text-warning", "/orders?status=Pending"],
+        ["In Production", inProd, Factory, "text-primary", "/orders?status=In%20Production"],
+        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
       ]
     : [
-        ["Current Orders", orders.filter(o => o.status !== "Delivered").length, Package, "text-primary"],
-        ["Completed", completed, CheckCircle2, "text-success"],
-        ["Invoices", fmtMoney(orders.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, "text-primary"],
-        ["Pending Payment", fmtMoney(orders.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "text-warning"],
+        ["Current Orders", orders.filter(o => o.status !== "Delivered").length, Package, "text-primary", "/orders"],
+        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
+        ["Invoices", fmtMoney(orders.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, "text-primary", "/invoices"],
+        ["Pending Payment", fmtMoney(orders.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "text-warning", "/invoices"],
       ];
 
   return (
@@ -126,9 +127,15 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
-        {stats.map(([label, val, Icon, color], i) => (
+        {stats.map(([label, val, Icon, color, to], i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
-            <StatCard label={label} value={val} icon={Icon} colorClass={color} />
+            {to ? (
+              <Link to={to} className="block h-full rounded-2xl transition-all hover:-translate-y-0.5 hover:shadow-soft active:scale-[0.98]">
+                <StatCard label={label} value={val} icon={Icon} colorClass={color} />
+              </Link>
+            ) : (
+              <StatCard label={label} value={val} icon={Icon} colorClass={color} />
+            )}
           </motion.div>
         ))}
       </div>

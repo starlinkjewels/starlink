@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid } from "@/lib/db";
+import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -132,28 +132,45 @@ export function OrderDetailPage() {
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     let paidInFull = false;
     let isFirst = false;
+    let toCredit = 0;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (!o.advances) o.advances = [];
-      // First payment on the order is the "advance"; every later collection is a
-      // regular payment; the one that clears the balance is the "final payment".
+      // Never let a single order be paid beyond its balance — cap at the balance
+      // and send the excess to the client's credit so it can clear other bills.
+      const bal = balanceDue(o);
+      const applied = Math.min(amt, bal);
+      toCredit = Math.round((amt - applied) * 100) / 100;
       isFirst = o.advances.length === 0;
-      paidInFull = totalAdvance(o) + amt >= orderTotal(o);
-      const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
-      o.advances.push({ id: uid("adv_"), amount: amt, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString() });
+      if (applied > 0) {
+        // First payment on the order is the "advance"; every later collection is a
+        // regular payment; the one that clears the balance is the "final payment".
+        paidInFull = totalAdvance(o) + applied >= orderTotal(o);
+        const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
+        o.advances.push({ id: uid("adv_"), amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString() });
+      }
+      if (toCredit > 0) {
+        const c = d.clients.find(x => x.id === o.clientId);
+        if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + toCredit) * 100) / 100;
+      }
       const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({
+      if (clientUser && applied > 0) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: paidInFull ? "Order Paid in Full" : isFirst ? "Advance Recorded" : "Payment Recorded",
         body: paidInFull
-          ? `${o.orderNumber} paid in full — final payment of ${fmtMoney(amt)} received`
+          ? `${o.orderNumber} paid in full — final payment of ${fmtMoney(applied)} received`
           : isFirst
-          ? `${fmtMoney(amt)} advance received for ${o.orderNumber}`
-          : `${fmtMoney(amt)} payment received for ${o.orderNumber}`,
+          ? `${fmtMoney(applied)} advance received for ${o.orderNumber}`
+          : `${fmtMoney(applied)} payment received for ${o.orderNumber}`,
         type: "info", read: false, createdAt: new Date().toISOString(),
       });
     });
-    toast.success(paidInFull ? "Final payment recorded — order paid in full" : isFirst ? "Advance payment recorded" : "Payment recorded");
+    toast.success(
+      toCredit > 0
+        ? `Payment recorded — ${fmtMoney(toCredit)} added to client credit`
+        : paidInFull ? "Final payment recorded — order paid in full"
+        : isFirst ? "Advance payment recorded" : "Payment recorded"
+    );
     setAdvAmt(""); setAdvNote(""); setShowAdvForm(false);
   };
 
@@ -202,6 +219,13 @@ export function OrderDetailPage() {
           body: `${o.orderNumber} final amount confirmed: ${fmtMoney(val)}${(o.shippingCharge || 0) > 0 ? ` + ${fmtMoney(o.shippingCharge)} shipping` : ""}`,
           type: "info", read: false, createdAt: new Date().toISOString(),
         });
+      }
+      // If the (possibly lowered) value now sits below what's already paid, move
+      // the overpaid excess to the client's credit so it can clear other bills.
+      const back = capOrderAdvances(o);
+      if (back > 0) {
+        const c = d.clients.find(x => x.id === o.clientId);
+        if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100;
       }
     });
     toast.success("Actual details saved");
