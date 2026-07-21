@@ -13,6 +13,8 @@ export function InvoicesPage() {
   const db = useDb();
   const [q, setQ] = useState("");
   const [clientFilter, setClientFilter] = useState("all");
+  const [ledgerQ, setLedgerQ] = useState("");
+  const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
@@ -38,9 +40,20 @@ export function InvoicesPage() {
     : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
 
   // Orders with advances (all roles see their own)
-  let ordersWithAdvance = db.orders.filter(o => (o.advances || []).length > 0);
-  if (user!.role === "client") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === user!.clientId);
-  if (user!.role === "employee") ordersWithAdvance = ordersWithAdvance.filter(o => o.assignedEmployeeId === user!.id);
+  let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
+  if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
+  if (user!.role === "employee") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.assignedEmployeeId === user!.id);
+
+  let ordersWithAdvance = ordersWithAdvanceBase;
+  if (user!.role !== "client" && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
+
+  const lq = ledgerQ.trim().toLowerCase();
+  if (lq) {
+    ordersWithAdvance = ordersWithAdvance.filter(o => {
+      const client = db.clients.find(c => c.id === o.clientId);
+      return o.orderNumber.toLowerCase().includes(lq) || (client?.companyName ?? "").toLowerCase().includes(lq);
+    });
+  }
 
   const totalPaid = list.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
   const totalPending = list.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
@@ -228,14 +241,35 @@ export function InvoicesPage() {
       </div>
 
       {/* Advance Payments section */}
-      {ordersWithAdvance.length > 0 && (
+      {ordersWithAdvanceBase.length > 0 && (
         <div className="card-luxe overflow-hidden">
-          <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-2 flex-wrap">
-            <div>
+          <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
+            <div className="shrink-0">
               <h2 className="font-semibold text-brand-dark">Advance Payment Ledger</h2>
               <p className="text-xs text-muted-foreground mt-0.5">All recorded advance payments per order</p>
             </div>
-            {ordersWithAdvance.length > 0 && <p className="text-xs text-muted-foreground">Showing {ledStart + 1}–{ledEnd} of {ordersWithAdvance.length}</p>}
+            <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input
+                value={ledgerQ}
+                onChange={e => setLedgerQ(e.target.value)}
+                placeholder="Search order, client…"
+                className="pl-9 h-9 rounded-xl text-sm"
+              />
+            </div>
+            {user!.role !== "client" && (
+              <select
+                value={ledgerClientFilter}
+                onChange={e => setLedgerClientFilter(e.target.value)}
+                className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="all">All Clients</option>
+                {clientOptions.map(c => (
+                  <option key={c.id} value={c.id}>{c.companyName}</option>
+                ))}
+              </select>
+            )}
+            {ordersWithAdvance.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {ledStart + 1}–{ledEnd} of {ordersWithAdvance.length}</p>}
           </div>
 
           {/* Desktop table */}
@@ -273,12 +307,18 @@ export function InvoicesPage() {
                     </tr>
                   );
                 })}
+                {ordersWithAdvance.length === 0 && (
+                  <tr><td colSpan={5} className="p-12 text-center text-muted-foreground">No orders match your search.</td></tr>
+                )}
               </tbody>
             </table>
           </div>
 
           {/* Mobile cards */}
           <div className="md:hidden divide-y divide-border/40">
+            {ordersWithAdvance.length === 0 && (
+              <div className="p-12 text-center text-muted-foreground">No orders match your search.</div>
+            )}
             {pagedLedger.map(o => {
               const client = db.clients.find(c => c.id === o.clientId);
               const adv = totalAdvance(o);

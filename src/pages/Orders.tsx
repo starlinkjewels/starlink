@@ -13,7 +13,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
-const PAGE_SIZE = 10;
+const PAGE_SIZE = 12;
 
 function lastTrackingStep(o: Order): string {
   const inProgress = o.timeline.find(t => t.status === "in_progress");
