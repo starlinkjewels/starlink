@@ -134,20 +134,21 @@ export function OrdersPage() {
             const img = o.cadImage || o.images?.[0];
             return (
               <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block">
-                <div className="relative aspect-square bg-secondary/50">
+                <div className={`relative aspect-square overflow-hidden ${img ? "bg-secondary animate-pulse" : "bg-secondary/50"}`}>
                   {img ? (
                     <img
                       src={img}
                       alt={o.orderNumber}
                       loading="lazy"
                       decoding="async"
-                      onLoad={e => e.currentTarget.classList.remove("opacity-0")}
-                      className="w-full h-full object-cover opacity-0 transition-opacity duration-300"
+                      onLoad={e => e.currentTarget.parentElement?.classList.remove("animate-pulse")}
+                      onError={e => { e.currentTarget.parentElement?.classList.remove("animate-pulse"); e.currentTarget.style.display = "none"; }}
+                      className="relative z-10 w-full h-full object-cover"
                     />
                   ) : (
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}
-                  <div className="absolute top-2 left-2"><StatusBadge status={o.status} /></div>
+                  <div className="absolute top-2 left-2 z-20"><StatusBadge status={o.status} /></div>
                 </div>
                 <div className="p-3">
                   <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
