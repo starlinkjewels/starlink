@@ -70,7 +70,7 @@ export function MessagesPage() {
     db.messages.filter(m => m.fromUserId === contactId && m.toUserId === user!.id && !m.read).length;
 
   return (
-    <div className="max-w-6xl mx-auto h-[calc(100vh-10rem)]">
+    <div className="max-w-6xl mx-auto h-full min-h-0">
       {/* ── Desktop layout: side-by-side ── */}
       <div className="hidden md:grid md:grid-cols-[280px_1fr] gap-4 h-full">
         {/* Contact list */}
