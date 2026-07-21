@@ -47,12 +47,16 @@ export function Dashboard() {
     }));
   }, [orders]);
 
+  // Every order status shown (not just a few) so the chart reflects all orders.
   const statusData = [
-    { name: "Waiting", value: orders.filter(o => o.status === "Waiting").length, color: "oklch(0.78 0.16 70)" },
-    { name: "In Production", value: inProd, color: "oklch(0.475 0.13 264)" },
-    { name: "Ready", value: ready, color: "oklch(0.68 0.11 262)" },
-    { name: "Delivered", value: completed, color: "oklch(0.72 0.17 148)" },
-  ];
+    { name: "Waiting",       color: "oklch(0.78 0.16 70)" },
+    { name: "Approved",      color: "oklch(0.62 0.13 264)" },
+    { name: "In Production", color: "oklch(0.475 0.13 264)" },
+    { name: "Ready",         color: "oklch(0.68 0.11 262)" },
+    { name: "Dispatched",    color: "oklch(0.60 0.11 232)" },
+    { name: "Delivered",     color: "oklch(0.72 0.17 148)" },
+    { name: "Rejected",      color: "oklch(0.62 0.20 22)" },
+  ].map(s => ({ ...s, value: orders.filter(o => o.status === s.name).length }));
 
   const client = user?.role === "client" ? db.clients.find(c => c.id === user.clientId) : null;
   const recent = [...orders].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)).slice(0, 6);
