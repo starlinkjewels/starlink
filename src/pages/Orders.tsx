@@ -72,50 +72,47 @@ export function OrdersPage() {
         )}
       </div>
 
-      {/* ── Search · filters · view toggle ── */}
-      <div className="card-luxe p-3 space-y-2.5">
-        {/* Row 1: search + List/Grid toggle (right) */}
-        <div className="flex items-center gap-2.5">
-          <div className="relative flex-1 min-w-0">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-9 h-10 rounded-xl" />
-          </div>
-          <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border/60 shrink-0">
-            <button onClick={() => saveView("list")} aria-label="List view"
-              className={`flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
-            </button>
-            <button onClick={() => saveView("grid")} aria-label="Grid view"
-              className={`flex items-center gap-1.5 h-8 px-2 sm:px-2.5 rounded-lg text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
-            </button>
-          </div>
+      {/* ── Search · filters · view toggle — one row on desktop, tidy 2 rows on mobile ── */}
+      <div className="card-luxe p-2 flex flex-wrap items-center gap-2">
+        <div className="relative order-1 flex-1 min-w-[150px]">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-8 h-9 rounded-lg text-sm" />
         </div>
-        {/* Row 2: status + client filters */}
-        <div className="flex flex-col sm:flex-row gap-2.5">
-          <Select value={status} onValueChange={setStatus}>
-            <SelectTrigger className="w-full sm:w-48 h-10 rounded-xl">
-              <Filter className="h-3.5 w-3.5 mr-2 shrink-0" /><SelectValue />
+
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="order-3 sm:order-2 flex-1 min-w-[130px] sm:flex-none sm:w-40 h-9 rounded-lg text-sm">
+            <Filter className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All status</SelectItem>
+            <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
+            {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
+              <SelectItem key={s} value={s}>{s}</SelectItem>)}
+          </SelectContent>
+        </Select>
+
+        {isStaff && (
+          <Select value={clientFilter} onValueChange={setClientFilter}>
+            <SelectTrigger className="order-4 sm:order-3 flex-1 min-w-[130px] sm:flex-none sm:w-48 h-9 rounded-lg text-sm">
+              <Users className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All status</SelectItem>
-              <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
-              {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
-                <SelectItem key={s} value={s}>{s}</SelectItem>)}
+              <SelectItem value="all">All clients</SelectItem>
+              {[...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c =>
+                <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
             </SelectContent>
           </Select>
-          {isStaff && (
-            <Select value={clientFilter} onValueChange={setClientFilter}>
-              <SelectTrigger className="w-full sm:w-56 h-10 rounded-xl">
-                <Users className="h-3.5 w-3.5 mr-2 shrink-0" /><SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All clients</SelectItem>
-                {[...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c =>
-                  <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
+        )}
+
+        <div className="order-2 sm:order-5 shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
         </div>
       </div>
 
