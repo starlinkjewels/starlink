@@ -274,10 +274,27 @@ export function OrderDetailPage() {
   );
 
   const handlePrintInvoice = () => {
-    const inv = db.invoices.find(i => i.orderId === order.id);
-    const invNumber = inv?.number
-      ?? String(db.invoices.findIndex(i => i.orderId === order.id) + 1).padStart(4, "0");
-    printInvoice(order, client, db.settings, invNumber || "0001");
+    const existing = db.invoices.find(i => i.orderId === order.id);
+    const amount = orderTotal(order);
+    const paid = balance <= 0;
+    let invNumber: string;
+    if (existing) {
+      // Stable number, reused on every reprint — keep amount/paid status current.
+      invNumber = existing.number;
+      if (existing.amount !== amount || existing.paid !== paid) {
+        updateDb(d => {
+          const i = d.invoices.find(x => x.id === existing.id);
+          if (i) { i.amount = amount; i.paid = paid; }
+        });
+      }
+    } else {
+      // First time this order is billed — assign the next number in sequence.
+      invNumber = String(db.invoices.length + 1).padStart(4, "0");
+      updateDb(d => {
+        d.invoices.push({ id: uid("inv_"), orderId: order.id, clientId: order.clientId, number: invNumber, amount, paid, createdAt: new Date().toISOString() });
+      });
+    }
+    printInvoice(order, client, db.settings, invNumber);
   };
 
   return (

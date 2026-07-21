@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, type DB } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -81,6 +81,36 @@ export function SettingsPage() {
 
   const canEditRates = user?.role === "admin" || user?.role === "employee";
   const isAdmin = user?.role === "admin";
+
+  // Orders that have been priced but never had an invoice number assigned —
+  // lets admin backfill all of them at once instead of opening each order to print.
+  const ordersNeedingInvoice = loadDb().orders
+    .filter(o => o.amount > 0 && !loadDb().invoices.some(i => i.orderId === o.id))
+    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+
+  const [generatingInvoices, setGeneratingInvoices] = useState(false);
+  const generateInvoiceNumbers = () => {
+    const fresh = loadDb();
+    const missing = fresh.orders
+      .filter(o => o.amount > 0 && !fresh.invoices.some(i => i.orderId === o.id))
+      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    if (!missing.length) return;
+    if (!confirm(`Generate invoice numbers for ${missing.length} order${missing.length !== 1 ? "s" : ""}, oldest first? This cannot be undone.`)) return;
+    setGeneratingInvoices(true);
+    updateDb(d => {
+      let n = d.invoices.length;
+      for (const o of missing) {
+        n++;
+        d.invoices.push({
+          id: uid("inv_"), orderId: o.id, clientId: o.clientId,
+          number: String(n).padStart(4, "0"),
+          amount: orderTotal(o), paid: balanceDue(o) <= 0, createdAt: o.createdAt,
+        });
+      }
+    });
+    toast.success(`Generated ${missing.length} invoice number${missing.length !== 1 ? "s" : ""}`);
+    setGeneratingInvoices(false);
+  };
 
   // Users created under the previous model (password in Firestore, no Auth
   // account). Admin can provision Firebase Auth logins for them in one click.
@@ -399,6 +429,24 @@ export function SettingsPage() {
           </div>
 
           <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">Save Pricing Rates</AsyncButton>
+        </div>
+      )}
+
+      {/* Bulk invoice numbering — admin only, shown only when some priced orders have no invoice yet */}
+      {isAdmin && ordersNeedingInvoice.length > 0 && (
+        <div className="card-luxe p-6 space-y-3">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            <h3 className="font-semibold">Invoice Numbering</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {ordersNeedingInvoice.length} priced order{ordersNeedingInvoice.length !== 1 ? "s don't" : " doesn't"} have an invoice number yet.
+            Generate them all at once — numbered {String(loadDb().invoices.length + 1).padStart(4, "0")} through{" "}
+            {String(loadDb().invoices.length + ordersNeedingInvoice.length).padStart(4, "0")}, oldest order first.
+          </p>
+          <AsyncButton onClick={generateInvoiceNumbers} disabled={generatingInvoices} className="btn-hero rounded-xl w-full">
+            {generatingInvoices ? "Generating…" : `Generate ${ordersNeedingInvoice.length} invoice number${ordersNeedingInvoice.length !== 1 ? "s" : ""}`}
+          </AsyncButton>
         </div>
       )}
 

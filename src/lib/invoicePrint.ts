@@ -83,10 +83,11 @@ export function printInvoice(
       <td class="tot-val"><strong>${bal > 0 ? usd(bal) : usd(0)}</strong></td>
     </tr>`;
 
-  /* QR / stamp placeholders */
+  /* QR / stamp placeholders — vertical rectangle so a QR-code-plus-logo image
+     (Venmo, Zelle, etc.) scales proportionally instead of being squashed into a square. */
   const qr = (src?: string, label = "Upload QR") => src
-    ? `<img src="${src}" style="width:76px;height:76px;display:block;margin:0 auto;" />`
-    : `<div style="width:76px;height:76px;border:1.5px dashed #bbb;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;text-align:center;margin:0 auto;">${label}</div>`;
+    ? `<img src="${src}" style="width:88px;height:112px;display:block;margin:0 auto;object-fit:contain;" />`
+    : `<div style="width:88px;height:112px;border:1.5px dashed #bbb;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;text-align:center;margin:0 auto;">${label}</div>`;
 
   const stampHtml = settings.invoiceStamp
     ? `<img src="${settings.invoiceStamp}" style="width:76px;height:76px;display:block;margin:4px auto;object-fit:contain;" />`

@@ -1,13 +1,18 @@
 import { useState, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, totalAdvance, orderTotal } from "@/lib/db";
+import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
 import {
   TrendingUp, Download, Filter, X, DollarSign,
-  CreditCard, Receipt, Calendar,
+  CreditCard, Receipt, Calendar, Trash2, Pencil,
 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { AsyncButton } from "@/components/AsyncButton";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 
@@ -57,11 +62,57 @@ function downloadCSV(rows: IncomeRow[]) {
 export function IncomePage() {
   const { user } = useAuth();
   const db = useDb();
+  const canEdit = user!.role !== "client";
 
   /* Filters */
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo]     = useState("");
   const [clientFilter, setClientFilter] = useState("all");
+
+  /* Edit/delete a transaction — corrects mistakes (wrong amount, typo, etc.) */
+  const [editing, setEditing] = useState<IncomeRow | null>(null);
+  const [editAmount, setEditAmount] = useState("");
+  const [editNote, setEditNote] = useState("");
+
+  const openEdit = (row: IncomeRow) => {
+    if (!canEdit) return;
+    setEditing(row);
+    setEditAmount(String(row.amount));
+    setEditNote(row.type === "Advance" ? row.description : "");
+  };
+
+  const saveEdit = () => {
+    if (!editing) return;
+    const amt = parseFloat(editAmount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    updateDb(d => {
+      if (editing.type === "Advance") {
+        const o = d.orders.find(x => x.id === editing.orderId);
+        const adv = o?.advances.find(a => a.id === editing.id);
+        if (adv) { adv.amount = amt; adv.note = editNote.trim() || "Advance payment"; }
+      } else {
+        const inv = d.invoices.find(i => i.id === editing.id);
+        if (inv) inv.amount = amt;
+      }
+    });
+    toast.success("Transaction updated");
+    setEditing(null);
+  };
+
+  const deleteEdit = () => {
+    if (!editing) return;
+    if (!confirm("Delete this transaction? This cannot be undone.")) return;
+    updateDb(d => {
+      if (editing.type === "Advance") {
+        const o = d.orders.find(x => x.id === editing.orderId);
+        if (o) o.advances = o.advances.filter(a => a.id !== editing.id);
+      } else {
+        d.invoices = d.invoices.filter(i => i.id !== editing.id);
+      }
+    });
+    toast.success("Transaction deleted");
+    setEditing(null);
+  };
 
   /* Build unified income rows */
   const allRows = useMemo<IncomeRow[]>(() => {
@@ -262,7 +313,11 @@ export function IncomePage() {
             </thead>
             <tbody>
               {paged.map(row => (
-                <tr key={row.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
+                <tr
+                  key={row.id}
+                  onClick={() => openEdit(row)}
+                  className={`border-t border-border/40 hover:bg-secondary/30 transition-colors ${canEdit ? "cursor-pointer" : ""}`}
+                >
                   <td className="px-5 py-3.5 text-muted-foreground text-xs whitespace-nowrap">
                     {fmtDate(row.date)}
                   </td>
@@ -272,6 +327,7 @@ export function IncomePage() {
                   <td className="px-4 py-3.5">
                     <Link
                       to={`/orders/${row.orderId}`}
+                      onClick={e => e.stopPropagation()}
                       className="text-primary hover:underline font-mono text-xs font-semibold"
                     >
                       {row.orderNumber}
@@ -290,7 +346,10 @@ export function IncomePage() {
                     {row.description}
                   </td>
                   <td className="px-5 py-3.5 text-right font-semibold text-brand-dark whitespace-nowrap">
-                    {fmtMoney(row.amount)}
+                    <span className="inline-flex items-center gap-1.5 justify-end">
+                      {fmtMoney(row.amount)}
+                      {canEdit && <Pencil className="h-3 w-3 text-muted-foreground" />}
+                    </span>
                   </td>
                 </tr>
               ))}
@@ -316,7 +375,11 @@ export function IncomePage() {
         {/* Mobile cards */}
         <div className="md:hidden divide-y divide-border/40">
           {paged.map(row => (
-            <div key={row.id} className="p-4 space-y-2">
+            <div
+              key={row.id}
+              onClick={() => openEdit(row)}
+              className={`p-4 space-y-2 ${canEdit ? "active:bg-secondary/40" : ""}`}
+            >
               <div className="flex items-center justify-between gap-2">
                 <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full
                   ${row.type === "Invoice"
@@ -325,7 +388,10 @@ export function IncomePage() {
                   {row.type === "Invoice" ? <Receipt className="h-3 w-3" /> : <CreditCard className="h-3 w-3" />}
                   {row.type}
                 </span>
-                <span className="font-display font-bold text-brand-dark">{fmtMoney(row.amount)}</span>
+                <span className="font-display font-bold text-brand-dark inline-flex items-center gap-1.5">
+                  {fmtMoney(row.amount)}
+                  {canEdit && <Pencil className="h-3 w-3 text-muted-foreground" />}
+                </span>
               </div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-sm font-medium truncate">{row.clientName}</p>
@@ -335,6 +401,7 @@ export function IncomePage() {
                 <p className="text-xs text-muted-foreground truncate">{row.description}</p>
                 <Link
                   to={`/orders/${row.orderId}`}
+                  onClick={e => e.stopPropagation()}
                   className="text-primary hover:underline font-mono text-xs font-semibold shrink-0"
                 >
                   {row.orderNumber}
@@ -379,6 +446,53 @@ export function IncomePage() {
           </div>
         )}
       </div>
+
+      {/* ── Edit / delete transaction dialog ── */}
+      <Dialog open={!!editing} onOpenChange={open => !open && setEditing(null)}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader><DialogTitle className="font-display text-2xl">Edit Transaction</DialogTitle></DialogHeader>
+          {editing && (
+            <div className="space-y-4">
+              <div className="text-xs text-muted-foreground">
+                {editing.clientName} · {editing.orderNumber} · {fmtDate(editing.date)}
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Amount ($)</Label>
+                <Input
+                  type="number" min="0.01" step="0.01" autoFocus
+                  value={editAmount}
+                  onChange={e => setEditAmount(e.target.value)}
+                  className="rounded-xl h-10"
+                />
+              </div>
+              {editing.type === "Advance" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Note</Label>
+                  <Input
+                    value={editNote}
+                    onChange={e => setEditNote(e.target.value)}
+                    className="rounded-xl h-10"
+                    placeholder="e.g. Cash, Bank transfer, Cheque #"
+                  />
+                </div>
+              )}
+              <div className="flex items-center justify-between gap-2 pt-1">
+                <Button
+                  variant="outline" size="sm"
+                  onClick={deleteEdit}
+                  className="rounded-xl gap-2 text-destructive hover:text-destructive"
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </Button>
+                <div className="flex gap-2">
+                  <Button size="sm" variant="outline" onClick={() => setEditing(null)} className="rounded-xl">Cancel</Button>
+                  <AsyncButton size="sm" onClick={saveEdit} className="btn-hero rounded-xl">Save</AsyncButton>
+                </div>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
