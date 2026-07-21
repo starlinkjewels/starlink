@@ -3,7 +3,7 @@ const MAP: Record<string, string> = {
   Approved: "bg-brand-light/15 text-brand-dark border-brand-light/30",
   Rejected: "bg-destructive/15 text-destructive border-destructive/30",
   "In Production": "bg-primary/15 text-primary border-primary/30",
-  Ready: "bg-accent/15 text-accent-foreground border-accent/30",
+  Ready: "bg-accent text-accent-foreground border-accent font-semibold",
   Dispatched: "bg-brand-light/20 text-brand-dark border-brand-light/40",
   Delivered: "bg-success/15 text-success border-success/30",
   active: "bg-success/15 text-success border-success/30",
