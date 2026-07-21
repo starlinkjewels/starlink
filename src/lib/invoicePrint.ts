@@ -60,7 +60,7 @@ export function printInvoice(
   /* totals — integrated as extra tbody rows; left cols have white/no border.
      Deposit/Balance rows only appear when they add information: a $0 balance
      or a deposit that equals the total is redundant with "Total Amount" above,
-     so a fully-settled invoice just shows Total Amount as the final line. */
+     so a fully-settled invoice just ends with Total Amount as the final line. */
   const shippingRow = shipping > 0 ? `
     <tr class="tot-row">
       <td colspan="4" class="blank"></td>
@@ -82,13 +82,6 @@ export function printInvoice(
       <td class="tot-val"><strong>${usd(bal)}</strong></td>
     </tr>` : "";
 
-  const paidRow = total > 0 && bal <= 0 ? `
-    <tr class="tot-row">
-      <td colspan="4" class="blank"></td>
-      <td colspan="2" class="tot-lbl" style="color:#1a8a4a;">Payment Status</td>
-      <td class="tot-val" style="color:#1a8a4a;"><strong>PAID IN FULL</strong></td>
-    </tr>` : "";
-
   const totalsRows = `
     ${shippingRow}
     <tr class="tot-row tot-bold">
@@ -97,8 +90,7 @@ export function printInvoice(
       <td class="tot-val"><strong>${usd(total)}</strong></td>
     </tr>
     ${depositRow}
-    ${balanceRow}
-    ${paidRow}`;
+    ${balanceRow}`;
 
   /* QR / stamp placeholders — vertical rectangle so a QR-code-plus-logo image
      (Venmo, Zelle, etc.) scales proportionally instead of being squashed into a square. */
