@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS } from "@/lib/db";
 import type { Order } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import {
@@ -99,14 +99,21 @@ export function ReportsPage() {
   const normal = speedRows.filter(r => r.days > 7 && r.days <= 20).length;
   const slow   = speedRows.filter(r => r.days > 20).length;
 
-  /* ── department chart ── */
-  const DEPTS = ["Sales","CAD","Design","Production","Diamond Setting",
-                 "Polishing","QC","Packing","Dispatch","Accounts"];
-  const byDept = DEPTS.map(d => ({
-    name: d.length > 8 ? d.slice(0, 8) + "…" : d,
-    fullName: d,
-    count: filtered.filter(o => o.timeline.some(t => t.department === d && t.status === "done")).length,
-  }));
+  /* ── production-stage chart — every order has a timeline, so this always
+     has data (the old "by department" relied on a field that's often unset). */
+  const byStage = useMemo(() => {
+    const stageOf = (o: Order): string => {
+      const ip = o.timeline.find(t => t.status === "in_progress");
+      if (ip) return ip.step;
+      const done = o.timeline.filter(t => t.status === "done");
+      return done.length ? done[done.length - 1].step : (o.timeline[0]?.step ?? "—");
+    };
+    const counts = new Map<string, number>();
+    filtered.forEach(o => { const s = stageOf(o); counts.set(s, (counts.get(s) || 0) + 1); });
+    return (TIMELINE_STEPS as readonly string[])
+      .filter(s => counts.has(s))
+      .map(s => ({ name: s.length > 11 ? s.slice(0, 10) + "…" : s, fullName: s, count: counts.get(s) || 0 }));
+  }, [filtered]);
 
   /* ── client-wise breakdown (admin / employee, no client filter) ── */
   const byClient = useMemo(() => {
@@ -428,16 +435,17 @@ export function ReportsPage() {
         )}
       </div>
 
-      {/* ── Orders by Department (admin / employee) ── */}
-      {canSeeAll && (
+      {/* ── Orders by Production Stage (admin / employee) ── */}
+      {canSeeAll && byStage.length > 0 && (
         <div className="card-luxe p-4 sm:p-5">
           <div className="mb-4">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Analytics</p>
-            <h3 className="font-semibold text-brand-dark text-sm sm:text-base">Orders by Department</h3>
+            <h3 className="font-semibold text-brand-dark text-sm sm:text-base">Orders by Production Stage</h3>
+            <p className="text-[11px] text-muted-foreground mt-0.5">How many orders are currently at each stage</p>
           </div>
-          <ResponsiveContainer width="100%" height={200}>
-            <BarChart data={byDept} margin={{ left: -16, right: 4, top: 4, bottom: 0 }}>
-              <XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} />
+          <ResponsiveContainer width="100%" height={220}>
+            <BarChart data={byStage} margin={{ left: -16, right: 4, top: 4, bottom: 30 }}>
+              <XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={0} angle={-30} textAnchor="end" height={50} />
               <YAxis tick={{ fontSize: 9 }} allowDecimals={false} tickLine={false} axisLine={false} />
               <Tooltip
                 formatter={(v: number, _: string, p: any) => [v, p.payload.fullName]}
