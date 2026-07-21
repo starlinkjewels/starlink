@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal } from "@/lib/db";
 import type { Order } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import {
@@ -188,6 +188,39 @@ export function ReportsPage() {
     doc.save("Starlink-Report.pdf");
   }
 
+  /* ── Excel export (CSV — opens directly in Excel) ── */
+  function exportExcel() {
+    const headers = [
+      "Order #", "Client", "Type", "Metal", "Diamond", "Qty", "Status", "Priority",
+      "Order Value", "Advance Paid", "Balance Due", "Invoice Total", "Created", "Design #",
+    ];
+    const esc = (v: unknown) => {
+      const s = String(v ?? "");
+      return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    };
+    const rows = [...filtered]
+      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))
+      .map(o => {
+        const c = clients.find(cl => cl.id === o.clientId);
+        return [
+          o.orderNumber, c?.companyName ?? "", o.jewelleryType, o.metal, o.diamondType,
+          o.quantity, o.status, o.priority, o.amount ?? 0, totalAdvance(o), balanceDue(o),
+          orderTotal(o), fmtDate(o.createdAt), o.designNumber ?? "",
+        ];
+      });
+    const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
+    // UTF-8 BOM so Excel reads it with correct encoding.
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
   /* ── render ── */
   return (
     <div className="max-w-6xl mx-auto space-y-4">
@@ -204,12 +237,20 @@ export function ReportsPage() {
               : `${total} order${total !== 1 ? "s" : ""}${hasFilters ? " (filtered)" : " · all time"}`}
           </p>
         </div>
-        <button onClick={exportPdf}
-          className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl btn-hero text-xs sm:text-sm font-medium shrink-0">
-          <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-          <span className="hidden sm:inline">Download PDF</span>
-          <span className="sm:hidden">PDF</span>
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={exportExcel}
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs sm:text-sm font-medium text-brand-dark">
+            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Export Excel</span>
+            <span className="sm:hidden">Excel</span>
+          </button>
+          <button onClick={exportPdf}
+            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl btn-hero text-xs sm:text-sm font-medium">
+            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+            <span className="hidden sm:inline">Download PDF</span>
+            <span className="sm:hidden">PDF</span>
+          </button>
+        </div>
       </div>
 
       {/* ── Filters (admin / employee) ── */}
@@ -464,6 +505,77 @@ export function ReportsPage() {
                 ))}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ── All Orders table (admin / employee) ── */}
+      {canSeeAll && filtered.length > 0 && (
+        <div className="card-luxe p-4 sm:p-5">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Detail</p>
+              <h3 className="font-semibold text-brand-dark text-sm sm:text-base">All Orders ({filtered.length})</h3>
+            </div>
+            <button onClick={exportExcel}
+              className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark shrink-0">
+              <Download className="h-3.5 w-3.5" /> Excel
+            </button>
+          </div>
+
+          {/* Desktop table */}
+          <div className="hidden sm:block overflow-x-auto max-h-[28rem] overflow-y-auto">
+            <table className="table-luxe w-full text-sm">
+              <thead className="sticky top-0 bg-white z-10">
+                <tr className="border-b border-border/60">
+                  {["Order #","Client","Type","Status","Qty","Order Value","Advance","Balance","Date"].map(h => (
+                    <th key={h} className="text-left text-xs font-semibold text-muted-foreground pb-2 pr-4 pt-1 whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {[...filtered].sort((a,b) => +new Date(b.createdAt) - +new Date(a.createdAt)).map(o => {
+                  const c = clients.find(cl => cl.id === o.clientId);
+                  const bal = balanceDue(o);
+                  return (
+                    <tr key={o.id} className="hover:bg-secondary/30 transition-colors">
+                      <td className="py-2.5 pr-4 font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</td>
+                      <td className="py-2.5 pr-4 whitespace-nowrap">{c?.companyName ?? "—"}</td>
+                      <td className="py-2.5 pr-4 whitespace-nowrap">{o.jewelleryType}</td>
+                      <td className="py-2.5 pr-4">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span>
+                      </td>
+                      <td className="py-2.5 pr-4">{o.quantity}</td>
+                      <td className="py-2.5 pr-4 font-semibold text-brand-dark whitespace-nowrap">{fmtMoney(o.amount)}</td>
+                      <td className="py-2.5 pr-4 text-success whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</td>
+                      <td className={`py-2.5 pr-4 font-semibold whitespace-nowrap ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</td>
+                      <td className="py-2.5 pr-4 text-muted-foreground text-xs whitespace-nowrap">{fmtDate(o.createdAt)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {/* Mobile cards */}
+          <div className="sm:hidden space-y-2 max-h-[28rem] overflow-y-auto">
+            {[...filtered].sort((a,b) => +new Date(b.createdAt) - +new Date(a.createdAt)).map(o => {
+              const c = clients.find(cl => cl.id === o.clientId);
+              const bal = balanceDue(o);
+              return (
+                <div key={o.id} className="rounded-xl bg-secondary/50 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="font-mono text-xs font-semibold text-brand-dark truncate">{o.orderNumber}</p>
+                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{c?.companyName ?? "—"} · {o.jewelleryType} · {fmtDate(o.createdAt)}</p>
+                  <div className="flex items-center justify-between mt-1.5 text-xs">
+                    <span className="font-semibold text-brand-dark">{fmtMoney(o.amount)}</span>
+                    <span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? `Bal ${fmtMoney(bal)}` : "✓ Cleared"}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

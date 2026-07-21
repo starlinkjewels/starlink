@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
 import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck } from "lucide-react";
@@ -30,7 +30,9 @@ export function Dashboard() {
   const inProd = orders.filter(o => o.status === "In Production").length;
   const ready = orders.filter(o => o.status === "Ready" || o.status === "Dispatched").length;
   const completed = orders.filter(o => o.status === "Delivered").length;
-  const revenue = orders.filter(o => o.status === "Delivered").reduce((s, o) => s + o.amount, 0);
+  // Revenue = money actually collected to date (sum of all payments/advances),
+  // not just the value of delivered orders — so collected advances show up too.
+  const revenue = orders.reduce((s, o) => s + totalAdvance(o), 0);
 
   const monthlyData = useMemo(() => {
     const months = Array.from({ length: 6 }, (_, i) => {
