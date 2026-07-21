@@ -87,6 +87,8 @@ export function OrderDetailPage() {
   const advances = order.advances || [];
   const advTotal = totalAdvance(order);
   const balance = balanceDue(order);
+  // Any actual weight recorded? Drives the "Actual Details" display (all fields optional).
+  const hasActuals = !!(order.actualNetWeight || order.actualGrossWeight || order.actualDiamondWeight);
 
   // Admin, or the employee who owns this order (assigned to them OR the account
   // manager of the order's client) — full control of their own clients' orders.
@@ -172,30 +174,37 @@ export function OrderDetailPage() {
   };
 
   const saveActualDetails = () => {
+    // Every field is optional — update only what was actually filled in, and
+    // never overwrite an existing value with a blank.
+    const gw = parseFloat(actGrossW);
     const nw = parseFloat(actNetW);
     const dw = parseFloat(actDiamW);
-    const gw = parseFloat(actGrossW) || 0;
     const val = parseFloat(actOrderValue);
-    const ship = parseFloat(actShipping) || 0;
-    if (!nw || nw <= 0) { toast.error("Enter actual net weight"); return; }
-    if (!dw || dw <= 0) { toast.error("Enter actual diamond weight"); return; }
-    if (!val || val <= 0) { toast.error("Enter a valid order value"); return; }
+    const ship = parseFloat(actShipping);
+    const has = (n: number) => !isNaN(n) && n > 0;
+    const shipEntered = actShipping.trim() !== "" && !isNaN(ship) && ship >= 0;
+    if (!has(gw) && !has(nw) && !has(dw) && !has(val) && !shipEntered) {
+      toast.error("Enter at least one value to update");
+      return;
+    }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
-      o.actualGrossWeight   = gw || undefined;
-      o.actualNetWeight     = nw;
-      o.actualDiamondWeight = dw;
-      o.amount = val;
-      o.shippingCharge = ship;
-      const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({
-        id: uid("n_"), userId: clientUser.id,
-        title: "Order Finalized",
-        body: `${o.orderNumber} final amount confirmed: ${fmtMoney(val)}${ship > 0 ? ` + ${fmtMoney(ship)} shipping` : ""}`,
-        type: "info", read: false, createdAt: new Date().toISOString(),
-      });
+      if (has(gw)) o.actualGrossWeight   = gw;
+      if (has(nw)) o.actualNetWeight     = nw;
+      if (has(dw)) o.actualDiamondWeight = dw;
+      if (shipEntered) o.shippingCharge = ship;
+      if (has(val)) {
+        o.amount = val;
+        const clientUser = d.users.find(u => u.clientId === o.clientId);
+        if (clientUser) d.notifications.unshift({
+          id: uid("n_"), userId: clientUser.id,
+          title: "Order Finalized",
+          body: `${o.orderNumber} final amount confirmed: ${fmtMoney(val)}${(o.shippingCharge || 0) > 0 ? ` + ${fmtMoney(o.shippingCharge)} shipping` : ""}`,
+          type: "info", read: false, createdAt: new Date().toISOString(),
+        });
+      }
     });
-    toast.success("Actual details saved — order value updated");
+    toast.success("Actual details saved");
     setShowActualForm(false);
   };
 
@@ -407,7 +416,7 @@ export function OrderDetailPage() {
               <div>
                 <h3 className="font-display text-lg text-brand-dark">Actual Weights & Final Pricing</h3>
                 <p className="text-xs text-muted-foreground">
-                  {order.actualNetWeight
+                  {hasActuals
                     ? "Actual weight and final order value on file"
                     : "Fill in after the piece is ready (post Final Approval)"}
                 </p>
@@ -426,7 +435,7 @@ export function OrderDetailPage() {
                 }}
               >
                 <Calculator className="h-3.5 w-3.5" />
-                {order.actualNetWeight ? "Edit Actual Details" : "Enter Actual Details"}
+                {hasActuals ? "Edit Actual Details" : "Enter Actual Details"}
               </Button>
             )}
           </div>
@@ -457,7 +466,7 @@ export function OrderDetailPage() {
           )}
 
           {/* Filled actual details */}
-          {order.actualNetWeight && !showActualForm && (
+          {hasActuals && !showActualForm && (
             <div className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Actual Details (Confirmed)</p>
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -467,14 +476,18 @@ export function OrderDetailPage() {
                     <p className="font-semibold">{order.actualGrossWeight}g</p>
                   </div>
                 )}
-                <div className="p-3 rounded-xl bg-secondary text-sm">
-                  <p className="text-xs text-muted-foreground">Net Weight</p>
-                  <p className="font-semibold">{order.actualNetWeight}g</p>
-                </div>
-                <div className="p-3 rounded-xl bg-secondary text-sm">
-                  <p className="text-xs text-muted-foreground">Diamond Weight</p>
-                  <p className="font-semibold">{order.actualDiamondWeight}ct</p>
-                </div>
+                {order.actualNetWeight && (
+                  <div className="p-3 rounded-xl bg-secondary text-sm">
+                    <p className="text-xs text-muted-foreground">Net Weight</p>
+                    <p className="font-semibold">{order.actualNetWeight}g</p>
+                  </div>
+                )}
+                {order.actualDiamondWeight && (
+                  <div className="p-3 rounded-xl bg-secondary text-sm">
+                    <p className="text-xs text-muted-foreground">Diamond Weight</p>
+                    <p className="font-semibold">{order.actualDiamondWeight}ct</p>
+                  </div>
+                )}
               </div>
               <div className="rounded-xl border border-border/60 p-3 space-y-2 text-sm">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1">Pricing</p>
@@ -497,7 +510,7 @@ export function OrderDetailPage() {
           )}
 
           {/* Pending notice */}
-          {!order.actualNetWeight && !showActualForm && (
+          {!hasActuals && !showActualForm && (
             <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 p-4 flex items-start gap-3">
               <AlertCircle className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
               <div>
@@ -529,13 +542,13 @@ export function OrderDetailPage() {
                           className="rounded-xl h-10" placeholder="0.000" />
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Net Weight (g) *</Label>
+                        <Label className="text-xs">Net Weight (g)</Label>
                         <Input type="number" step="0.001" min={0} value={actNetW}
                           onChange={e => setActNetW(e.target.value)}
                           className="rounded-xl h-10" placeholder="0.000" autoFocus />
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Diamond Weight (ct) *</Label>
+                        <Label className="text-xs">Diamond Weight (ct)</Label>
                         <Input type="number" step="0.001" min={0} value={actDiamW}
                           onChange={e => setActDiamW(e.target.value)}
                           className="rounded-xl h-10" placeholder="0.000" />
@@ -546,7 +559,7 @@ export function OrderDetailPage() {
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Pricing</p>
                     <div className="grid grid-cols-2 gap-3">
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Order Value ($) *</Label>
+                        <Label className="text-xs">Order Value ($)</Label>
                         <Input type="number" step="0.01" min={0} value={actOrderValue}
                           onChange={e => setActOrderValue(e.target.value)}
                           className="rounded-xl h-10" placeholder="0" />
@@ -561,7 +574,7 @@ export function OrderDetailPage() {
                   </div>
 
                   <div className="flex gap-2">
-                    <AsyncButton size="sm" onClick={saveActualDetails} className="btn-hero rounded-xl">Save &amp; Update Order Value</AsyncButton>
+                    <AsyncButton size="sm" onClick={saveActualDetails} className="btn-hero rounded-xl">Save Details</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowActualForm(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </div>
