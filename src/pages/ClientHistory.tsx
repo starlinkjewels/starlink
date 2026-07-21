@@ -375,7 +375,7 @@ export function ClientHistoryPage() {
                 <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Qty</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Priority</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Amount</th>
+                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Bill</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Advance</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Balance</th>
                 <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Invoice</th>
@@ -409,7 +409,7 @@ export function ClientHistoryPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5"><StatusBadge status={o.status} /></td>
-                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(o.amount)}</td>
+                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(orderTotal(o))}</td>
                     <td className="px-4 py-3.5 text-right">
                       {adv > 0
                         ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
@@ -477,7 +477,7 @@ export function ClientHistoryPage() {
                           {invoice.paid ? "Paid" : "Unpaid"}
                         </span>
                       )}
-                      <span className="font-semibold text-foreground">{fmtMoney(o.amount)}</span>
+                      <span className="font-semibold text-foreground">{fmtMoney(orderTotal(o))}</span>
                     </div>
                   </div>
                 </div>
@@ -510,7 +510,7 @@ export function ClientHistoryPage() {
           <div className="px-5 py-3 bg-secondary/30 border-t border-border/60 flex items-center justify-between text-sm flex-wrap gap-3">
             <span className="text-muted-foreground">{filtered.length} order{filtered.length !== 1 ? "s" : ""}</span>
             <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-muted-foreground">Total <span className="font-semibold text-foreground">{fmtMoney(filtered.reduce((s, o) => s + o.amount, 0))}</span></span>
+              <span className="text-muted-foreground">Total <span className="font-semibold text-foreground">{fmtMoney(filtered.reduce((s, o) => s + orderTotal(o), 0))}</span></span>
               {filtered.some(o => (o.advances||[]).length > 0) && (
                 <>
                   <span className="text-muted-foreground">Advance <span className="font-semibold text-success">{fmtMoney(filtered.reduce((s, o) => s + totalAdvance(o), 0))}</span></span>
