@@ -220,6 +220,22 @@ export function AppLayout() {
           {/* Spacer */}
           <div className="flex-1 hidden md:block" />
 
+          {/* My Tasks (employee + admin) — in the top bar so it never overlaps
+              page content like pagination. */}
+          {(user?.role === "employee" || user?.role === "admin") && (
+            <button
+              onClick={() => setTasksOpen(true)}
+              aria-label="My Tasks"
+              className="relative h-9 w-9 rounded-xl hover:bg-secondary flex items-center justify-center transition-colors shrink-0">
+              <ListTodo className="h-[18px] w-[18px]" />
+              {pendingTasks > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold grid place-items-center leading-none">
+                  {pendingTasks > 9 ? "9+" : pendingTasks}
+                </span>
+              )}
+            </button>
+          )}
+
           {/* Notification bell */}
           <button
             onClick={() => navigate("/notifications")}
@@ -346,38 +362,6 @@ export function AppLayout() {
           </button>
         )}
 
-        {/* ── My Tasks floating button (employee + admin) ── */}
-        {(user?.role === "employee" || user?.role === "admin") && (
-          <>
-            {/* Desktop: text pill bottom-right */}
-            <button
-              onClick={() => setTasksOpen(v => !v)}
-              className="hidden md:flex fixed right-5 z-40 items-center gap-2 px-4 h-11 rounded-full bg-white border border-border shadow-lg hover:shadow-xl hover:border-primary/40 transition-all text-sm font-medium text-foreground"
-              style={{ bottom: "calc(env(safe-area-inset-bottom) + 1.25rem)" }}
-            >
-              <ListTodo className="h-4 w-4 text-primary shrink-0" />
-              My Tasks
-              {pendingTasks > 0 && (
-                <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">
-                  {pendingTasks > 99 ? "99+" : pendingTasks}
-                </span>
-              )}
-            </button>
-            {/* Mobile: icon-only circle on LEFT side, above bottom nav */}
-            <button
-              onClick={() => setTasksOpen(v => !v)}
-              className="md:hidden fixed left-4 z-40 h-12 w-12 rounded-full bg-white border border-border shadow-lg hover:shadow-xl transition-all grid place-items-center"
-              style={{ bottom: "calc(env(safe-area-inset-bottom) + 5rem)" }}
-            >
-              <ListTodo className="h-5 w-5 text-primary" />
-              {pendingTasks > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold grid place-items-center leading-none">
-                  {pendingTasks > 99 ? "99+" : pendingTasks}
-                </span>
-              )}
-            </button>
-          </>
-        )}
       </div>
 
       {/* ── Tasks Panel (my own tasks) ── */}
