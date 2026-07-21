@@ -12,9 +12,11 @@ export function InvoicesPage() {
   const { user } = useAuth();
   const db = useDb();
   const [q, setQ] = useState("");
+  const [clientFilter, setClientFilter] = useState("all");
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
+  if (user!.role !== "client" && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
 
   // Search by invoice #, linked order #, client name, or status.
   const ql = q.trim().toLowerCase();
@@ -30,6 +32,10 @@ export function InvoicesPage() {
     });
   }
   list = [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+
+  const clientOptions = user!.role === "client"
+    ? []
+    : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
 
   // Orders with advances (all roles see their own)
   let ordersWithAdvance = db.orders.filter(o => (o.advances || []).length > 0);
@@ -79,6 +85,18 @@ export function InvoicesPage() {
               className="pl-9 h-9 rounded-xl text-sm"
             />
           </div>
+          {user!.role !== "client" && (
+            <select
+              value={clientFilter}
+              onChange={e => setClientFilter(e.target.value)}
+              className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            >
+              <option value="all">All Clients</option>
+              {clientOptions.map(c => (
+                <option key={c.id} value={c.id}>{c.companyName}</option>
+              ))}
+            </select>
+          )}
           {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
         </div>
 
@@ -88,6 +106,7 @@ export function InvoicesPage() {
             <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
               <tr>
                 <th className="text-left px-5 py-3">Invoice</th>
+                <th className="text-left px-4 py-3">Client</th>
                 <th className="text-left px-4 py-3">Order</th>
                 <th className="text-left px-4 py-3">Date</th>
                 <th className="text-right px-4 py-3">Amount</th>
@@ -99,6 +118,7 @@ export function InvoicesPage() {
             <tbody>
               {pagedInvoices.map(inv => {
                 const o = db.orders.find(o => o.id === inv.orderId);
+                const client = db.clients.find(c => c.id === inv.clientId);
                 const adv = o ? totalAdvance(o) : 0;
                 const bal = o ? balanceDue(o) : inv.amount;
                 return (
@@ -109,6 +129,7 @@ export function InvoicesPage() {
                         <span className="font-medium">{inv.number}</span>
                       </div>
                     </td>
+                    <td className="px-4 py-3.5 font-medium max-w-[160px] truncate">{client?.companyName || "—"}</td>
                     <td className="px-4 py-3.5">
                       {o && <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs">{o.orderNumber}</Link>}
                     </td>
@@ -133,7 +154,7 @@ export function InvoicesPage() {
                 );
               })}
               {list.length === 0 && (
-                <tr><td colSpan={7} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</td></tr>
+                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</td></tr>
               )}
             </tbody>
           </table>
@@ -143,6 +164,7 @@ export function InvoicesPage() {
         <div className="md:hidden divide-y divide-border/40">
           {pagedInvoices.map(inv => {
             const o = db.orders.find(o => o.id === inv.orderId);
+            const client = db.clients.find(c => c.id === inv.clientId);
             const adv = o ? totalAdvance(o) : 0;
             const bal = o ? balanceDue(o) : inv.amount;
             return (
@@ -157,6 +179,8 @@ export function InvoicesPage() {
                     ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success bg-success/10 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-3 w-3" />Paid</span>
                     : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground bg-warning/10 px-2 py-0.5 rounded-full"><Clock className="h-3 w-3" />Pending</span>}
                 </div>
+                {/* Client name */}
+                <p className="text-sm font-medium truncate">{client?.companyName || "—"}</p>
                 {/* Row 2: Order link + Date */}
                 <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                   {o
