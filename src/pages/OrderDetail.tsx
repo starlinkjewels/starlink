@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
-  ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator,
+  ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -58,6 +58,7 @@ export function OrderDetailPage() {
   const cadRef = useRef<HTMLInputElement>(null);
   const [cadUploading, setCadUploading] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const [cadView, setCadView] = useState<"fit" | "full">("fit"); // CAD preview: contained vs full-width
 
   // Dispatch form
   const [showDispatch, setShowDispatch] = useState(false);
@@ -651,20 +652,40 @@ export function OrderDetailPage() {
           </div>
 
           {order.cadImage && (
-            <div className="relative group w-fit">
-              <img
-                src={order.cadImage}
-                alt="CAD Design"
-                className="max-h-72 rounded-xl border border-border object-contain cursor-pointer hover:border-primary/50 transition-colors"
-                onClick={() => setLightboxSrc(order.cadImage!)}
-              />
-              <button
-                type="button"
-                onClick={() => setLightboxSrc(order.cadImage!)}
-                className="absolute top-2 right-2 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-0 group-hover:opacity-100 transition-opacity"
-              >
-                <Eye className="h-3.5 w-3.5" />
-              </button>
+            <div className="space-y-2">
+              {/* View toggle — Fit (whole image) / Full (fills width). Tap image to zoom. */}
+              <div className="flex items-center justify-end">
+                <div className="inline-flex items-center gap-1 p-1 rounded-xl bg-secondary border border-border/60">
+                  <button
+                    type="button" onClick={() => setCadView("fit")} aria-label="Fit view"
+                    className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${cadView === "fit" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+                    <Minimize2 className="h-3.5 w-3.5" /> Fit
+                  </button>
+                  <button
+                    type="button" onClick={() => setCadView("full")} aria-label="Full view"
+                    className={`flex items-center gap-1.5 h-8 px-2.5 rounded-lg text-xs font-medium transition-colors ${cadView === "full" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+                    <Maximize2 className="h-3.5 w-3.5" /> Full
+                  </button>
+                </div>
+              </div>
+
+              <div className="relative group rounded-xl border border-border bg-secondary/40 overflow-hidden">
+                <img
+                  src={order.cadImage}
+                  alt="CAD Design"
+                  className={`w-full max-w-full object-contain mx-auto cursor-pointer transition-all ${cadView === "fit" ? "max-h-72 sm:max-h-80" : "max-h-none"}`}
+                  onClick={() => setLightboxSrc(order.cadImage!)}
+                />
+                <button
+                  type="button"
+                  onClick={() => setLightboxSrc(order.cadImage!)}
+                  className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                  aria-label="Zoom CAD image"
+                >
+                  <Eye className="h-4 w-4" />
+                </button>
+              </div>
+              <p className="text-[11px] text-muted-foreground text-center">Tap the image to zoom · {cadView === "fit" ? "showing whole design" : "full width"}</p>
             </div>
           )}
         </div>
