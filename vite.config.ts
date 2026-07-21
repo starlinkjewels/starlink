@@ -34,6 +34,26 @@ export default defineConfig({
         // Firebase SDK grows the main chunk past the default 2 MiB precache
         // limit — raise it so the service worker can still precache the app.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
+        // Cache order/CAD photos from Firebase Storage. Download URLs are unique
+        // per file token, so CacheFirst never serves a stale image — once loaded,
+        // it's served instantly (even offline) on every later view/scroll.
+        runtimeCaching: [
+          {
+            urlPattern: ({ url }) =>
+              url.hostname.includes("firebasestorage") ||
+              url.hostname.endsWith(".firebasestorage.app"),
+            handler: "CacheFirst",
+            options: {
+              cacheName: "sl-firebase-images",
+              expiration: {
+                maxEntries: 600,
+                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+                purgeOnQuotaError: true,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
       devOptions: { enabled: false },
     }),
