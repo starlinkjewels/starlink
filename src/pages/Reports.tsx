@@ -360,18 +360,29 @@ export function ReportsPage() {
           </div>
         ) : (
           <>
-            {/* Big stat */}
-            <div className="flex items-end gap-2 sm:gap-3 mb-5 flex-wrap">
-              <div>
-                <p className="font-display text-4xl sm:text-5xl text-brand-dark leading-none">{speedRows.length}</p>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">
-                  order{speedRows.length !== 1 ? "s" : ""} dispatched
-                </p>
+            {/* Key metrics */}
+            <div className="grid grid-cols-2 gap-3 mb-5">
+              <div className="rounded-2xl bg-gradient-to-br from-blue-50 to-blue-100/40 border border-blue-100 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-7 w-7 rounded-lg bg-blue-500/15 grid place-items-center shrink-0">
+                    <Truck className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-blue-700/80">Dispatched</p>
+                </div>
+                <p className="font-display text-3xl sm:text-4xl text-brand-dark leading-none">{speedRows.length}</p>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-1.5">orders in this period</p>
               </div>
-              <div className="pb-1 text-muted-foreground text-xl sm:text-2xl font-light">in avg</div>
-              <div>
-                <p className="font-display text-4xl sm:text-5xl text-primary leading-none">{avgDays}</p>
-                <p className="text-xs sm:text-sm text-muted-foreground mt-1">days each</p>
+              <div className="rounded-2xl bg-gradient-to-br from-primary/8 to-brand-light/10 border border-primary/15 p-4">
+                <div className="flex items-center gap-2 mb-2">
+                  <div className="h-7 w-7 rounded-lg bg-primary/15 grid place-items-center shrink-0">
+                    <Clock className="h-4 w-4 text-primary" />
+                  </div>
+                  <p className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wider text-primary/80">Avg Time</p>
+                </div>
+                <p className="font-display text-3xl sm:text-4xl text-primary leading-none">
+                  {avgDays}<span className="text-base sm:text-lg text-muted-foreground font-sans font-normal ml-1">days</span>
+                </p>
+                <p className="text-[11px] sm:text-xs text-muted-foreground mt-1.5">from order to dispatch</p>
               </div>
             </div>
 
