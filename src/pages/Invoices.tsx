@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal } from "@/lib/db";
+import type { Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
 import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search } from "lucide-react";
@@ -55,9 +56,14 @@ export function InvoicesPage() {
     });
   }
 
-  const totalPaid = list.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
-  const totalPending = list.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
-  const totalAdvancePaid = ordersWithAdvance.reduce((s, o) => s + totalAdvance(o), 0);
+  // Summary from LIVE order data (not the invoice's stale amount/paid snapshot),
+  // so these tie exactly with the client Account Ledger: Billed = Received + Outstanding.
+  const invOrders = list
+    .map(inv => db.orders.find(o => o.id === inv.orderId))
+    .filter((o): o is Order => !!o);
+  const totalBilled      = invOrders.reduce((s, o) => s + orderTotal(o), 0);
+  const totalReceived    = invOrders.reduce((s, o) => s + totalAdvance(o), 0);
+  const totalOutstanding = invOrders.reduce((s, o) => s + balanceDue(o), 0);
 
   const PAGE_SIZE = 10;
   const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE);
@@ -71,9 +77,9 @@ export function InvoicesPage() {
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
           { label: "Total Invoices", value: list.length, icon: FileText, color: "text-primary", bg: "bg-primary/10" },
-          { label: "Paid", value: fmtMoney(totalPaid), icon: CheckCircle2, color: "text-success", bg: "bg-success/10" },
-          { label: "Pending", value: fmtMoney(totalPending), icon: AlertCircle, color: "text-destructive", bg: "bg-destructive/10" },
-          { label: "Advances Collected", value: fmtMoney(totalAdvancePaid), icon: TrendingUp, color: "text-brand-dark", bg: "bg-brand-light/10" },
+          { label: "Billed", value: fmtMoney(totalBilled), icon: FileText, color: "text-brand-dark", bg: "bg-brand-light/10" },
+          { label: "Received", value: fmtMoney(totalReceived), icon: CheckCircle2, color: "text-success", bg: "bg-success/10" },
+          { label: "Outstanding", value: fmtMoney(totalOutstanding), icon: AlertCircle, color: "text-destructive", bg: "bg-destructive/10" },
         ].map(s => (
           <div key={s.label} className="card-luxe p-4">
             <div className={`h-8 w-8 rounded-lg ${s.bg} grid place-items-center mb-3`}>
@@ -132,8 +138,10 @@ export function InvoicesPage() {
               {pagedInvoices.map(inv => {
                 const o = db.orders.find(o => o.id === inv.orderId);
                 const client = db.clients.find(c => c.id === inv.clientId);
+                const amount = o ? orderTotal(o) : inv.amount;
                 const adv = o ? totalAdvance(o) : 0;
                 const bal = o ? balanceDue(o) : inv.amount;
+                const paid = o ? bal <= 0 : inv.paid;
                 return (
                   <tr key={inv.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3.5">
@@ -147,7 +155,7 @@ export function InvoicesPage() {
                       {o && <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs">{o.orderNumber}</Link>}
                     </td>
                     <td className="px-4 py-3.5 text-muted-foreground text-xs">{fmtDate(inv.createdAt)}</td>
-                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(inv.amount)}</td>
+                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(amount)}</td>
                     <td className="px-4 py-3.5 text-right">
                       {adv > 0
                         ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
@@ -159,7 +167,7 @@ export function InvoicesPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5">
-                      {inv.paid
+                      {paid
                         ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
                         : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span>}
                     </td>
@@ -178,8 +186,10 @@ export function InvoicesPage() {
           {pagedInvoices.map(inv => {
             const o = db.orders.find(o => o.id === inv.orderId);
             const client = db.clients.find(c => c.id === inv.clientId);
+            const amount = o ? orderTotal(o) : inv.amount;
             const adv = o ? totalAdvance(o) : 0;
             const bal = o ? balanceDue(o) : inv.amount;
+            const paid = o ? bal <= 0 : inv.paid;
             return (
               <div key={inv.id} className="p-4 space-y-3">
                 {/* Row 1: Invoice # + Status */}
@@ -188,7 +198,7 @@ export function InvoicesPage() {
                     <FileText className="h-4 w-4 text-primary shrink-0" />
                     <span className="font-semibold text-sm">{inv.number}</span>
                   </div>
-                  {inv.paid
+                  {paid
                     ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success bg-success/10 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-3 w-3" />Paid</span>
                     : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground bg-warning/10 px-2 py-0.5 rounded-full"><Clock className="h-3 w-3" />Pending</span>}
                 </div>
@@ -205,7 +215,7 @@ export function InvoicesPage() {
                 <div className="grid grid-cols-3 gap-2">
                   <div className="bg-secondary rounded-xl p-2.5 text-center">
                     <p className="text-[10px] text-muted-foreground mb-0.5">Amount</p>
-                    <p className="text-xs font-semibold">{fmtMoney(inv.amount)}</p>
+                    <p className="text-xs font-semibold">{fmtMoney(amount)}</p>
                   </div>
                   <div className="bg-secondary rounded-xl p-2.5 text-center">
                     <p className="text-[10px] text-muted-foreground mb-0.5">Advance</p>
@@ -295,7 +305,7 @@ export function InvoicesPage() {
                         <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold">{o.orderNumber}</Link>
                       </td>
                       <td className="px-4 py-3.5 text-muted-foreground text-xs">{client?.companyName || "—"}</td>
-                      <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(o.amount)}</td>
+                      <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(orderTotal(o))}</td>
                       <td className="px-4 py-3.5 text-right">
                         <span className="text-success font-semibold">{fmtMoney(adv)}</span>
                       </td>
@@ -335,7 +345,7 @@ export function InvoicesPage() {
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-secondary rounded-xl p-2.5 text-center">
                       <p className="text-[10px] text-muted-foreground mb-0.5">Total</p>
-                      <p className="text-xs font-semibold">{fmtMoney(o.amount)}</p>
+                      <p className="text-xs font-semibold">{fmtMoney(orderTotal(o))}</p>
                     </div>
                     <div className="bg-success/10 rounded-xl p-2.5 text-center">
                       <p className="text-[10px] text-muted-foreground mb-0.5">Advance</p>
