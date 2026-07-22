@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, TIMELINE_STEPS, allocatePaymentFIFO, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -193,7 +193,7 @@ export function NewOrderPage() {
           recordedBy: user!.id,
           createdAt: new Date().toISOString(),
         }] : [],
-        timeline: TIMELINE_STEPS.map((s, i) => ({
+        timeline: buildTimelineSteps(f.certificate === "yes").map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,

@@ -110,9 +110,13 @@ export function ReportsPage() {
     };
     const counts = new Map<string, number>();
     filtered.forEach(o => { const s = stageOf(o); counts.set(s, (counts.get(s) || 0) + 1); });
-    return (TIMELINE_STEPS as readonly string[])
-      .filter(s => counts.has(s))
-      .map(s => ({ name: s.length > 11 ? s.slice(0, 10) + "…" : s, fullName: s, count: counts.get(s) || 0 }));
+    // Known steps first (in order), then any legacy step names still on old orders.
+    const known = TIMELINE_STEPS as readonly string[];
+    const ordered = [
+      ...known.filter(s => counts.has(s)),
+      ...[...counts.keys()].filter(s => !known.includes(s)),
+    ];
+    return ordered.map(s => ({ name: s.length > 11 ? s.slice(0, 10) + "…" : s, fullName: s, count: counts.get(s) || 0 }));
   }, [filtered]);
 
   /* ── client-wise breakdown (admin / employee, no client filter) ── */

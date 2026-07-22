@@ -56,12 +56,22 @@ export interface Client {
   creditBalance?: number;
 }
 
+// Streamlined production stages. "Certification" is only added for orders that
+// are certified (see buildTimelineSteps). Names "CAD Designing", "Final Approval",
+// "Dispatch" and "Delivered" are relied on by status/section logic — keep them.
 export const TIMELINE_STEPS = [
-  "Order Submitted","Order Approved","CAD Designing","CAD Approved","Diamond Purchase","Wax Model",
-  "Casting","Stone Selection","Diamond Setting","Polishing","Quality Check",
-  "Hallmark","Final Approval","Packing","Dispatch","Delivered",
+  "Order Submitted", "Order Approved", "CAD Designing", "In Production",
+  "Certification", "Final Approval", "Dispatch", "Delivered",
 ] as const;
-export type TimelineStep = (typeof TIMELINE_STEPS)[number];
+// Loose on purpose: orders created before the list was shortened still hold older
+// step names, so the field type isn't constrained to the current literal union.
+export type TimelineStep = string;
+
+/** Timeline steps for a NEW order — the "Certification" stage is included only
+ *  when the order will be certified. */
+export function buildTimelineSteps(hasCertificate: boolean): string[] {
+  return (TIMELINE_STEPS as readonly string[]).filter(s => s !== "Certification" || hasCertificate);
+}
 
 export interface TimelineEntry {
   step: TimelineStep;
