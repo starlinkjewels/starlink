@@ -6,21 +6,16 @@ function localDate(iso: string) {
   const d = new Date(iso);
   return `${dd(d.getDate())}/${dd(d.getMonth() + 1)}/${d.getFullYear()}`;
 }
+/** Format a "YYYY-MM-DD" date-only string (no Date/timezone conversion needed). */
+function localDateStr(dateStr: string) {
+  const [y, m, day] = dateStr.split("-");
+  return `${day}/${m}/${y}`;
+}
 function usd(n: number) {
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-export function printInvoice(
-  order: Order,
-  client: Client | undefined,
-  settings: Settings,
-  invoiceNumber: string,
-) {
-  const adv      = totalAdvance(order);
-  const total    = orderTotal(order);
-  const bal      = balanceDue(order);
-  const shipping = order.shippingCharge || 0;
-
+function itemDescription(order: Order): string {
   const baseDescription = [
     order.productKarats,
     order.jewelleryType.toUpperCase(),
@@ -33,34 +28,31 @@ export function printInvoice(
     order.actualDiamondWeight ? `Diamond Weight: ${order.actualDiamondWeight}ct` : "",
   ].filter(Boolean).join(", ");
 
-  const description = baseDescription + (weightDetails ? ` (${weightDetails})` : "");
+  return baseDescription + (weightDetails ? ` (${weightDetails})` : "");
+}
 
+function itemRowHtml(sr: number, order: Order): string {
   const stockId   = order.designNumber || order.orderNumber;
   const weight    = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
   const itemPrice = order.amount ? usd(order.amount) : "—";
   const itemTotal = order.amount ? usd(order.amount) : "—";
-
-  /* ── 10 item rows then totals rows embedded inside same table ── */
-  const ITEM_ROWS = 10;
-  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => {
-    if (i === 0) {
-      return `<tr class="item-row">
-        <td class="c">1</td>
+  return `<tr class="item-row">
+        <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${description}</td>
+        <td class="l">${itemDescription(order)}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>
         <td class="c">${itemPrice}</td>
         <td class="c">${itemTotal}</td>
       </tr>`;
-    }
-    return `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></td><td class="c"></td><td class="c"></td><td class="c"></td><td class="c"></td></tr>`;
-  }).join("\n");
+}
 
-  /* totals — integrated as extra tbody rows; left cols have white/no border.
-     Deposit/Balance rows only appear when they add information: a $0 balance
-     or a deposit that equals the total is redundant with "Total Amount" above,
-     so a fully-settled invoice just ends with Total Amount as the final line. */
+const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></td><td class="c"></td><td class="c"></td><td class="c"></td><td class="c"></td></tr>`;
+
+/* Deposit/Balance rows only appear when they add information: a $0 balance or a
+   deposit that equals the total is redundant with "Total Amount" above, so a
+   fully-settled invoice just ends with Total Amount as the final line. */
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number): string {
   const shippingRow = shipping > 0 ? `
     <tr class="tot-row">
       <td colspan="4" class="blank"></td>
@@ -82,7 +74,7 @@ export function printInvoice(
       <td class="tot-val"><strong>${usd(bal)}</strong></td>
     </tr>` : "";
 
-  const totalsRows = `
+  return `
     ${shippingRow}
     <tr class="tot-row tot-bold">
       <td colspan="4" class="blank"></td>
@@ -91,6 +83,18 @@ export function printInvoice(
     </tr>
     ${depositRow}
     ${balanceRow}`;
+}
+
+/** Shared invoice document shell — header, TO block, items table, footer, legal text. */
+function buildInvoiceDoc(opts: {
+  client: Client | undefined;
+  settings: Settings;
+  invoiceNumber: string;
+  dateLabel: string;
+  itemRows: string;
+  totalsRows: string;
+}): string {
+  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows } = opts;
 
   /* QR / stamp placeholders — vertical rectangle so a QR-code-plus-logo image
      (Venmo, Zelle, etc.) scales proportionally instead of being squashed into a square. */
@@ -102,7 +106,7 @@ export function printInvoice(
     ? `<img src="${settings.invoiceStamp}" style="width:76px;height:76px;display:block;margin:4px auto;object-fit:contain;" />`
     : `<div style="width:76px;height:76px;border:1.5px dashed #bbb;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;text-align:center;margin:4px auto;">Upload Stamp</div>`;
 
-  const html = `<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
@@ -301,7 +305,7 @@ export function printInvoice(
     <div class="meta">
       <table>
         <tr><td>Invoice No:</td><td>${invoiceNumber}</td></tr>
-        <tr><td>Date:</td><td>${localDate(order.createdAt)}</td></tr>
+        <tr><td>Date:</td><td>${dateLabel}</td></tr>
         <tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>
       </table>
     </div>
@@ -367,10 +371,67 @@ export function printInvoice(
 </script>
 </body>
 </html>`;
+}
 
+function openAndPrint(html: string) {
   const w = window.open("", "_blank", "width=860,height=1120");
   if (!w) { alert("Please allow popups to print/download the invoice."); return; }
   w.document.open();
   w.document.write(html);
   w.document.close();
+}
+
+export function printInvoice(
+  order: Order,
+  client: Client | undefined,
+  settings: Settings,
+  invoiceNumber: string,
+) {
+  const adv      = totalAdvance(order);
+  const total    = orderTotal(order);
+  const bal      = balanceDue(order);
+  const shipping = order.shippingCharge || 0;
+
+  /* ── 10 item rows then totals rows embedded inside same table ── */
+  const ITEM_ROWS = 10;
+  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order) : BLANK_ROW).join("\n");
+
+  const html = buildInvoiceDoc({
+    client, settings, invoiceNumber,
+    dateLabel: localDate(order.createdAt),
+    itemRows,
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+  });
+  openAndPrint(html);
+}
+
+/**
+ * Combined invoice for every order dispatched on one day, for one client —
+ * one line item per order, totals summed across all of them. Used for the
+ * "Download Invoice" button on the Invoices page (date + client filter).
+ */
+export function printBatchInvoice(
+  orders: Order[],
+  client: Client | undefined,
+  settings: Settings,
+  invoiceNumber: string,
+  dateStr: string, // "YYYY-MM-DD"
+) {
+  const adv      = orders.reduce((s, o) => s + totalAdvance(o), 0);
+  const total    = orders.reduce((s, o) => s + orderTotal(o), 0);
+  const bal      = orders.reduce((s, o) => s + balanceDue(o), 0);
+  const shipping = orders.reduce((s, o) => s + (o.shippingCharge || 0), 0);
+
+  const ITEM_ROWS = Math.max(10, orders.length);
+  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) =>
+    i < orders.length ? itemRowHtml(i + 1, orders[i]) : BLANK_ROW
+  ).join("\n");
+
+  const html = buildInvoiceDoc({
+    client, settings, invoiceNumber,
+    dateLabel: localDateStr(dateStr),
+    itemRows,
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+  });
+  openAndPrint(html);
 }

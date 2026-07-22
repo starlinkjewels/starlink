@@ -4,10 +4,13 @@ import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal } from "@/lib/d
 import type { Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
-import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search } from "lucide-react";
+import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search, Download, CalendarDays } from "lucide-react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { printBatchInvoice } from "@/lib/invoicePrint";
 
 export function InvoicesPage() {
   const { user } = useAuth();
@@ -16,6 +19,7 @@ export function InvoicesPage() {
   const [clientFilter, setClientFilter] = useState("all");
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
+  const [batchDate, setBatchDate] = useState("");
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
@@ -39,6 +43,25 @@ export function InvoicesPage() {
   const clientOptions = user!.role === "client"
     ? []
     : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
+
+  // Combined invoice: every order for the selected client dispatched on the chosen
+  // date, as one PDF with one line item per order (uses the Client filter above).
+  const downloadBatchInvoice = () => {
+    if (clientFilter === "all") { toast.error("Select a client first"); return; }
+    if (!batchDate) { toast.error("Select a date"); return; }
+    const batchClient = db.clients.find(c => c.id === clientFilter);
+    const dispatchedOrders = db.orders.filter(o => {
+      if (o.clientId !== clientFilter) return false;
+      const dispatchStep = o.timeline.find(t => t.step === "Dispatch" && t.status === "done");
+      return dispatchStep?.date?.slice(0, 10) === batchDate;
+    });
+    if (!dispatchedOrders.length) {
+      toast.error(`No orders dispatched for ${batchClient?.companyName ?? "this client"} on ${batchDate}`);
+      return;
+    }
+    const invoiceNumber = "C" + batchDate.replace(/-/g, "");
+    printBatchInvoice(dispatchedOrders, batchClient, db.settings, invoiceNumber, batchDate);
+  };
 
   // Orders with advances (all roles see their own)
   let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
@@ -118,6 +141,33 @@ export function InvoicesPage() {
           )}
           {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
         </div>
+
+        {/* Combined dispatch invoice — pick the client above + a date, download one PDF
+            covering every order for that client dispatched on that date */}
+        {user!.role !== "client" && (
+          <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
+            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+            <span className="text-xs text-muted-foreground shrink-0">Combined invoice for orders dispatched on</span>
+            <input
+              type="date"
+              value={batchDate}
+              onChange={e => setBatchDate(e.target.value)}
+              className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
+            />
+            <Button
+              size="sm"
+              onClick={downloadBatchInvoice}
+              disabled={clientFilter === "all" || !batchDate}
+              className="btn-hero rounded-xl gap-2 h-9"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Download Invoice
+            </Button>
+            {clientFilter === "all" && (
+              <span className="text-xs text-muted-foreground">select a client above first</span>
+            )}
+          </div>
+        )}
 
         {/* Desktop table */}
         <div className="hidden md:block">
