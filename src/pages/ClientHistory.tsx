@@ -365,11 +365,11 @@ export function ClientHistoryPage() {
                 <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Qty</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Priority</th>
                 <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Bill</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Advance</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Balance</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Invoice</th>
-                <th className="text-right px-4 py-3 text-xs font-semibold text-muted-foreground">Date</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Bill</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Advance</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Balance</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Invoice</th>
+                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Date</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -399,18 +399,18 @@ export function ClientHistoryPage() {
                       </span>
                     </td>
                     <td className="px-4 py-3.5"><StatusBadge status={o.status} /></td>
-                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(orderTotal(o))}</td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(orderTotal(o))}</td>
+                    <td className="px-4 py-3.5 text-center">
                       {adv > 0
                         ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
                         : <span className="text-muted-foreground text-xs">—</span>}
                     </td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-4 py-3.5 text-center">
                       <span className={`text-xs font-semibold ${bal === 0 ? "text-success" : "text-destructive"}`}>
                         {bal === 0 ? "✓ Cleared" : fmtMoney(bal)}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-4 py-3.5 text-center">
                       {invoice ? (
                         <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${invoice.paid ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}`}>
                           {invoice.paid ? "Paid" : "Unpaid"}
@@ -419,7 +419,7 @@ export function ClientHistoryPage() {
                         <span className="text-xs text-muted-foreground">—</span>
                       )}
                     </td>
-                    <td className="px-4 py-3.5 text-right text-xs text-muted-foreground whitespace-nowrap">{fmtDate(o.createdAt)}</td>
+                    <td className="px-4 py-3.5 text-center text-xs text-muted-foreground whitespace-nowrap">{fmtDate(o.createdAt)}</td>
                     <td className="px-4 py-3.5">
                       <Link to={`/orders/${o.id}`}>
                         <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">

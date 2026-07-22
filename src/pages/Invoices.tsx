@@ -128,10 +128,10 @@ export function InvoicesPage() {
                 <th className="text-left px-4 py-3">Client</th>
                 <th className="text-left px-4 py-3">Order</th>
                 <th className="text-left px-4 py-3">Date</th>
-                <th className="text-right px-4 py-3">Amount</th>
-                <th className="text-right px-4 py-3">Advance</th>
-                <th className="text-right px-4 py-3">Balance</th>
-                <th className="text-left px-4 py-3">Status</th>
+                <th className="text-center px-4 py-3">Amount</th>
+                <th className="text-center px-4 py-3">Advance</th>
+                <th className="text-center px-4 py-3">Balance</th>
+                <th className="text-center px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -155,18 +155,18 @@ export function InvoicesPage() {
                       {o && <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs">{o.orderNumber}</Link>}
                     </td>
                     <td className="px-4 py-3.5 text-muted-foreground text-xs">{fmtDate(inv.createdAt)}</td>
-                    <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(amount)}</td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(amount)}</td>
+                    <td className="px-4 py-3.5 text-center">
                       {adv > 0
                         ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
                         : <span className="text-muted-foreground text-xs">—</span>}
                     </td>
-                    <td className="px-4 py-3.5 text-right">
+                    <td className="px-4 py-3.5 text-center">
                       <span className={`text-xs font-medium ${bal > 0 ? "text-destructive" : "text-success"}`}>
                         {bal > 0 ? fmtMoney(bal) : "Cleared"}
                       </span>
                     </td>
-                    <td className="px-4 py-3.5">
+                    <td className="px-4 py-3.5 text-center">
                       {paid
                         ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
                         : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span>}
@@ -289,9 +289,9 @@ export function InvoicesPage() {
                 <tr>
                   <th className="text-left px-5 py-3">Order</th>
                   <th className="text-left px-4 py-3">Client</th>
-                  <th className="text-right px-4 py-3">Order Total</th>
-                  <th className="text-right px-4 py-3">Advance Paid</th>
-                  <th className="text-right px-4 py-3">Balance Due</th>
+                  <th className="text-center px-4 py-3">Order Total</th>
+                  <th className="text-center px-4 py-3">Advance Paid</th>
+                  <th className="text-center px-4 py-3">Balance Due</th>
                 </tr>
               </thead>
               <tbody>
@@ -305,11 +305,11 @@ export function InvoicesPage() {
                         <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold">{o.orderNumber}</Link>
                       </td>
                       <td className="px-4 py-3.5 text-muted-foreground text-xs">{client?.companyName || "—"}</td>
-                      <td className="px-4 py-3.5 text-right font-semibold">{fmtMoney(orderTotal(o))}</td>
-                      <td className="px-4 py-3.5 text-right">
+                      <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(orderTotal(o))}</td>
+                      <td className="px-4 py-3.5 text-center">
                         <span className="text-success font-semibold">{fmtMoney(adv)}</span>
                       </td>
-                      <td className="px-4 py-3.5 text-right">
+                      <td className="px-4 py-3.5 text-center">
                         <span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>
                           {bal > 0 ? fmtMoney(bal) : "✓ Cleared"}
                         </span>
