@@ -128,7 +128,9 @@ export function IncomePage() {
       const client = db.clients.find(c => c.id === order.clientId);
       const clientName = client?.companyName ?? "Unknown Client";
 
-      /* ── Advance payments ── */
+      /* ── Payments (advances) — the actual money received. Paid invoices are
+         NOT added: an invoice's "paid" flag just mirrors these payments, so
+         counting both would double the income. ── */
       (order.advances ?? []).forEach(adv => {
         rows.push({
           id: adv.id,
@@ -138,27 +140,10 @@ export function IncomePage() {
           orderId: order.id,
           orderNumber: order.orderNumber,
           type: "Advance",
-          description: adv.note || "Advance payment",
+          description: adv.note || "Payment received",
           amount: adv.amount,
         });
       });
-
-      /* ── Paid invoices ── */
-      db.invoices
-        .filter(inv => inv.orderId === order.id && inv.paid)
-        .forEach(inv => {
-          rows.push({
-            id: inv.id,
-            date: inv.createdAt,
-            clientId: inv.clientId,
-            clientName,
-            orderId: order.id,
-            orderNumber: order.orderNumber,
-            type: "Invoice",
-            description: `Invoice ${inv.number}`,
-            amount: inv.amount,
-          });
-        });
     });
 
     /* Sort newest first */
@@ -177,9 +162,9 @@ export function IncomePage() {
   }, [allRows, dateFrom, dateTo, clientFilter]);
 
   /* Summary totals */
-  const totalIncome    = filtered.reduce((s, r) => s + r.amount, 0);
-  const advanceTotal   = filtered.filter(r => r.type === "Advance").reduce((s, r) => s + r.amount, 0);
-  const invoiceTotal   = filtered.filter(r => r.type === "Invoice").reduce((s, r) => s + r.amount, 0);
+  const totalIncome = filtered.reduce((s, r) => s + r.amount, 0);
+  const nowMonth = new Date().toISOString().slice(0, 7);
+  const thisMonth = filtered.filter(r => r.date.slice(0, 7) === nowMonth).reduce((s, r) => s + r.amount, 0);
 
   /* Clients list for filter dropdown */
   const clients = user!.role === "client"
@@ -207,12 +192,11 @@ export function IncomePage() {
       </div>
 
       {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {[
-          { label: "Total Income",      value: fmtMoney(totalIncome),   icon: TrendingUp,  color: "text-primary",     bg: "bg-primary/10" },
-          { label: "From Invoices",     value: fmtMoney(invoiceTotal),  icon: Receipt,     color: "text-success",     bg: "bg-success/10" },
-          { label: "From Advances",     value: fmtMoney(advanceTotal),  icon: CreditCard,  color: "text-brand-dark",  bg: "bg-brand-light/10" },
-          { label: "Transactions",      value: filtered.length,         icon: DollarSign,  color: "text-muted-foreground", bg: "bg-secondary" },
+          { label: "Total Received",  value: fmtMoney(totalIncome), icon: TrendingUp,  color: "text-success",          bg: "bg-success/10" },
+          { label: "This Month",      value: fmtMoney(thisMonth),   icon: Calendar,    color: "text-primary",          bg: "bg-primary/10" },
+          { label: "Payments",        value: filtered.length,       icon: CreditCard,  color: "text-brand-dark",       bg: "bg-brand-light/10" },
         ].map(s => (
           <div key={s.label} className="card-luxe p-4">
             <div className={`h-8 w-8 rounded-lg ${s.bg} grid place-items-center mb-3`}>

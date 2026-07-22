@@ -43,8 +43,9 @@ export function ClientHistoryPage() {
 
   const allInvoices = db.invoices.filter(inv => inv.clientId === id);
 
-  // Summary stats
-  const totalValue = allOrders.reduce((s, o) => s + o.amount, 0);
+  // Summary stats — use the full bill (incl. shipping/cert) so "Total Value"
+  // matches the Account Ledger's "Total Billed".
+  const totalValue = allOrders.reduce((s, o) => s + orderTotal(o), 0);
   const paidAmount = allInvoices.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
   const pendingAmount = allInvoices.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
   const activeOrders = allOrders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
@@ -326,39 +327,6 @@ export function ClientHistoryPage() {
           </div>
         )}
       </div>
-
-      {/* Invoice Summary */}
-      {allInvoices.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          <div className="card-luxe p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0">
-              <CheckCircle2 className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Paid Invoices</p>
-              <p className="font-semibold">{allInvoices.filter(i => i.paid).length} · {fmtMoney(paidAmount)}</p>
-            </div>
-          </div>
-          <div className="card-luxe p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-destructive/10 grid place-items-center shrink-0">
-              <AlertCircle className="h-5 w-5 text-destructive" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Pending Invoices</p>
-              <p className="font-semibold">{allInvoices.filter(i => !i.paid).length} · {fmtMoney(pendingAmount)}</p>
-            </div>
-          </div>
-          <div className="card-luxe p-4 flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-primary/10 grid place-items-center shrink-0">
-              <FileText className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground">Total Invoices</p>
-              <p className="font-semibold">{allInvoices.length} · {fmtMoney(totalValue)}</p>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Order History */}
       <div className="card-luxe overflow-hidden">
