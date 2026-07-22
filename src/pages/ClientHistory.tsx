@@ -59,31 +59,35 @@ export function ClientHistoryPage() {
 
   // ── Client account / payments ──
   const [payAmount, setPayAmount] = useState("");
+  const [payMethod, setPayMethod] = useState("Cash");
+  const [payRemark, setPayRemark] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
   const account = clientAccount(allOrders, client?.creditBalance || 0);
 
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    // Note recorded on each payment entry → shows in the Income Passbook.
+    const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
       const clientOrders = d.orders.filter(o => o.clientId === id);
       const now = new Date().toISOString();
       // Reclaim any over-payment, fold in existing credit + this amount, then
-      // re-allocate oldest-bill-first.
-      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now);
+      // re-allocate oldest-bill-first — tagging entries with the payment method.
+      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now, note);
       c.creditBalance = leftover > 0 ? leftover : undefined;
       const clientUser = d.users.find(u => u.clientId === id);
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: "Payment Received",
-        body: `${fmtMoney(amt)} received and applied to your oldest pending orders.`,
+        body: `${fmtMoney(amt)} received via ${payMethod} and applied to your oldest pending orders.`,
         type: "info", read: false, createdAt: now,
       });
     });
-    toast.success("Payment recorded & allocated to oldest bills");
-    setPayAmount(""); setShowPayForm(false);
+    toast.success(`Payment recorded (${payMethod}) & allocated to oldest bills`);
+    setPayAmount(""); setPayRemark(""); setShowPayForm(false);
   };
 
   const applyCredit = () => {
@@ -285,8 +289,9 @@ export function ClientHistoryPage() {
         {showPayForm && (
           <div className="pt-2 border-t border-border/60 space-y-2.5">
             <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
-            <div className="flex flex-col sm:flex-row gap-2.5">
-              <div className="relative flex-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {/* Amount */}
+              <div className="relative">
                 <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="number" min="1" step="0.01" autoFocus
@@ -294,8 +299,25 @@ export function ClientHistoryPage() {
                   onKeyDown={e => e.key === "Enter" && recordPayment()}
                   className="pl-9 rounded-xl h-10" placeholder="Amount received" />
               </div>
+              {/* Method */}
+              <Select value={payMethod} onValueChange={setPayMethod}>
+                <SelectTrigger className="h-10 rounded-xl">
+                  <CreditCard className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m =>
+                    <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {/* Remark */}
+              <Input
+                value={payRemark} onChange={e => setPayRemark(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && recordPayment()}
+                className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
+            </div>
+            <div className="flex gap-2.5">
               <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
-              <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); }} className="rounded-xl h-10">Cancel</Button>
+              <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); setPayRemark(""); }} className="rounded-xl h-10">Cancel</Button>
             </div>
             <p className="text-xs text-muted-foreground">
               {account.credit > 0 && <>Includes {fmtMoney(account.credit)} existing credit. </>}

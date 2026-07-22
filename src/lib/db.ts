@@ -304,7 +304,7 @@ export function balanceDue(order: Order): number {
  * the passed order objects (call inside updateDb). Returns the unallocated
  * leftover — which the caller should carry forward as client credit.
  */
-export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy: string, at: string): number {
+export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy: string, at: string, note = "Payment received"): number {
   let remaining = amount;
   const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   for (const o of oldestFirst) {
@@ -313,7 +313,7 @@ export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy:
     if (bal <= 0) continue;
     const pay = Math.min(remaining, bal);
     if (!o.advances) o.advances = [];
-    o.advances.push({ id: uid("adv_"), amount: pay, note: "Payment received", recordedBy, createdAt: at });
+    o.advances.push({ id: uid("adv_"), amount: pay, note, recordedBy, createdAt: at });
     remaining -= pay;
   }
   return Math.round(remaining * 100) / 100; // leftover → credit
@@ -348,11 +348,11 @@ export function capOrderAdvances(o: Order): number {
  * credit and any `extra` new payment, then re-allocate oldest-bill-first.
  * Mutates the given orders; returns the leftover to store as client credit.
  */
-export function reconcileClientAccount(orders: Order[], extra: number, creditBalance: number, recordedBy: string, at: string): number {
+export function reconcileClientAccount(orders: Order[], extra: number, creditBalance: number, recordedBy: string, at: string, note?: string): number {
   let pool = (extra || 0) + (creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
-  return allocatePaymentFIFO(orders, pool, recordedBy, at);
+  return allocatePaymentFIFO(orders, pool, recordedBy, at, note);
 }
 
 /** Client account summary across all their orders (+ carried-forward credit). */
