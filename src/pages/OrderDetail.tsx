@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances } from "@/lib/db";
+import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
-  ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2,
+  ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -42,6 +42,21 @@ async function compressImage(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+/** Order status derived purely from how many timeline steps are done — so a
+ *  reverted (undone) stage downgrades the status correctly, not just upgrades. */
+function statusFromTimeline(timeline: Order["timeline"]): Order["status"] {
+  const total = timeline.length;
+  const done = timeline.filter(t => t.status === "done").length;
+  const finalApprovalIdx = timeline.findIndex(x => x.step === "Final Approval");
+  const dispatchIdx = timeline.findIndex(x => x.step === "Dispatch");
+  if (done >= total) return "Delivered";
+  if (dispatchIdx >= 0 && done >= dispatchIdx + 1) return "Dispatched";
+  if (finalApprovalIdx >= 0 && done >= finalApprovalIdx + 1) return "Ready";
+  if (done >= 3) return "In Production";
+  if (done >= 2) return "Approved";
+  return "Waiting";
 }
 
 export function OrderDetailPage() {
@@ -113,6 +128,22 @@ export function OrderDetailPage() {
       if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
     toast.success("Stage marked complete");
+  };
+
+  // Undo a stage marked complete by mistake — this stage becomes the current
+  // (in-progress) one and every later stage is reset to not-done; the order
+  // status is recomputed from what's left done.
+  const revertStep = (idx: number) => {
+    if (!confirm("Undo this stage? This stage and any later ones will be marked not done, and the order status will update.")) return;
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      for (let i = idx; i < o.timeline.length; i++) {
+        o.timeline[i] = { ...o.timeline[i], status: "pending", date: undefined, employeeId: undefined, department: undefined, remarks: undefined };
+      }
+      o.timeline[idx].status = "in_progress";
+      o.status = statusFromTimeline(o.timeline);
+    });
+    toast.success("Stage reverted");
   };
 
   const approve = (yes: boolean) => {
@@ -1020,6 +1051,13 @@ export function OrderDetailPage() {
                     isActive
                       ? <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
+                  )}
+                  {canEditStage() && isDone && (
+                    <button
+                      onClick={() => revertStep(idx)}
+                      className="mt-2 inline-flex items-center gap-1 h-7 px-2 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                      <RotateCcw className="h-3 w-3" /> Undo
+                    </button>
                   )}
                 </div>
               </motion.div>
