@@ -245,18 +245,24 @@ function buildInvoiceDoc(opts: {
      as equal visually too. A column padded wider than its text (e.g. a short
      "Chop or signature." in a wide box) leaves invisible internal slack that
      makes the real, equal CSS gap look uneven next to a column whose text
-     nearly fills its box. Top-aligned so every column's header — Bank Details/
-     Scan to Pay/For ... Inc — sits on the same line. ── */
+     nearly fills its box.
+     Columns stretch to the same (tallest) height, so:
+       • headers — Bank Details / Scan to Pay / For ... Inc — all sit on the
+         same top line (plain columns start their content flush at the top).
+       • the two signature captions — "Chop or signature." and "Chop &
+         Authorized Signature" — are pinned to the bottom of that same
+         height with flex-direction:column, so they land on the same line
+         too, instead of the shorter signature column finishing early. ── */
   .footer {
     display: flex;
     justify-content: space-between;
-    align-items: flex-start;
+    align-items: stretch;
     margin-top: 20px;
   }
-  .f-left { flex: 0 0 auto; }
+  .f-left { flex: 0 0 auto; display: flex; flex-direction: column; justify-content: flex-end; }
   .f-bank { flex: 0 0 auto; max-width: 200px; font-size: 9px; line-height: 1.7; color: #222; }
   .f-mid { flex: 0 0 auto; display: flex; gap: 12px; }
-  .f-right { flex: 0 0 auto; max-width: 130px; text-align: center; }
+  .f-right { flex: 0 0 auto; max-width: 130px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
 
   .sig-line { border-top: 1px solid #333; width: 110px; margin-bottom: 4px; }
   .sig-text { font-size: 9.5px; }
