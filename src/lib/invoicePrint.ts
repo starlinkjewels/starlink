@@ -51,12 +51,14 @@ const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></
 
 /** Client-provided bank/wire details tables, uploaded as images (Settings → Invoice /
  *  Bill Settings) so they print pixel-exact instead of being recreated with HTML/CSS.
- *  Rendered as its own row, completely separate from the totals table, so it can
- *  never affect that table's row heights. */
+ *  Positioned with position:absolute (bottom-left of a wrapper around the items
+ *  table — see buildInvoiceDoc) so it visually sits beside the totals box, in the
+ *  blank space that's already there, WITHOUT being part of the table itself — it
+ *  can never change a single row's height, no matter how tall the image is. */
 function bankImagesHtml(settings: Settings): string {
   const imgs = [settings.bankDetailsImage1, settings.bankDetailsImage2].filter((s): s is string => !!s);
   if (!imgs.length) return "";
-  return `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-top:10px;">
+  return `<div style="position:absolute;left:0;bottom:0;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
     ${imgs.map(src => `<img src="${src}" style="max-width:190px;max-height:130px;object-fit:contain;" />`).join("\n    ")}
   </div>`;
 }
@@ -325,27 +327,31 @@ function buildInvoiceDoc(opts: {
     </div>
   </div>
 
-  <!-- Items table + totals embedded -->
-  <table class="items">
-    <thead>
-      <tr>
-        <th style="width:42px">SR<br/>NO</th>
-        <th style="width:64px">STOCK ID</th>
-        <th class="l">DESCRIPTION</th>
-        <th style="width:42px">PCS</th>
-        <th style="width:64px">WEIGHT</th>
-        <th style="width:88px">PRICE<br/>USD</th>
-        <th style="width:70px">TOTAL</th>
-      </tr>
-    </thead>
-    <tbody>
-      ${itemRows}
-      ${totalsRows}
-    </tbody>
-  </table>
+  <!-- Items table + totals embedded. Wrapped in position:relative purely so the bank
+       images (position:absolute, bottom-left) can anchor to this box's bottom-left
+       corner — they are NOT part of the table and cannot change its row heights. -->
+  <div style="position:relative;">
+    <table class="items">
+      <thead>
+        <tr>
+          <th style="width:42px">SR<br/>NO</th>
+          <th style="width:64px">STOCK ID</th>
+          <th class="l">DESCRIPTION</th>
+          <th style="width:42px">PCS</th>
+          <th style="width:64px">WEIGHT</th>
+          <th style="width:88px">PRICE<br/>USD</th>
+          <th style="width:70px">TOTAL</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${itemRows}
+        ${totalsRows}
+      </tbody>
+    </table>
 
-  <!-- Bank / wire details (uploaded images, if set) — own row, never affects the table above -->
-  ${bankImagesHtml(settings)}
+    <!-- Bank / wire details (uploaded images, if set) -->
+    ${bankImagesHtml(settings)}
+  </div>
 
   <!-- Footer -->
   <div class="footer">
@@ -439,7 +445,10 @@ export function printBatchInvoice(
   const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
   const shipping = orders.reduce((s, o) => s + (o.shippingCharge || 0), 0);
 
-  const ITEM_ROWS = Math.max(10, orders.length);
+  // Always keep a few blank rows after the real ones — the bank-detail images are
+  // absolutely positioned over this space (see bankImagesHtml), so with too many
+  // orders and zero blank rows left, the images would overlap real item rows.
+  const ITEM_ROWS = Math.max(10, orders.length + 4);
   const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) =>
     i < orders.length ? itemRowHtml(i + 1, orders[i]) : BLANK_ROW
   ).join("\n");
