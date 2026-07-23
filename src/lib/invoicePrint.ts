@@ -106,6 +106,19 @@ function buildInvoiceDoc(opts: {
     ? `<img src="${settings.invoiceStamp}" style="width:76px;height:76px;display:block;margin:4px auto;object-fit:contain;" />`
     : `<div style="width:76px;height:76px;border:1.5px dashed #bbb;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;text-align:center;margin:4px auto;">Upload Stamp</div>`;
 
+  /* Bank details — only shown if the admin filled at least one field (Settings → Invoice / Bill Settings) */
+  const bankRows = [
+    settings.bankName          ? `<div class="bank-row"><b>Bank:</b> ${settings.bankName}</div>`             : "",
+    settings.bankAccountName   ? `<div class="bank-row"><b>A/C Name:</b> ${settings.bankAccountName}</div>`   : "",
+    settings.bankAccountNumber ? `<div class="bank-row"><b>A/C No:</b> ${settings.bankAccountNumber}</div>`   : "",
+    settings.bankRoutingNumber ? `<div class="bank-row"><b>Routing No:</b> ${settings.bankRoutingNumber}</div>` : "",
+    settings.bankSwiftCode     ? `<div class="bank-row"><b>SWIFT/IFSC:</b> ${settings.bankSwiftCode}</div>`   : "",
+  ].filter(Boolean).join("\n      ");
+  const bankHtml = bankRows ? `<div class="f-bank">
+      <div class="bank-title">Bank Details</div>
+      ${bankRows}
+    </div>` : "";
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -227,7 +240,7 @@ function buildInvoiceDoc(opts: {
     border-top: 1px solid #333;
   }
 
-  /* ── Footer three-col row ── */
+  /* ── Footer row ── */
   .footer {
     display: flex;
     justify-content: space-between;
@@ -235,12 +248,16 @@ function buildInvoiceDoc(opts: {
     margin-top: 20px;
     gap: 10px;
   }
-  .f-left { flex: 1; }
+  .f-left { flex: 0.8; }
+  .f-bank { flex: 1.3; font-size: 9px; line-height: 1.6; color: #222; }
   .f-mid { flex: 1; display: flex; gap: 12px; justify-content: center; align-items: flex-end; }
   .f-right { flex: 1; text-align: center; }
 
   .sig-line { border-top: 1px solid #333; width: 110px; margin-bottom: 4px; }
   .sig-text { font-size: 9.5px; }
+  .bank-title { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; color: #1a2e4d; margin-bottom: 5px; }
+  .bank-row { white-space: nowrap; }
+  .bank-row b { font-weight: 600; }
   .qr-block { text-align: center; }
   .qr-lbl { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; margin-bottom: 4px; }
   .qr-brand { font-size: 9px; font-style: italic; margin-top: 3px; color: #444; }
@@ -338,6 +355,8 @@ function buildInvoiceDoc(opts: {
         <div class="sig-text">Chop or signature.</div>
       </div>
     </div>
+
+    ${bankHtml}
 
     <div class="f-mid">
       <div class="qr-block">
