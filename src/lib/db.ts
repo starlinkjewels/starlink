@@ -237,12 +237,11 @@ export interface Settings {
   invoiceQr1?: string;           // base64 – first QR (Venmo / payment)
   invoiceQr2?: string;           // base64 – second QR
   invoiceStamp?: string;         // base64 – authorised stamp/seal
-  // Bank details — shown on the printed invoice, left of the QR codes
-  bankName?: string;
-  bankAccountName?: string;
-  bankAccountNumber?: string;
-  bankRoutingNumber?: string;    // ABA / routing number
-  bankSwiftCode?: string;        // SWIFT / IFSC — optional, for international wires
+  // Bank/wire details — uploaded as images (client provides their own pre-made
+  // table, e.g. "USA Wire Details" / "Hong Kong Wire Details") so it prints
+  // pixel-exact instead of being recreated with HTML/CSS.
+  bankDetailsImage1?: string;    // base64
+  bankDetailsImage2?: string;    // base64
 }
 
 export interface CatalogFavorite {

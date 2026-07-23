@@ -49,40 +49,34 @@ function itemRowHtml(sr: number, order: Order): string {
 
 const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></td><td class="c"></td><td class="c"></td><td class="c"></td><td class="c"></td></tr>`;
 
+/** Client-provided bank/wire details tables, uploaded as images (Settings → Invoice /
+ *  Bill Settings) so they print pixel-exact instead of being recreated with HTML/CSS. */
+function bankImagesHtml(settings: Settings): string {
+  const imgs = [settings.bankDetailsImage1, settings.bankDetailsImage2].filter((s): s is string => !!s);
+  if (!imgs.length) return "";
+  return `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
+        ${imgs.map(src => `<img src="${src}" style="max-width:190px;max-height:150px;object-fit:contain;" />`).join("\n        ")}
+      </div>`;
+}
+
 /* Deposit/Balance rows only appear when they add information: a $0 balance or a
    deposit that equals the total is redundant with "Total Amount" above, so a
-   fully-settled invoice just ends with Total Amount as the final line. */
-function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number): string {
-  const shippingRow = shipping > 0 ? `
-    <tr class="tot-row">
-      <td colspan="4" class="blank"></td>
-      <td colspan="2" class="tot-lbl">Shipping Charges</td>
-      <td class="tot-val">${usd(shipping)}</td>
-    </tr>` : "";
+   fully-settled invoice just ends with Total Amount as the final line.
+   Bank detail images (if any) go in the first row's blank cell, spanning every
+   totals row via rowspan, so they sit beside the whole totals box. */
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, bankImgs: string): string {
+  const rows: { label: string; value: string; bold?: boolean }[] = [];
+  if (shipping > 0) rows.push({ label: "Shipping Charges", value: usd(shipping) });
+  rows.push({ label: "Total Amount", value: usd(total), bold: true });
+  if (adv > 0 && bal > 0) rows.push({ label: "Deposit Payment", value: usd(adv) });
+  if (bal > 0) rows.push({ label: "Balance Due", value: usd(bal), bold: true });
 
-  const depositRow = adv > 0 && bal > 0 ? `
-    <tr class="tot-row">
-      <td colspan="4" class="blank"></td>
-      <td colspan="2" class="tot-lbl">Deposit Payment</td>
-      <td class="tot-val">${usd(adv)}</td>
-    </tr>` : "";
-
-  const balanceRow = bal > 0 ? `
-    <tr class="tot-row">
-      <td colspan="4" class="blank"></td>
-      <td colspan="2" class="tot-lbl"><strong>Balance Due</strong></td>
-      <td class="tot-val"><strong>${usd(bal)}</strong></td>
-    </tr>` : "";
-
-  return `
-    ${shippingRow}
-    <tr class="tot-row tot-bold">
-      <td colspan="4" class="blank"></td>
-      <td colspan="2" class="tot-lbl"><strong>Total Amount</strong></td>
-      <td class="tot-val"><strong>${usd(total)}</strong></td>
-    </tr>
-    ${depositRow}
-    ${balanceRow}`;
+  return rows.map((r, i) => `
+    <tr class="tot-row${r.bold ? " tot-bold" : ""}">
+      ${i === 0 ? `<td colspan="4" rowspan="${rows.length}" class="blank bank-cell">${bankImgs}</td>` : ""}
+      <td colspan="2" class="tot-lbl">${r.bold ? `<strong>${r.label}</strong>` : r.label}</td>
+      <td class="tot-val">${r.bold ? `<strong>${r.value}</strong>` : r.value}</td>
+    </tr>`).join("\n");
 }
 
 /** Shared invoice document shell — header, TO block, items table, footer, legal text. */
@@ -105,19 +99,6 @@ function buildInvoiceDoc(opts: {
   const stampHtml = settings.invoiceStamp
     ? `<img src="${settings.invoiceStamp}" style="width:76px;height:76px;display:block;margin:4px auto;object-fit:contain;" />`
     : `<div style="width:76px;height:76px;border:1.5px dashed #bbb;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:9px;color:#aaa;text-align:center;margin:4px auto;">Upload Stamp</div>`;
-
-  /* Bank details — only shown if the admin filled at least one field (Settings → Invoice / Bill Settings) */
-  const bankRows = [
-    settings.bankName ? `<div class="bank-row"><b>Bank:</b> ${settings.bankName}</div>` : "",
-    settings.bankAccountName ? `<div class="bank-row"><b>A/C Name:</b> ${settings.bankAccountName}</div>` : "",
-    settings.bankAccountNumber ? `<div class="bank-row"><b>A/C No:</b> ${settings.bankAccountNumber}</div>` : "",
-    settings.bankRoutingNumber ? `<div class="bank-row"><b>Routing No:</b> ${settings.bankRoutingNumber}</div>` : "",
-    settings.bankSwiftCode ? `<div class="bank-row"><b>SWIFT/IFSC:</b> ${settings.bankSwiftCode}</div>` : "",
-  ].filter(Boolean).join("\n      ");
-  const bankHtml = bankRows ? `<div class="f-bank">
-      <div class="bank-title">Bank Details</div>
-      ${bankRows}
-    </div>` : "";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -208,6 +189,10 @@ function buildInvoiceDoc(opts: {
     border: none;
     background: transparent;
   }
+  .items .tot-row td.bank-cell {
+    vertical-align: top;
+    padding: 6px 12px 0 0;
+  }
   .items .tot-row td.tot-lbl {
     border: 1px solid #b0b0b0;
     border-left: 1px solid #333;
@@ -240,35 +225,22 @@ function buildInvoiceDoc(opts: {
     border-top: 1px solid #333;
   }
 
-  /* ── Footer row — every column sized to hug its own content (not a guessed
-     fixed width), so space-between's equal leftover-space math actually reads
-     as equal visually too. A column padded wider than its text (e.g. a short
-     "Chop or signature." in a wide box) leaves invisible internal slack that
-     makes the real, equal CSS gap look uneven next to a column whose text
-     nearly fills its box.
-     Columns stretch to the same (tallest) height, so:
-       • headers — Bank Details / Scan to Pay / For ... Inc — all sit on the
-         same top line (plain columns start their content flush at the top).
-       • the two signature captions — "Chop or signature." and "Chop &
-         Authorized Signature" — are pinned to the bottom of that same
-         height with flex-direction:column, so they land on the same line
-         too, instead of the shorter signature column finishing early. ── */
+  /* ── Footer three-col row — bottom-aligned so "Chop or signature." and
+     "Chop & Authorized Signature" sit on the same line regardless of the
+     taller QR/stamp column above them. ── */
   .footer {
     display: flex;
     justify-content: space-between;
-    align-items: stretch;
+    align-items: flex-end;
     margin-top: 20px;
+    gap: 10px;
   }
-  .f-left { flex: 0 0 auto; display: flex; flex-direction: column; justify-content: flex-end; }
-  .f-bank { flex: 0 0 auto; max-width: 200px; font-size: 9px; line-height: 1.7; color: #222; }
-  .f-mid { flex: 0 0 auto; display: flex; gap: 12px; }
-  .f-right { flex: 0 0 auto; max-width: 130px; text-align: center; display: flex; flex-direction: column; justify-content: space-between; }
+  .f-left { flex: 1; }
+  .f-mid { flex: 1; display: flex; gap: 12px; justify-content: center; align-items: flex-end; }
+  .f-right { flex: 1; text-align: center; }
 
   .sig-line { border-top: 1px solid #333; width: 110px; margin-bottom: 4px; }
   .sig-text { font-size: 9.5px; }
-  .bank-title { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; color: #1a2e4d; margin-bottom: 4px; }
-  .bank-row { line-height: 1.7; }
-  .bank-row b { font-weight: 600; }
   .qr-block { text-align: center; }
   .qr-lbl { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; margin-bottom: 4px; }
   .qr-brand { font-size: 9px; font-style: italic; margin-top: 3px; color: #444; }
@@ -367,8 +339,6 @@ function buildInvoiceDoc(opts: {
       </div>
     </div>
 
-    ${bankHtml}
-
     <div class="f-mid">
       <div class="qr-block">
         <div class="qr-lbl">SCAN TO PAY</div>
@@ -430,7 +400,7 @@ export function printInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDate(order.createdAt),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, bankImagesHtml(settings)),
   });
   openAndPrint(html);
 }
@@ -461,7 +431,7 @@ export function printBatchInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDateStr(dateStr),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, bankImagesHtml(settings)),
   });
   openAndPrint(html);
 }

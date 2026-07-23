@@ -10,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
-import { Diamond, Weight, Truck, Upload, X, QrCode, Stamp, FileText, ShieldCheck, Loader2 } from "lucide-react";
+import { Diamond, Weight, Truck, Upload, X, QrCode, Stamp, Landmark, FileText, ShieldCheck, Loader2 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -28,6 +28,8 @@ export function SettingsPage() {
   const qr1Ref    = useRef<HTMLInputElement>(null);
   const qr2Ref    = useRef<HTMLInputElement>(null);
   const stampRef  = useRef<HTMLInputElement>(null);
+  const bankImg1Ref = useRef<HTMLInputElement>(null);
+  const bankImg2Ref = useRef<HTMLInputElement>(null);
 
   const save = () => { saveDb(db); toast.success("Settings saved"); };
   const saveRates = () => { saveDb(db); toast.success("Pricing rates updated"); };
@@ -70,7 +72,7 @@ export function SettingsPage() {
   };
 
   const [uploadingField, setUploadingField] = useState<string | null>(null);
-  const handleImg = async (field: "invoiceQr1" | "invoiceQr2" | "invoiceStamp", file: File) => {
+  const handleImg = async (field: "invoiceQr1" | "invoiceQr2" | "invoiceStamp" | "bankDetailsImage1" | "bankDetailsImage2", file: File) => {
     setUploadingField(field);
     try {
       const url = await uploadDataUrl(await toBase64(file), "settings");
@@ -142,7 +144,7 @@ export function SettingsPage() {
     label: string;
     icon: React.ElementType;
     value?: string;
-    fieldKey: "invoiceQr1" | "invoiceQr2" | "invoiceStamp";
+    fieldKey: "invoiceQr1" | "invoiceQr2" | "invoiceStamp" | "bankDetailsImage1" | "bankDetailsImage2";
     inputRef: React.RefObject<HTMLInputElement | null>;
   }) => (
     <div className="flex flex-col items-center gap-2">
@@ -319,66 +321,24 @@ export function SettingsPage() {
           </div>
         </div>
 
-        {/* Bank details — printed to the left of the QR codes on the invoice */}
-        <div>
-          <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wide">Bank Details (for wire / bank transfer)</p>
-          <div className="grid grid-cols-1 gap-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Bank Name</Label>
-                <Input
-                  value={db.settings.bankName ?? ""}
-                  onChange={e => setDb({ ...db, settings: { ...db.settings, bankName: e.target.value } })}
-                  placeholder="Chase Bank"
-                  className="rounded-xl"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Account Holder Name</Label>
-                <Input
-                  value={db.settings.bankAccountName ?? ""}
-                  onChange={e => setDb({ ...db, settings: { ...db.settings, bankAccountName: e.target.value } })}
-                  placeholder="Starlink Jewels Inc"
-                  className="rounded-xl"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1">
-                <Label className="text-xs">Account Number</Label>
-                <Input
-                  value={db.settings.bankAccountNumber ?? ""}
-                  onChange={e => setDb({ ...db, settings: { ...db.settings, bankAccountNumber: e.target.value } })}
-                  placeholder="000123456789"
-                  className="rounded-xl"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Routing No. (ABA)</Label>
-                <Input
-                  value={db.settings.bankRoutingNumber ?? ""}
-                  onChange={e => setDb({ ...db, settings: { ...db.settings, bankRoutingNumber: e.target.value } })}
-                  placeholder="021000021"
-                  className="rounded-xl"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">SWIFT / IFSC (optional)</Label>
-                <Input
-                  value={db.settings.bankSwiftCode ?? ""}
-                  onChange={e => setDb({ ...db, settings: { ...db.settings, bankSwiftCode: e.target.value } })}
-                  placeholder="CHASUS33"
-                  className="rounded-xl"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-
         {/* Image uploads */}
         <div>
           <p className="text-xs font-medium text-muted-foreground mb-3 uppercase tracking-wide">Bill Images</p>
           <div className="flex items-start justify-around gap-4 flex-wrap">
+            <ImgSlot
+              label="Bank Details 1 (e.g. USA Wire)"
+              icon={Landmark}
+              value={db.settings.bankDetailsImage1}
+              fieldKey="bankDetailsImage1"
+              inputRef={bankImg1Ref}
+            />
+            <ImgSlot
+              label="Bank Details 2 (e.g. International Wire)"
+              icon={Landmark}
+              value={db.settings.bankDetailsImage2}
+              fieldKey="bankDetailsImage2"
+              inputRef={bankImg2Ref}
+            />
             <ImgSlot
               label="QR Code 1 (Venmo / Pay)"
               icon={QrCode}
