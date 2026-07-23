@@ -193,8 +193,14 @@ export function AppLayout() {
       {/* ── Main content ── */}
       <div className="flex-1 min-w-0 flex flex-col h-full overflow-hidden">
 
-        {/* ── Top bar ── */}
-        <header className="shrink-0 sticky top-0 z-30 glass border-b px-4 md:px-6 flex items-center gap-4"
+        {/* ── Top bar ──
+            On mobile this is `fixed` (truly pinned to the viewport) rather than
+            `sticky` — Android Chrome's dynamic toolbar hide/show animation on
+            scroll can visually clip/shift a sticky element for a frame or two;
+            fixed positioning is anchored directly to the viewport and doesn't
+            have that issue. Desktop keeps the original sticky-in-flow behavior
+            (no toolbar, no issue, and the sidebar layout depends on flow). */}
+        <header className="fixed inset-x-0 top-0 md:sticky md:inset-auto shrink-0 z-30 glass border-b px-4 md:px-6 flex items-center gap-4"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 0px)", height: "calc(env(safe-area-inset-top) + 4rem)" }}>
 
           {/* Mobile logo */}
@@ -318,7 +324,7 @@ export function AppLayout() {
           initial={{ opacity: 0, y: 8 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.25 }}
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-6">
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           <Outlet />
         </motion.main>
 
