@@ -149,7 +149,10 @@ export function StarlinkAiPage() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3">
+        <div
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-4 space-y-3 [&::-webkit-scrollbar]:hidden"
+          style={{ scrollbarWidth: "none" }}
+        >
           {messages.length === 0 && (
             <div className="h-full flex flex-col items-center justify-center gap-4 text-center px-6">
               <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-dark/10 grid place-items-center">
