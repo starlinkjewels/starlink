@@ -240,23 +240,25 @@ function buildInvoiceDoc(opts: {
     border-top: 1px solid #333;
   }
 
-  /* ── Footer row ── */
+  /* ── Footer row — fixed-width columns + space-between so the gaps between
+     them are always equal, top-aligned so every column's header sits on the
+     same line (mixing flex-end here made "Bank Details" sit lower than
+     "Scan to Pay" whenever the QR column was taller). ── */
   .footer {
     display: flex;
     justify-content: space-between;
-    align-items: flex-end;
+    align-items: flex-start;
     margin-top: 20px;
-    gap: 10px;
   }
-  .f-left { flex: 0.8; }
-  .f-bank { flex: 1.3; font-size: 9px; line-height: 1.6; color: #222; }
-  .f-mid { flex: 1; display: flex; gap: 12px; justify-content: center; align-items: flex-end; }
-  .f-right { flex: 1; text-align: center; }
+  .f-left { flex: 0 0 110px; }
+  .f-bank { flex: 0 0 190px; font-size: 9px; line-height: 1.7; color: #222; }
+  .f-mid { flex: 0 0 auto; display: flex; gap: 12px; }
+  .f-right { flex: 0 0 120px; text-align: center; }
 
   .sig-line { border-top: 1px solid #333; width: 110px; margin-bottom: 4px; }
   .sig-text { font-size: 9.5px; }
-  .bank-title { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; color: #1a2e4d; margin-bottom: 5px; }
-  .bank-row { white-space: nowrap; }
+  .bank-title { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; text-transform: uppercase; color: #1a2e4d; margin-bottom: 4px; }
+  .bank-row { line-height: 1.7; }
   .bank-row b { font-weight: 600; }
   .qr-block { text-align: center; }
   .qr-lbl { font-size: 9px; font-weight: bold; letter-spacing: 0.5px; margin-bottom: 4px; }
