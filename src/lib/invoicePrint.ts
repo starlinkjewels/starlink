@@ -50,33 +50,51 @@ function itemRowHtml(sr: number, order: Order): string {
 const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></td><td class="c"></td><td class="c"></td><td class="c"></td><td class="c"></td></tr>`;
 
 /** Client-provided bank/wire details tables, uploaded as images (Settings → Invoice /
- *  Bill Settings) so they print pixel-exact instead of being recreated with HTML/CSS. */
+ *  Bill Settings) so they print pixel-exact instead of being recreated with HTML/CSS.
+ *  Rendered as its own row, completely separate from the totals table, so it can
+ *  never affect that table's row heights. */
 function bankImagesHtml(settings: Settings): string {
   const imgs = [settings.bankDetailsImage1, settings.bankDetailsImage2].filter((s): s is string => !!s);
   if (!imgs.length) return "";
-  return `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;">
-        ${imgs.map(src => `<img src="${src}" style="max-width:190px;max-height:150px;object-fit:contain;" />`).join("\n        ")}
-      </div>`;
+  return `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-start;margin-top:10px;">
+    ${imgs.map(src => `<img src="${src}" style="max-width:190px;max-height:130px;object-fit:contain;" />`).join("\n    ")}
+  </div>`;
 }
 
 /* Deposit/Balance rows only appear when they add information: a $0 balance or a
    deposit that equals the total is redundant with "Total Amount" above, so a
-   fully-settled invoice just ends with Total Amount as the final line.
-   Bank detail images (if any) go in the first row's blank cell, spanning every
-   totals row via rowspan, so they sit beside the whole totals box. */
-function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, bankImgs: string): string {
-  const rows: { label: string; value: string; bold?: boolean }[] = [];
-  if (shipping > 0) rows.push({ label: "Shipping Charges", value: usd(shipping) });
-  rows.push({ label: "Total Amount", value: usd(total), bold: true });
-  if (adv > 0 && bal > 0) rows.push({ label: "Deposit Payment", value: usd(adv) });
-  if (bal > 0) rows.push({ label: "Balance Due", value: usd(bal), bold: true });
+   fully-settled invoice just ends with Total Amount as the final line. */
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number): string {
+  const shippingRow = shipping > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">Shipping Charges</td>
+      <td class="tot-val">${usd(shipping)}</td>
+    </tr>` : "";
 
-  return rows.map((r, i) => `
-    <tr class="tot-row${r.bold ? " tot-bold" : ""}">
-      ${i === 0 ? `<td colspan="4" rowspan="${rows.length}" class="blank bank-cell">${bankImgs}</td>` : ""}
-      <td colspan="2" class="tot-lbl">${r.bold ? `<strong>${r.label}</strong>` : r.label}</td>
-      <td class="tot-val">${r.bold ? `<strong>${r.value}</strong>` : r.value}</td>
-    </tr>`).join("\n");
+  const depositRow = adv > 0 && bal > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">Deposit Payment</td>
+      <td class="tot-val">${usd(adv)}</td>
+    </tr>` : "";
+
+  const balanceRow = bal > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl"><strong>Balance Due</strong></td>
+      <td class="tot-val"><strong>${usd(bal)}</strong></td>
+    </tr>` : "";
+
+  return `
+    ${shippingRow}
+    <tr class="tot-row tot-bold">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl"><strong>Total Amount</strong></td>
+      <td class="tot-val"><strong>${usd(total)}</strong></td>
+    </tr>
+    ${depositRow}
+    ${balanceRow}`;
 }
 
 /** Shared invoice document shell — header, TO block, items table, footer, legal text. */
@@ -188,10 +206,6 @@ function buildInvoiceDoc(opts: {
   .items .tot-row td.blank {
     border: none;
     background: transparent;
-  }
-  .items .tot-row td.bank-cell {
-    vertical-align: top;
-    padding: 6px 12px 0 0;
   }
   .items .tot-row td.tot-lbl {
     border: 1px solid #b0b0b0;
@@ -330,6 +344,9 @@ function buildInvoiceDoc(opts: {
     </tbody>
   </table>
 
+  <!-- Bank / wire details (uploaded images, if set) — own row, never affects the table above -->
+  ${bankImagesHtml(settings)}
+
   <!-- Footer -->
   <div class="footer">
     <div class="f-left">
@@ -400,7 +417,7 @@ export function printInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDate(order.createdAt),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping, bankImagesHtml(settings)),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
   });
   openAndPrint(html);
 }
@@ -431,7 +448,7 @@ export function printBatchInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDateStr(dateStr),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping, bankImagesHtml(settings)),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
   });
   openAndPrint(html);
 }
