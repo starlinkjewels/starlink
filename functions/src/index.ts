@@ -29,7 +29,12 @@ export const starlinkAiChat = onCall<ChatRequestData>(
     secrets: [SARVAM_API_KEY],
     region: "us-central1",
     cors: true,
-    enforceAppCheck: true,
+    // App Check enforcement is off for now — the production domain isn't
+    // reliably producing App Check tokens yet (reCAPTCHA site key domain
+    // registration needs to be confirmed separately). Security here still
+    // rests on Firebase Auth + the role-scoping in lib/scope.ts and
+    // tools/execute.ts, which don't depend on App Check.
+    // enforceAppCheck: true,
     // Cost control: smallest usable memory tier (ties to the smallest CPU
     // allocation), no warm/idle instances kept running between calls (billing
     // only happens while an actual request is being handled), and capped at a
