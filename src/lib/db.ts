@@ -11,8 +11,16 @@
 // The `session` (which user is logged in) stays in localStorage — it is
 // per-device and must not be shared through Firestore.
 import {
-  collection, doc, onSnapshot, writeBatch, query, where, getDoc, documentId,
-  type Query, type DocumentData,
+  collection,
+  doc,
+  onSnapshot,
+  writeBatch,
+  query,
+  where,
+  getDoc,
+  documentId,
+  type Query,
+  type DocumentData,
 } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
 
@@ -60,8 +68,14 @@ export interface Client {
 // are certified (see buildTimelineSteps). Names "CAD Designing", "Final Approval",
 // "Dispatch" and "Delivered" are relied on by status/section logic — keep them.
 export const TIMELINE_STEPS = [
-  "Order Submitted", "Order Approved", "CAD Designing", "In Production",
-  "Certification", "Final Approval", "Dispatch", "Delivered",
+  "Order Submitted",
+  "Order Approved",
+  "CAD Designing",
+  "In Production",
+  "Certification",
+  "Final Approval",
+  "Dispatch",
+  "Delivered",
 ] as const;
 // Loose on purpose: orders created before the list was shortened still hold older
 // step names, so the field type isn't constrained to the current literal union.
@@ -70,7 +84,9 @@ export type TimelineStep = string;
 /** Timeline steps for a NEW order — the "Certification" stage is included only
  *  when the order will be certified. */
 export function buildTimelineSteps(hasCertificate: boolean): string[] {
-  return (TIMELINE_STEPS as readonly string[]).filter(s => s !== "Certification" || hasCertificate);
+  return (TIMELINE_STEPS as readonly string[]).filter(
+    (s) => s !== "Certification" || hasCertificate,
+  );
 }
 
 export interface TimelineEntry {
@@ -96,27 +112,29 @@ export interface Order {
   orderNumber: string;
   clientId: string;
   contactPerson: string;
-  jewelleryType: "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
+  jewelleryType:
+    "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
   metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver";
   diamondType: "Natural" | "Lab Grown";
   quantity: number;
-  diamondWeight: number;     // estimated diamond weight (ct) — entered at order creation
+  diamondWeight: number; // estimated diamond weight (ct) — entered at order creation
   metalWeight: number;
   // Estimated weights — entered at order creation (piece not made yet)
-  estimatedGrossWeight?: number;  // grams
-  estimatedNetWeight?: number;    // grams
+  estimatedGrossWeight?: number; // grams
+  estimatedNetWeight?: number; // grams
   // Actual details — filled in after production / Final Approval by admin
-  actualGrossWeight?: number;     // grams
-  actualNetWeight?: number;       // grams
-  actualDiamondWeight?: number;   // carats
-  actualMetalRate?: number;       // $ per gram
-  actualDiamondRate?: number;     // $ per carat
-  actualMakingCharges?: number;   // flat $ making charges
-  images: string[];          // up to 3 reference images (base64)
+  actualGrossWeight?: number; // grams
+  actualNetWeight?: number; // grams
+  actualDiamondWeight?: number; // carats
+  actualMetalRate?: number; // $ per gram
+  actualDiamondRate?: number; // $ per carat
+  actualMakingCharges?: number; // flat $ making charges
+  images: string[]; // up to 3 reference images (base64)
   instructions: string;
   expectedDelivery: string;
   priority: "Normal" | "Urgent" | "High Priority";
-  status: "Waiting" | "Approved" | "Rejected" | "In Production" | "Ready" | "Dispatched" | "Delivered";
+  status:
+    "Waiting" | "Approved" | "Rejected" | "In Production" | "Ready" | "Dispatched" | "Delivered";
   assignedEmployeeId?: string;
   estimatedDelivery?: string;
   amount: number;
@@ -127,13 +145,13 @@ export interface Order {
   // Product specifications
   designNumber?: string;
   productSize?: string;
-  productColor?: string;   // "Yellow" | "Rose" | "White"
-  productKarats?: string;  // "9K" | "10K" | "14K" | "18K" | "22K" | "24K"
+  productColor?: string; // "Yellow" | "Rose" | "White"
+  productKarats?: string; // "9K" | "10K" | "14K" | "18K" | "22K" | "24K"
   // Delivery preference
   deliveryTime?: string;
   // Finishing options
-  rhodium?: string;   // "No Rhodium" | "Diamond Part White" | "Full White" | "Other"
-  stamping?: string;  // "No Stamping" | "KT Stamping" | "Diamond Weight + KT Stamp" | "Other"
+  rhodium?: string; // "No Rhodium" | "Diamond Part White" | "Full White" | "Other"
+  stamping?: string; // "No Stamping" | "KT Stamping" | "Diamond Weight + KT Stamp" | "Other"
   // CAD design image (uploaded after CAD Approved step)
   cadImage?: string;
   // Dispatch info
@@ -142,14 +160,14 @@ export interface Order {
   trackingLink?: string;
   // Certificate
   certificate?: boolean;
-  certificateFee?: number;  // editable per order
+  certificateFee?: number; // editable per order
 }
 
 export interface Task {
   id: string;
   title: string;
-  assignedTo: string;   // userId (employee)
-  assignedBy: string;   // userId (admin)
+  assignedTo: string; // userId (employee)
+  assignedBy: string; // userId (admin)
   completed: boolean;
   completedAt?: string;
   createdAt: string;
@@ -194,7 +212,7 @@ export interface Expense {
   category: ExpenseCategory;
   note?: string;
   employeeId: string; // userId of admin or employee who added it
-  clientId?: string;  // optional: which client this expense relates to
+  clientId?: string; // optional: which client this expense relates to
   createdAt: string;
 }
 
@@ -223,25 +241,25 @@ export interface Settings {
   currency: string;
   language: string;
   notifications: boolean;
-  diamondRate: number;           // $ per carat
-  metalRate: number;             // $ per gram
+  diamondRate: number; // $ per carat
+  metalRate: number; // $ per gram
   defaultShippingCharge: number; // $ flat default per order
   // Invoice branding
-  invoiceAddress1?: string;      // Street line
-  invoiceAddress2?: string;      // City / area
-  invoiceAddress3?: string;      // State + ZIP
-  invoiceTel?: string;           // Tel No
-  invoicePrimary?: string;       // Primary phone
-  invoiceEmail?: string;         // Email shown on bill
-  invoiceTerms?: string;         // e.g. "COD"
-  invoiceQr1?: string;           // base64 – first QR (Venmo / payment)
-  invoiceQr2?: string;           // base64 – second QR
-  invoiceStamp?: string;         // base64 – authorised stamp/seal
+  invoiceAddress1?: string; // Street line
+  invoiceAddress2?: string; // City / area
+  invoiceAddress3?: string; // State + ZIP
+  invoiceTel?: string; // Tel No
+  invoicePrimary?: string; // Primary phone
+  invoiceEmail?: string; // Email shown on bill
+  invoiceTerms?: string; // e.g. "COD"
+  invoiceQr1?: string; // base64 – first QR (Venmo / payment)
+  invoiceQr2?: string; // base64 – second QR
+  invoiceStamp?: string; // base64 – authorised stamp/seal
   // Bank/wire details — uploaded as images (client provides their own pre-made
   // table, e.g. "USA Wire Details" / "Hong Kong Wire Details") so it prints
   // pixel-exact instead of being recreated with HTML/CSS.
-  bankDetailsImage1?: string;    // base64
-  bankDetailsImage2?: string;    // base64
+  bankDetailsImage1?: string; // base64
+  bankDetailsImage2?: string; // base64
 }
 
 export interface CatalogFavorite {
@@ -265,14 +283,43 @@ export interface DB {
   session: { userId: string | null };
 }
 
-const LEGACY_KEY = "starlink_db_v2";   // pre-Firebase localStorage blob (migrated on first run)
+const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
 function defaultSettings(): Settings {
-  return { companyName: "Starlink Jewels", currency: "USD", language: "English", notifications: true, diamondRate: 3500, metalRate: 65, defaultShippingCharge: 0, invoiceAddress1: "55 JOHN ST", invoiceAddress2: "EAST RUTHERFORD", invoiceAddress3: "NEW JERSEY 07073", invoiceTel: "+91 83472 78188", invoicePrimary: "+1 201 554 4824", invoiceEmail: "Starlinkjewels@gmail.com", invoiceTerms: "COD" };
+  return {
+    companyName: "Starlink Jewels",
+    currency: "USD",
+    language: "English",
+    notifications: true,
+    diamondRate: 3500,
+    metalRate: 65,
+    defaultShippingCharge: 0,
+    invoiceAddress1: "55 JOHN ST",
+    invoiceAddress2: "EAST RUTHERFORD",
+    invoiceAddress3: "NEW JERSEY 07073",
+    invoiceTel: "+91 83472 78188",
+    invoicePrimary: "+1 201 554 4824",
+    invoiceEmail: "Starlinkjewels@gmail.com",
+    invoiceTerms: "COD",
+  };
 }
 
 function emptyDb(): DB {
-  return { users: [], clients: [], orders: [], tasks: [], messages: [], notifications: [], invoices: [], expenses: [], catalogFolders: [], catalogItems: [], catalogFavorites: [], settings: defaultSettings(), session: { userId: null } };
+  return {
+    users: [],
+    clients: [],
+    orders: [],
+    tasks: [],
+    messages: [],
+    notifications: [],
+    invoices: [],
+    expenses: [],
+    catalogFolders: [],
+    catalogItems: [],
+    catalogFavorites: [],
+    settings: defaultSettings(),
+    session: { userId: null },
+  };
 }
 
 // In-memory cache — the single source the synchronous UI reads from.
@@ -319,7 +366,13 @@ export function balanceDue(order: Order): number {
  * the passed order objects (call inside updateDb). Returns the unallocated
  * leftover — which the caller should carry forward as client credit.
  */
-export function allocatePaymentFIFO(orders: Order[], amount: number, recordedBy: string, at: string, note = "Payment received"): number {
+export function allocatePaymentFIFO(
+  orders: Order[],
+  amount: number,
+  recordedBy: string,
+  at: string,
+  note = "Payment received",
+): number {
   let remaining = amount;
   const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   for (const o of oldestFirst) {
@@ -363,7 +416,14 @@ export function capOrderAdvances(o: Order): number {
  * credit and any `extra` new payment, then re-allocate oldest-bill-first.
  * Mutates the given orders; returns the leftover to store as client credit.
  */
-export function reconcileClientAccount(orders: Order[], extra: number, creditBalance: number, recordedBy: string, at: string, note?: string): number {
+export function reconcileClientAccount(
+  orders: Order[],
+  extra: number,
+  creditBalance: number,
+  recordedBy: string,
+  at: string,
+  note?: string,
+): number {
   let pool = (extra || 0) + (creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
@@ -374,7 +434,8 @@ export function reconcileClientAccount(orders: Order[], extra: number, creditBal
 export function clientAccount(orders: Order[], creditBalance = 0) {
   // Outstanding must be summed PER ORDER (capped at 0) — otherwise an order that
   // was overpaid would wrongly cancel out real balance still due on another order.
-  let outstanding = 0, overpaid = 0;
+  let outstanding = 0,
+    overpaid = 0;
   for (const o of orders) {
     outstanding += balanceDue(o);
     overpaid += Math.max(0, totalAdvance(o) - orderTotal(o));
@@ -388,8 +449,8 @@ export function clientAccount(orders: Order[], creditBalance = 0) {
 /** Backward-compat: insert the "Diamond Purchase" step (added after "CAD Approved")
  *  into orders created before this step existed, without disturbing their progress. */
 function insertDiamondPurchaseStep(o: Order) {
-  if (o.timeline.some(t => t.step === "Diamond Purchase")) return;
-  const cadIdx = o.timeline.findIndex(t => t.step === "CAD Approved");
+  if (o.timeline.some((t) => t.step === "Diamond Purchase")) return;
+  const cadIdx = o.timeline.findIndex((t) => t.step === "CAD Approved");
   if (cadIdx === -1) return; // unexpected shape — leave as-is
   const cadDone = o.timeline[cadIdx].status === "done";
   o.timeline.splice(cadIdx + 1, 0, {
@@ -405,12 +466,35 @@ function insertDiamondPurchaseStep(o: Order) {
  * ──────────────────────────────────────────────────────────────────────── */
 
 // Array-shaped collections stored as one Firestore document per item.
+//
+// catalogItems is deliberately NOT in this list — a folder can hold
+// thousands of items, and this system works by diffing a FULL in-memory
+// mirror against Firestore, deleting anything missing from memory. Only ever
+// loading one page of items at a time would make that look like every
+// un-loaded item was deleted. Catalog items are paginated and read/written
+// directly via src/lib/catalogItems.ts instead — see that file's header.
 type ArrayCol =
-  | "users" | "clients" | "orders" | "tasks" | "messages" | "notifications"
-  | "invoices" | "expenses" | "catalogFolders" | "catalogItems" | "catalogFavorites";
+  | "users"
+  | "clients"
+  | "orders"
+  | "tasks"
+  | "messages"
+  | "notifications"
+  | "invoices"
+  | "expenses"
+  | "catalogFolders"
+  | "catalogFavorites";
 const ARRAY_COLS: ArrayCol[] = [
-  "users", "clients", "orders", "tasks", "messages", "notifications",
-  "invoices", "expenses", "catalogFolders", "catalogItems", "catalogFavorites",
+  "users",
+  "clients",
+  "orders",
+  "tasks",
+  "messages",
+  "notifications",
+  "invoices",
+  "expenses",
+  "catalogFolders",
+  "catalogFavorites",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
@@ -421,7 +505,7 @@ const INDEX_COL = "userByAuth"; // uid → role index the security rules read
 interface IndexDoc {
   role: Role;
   clientId: string | null;
-  appId: string;   // the user's app id (User.id), for scoping references
+  appId: string; // the user's app id (User.id), for scoping references
   status: "active" | "inactive";
 }
 // Last-known Firestore state of the index (uid → serialised IndexDoc), for diffing.
@@ -463,7 +547,7 @@ let messagesScopeIsFull = true;
 // Used to safely allow a client to delete ONLY their own sent messages.
 let clientAppId: string | null = null;
 
-let seeded = false;      // becomes true once cache has been populated from Firestore
+let seeded = false; // becomes true once cache has been populated from Firestore
 let persistQueue: Promise<void> = Promise.resolve();
 
 function emit() {
@@ -483,14 +567,15 @@ async function persist() {
   for (const col of ARRAY_COLS) {
     const cur = (snap[col] as unknown as Record<string, unknown>[]) || [];
     const prev = (remote[col] as unknown as Record<string, unknown>[]) || [];
-    const curMap = new Map(cur.map(i => [docId(col, i), i]));
-    const prevMap = new Map(prev.map(i => [docId(col, i), i]));
+    const curMap = new Map(cur.map((i) => [docId(col, i), i]));
+    const prevMap = new Map(prev.map((i) => [docId(col, i), i]));
 
     for (const [id, item] of curMap) {
       const before = prevMap.get(id);
       if (!before || !eq(before, item)) {
         batch.set(doc(fsdb, col, id), item);
-        touched.add(col); ops++;
+        touched.add(col);
+        ops++;
       }
     }
     for (const [id, prevItem] of prevMap) {
@@ -499,15 +584,25 @@ async function persist() {
       // threads). Never infer deletion of a message it doesn't own — otherwise a
       // partial mirror could wipe other conversations. A client may delete only
       // messages it sent; staff (full mirror) may delete any.
-      if (col === "messages" && !messagesScopeIsFull &&
-          (prevItem as { fromUserId?: string }).fromUserId !== clientAppId) continue;
-      batch.delete(doc(fsdb, col, id)); touched.add(col); ops++;
+      if (
+        col === "messages" &&
+        !messagesScopeIsFull &&
+        (prevItem as { fromUserId?: string }).fromUserId !== clientAppId
+      )
+        continue;
+      batch.delete(doc(fsdb, col, id));
+      touched.add(col);
+      ops++;
     }
   }
 
   if (!eq(snap.settings, remote.settings)) {
-    batch.set(doc(fsdb, SETTINGS_COL, SETTINGS_DOC), snap.settings as unknown as Record<string, unknown>);
-    touched.add(SETTINGS_COL); ops++;
+    batch.set(
+      doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
+      snap.settings as unknown as Record<string, unknown>,
+    );
+    touched.add(SETTINGS_COL);
+    ops++;
   }
 
   // Maintain the userByAuth role index (keyed by Firebase Auth uid). The
@@ -523,15 +618,22 @@ async function persist() {
   for (const [auid, data] of Object.entries(desired)) {
     if (remoteIdx[auid] !== JSON.stringify(data)) {
       batch.set(doc(fsdb, INDEX_COL, auid), data as unknown as Record<string, unknown>);
-      idxWrites[auid] = data; ops++;
+      idxWrites[auid] = data;
+      ops++;
     }
   }
   for (const auid of Object.keys(remoteIdx)) {
-    if (!desired[auid]) { batch.delete(doc(fsdb, INDEX_COL, auid)); idxDeletes.push(auid); ops++; }
+    if (!desired[auid]) {
+      batch.delete(doc(fsdb, INDEX_COL, auid));
+      idxDeletes.push(auid);
+      ops++;
+    }
   }
 
   if (ops === 0) return;
-  touched.forEach(c => { writePending[c] = (writePending[c] || 0) + 1; });
+  touched.forEach((c) => {
+    writePending[c] = (writePending[c] || 0) + 1;
+  });
   setPending(pendingCount + 1);
   try {
     await batch.commit();
@@ -545,9 +647,12 @@ async function persist() {
     }
   } catch (err) {
     console.error("[db] Firestore write failed:", err);
-    if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-db-error", { detail: err }));
+    if (typeof window !== "undefined")
+      window.dispatchEvent(new CustomEvent("starlink-db-error", { detail: err }));
   } finally {
-    touched.forEach(c => { writePending[c] = Math.max(0, (writePending[c] || 1) - 1); });
+    touched.forEach((c) => {
+      writePending[c] = Math.max(0, (writePending[c] || 1) - 1);
+    });
     setPending(pendingCount - 1);
   }
 }
@@ -557,9 +662,12 @@ async function persist() {
 let pendingCount = 0;
 function setPending(n: number) {
   pendingCount = Math.max(0, n);
-  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-db-pending", { detail: pendingCount }));
+  if (typeof window !== "undefined")
+    window.dispatchEvent(new CustomEvent("starlink-db-pending", { detail: pendingCount }));
 }
-export function pendingWrites() { return pendingCount; }
+export function pendingWrites() {
+  return pendingCount;
+}
 
 export function saveDb(db?: DB) {
   // Adopt the caller's object into the cache. Callers may pass a loadDb() copy
@@ -568,7 +676,9 @@ export function saveDb(db?: DB) {
   if (db && db !== cache) Object.assign(cache, db);
   emit();
   // Chain persists so overlapping saves don't race; each recomputes the diff.
-  persistQueue = persistQueue.then(persist).catch(err => console.error("[db] persist error", err));
+  persistQueue = persistQueue
+    .then(persist)
+    .catch((err) => console.error("[db] persist error", err));
 }
 
 export function updateDb(fn: (db: DB) => void) {
@@ -583,7 +693,10 @@ export function updateDb(fn: (db: DB) => void) {
  * to Firebase (writes are optimistic, so this is what "done" really means).
  */
 export function flush(): Promise<void> {
-  return persistQueue.then(() => {}, () => {});
+  return persistQueue.then(
+    () => {},
+    () => {},
+  );
 }
 
 export function uid(prefix = "") {
@@ -605,9 +718,7 @@ let unsubscribers: Array<() => void> = [];
  *  • "client" — subscribe only to the client's own orders/invoices/messages/
  *               notifications/client-record (enforced identically by the rules).
  */
-export type Scope =
-  | { kind: "full" }
-  | { kind: "client"; appId: string; clientId: string };
+export type Scope = { kind: "full" } | { kind: "client"; appId: string; clientId: string };
 
 /**
  * Watch the signed-in user's own role-index doc and invoke `onRevoked` the
@@ -617,13 +728,19 @@ export type Scope =
  */
 export function watchAccess(authUid: string, onRevoked: () => void): () => void {
   let firstFired = false;
-  return onSnapshot(doc(fsdb, INDEX_COL, authUid),
-    snap => {
+  return onSnapshot(
+    doc(fsdb, INDEX_COL, authUid),
+    (snap) => {
       // Ignore the initial read; only react to a live change to inactive/deleted.
-      if (!firstFired) { firstFired = true; return; }
+      if (!firstFired) {
+        firstFired = true;
+        return;
+      }
       if (!snap.exists() || (snap.data() as IndexDoc).status !== "active") onRevoked();
     },
-    () => { /* permission/network error — ignore */ },
+    () => {
+      /* permission/network error — ignore */
+    },
   );
 }
 
@@ -633,7 +750,8 @@ export async function resolveScope(authUid: string): Promise<Scope> {
     const s = await getDoc(doc(fsdb, INDEX_COL, authUid));
     if (s.exists()) {
       const d = s.data() as IndexDoc;
-      if (d.role === "client" && d.clientId) return { kind: "client", appId: d.appId, clientId: d.clientId };
+      if (d.role === "client" && d.clientId)
+        return { kind: "client", appId: d.appId, clientId: d.clientId };
     }
   } catch (e) {
     console.error("[db] resolveScope failed:", e);
@@ -659,7 +777,13 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
 
 /** Unsubscribe all listeners and clear the cache (on sign-out). */
 export function stopDb() {
-  unsubscribers.forEach(u => { try { u(); } catch { /* ignore */ } });
+  unsubscribers.forEach((u) => {
+    try {
+      u();
+    } catch {
+      /* ignore */
+    }
+  });
   unsubscribers = [];
   Object.assign(cache, emptyDb());
   remote = emptyDb();
@@ -675,7 +799,10 @@ export function stopDb() {
 /** Apply a collection snapshot into the cache/remote mirror. */
 function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
   let list = docs;
-  if (col === "orders") list = list.map(o => normalizeOrder(o as unknown as Order) as unknown as Record<string, unknown>);
+  if (col === "orders")
+    list = list.map(
+      (o) => normalizeOrder(o as unknown as Order) as unknown as Record<string, unknown>,
+    );
   (cache[col] as unknown) = list;
   (remote[col] as unknown) = clean(list);
   if (col === "users" && !idxSeeded) {
@@ -698,37 +825,55 @@ function subscribeAll(scope: Scope): Promise<void> {
       if (col === "tasks" || col === "expenses") continue;
       if (col === "messages") continue; // handled specially (two-sided)
       const c = collection(fsdb, col);
-      if (col === "orders" || col === "invoices") specs.push({ col, q: query(c, where("clientId", "==", client.clientId)) });
-      else if (col === "notifications") specs.push({ col, q: query(c, where("userId", "==", client.appId)) });
-      else if (col === "clients") specs.push({ col, q: query(c, where(documentId(), "==", client.clientId)) });
+      if (col === "orders" || col === "invoices")
+        specs.push({ col, q: query(c, where("clientId", "==", client.clientId)) });
+      else if (col === "notifications")
+        specs.push({ col, q: query(c, where("userId", "==", client.appId)) });
+      else if (col === "clients")
+        specs.push({ col, q: query(c, where(documentId(), "==", client.clientId)) });
       else specs.push({ col, q: c }); // users, catalog* — shared / names
     } else {
       specs.push({ col, q: collection(fsdb, col) });
     }
   }
 
-  const names: string[] = specs.map(s => s.col);
+  const names: string[] = specs.map((s) => s.col);
   if (client) names.push("messages");
   names.push(SETTINGS_COL);
   const pending = new Set<string>(names);
 
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     let done = false;
     const first = (name: string) => {
       pending.delete(name);
-      if (!done && pending.size === 0) { done = true; resolve(); }
+      if (!done && pending.size === 0) {
+        done = true;
+        resolve();
+      }
     };
 
     for (const { col, q } of specs) {
-      unsubscribers.push(onSnapshot(q,
-        snap => {
-          if (writePending[col]) { first(col); return; }
-          applyList(col, snap.docs.map(d => d.data() as Record<string, unknown>));
-          first(col);
-          if (seeded) emit();
-        },
-        err => { console.error(`[db] listener ${col} failed:`, err); first(col); },
-      ));
+      unsubscribers.push(
+        onSnapshot(
+          q,
+          (snap) => {
+            if (writePending[col]) {
+              first(col);
+              return;
+            }
+            applyList(
+              col,
+              snap.docs.map((d) => d.data() as Record<string, unknown>),
+            );
+            first(col);
+            if (seeded) emit();
+          },
+          (err) => {
+            console.error(`[db] listener ${col} failed:`, err);
+            first(col);
+          },
+        ),
+      );
     }
 
     // A client's messages are those they sent OR received — two queries merged
@@ -736,37 +881,77 @@ function subscribeAll(scope: Scope): Promise<void> {
     if (client) {
       let fromMsgs: Record<string, unknown>[] = [];
       let toMsgs: Record<string, unknown>[] = [];
-      let firedFrom = false, firedTo = false;
+      let firedFrom = false,
+        firedTo = false;
       const apply = () => {
         const map = new Map<string, Record<string, unknown>>();
         for (const m of [...fromMsgs, ...toMsgs]) map.set(String(m.id), m);
         applyList("messages", [...map.values()]);
         if (seeded) emit();
       };
-      const doneMsg = () => { if (firedFrom && firedTo) first("messages"); };
+      const doneMsg = () => {
+        if (firedFrom && firedTo) first("messages");
+      };
       const msgs = collection(fsdb, "messages");
-      unsubscribers.push(onSnapshot(query(msgs, where("fromUserId", "==", client.appId)),
-        snap => { if (!writePending["messages"]) { fromMsgs = snap.docs.map(d => d.data() as Record<string, unknown>); apply(); } firedFrom = true; doneMsg(); },
-        err => { console.error("[db] listener messages(from) failed:", err); firedFrom = true; doneMsg(); },
-      ));
-      unsubscribers.push(onSnapshot(query(msgs, where("toUserId", "==", client.appId)),
-        snap => { if (!writePending["messages"]) { toMsgs = snap.docs.map(d => d.data() as Record<string, unknown>); apply(); } firedTo = true; doneMsg(); },
-        err => { console.error("[db] listener messages(to) failed:", err); firedTo = true; doneMsg(); },
-      ));
+      unsubscribers.push(
+        onSnapshot(
+          query(msgs, where("fromUserId", "==", client.appId)),
+          (snap) => {
+            if (!writePending["messages"]) {
+              fromMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
+              apply();
+            }
+            firedFrom = true;
+            doneMsg();
+          },
+          (err) => {
+            console.error("[db] listener messages(from) failed:", err);
+            firedFrom = true;
+            doneMsg();
+          },
+        ),
+      );
+      unsubscribers.push(
+        onSnapshot(
+          query(msgs, where("toUserId", "==", client.appId)),
+          (snap) => {
+            if (!writePending["messages"]) {
+              toMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
+              apply();
+            }
+            firedTo = true;
+            doneMsg();
+          },
+          (err) => {
+            console.error("[db] listener messages(to) failed:", err);
+            firedTo = true;
+            doneMsg();
+          },
+        ),
+      );
     }
 
-    unsubscribers.push(onSnapshot(doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
-      snap => {
-        if (writePending[SETTINGS_COL]) { first(SETTINGS_COL); return; }
-        if (snap.exists()) {
-          cache.settings = { ...defaultSettings(), ...(snap.data() as Settings) };
-          remote.settings = clean(cache.settings);
-        }
-        first(SETTINGS_COL);
-        if (seeded) emit();
-      },
-      err => { console.error("[db] listener settings failed:", err); first(SETTINGS_COL); },
-    ));
+    unsubscribers.push(
+      onSnapshot(
+        doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
+        (snap) => {
+          if (writePending[SETTINGS_COL]) {
+            first(SETTINGS_COL);
+            return;
+          }
+          if (snap.exists()) {
+            cache.settings = { ...defaultSettings(), ...(snap.data() as Settings) };
+            remote.settings = clean(cache.settings);
+          }
+          first(SETTINGS_COL);
+          if (seeded) emit();
+        },
+        (err) => {
+          console.error("[db] listener settings failed:", err);
+          first(SETTINGS_COL);
+        },
+      ),
+    );
   });
 }
 
@@ -778,7 +963,9 @@ function readLegacy(): DB | null {
     if (!raw) return null;
     const db = JSON.parse(raw) as DB;
     return db && Array.isArray(db.users) ? db : null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -792,7 +979,7 @@ async function migrateLegacy(legacy: DB) {
   console.info("[db] Migrating legacy localStorage data to Firestore…");
   const migrated = await uploadInlineMedia(legacy);
   const mergeById = <T extends { id: string }>(existing: T[], incoming: T[]): T[] => {
-    const map = new Map(existing.map(x => [x.id, x]));
+    const map = new Map(existing.map((x) => [x.id, x]));
     for (const x of incoming || []) if (!map.has(x.id)) map.set(x.id, x);
     return [...map.values()];
   };
@@ -805,12 +992,22 @@ async function migrateLegacy(legacy: DB) {
   cache.invoices = mergeById(cache.invoices, migrated.invoices || []);
   cache.expenses = mergeById(cache.expenses, migrated.expenses || []);
   cache.catalogFolders = mergeById(cache.catalogFolders, migrated.catalogFolders || []);
-  cache.catalogItems = mergeById(cache.catalogItems, migrated.catalogItems || []);
   const favKey = (f: CatalogFavorite) => `${f.userId}__${f.itemId}`;
   const favSeen = new Set(cache.catalogFavorites.map(favKey));
-  for (const f of migrated.catalogFavorites || []) if (!favSeen.has(favKey(f))) cache.catalogFavorites.push(f);
+  for (const f of migrated.catalogFavorites || [])
+    if (!favSeen.has(favKey(f))) cache.catalogFavorites.push(f);
   await persist();
-  try { localStorage.removeItem(LEGACY_KEY); } catch { /* ignore */ }
+  // catalogItems is paginated and written directly (see src/lib/catalogItems.ts),
+  // not through the diff-based persist() above — migrate it the same way.
+  if ((migrated.catalogItems || []).length) {
+    const { createCatalogItem } = await import("./catalogItems");
+    for (const item of migrated.catalogItems) await createCatalogItem(item);
+  }
+  try {
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {
+    /* ignore */
+  }
   console.info("[db] Migration complete.");
 }
 
@@ -824,11 +1021,15 @@ async function uploadInlineMedia(db: DB): Promise<DB> {
     val && val.startsWith("data:") ? await uploadDataUrl(val, folder) : val;
 
   for (const o of db.orders || []) {
-    if (o.images) o.images = await Promise.all(o.images.map(img => up(img, `orders/${o.id}`) as Promise<string>));
+    if (o.images)
+      o.images = await Promise.all(
+        o.images.map((img) => up(img, `orders/${o.id}`) as Promise<string>),
+      );
     o.cadImage = await up(o.cadImage, `orders/${o.id}/cad`);
     for (const t of o.timeline || []) t.photo = await up(t.photo, `orders/${o.id}/timeline`);
   }
-  for (const it of db.catalogItems || []) it.data = (await up(it.data, `catalog/${it.folderId}`)) || it.data;
+  for (const it of db.catalogItems || [])
+    it.data = (await up(it.data, `catalog/${it.folderId}`)) || it.data;
   for (const u of db.users || []) u.photo = await up(u.photo, `users/${u.id}`);
   if (db.settings) {
     db.settings.invoiceQr1 = await up(db.settings.invoiceQr1, "settings");
@@ -841,17 +1042,27 @@ async function uploadInlineMedia(db: DB): Promise<DB> {
 // helpers
 export function currentUserOrders(db: DB, user: User): Order[] {
   if (user.role === "admin") return db.orders;
-  if (user.role === "client") return db.orders.filter(o => o.clientId === user.clientId);
+  if (user.role === "client") return db.orders.filter((o) => o.clientId === user.clientId);
   // Employee: orders assigned to them OR belonging to a client they manage.
-  const myClientIds = new Set(db.clients.filter(c => c.accountManagerId === user.id).map(c => c.id));
-  return db.orders.filter(o => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
+  const myClientIds = new Set(
+    db.clients.filter((c) => c.accountManagerId === user.id).map((c) => c.id),
+  );
+  return db.orders.filter((o) => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
 }
 
 export function fmtMoney(n: number) {
-  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(n);
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(n);
 }
 
 export function fmtDate(iso?: string) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
 }
