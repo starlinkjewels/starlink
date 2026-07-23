@@ -102,7 +102,7 @@ export const starlinkAiChat = onCall<ChatRequestData>(
 
 async function callProvider(apiKey: string, messages: ChatMessage[], tools: ToolDef[], toolChoice: "auto" | "none") {
   try {
-    return await chatCompletion(apiKey, messages, tools, { toolChoice, maxTokens: 500 });
+    return await chatCompletion(apiKey, messages, tools, { toolChoice, maxTokens: 700 });
   } catch (err) {
     console.error("[starlinkAiChat] provider call failed:", err);
     throw new HttpsError("internal", "Starlink AI is having trouble responding right now. Please try again.");

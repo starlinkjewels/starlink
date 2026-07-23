@@ -5,7 +5,7 @@
 // reaches the frontend.
 
 const CHAT_COMPLETIONS_URL = "https://api.sarvam.ai/v1/chat/completions";
-const MODEL = "sarvam-30b";
+const MODEL = "sarvam-105b";
 
 export interface ToolCall {
   id: string;
@@ -49,8 +49,15 @@ export async function chatCompletion(
       ...(tools.length
         ? { tools, tool_choice: opts.toolChoice ?? "auto" }
         : {}),
-      max_tokens: opts.maxTokens ?? 500,
+      max_tokens: opts.maxTokens ?? 700,
       temperature: 0.2,
+      // Explicitly disabled — reasoning/thinking tokens are billed against the
+      // same max_tokens budget as the visible answer, so leaving this unset
+      // (provider default may enable reasoning) can silently eat most of the
+      // budget before the model writes anything visible, truncating the
+      // actual reply. This assistant only does straightforward lookups/
+      // formatting, not the kind of task reasoning mode is meant for.
+      reasoning_effort: null,
     }),
   });
 
