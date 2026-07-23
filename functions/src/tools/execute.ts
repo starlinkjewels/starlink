@@ -180,20 +180,23 @@ async function getAccountSummary(args: Record<string, unknown>, caller: Caller) 
       if (!seen.has(dd.id)) { docs.push(dd); seen.add(dd.id); }
     });
 
+  // Always ordered newest-first before the cap, so once a client/business
+  // passes ACCOUNT_SUMMARY_CAP orders, the summary is deterministically the
+  // most recent N rather than an arbitrary Firestore-returned subset.
   if (caller.role === "client") {
-    add(await base.where("clientId", "==", caller.clientId).limit(ACCOUNT_SUMMARY_CAP).get());
+    add(await base.where("clientId", "==", caller.clientId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
   } else if (caller.role === "admin") {
     let q: Query = base;
     if (clientId) q = q.where("clientId", "==", clientId);
-    add(await q.limit(ACCOUNT_SUMMARY_CAP).get());
+    add(await q.orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
   } else if (clientId) {
-    add(await base.where("clientId", "==", clientId).limit(ACCOUNT_SUMMARY_CAP).get());
+    add(await base.where("clientId", "==", clientId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
   } else {
-    add(await base.where("assignedEmployeeId", "==", caller.appId).limit(ACCOUNT_SUMMARY_CAP).get());
+    add(await base.where("assignedEmployeeId", "==", caller.appId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
     const mine = await resolveEmployeeClientIds(caller.appId);
     for (const c of chunk([...mine], 30)) {
       if (!c.length) continue;
-      add(await base.where("clientId", "in", c).limit(ACCOUNT_SUMMARY_CAP).get());
+      add(await base.where("clientId", "in", c).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
     }
   }
 
