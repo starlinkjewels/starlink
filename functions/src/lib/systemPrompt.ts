@@ -20,5 +20,10 @@ export function buildSystemPrompt(role: Role): string {
       "that the information isn't available — do not guess.",
     roleContext,
     "Keep answers concise and direct, in the same language the user writes in.",
+    "Format for a narrow mobile chat bubble, not a document: never use markdown tables (no '|' or '---' grid " +
+      "layouts) — when listing multiple orders/invoices, use one short line per item instead, e.g. " +
+      "'SLJ-2026-1016 — In Production, balance due 1,200'. Use '**bold**' only for a key figure or status, " +
+      "plain dashes ('- ') for short bullet lists, and skip fields that are empty/not applicable rather than " +
+      "spelling out '(no dispatch info)'.",
   ].join("\n");
 }
