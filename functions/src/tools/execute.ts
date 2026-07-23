@@ -227,21 +227,52 @@ async function getAccountSummary(args: Record<string, unknown>, caller: Caller) 
     ? await db.getAll(...orderIds.map(id => db.collection("orders").doc(id)))
     : [];
 
+  const round2 = (n: number) => Math.round(n * 100) / 100;
   let billed = 0, received = 0, outstanding = 0;
+  const perClient = new Map<string, { billed: number; received: number; outstanding: number }>();
   for (const doc of orderDocs) {
     if (!doc.exists) continue;
     const d = doc.data()!;
     billed += orderTotal(d);
     received += totalAdvance(d);
     outstanding += balanceDue(d);
+
+    const cid = d.clientId as string | undefined;
+    if (cid) {
+      const row = perClient.get(cid) ?? { billed: 0, received: 0, outstanding: 0 };
+      row.billed += orderTotal(d);
+      row.received += totalAdvance(d);
+      row.outstanding += balanceDue(d);
+      perClient.set(cid, row);
+    }
   }
-  const round2 = (n: number) => Math.round(n * 100) / 100;
+
+  // Per-client breakdown — only meaningful for staff looking at more than one
+  // client at once (a single named client, or a client-role caller, is
+  // already a one-client view). Answers "which clients owe how much" /
+  // "client wise due balance" directly instead of just one grand total.
+  let byClient: Array<{ client_name: string; billed: number; received: number; outstanding: number }> | undefined;
+  if (caller.role !== "client" && !clientId && perClient.size > 0) {
+    const clientDocs = await db.getAll(...[...perClient.keys()].map(id => db.collection("clients").doc(id)));
+    const names = new Map(clientDocs.filter(d => d.exists).map(d => [d.id, d.get("companyName") as string]));
+    byClient = [...perClient.entries()]
+      .map(([cid, v]) => ({
+        client_name: names.get(cid) ?? "Unknown client",
+        billed: round2(v.billed),
+        received: round2(v.received),
+        outstanding: round2(v.outstanding),
+      }))
+      .sort((a, b) => b.outstanding - a.outstanding)
+      .slice(0, 20);
+  }
+
   return {
     invoices_counted: invoiceDocs.length,
     total_billed: round2(billed),
     total_received: round2(received),
     total_outstanding: round2(outstanding),
     truncated: invoiceDocs.length >= ACCOUNT_SUMMARY_CAP,
+    ...(byClient ? { by_client_top20_by_outstanding: byClient } : {}),
   };
 }
 

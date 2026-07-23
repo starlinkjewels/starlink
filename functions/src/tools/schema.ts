@@ -87,7 +87,10 @@ export function buildToolDefs(caller: Caller): ToolDef[] {
           "any question about income, revenue, sales, earnings, how much is owed, or overall account status. " +
           "Always call this rather than asking the user to clarify what 'income' means — present the three " +
           "figures it returns (billed/received/outstanding) and let the user ask a follow-up if they wanted " +
-          "something more specific.",
+          "something more specific. For staff asking a 'client wise' / 'which clients owe how much' / " +
+          "per-client breakdown question (without naming one specific client), the response also includes " +
+          "by_client_top20_by_outstanding — a per-client list sorted by outstanding balance — present that " +
+          "directly instead of saying you don't have it.",
         parameters: {
           type: "object",
           properties: { ...staffExtra },
