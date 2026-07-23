@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
@@ -17,6 +17,7 @@ const NAV: NavItem[] = [
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/income", label: "Passbook", icon: BookOpen },
+  { to: "/ai", label: "Starlink AI", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reports", label: "Reports", icon: BarChart3 },
@@ -36,6 +37,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/catalog",  label: "Catalog",  icon: FolderOpen },
   { to: "/income",   label: "Passbook", icon: BookOpen },
+  { to: "/ai",       label: "Starlink AI", icon: Sparkles },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
@@ -56,6 +58,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/invoices": "Invoices",
   "/income":   "Income Passbook",
   "/catalog":  "Catalog",
+  "/ai":       "Starlink AI",
   "/expenses": "Expenses",
   "/messages": "Messages",
   "/notifications": "Notifications",
@@ -76,6 +79,7 @@ const ICON_COLORS: Record<string, string> = {
   "/invoices":   "bg-blue-500/15 text-blue-600",
   "/catalog":    "bg-amber-500/15 text-amber-600",
   "/income":     "bg-emerald-500/15 text-emerald-600",
+  "/ai":         "bg-primary/15 text-primary",
   "/expenses":   "bg-rose-500/15 text-rose-600",
   "/clients":    "bg-violet-500/15 text-violet-600",
   "/employees":  "bg-orange-500/15 text-orange-600",

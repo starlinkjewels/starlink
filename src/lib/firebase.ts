@@ -8,6 +8,7 @@ import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
+import { getFunctions, type Functions } from "firebase/functions";
 import {
   getAuth, createUserWithEmailAndPassword, signOut, type Auth,
 } from "firebase/auth";
@@ -77,6 +78,10 @@ export const storage: FirebaseStorage = getStorage(app);
 
 // Firebase Authentication — every user (admin, employee, client) signs in here.
 export const auth: Auth = getAuth(app);
+
+// Cloud Functions callables (e.g. Starlink AI) — region must match where the
+// functions are deployed (see functions/src/index.ts).
+export const functions: Functions = getFunctions(app, "us-central1");
 
 export const firebaseConfigPublic = firebaseConfig;
 
