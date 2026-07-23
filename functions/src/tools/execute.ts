@@ -84,19 +84,28 @@ async function listOrders(args: Record<string, unknown>, caller: Caller) {
     snap.docs.forEach(dd => {
       if (!seen.has(dd.id)) { docs.push(dd); seen.add(dd.id); }
     });
+  // Exact total via Firestore's count() aggregation — cheap regardless of how
+  // many thousand orders match, since it never fetches the actual documents.
+  // Only computed for single-filter scopes; the employee "all my clients at
+  // once" case below is a union of two query paths and isn't given an exact
+  // total (the returned list itself is still accurate, just not a total count).
+  let totalCount: number | undefined;
 
   if (caller.role === "client") {
     let q: Query = base.where("clientId", "==", caller.clientId);
     if (status) q = q.where("status", "==", status);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else if (caller.role === "admin") {
     let q: Query = base;
     if (clientId) q = q.where("clientId", "==", clientId);
     if (status) q = q.where("status", "==", status);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else if (clientId) {
     let q: Query = base.where("clientId", "==", clientId);
     if (status) q = q.where("status", "==", status);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else {
     // employee, no specific client named — their assigned orders + orders of clients they manage
@@ -114,7 +123,10 @@ async function listOrders(args: Record<string, unknown>, caller: Caller) {
   }
 
   docs.sort((a, b) => String(b.get("createdAt") || "").localeCompare(String(a.get("createdAt") || "")));
-  return { orders: docs.slice(0, limit).map(orderSummary) };
+  return {
+    ...(totalCount !== undefined ? { total_matching: totalCount } : {}),
+    orders: docs.slice(0, limit).map(orderSummary),
+  };
 }
 
 async function listInvoices(args: Record<string, unknown>, caller: Caller) {
@@ -140,49 +152,60 @@ async function listInvoices(args: Record<string, unknown>, caller: Caller) {
     snap.docs.forEach(dd => {
       if (!seen.has(dd.id)) { docs.push(dd); seen.add(dd.id); }
     });
+  let totalCount = 0;
 
   if (caller.role === "client") {
     let q: Query = base.where("clientId", "==", caller.clientId);
     if (paid !== undefined) q = q.where("paid", "==", paid);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else if (caller.role === "admin") {
     let q: Query = base;
     if (clientId) q = q.where("clientId", "==", clientId);
     if (paid !== undefined) q = q.where("paid", "==", paid);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else if (clientId) {
     let q: Query = base.where("clientId", "==", clientId);
     if (paid !== undefined) q = q.where("paid", "==", paid);
+    totalCount = (await q.count().get()).data().count;
     add(await q.orderBy("createdAt", "desc").limit(limit).get());
   } else {
+    // Chunked only because "in" caps at 30 values — each chunk is a disjoint
+    // slice of the same clientId set, so summing counts across chunks is
+    // still an exact total (no overlap to double-count).
     const mine = await resolveEmployeeClientIds(caller.appId);
     for (const c of chunk([...mine], 30)) {
       if (!c.length) continue;
       let q: Query = base.where("clientId", "in", c);
       if (paid !== undefined) q = q.where("paid", "==", paid);
+      totalCount += (await q.count().get()).data().count;
       add(await q.orderBy("createdAt", "desc").limit(limit).get());
     }
   }
 
   docs.sort((a, b) => String(b.get("createdAt") || "").localeCompare(String(a.get("createdAt") || "")));
-  return { invoices: docs.slice(0, limit).map(invoiceSummary) };
+  return { total_matching: totalCount, invoices: docs.slice(0, limit).map(invoiceSummary) };
 }
 
 async function getAccountSummary(args: Record<string, unknown>, caller: Caller) {
   const { clientId, denied } = await resolveScopedClientName(args, caller);
   if (denied) return { error: "not_authorized_for_this_client" };
 
-  const base = db.collection("orders");
-  const docs: QueryDocumentSnapshot[] = [];
+  // Matches the app's own Invoices page exactly: totals are based only on
+  // orders that have an invoice generated (not every order), computed from
+  // the LIVE order data rather than the invoice's own amount/paid snapshot
+  // (which can go stale after the order is edited post-invoicing). Invoices
+  // have no assignedEmployeeId field, so employee scoping goes entirely
+  // through their permitted clientId set.
+  const base = db.collection("invoices");
+  const invoiceDocs: QueryDocumentSnapshot[] = [];
   const seen = new Set<string>();
   const add = (snap: QuerySnapshot) =>
     snap.docs.forEach(dd => {
-      if (!seen.has(dd.id)) { docs.push(dd); seen.add(dd.id); }
+      if (!seen.has(dd.id)) { invoiceDocs.push(dd); seen.add(dd.id); }
     });
 
-  // Always ordered newest-first before the cap, so once a client/business
-  // passes ACCOUNT_SUMMARY_CAP orders, the summary is deterministically the
-  // most recent N rather than an arbitrary Firestore-returned subset.
   if (caller.role === "client") {
     add(await base.where("clientId", "==", caller.clientId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
   } else if (caller.role === "admin") {
@@ -192,7 +215,6 @@ async function getAccountSummary(args: Record<string, unknown>, caller: Caller) 
   } else if (clientId) {
     add(await base.where("clientId", "==", clientId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
   } else {
-    add(await base.where("assignedEmployeeId", "==", caller.appId).orderBy("createdAt", "desc").limit(ACCOUNT_SUMMARY_CAP).get());
     const mine = await resolveEmployeeClientIds(caller.appId);
     for (const c of chunk([...mine], 30)) {
       if (!c.length) continue;
@@ -200,20 +222,47 @@ async function getAccountSummary(args: Record<string, unknown>, caller: Caller) 
     }
   }
 
+  const orderIds = [...new Set(invoiceDocs.map(d => d.get("orderId")).filter(Boolean))];
+  const orderDocs = orderIds.length
+    ? await db.getAll(...orderIds.map(id => db.collection("orders").doc(id)))
+    : [];
+
   let billed = 0, received = 0, outstanding = 0;
-  for (const doc of docs) {
-    const d = doc.data();
+  for (const doc of orderDocs) {
+    if (!doc.exists) continue;
+    const d = doc.data()!;
     billed += orderTotal(d);
     received += totalAdvance(d);
     outstanding += balanceDue(d);
   }
   const round2 = (n: number) => Math.round(n * 100) / 100;
   return {
-    orders_counted: docs.length,
+    invoices_counted: invoiceDocs.length,
     total_billed: round2(billed),
     total_received: round2(received),
     total_outstanding: round2(outstanding),
-    truncated: docs.length >= ACCOUNT_SUMMARY_CAP,
+    truncated: invoiceDocs.length >= ACCOUNT_SUMMARY_CAP,
+  };
+}
+
+async function listClients(args: Record<string, unknown>, caller: Caller) {
+  if (caller.role === "client") return { error: "unknown_or_unauthorized_tool" };
+  const limit = Math.max(1, Math.min(200, typeof args.limit === "number" ? Math.round(args.limit) : 100));
+
+  // Bounded collection (real business relationships, not thousands) — safe to
+  // fetch in full and filter/slice in memory, same reasoning as
+  // resolveClientByName().
+  const snap = await db.collection("clients").get();
+  let docs = snap.docs;
+  if (caller.role === "employee") {
+    const mine = await resolveEmployeeClientIds(caller.appId);
+    docs = docs.filter(d => mine.has(d.id));
+  }
+  docs = docs.slice(0, limit);
+
+  return {
+    clients_counted: docs.length,
+    clients: docs.map(d => ({ name: d.get("companyName"), status: d.get("status") })),
   };
 }
 
@@ -222,6 +271,7 @@ const EXECUTORS: Record<ToolName, (args: Record<string, unknown>, caller: Caller
   list_orders: listOrders,
   list_invoices: listInvoices,
   get_account_summary: getAccountSummary,
+  list_clients: listClients,
 };
 
 /**

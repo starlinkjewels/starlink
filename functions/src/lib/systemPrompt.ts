@@ -18,6 +18,17 @@ export function buildSystemPrompt(role: Role): string {
     "Only state facts returned by your tools during this conversation. Never invent order numbers, amounts, " +
       "dates, statuses, or client names. If a tool returns no result or an authorization error, say plainly " +
       "that the information isn't available — do not guess.",
+    "Bias strongly toward calling a tool and answering, over asking a clarifying question. If a question is " +
+      "even reasonably answerable with your available tools (e.g. 'how many clients', 'total income', 'what's " +
+      "outstanding', 'list my orders'), just call the tool and present what it returns — do not stop to ask " +
+      "what the user meant. Only ask a clarifying question when a tool genuinely cannot run without missing " +
+      "specifics it truly requires, such as which order number when several could be meant. Users find a " +
+      "back-and-forth before every answer frustrating and will stop using you if you do this.",
+    "Your tools cover orders, invoices, account/billing totals, and (for staff) the client list — that's it. " +
+      "You have no access to the product catalog, business expenses, profit, employee performance, or anything " +
+      "not returned by a tool. If asked about one of these, say plainly and confidently that it's outside what " +
+      "you can look up right now, and suggest the relevant part of the app (e.g. Catalog, Expenses) instead of " +
+      "hedging, apologizing at length, or pretending you might be able to help with more detail.",
     roleContext,
     "Keep answers concise and direct, in the same language the user writes in.",
     "Format for a narrow mobile chat bubble, not a document: never use markdown tables (no '|' or '---' grid " +

@@ -31,21 +31,23 @@ export async function resolveCaller(uid: string): Promise<Caller> {
 }
 
 /**
- * An employee's permitted client ids: clients they manage (Client.accountManagerId)
- * UNION clientIds of orders assigned directly to them (Order.assignedEmployeeId).
- * The union is required because Invoice has no assignedEmployeeId field — only
- * clientId — so invoice access must be expressed via this clientId set. Mirrors
- * currentUserOrders() in src/lib/db.ts.
+ * An employee's MANAGED client ids — clients where Client.accountManagerId is
+ * them. This is the boundary for whole-account visibility: client_name
+ * resolution, list_clients, and account/invoice summaries all use this set.
+ *
+ * Deliberately does NOT include clientIds of orders merely assigned to them
+ * (Order.assignedEmployeeId) — being assigned one order for a client managed
+ * by someone else grants visibility into that ONE order (handled separately,
+ * e.g. findOrder's own `assignedEmployeeId` check, and listOrders' own direct
+ * query for assigned orders), not that client's entire order/invoice history.
+ * Expanding this set to include assigned-order clients would leak the rest of
+ * that client's account to an employee who isn't actually their manager —
+ * exactly the kind of over-broad access this app's role model must avoid.
  */
 export async function resolveEmployeeClientIds(appId: string): Promise<Set<string>> {
   const ids = new Set<string>();
   const managed = await db.collection("clients").where("accountManagerId", "==", appId).get();
   managed.forEach(d => ids.add(d.id));
-  const assigned = await db.collection("orders").where("assignedEmployeeId", "==", appId).limit(500).get();
-  assigned.forEach(d => {
-    const clientId = d.get("clientId");
-    if (clientId) ids.add(clientId);
-  });
   return ids;
 }
 

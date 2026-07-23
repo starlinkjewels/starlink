@@ -1,7 +1,7 @@
 import type { Caller } from "../lib/scope";
 import type { ToolDef } from "../lib/sarvam";
 
-export const TOOL_NAMES = ["find_order", "list_orders", "list_invoices", "get_account_summary"] as const;
+export const TOOL_NAMES = ["find_order", "list_orders", "list_invoices", "get_account_summary", "list_clients"] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 const CLIENT_NAME_PARAM = {
@@ -19,6 +19,7 @@ const CLIENT_NAME_PARAM = {
  */
 export function buildToolDefs(caller: Caller): ToolDef[] {
   const staffExtra = caller.role !== "client" ? CLIENT_NAME_PARAM : {};
+  const isStaff = caller.role !== "client";
 
   return [
     {
@@ -41,7 +42,10 @@ export function buildToolDefs(caller: Caller): ToolDef[] {
       type: "function",
       function: {
         name: "list_orders",
-        description: "List orders, optionally filtered by status, most recent first.",
+        description:
+          "List orders, optionally filtered by status, most recent first. The response includes " +
+          "total_matching — the exact total count (not just how many are in the returned list) — use that " +
+          "directly for any 'how many orders' question rather than counting the returned items.",
         parameters: {
           type: "object",
           properties: {
@@ -59,7 +63,10 @@ export function buildToolDefs(caller: Caller): ToolDef[] {
       type: "function",
       function: {
         name: "list_invoices",
-        description: "List invoices, optionally filtered by order number or paid status, most recent first.",
+        description:
+          "List invoices, optionally filtered by order number or paid status, most recent first. The response " +
+          "includes total_matching — the exact total count of invoices (bills) — use that directly for any " +
+          "'how many invoices/bills' question rather than counting the returned items.",
         parameters: {
           type: "object",
           properties: {
@@ -75,12 +82,36 @@ export function buildToolDefs(caller: Caller): ToolDef[] {
       type: "function",
       function: {
         name: "get_account_summary",
-        description: "Total billed, received (advance payments), and outstanding balance summary.",
+        description:
+          "Total billed, received (advance payments), and outstanding balance — this is what to call for " +
+          "any question about income, revenue, sales, earnings, how much is owed, or overall account status. " +
+          "Always call this rather than asking the user to clarify what 'income' means — present the three " +
+          "figures it returns (billed/received/outstanding) and let the user ask a follow-up if they wanted " +
+          "something more specific.",
         parameters: {
           type: "object",
           properties: { ...staffExtra },
         },
       },
     },
+    ...(isStaff
+      ? [
+          {
+            type: "function" as const,
+            function: {
+              name: "list_clients",
+              description:
+                "List clients (companies) — use this for 'how many clients do I have', 'list my clients', " +
+                "or similar. Returns each client's name and status; count the results for a total.",
+              parameters: {
+                type: "object",
+                properties: {
+                  limit: { type: "number", description: "Max results to return, default 100, max 200" },
+                },
+              },
+            },
+          },
+        ]
+      : []),
   ];
 }
