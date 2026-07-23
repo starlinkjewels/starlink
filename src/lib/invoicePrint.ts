@@ -240,20 +240,23 @@ function buildInvoiceDoc(opts: {
     border-top: 1px solid #333;
   }
 
-  /* ── Footer row — fixed-width columns + space-between so the gaps between
-     them are always equal, top-aligned so every column's header sits on the
-     same line (mixing flex-end here made "Bank Details" sit lower than
-     "Scan to Pay" whenever the QR column was taller). ── */
+  /* ── Footer row — every column sized to hug its own content (not a guessed
+     fixed width), so space-between's equal leftover-space math actually reads
+     as equal visually too. A column padded wider than its text (e.g. a short
+     "Chop or signature." in a wide box) leaves invisible internal slack that
+     makes the real, equal CSS gap look uneven next to a column whose text
+     nearly fills its box. Top-aligned so every column's header — Bank Details/
+     Scan to Pay/For ... Inc — sits on the same line. ── */
   .footer {
     display: flex;
     justify-content: space-between;
     align-items: flex-start;
     margin-top: 20px;
   }
-  .f-left { flex: 0 0 110px; }
-  .f-bank { flex: 0 0 190px; font-size: 9px; line-height: 1.7; color: #222; }
+  .f-left { flex: 0 0 auto; }
+  .f-bank { flex: 0 0 auto; max-width: 200px; font-size: 9px; line-height: 1.7; color: #222; }
   .f-mid { flex: 0 0 auto; display: flex; gap: 12px; }
-  .f-right { flex: 0 0 120px; text-align: center; }
+  .f-right { flex: 0 0 auto; max-width: 130px; text-align: center; }
 
   .sig-line { border-top: 1px solid #333; width: 110px; margin-bottom: 4px; }
   .sig-text { font-size: 9.5px; }
