@@ -23,8 +23,8 @@ function itemDescription(order: Order): string {
   ].filter(Boolean).join(" ") || `${order.jewelleryType} - ${order.metal}`.toUpperCase();
 
   const weightDetails = [
-    order.actualGrossWeight   ? `Gross Weight: ${order.actualGrossWeight}g`     : "",
-    order.actualNetWeight     ? `Net Weight: ${order.actualNetWeight}g`         : "",
+    order.actualGrossWeight ? `Gross Weight: ${order.actualGrossWeight}g` : "",
+    order.actualNetWeight ? `Net Weight: ${order.actualNetWeight}g` : "",
     order.actualDiamondWeight ? `Diamond Weight: ${order.actualDiamondWeight}ct` : "",
   ].filter(Boolean).join(", ");
 
@@ -32,8 +32,8 @@ function itemDescription(order: Order): string {
 }
 
 function itemRowHtml(sr: number, order: Order): string {
-  const stockId   = order.designNumber || order.orderNumber;
-  const weight    = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
+  const stockId = order.designNumber || order.orderNumber;
+  const weight = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
   const itemPrice = order.amount ? usd(order.amount) : "—";
   const itemTotal = order.amount ? usd(order.amount) : "—";
   return `<tr class="item-row">
@@ -108,11 +108,11 @@ function buildInvoiceDoc(opts: {
 
   /* Bank details — only shown if the admin filled at least one field (Settings → Invoice / Bill Settings) */
   const bankRows = [
-    settings.bankName          ? `<div class="bank-row"><b>Bank:</b> ${settings.bankName}</div>`             : "",
-    settings.bankAccountName   ? `<div class="bank-row"><b>A/C Name:</b> ${settings.bankAccountName}</div>`   : "",
-    settings.bankAccountNumber ? `<div class="bank-row"><b>A/C No:</b> ${settings.bankAccountNumber}</div>`   : "",
+    settings.bankName ? `<div class="bank-row"><b>Bank:</b> ${settings.bankName}</div>` : "",
+    settings.bankAccountName ? `<div class="bank-row"><b>A/C Name:</b> ${settings.bankAccountName}</div>` : "",
+    settings.bankAccountNumber ? `<div class="bank-row"><b>A/C No:</b> ${settings.bankAccountNumber}</div>` : "",
     settings.bankRoutingNumber ? `<div class="bank-row"><b>Routing No:</b> ${settings.bankRoutingNumber}</div>` : "",
-    settings.bankSwiftCode     ? `<div class="bank-row"><b>SWIFT/IFSC:</b> ${settings.bankSwiftCode}</div>`   : "",
+    settings.bankSwiftCode ? `<div class="bank-row"><b>SWIFT/IFSC:</b> ${settings.bankSwiftCode}</div>` : "",
   ].filter(Boolean).join("\n      ");
   const bankHtml = bankRows ? `<div class="f-bank">
       <div class="bank-title">Bank Details</div>
@@ -381,7 +381,7 @@ function buildInvoiceDoc(opts: {
     </div>
 
     <div class="f-right">
-      <div class="for-co">For ${(settings.companyName || "STARLINK JEWELS").toUpperCase()} INC</div>
+      <div class="for-co">${(settings.companyName || "STARLINK JEWELS").toUpperCase()} INC</div>
       ${stampHtml}
       <div class="auth">Chop &amp; Authorized Signature</div>
     </div>
@@ -417,9 +417,9 @@ export function printInvoice(
   settings: Settings,
   invoiceNumber: string,
 ) {
-  const adv      = totalAdvance(order);
-  const total    = orderTotal(order);
-  const bal      = balanceDue(order);
+  const adv = totalAdvance(order);
+  const total = orderTotal(order);
+  const bal = balanceDue(order);
   const shipping = order.shippingCharge || 0;
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
@@ -447,9 +447,9 @@ export function printBatchInvoice(
   invoiceNumber: string,
   dateStr: string, // "YYYY-MM-DD"
 ) {
-  const adv      = orders.reduce((s, o) => s + totalAdvance(o), 0);
-  const total    = orders.reduce((s, o) => s + orderTotal(o), 0);
-  const bal      = orders.reduce((s, o) => s + balanceDue(o), 0);
+  const adv = orders.reduce((s, o) => s + totalAdvance(o), 0);
+  const total = orders.reduce((s, o) => s + orderTotal(o), 0);
+  const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
   const shipping = orders.reduce((s, o) => s + (o.shippingCharge || 0), 0);
 
   const ITEM_ROWS = Math.max(10, orders.length);
