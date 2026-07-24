@@ -51,15 +51,31 @@ export interface CatalogPage {
   hasMore: boolean;
 }
 
-/** One page of a folder's items, newest first. Pass the previous page's cursor to get the next page. */
+export type CatalogSort = "date_desc" | "date_asc" | "name_asc" | "name_desc";
+export const CATALOG_SORT_OPTIONS: { value: CatalogSort; label: string }[] = [
+  { value: "date_desc", label: "Newest first" },
+  { value: "date_asc", label: "Oldest first" },
+  { value: "name_asc", label: "Name (A-Z / 1-9)" },
+  { value: "name_desc", label: "Name (Z-A / 9-1)" },
+];
+
+function sortField(sort: CatalogSort): "createdAt" | "name" {
+  return sort.startsWith("name") ? "name" : "createdAt";
+}
+function sortDir(sort: CatalogSort): "asc" | "desc" {
+  return sort.endsWith("asc") ? "asc" : "desc";
+}
+
+/** One page of a folder's items. Pass the previous page's cursor to get the next page — if `sort` changes, start over with cursor = null. */
 export async function fetchCatalogItemsPage(
   folderId: string,
   cursor: QueryDocumentSnapshot<DocumentData> | null,
+  sort: CatalogSort = "date_desc",
 ): Promise<CatalogPage> {
   const q = query(
     collection(fsdb, COL),
     where("folderId", "==", folderId),
-    orderBy("createdAt", "desc"),
+    orderBy(sortField(sort), sortDir(sort)),
     ...(cursor ? [startAfter(cursor)] : []),
     limit(CATALOG_PAGE_SIZE),
   );

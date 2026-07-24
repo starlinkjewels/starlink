@@ -26,6 +26,10 @@ import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import {
+  Select, SelectContent, SelectItem,
+  SelectTrigger, SelectValue,
+} from "@/components/ui/select";
+import {
   fetchCatalogItemsPage,
   countCatalogItems,
   findFolderThumbnail,
@@ -33,6 +37,8 @@ import {
   createCatalogItem,
   deleteCatalogItem,
   deleteCatalogItemsInFolders,
+  CATALOG_SORT_OPTIONS,
+  type CatalogSort,
 } from "@/lib/catalogItems";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 
@@ -571,11 +577,13 @@ function ItemGallery({
   canEdit,
   favIds,
   bannerItemId,
+  sort,
   sentinelRef,
   onOpen,
   onToggleFav,
   onDelete,
   onSetBanner,
+  onSortChange,
 }: {
   items: CatalogItem[];
   itemsLoading: boolean;
@@ -583,21 +591,37 @@ function ItemGallery({
   canEdit: boolean;
   favIds: Set<string>;
   bannerItemId?: string;
+  sort: CatalogSort;
   sentinelRef: React.RefObject<HTMLDivElement | null>;
   onOpen(items: CatalogItem[], idx: number): void;
   onToggleFav(id: string): void;
   onDelete(id: string): void;
   onSetBanner(item: CatalogItem): void;
+  onSortChange(sort: CatalogSort): void;
 }) {
   if (items.length === 0 && !itemsLoading && !canEdit) return null;
   return (
     <div className="space-y-3">
       {(items.length > 0 || itemsLoading) && (
         <>
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-0.5">
-            Files · {items.length}
-            {itemsHasMore ? "+" : ""}
-          </p>
+          <div className="flex items-center justify-between gap-3 px-0.5">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Files · {items.length}
+              {itemsHasMore ? "+" : ""}
+            </p>
+            <Select value={sort} onValueChange={(v) => onSortChange(v as CatalogSort)}>
+              <SelectTrigger className="rounded-lg h-8 w-auto gap-1.5 text-xs px-2.5">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {CATALOG_SORT_OPTIONS.map((opt) => (
+                  <SelectItem key={opt.value} value={opt.value} className="text-xs">
+                    {opt.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
           <VirtualGrid
             items={items}
             estimateRowHeight={ITEM_ROW_ESTIMATE_PX}
@@ -646,6 +670,7 @@ export function CatalogPage() {
   const [itemsCursor, setItemsCursor] = useState<QueryDocumentSnapshot<DocumentData> | null>(null);
   const [itemsHasMore, setItemsHasMore] = useState(false);
   const [itemsLoading, setItemsLoading] = useState(false);
+  const [itemsSort, setItemsSort] = useState<CatalogSort>("date_desc");
 
   // Async-fetched per-folder item counts/thumbnails (folder cards no longer
   // have the full item list in memory to derive these from locally).
@@ -707,7 +732,7 @@ export function CatalogPage() {
     setItemsCursor(null);
     setItemsHasMore(false);
     setItemsLoading(true);
-    fetchCatalogItemsPage(currentFolderId, null)
+    fetchCatalogItemsPage(currentFolderId, null, itemsSort)
       .then((page) => {
         if (cancelled) return;
         setItems(page.items);
@@ -720,20 +745,20 @@ export function CatalogPage() {
     return () => {
       cancelled = true;
     };
-  }, [currentFolderId]);
+  }, [currentFolderId, itemsSort]);
 
   const loadMoreItems = useCallback(async () => {
     if (!currentFolderId || !itemsHasMore || itemsLoading) return;
     setItemsLoading(true);
     try {
-      const page = await fetchCatalogItemsPage(currentFolderId, itemsCursor);
+      const page = await fetchCatalogItemsPage(currentFolderId, itemsCursor, itemsSort);
       setItems((prev) => [...prev, ...page.items]);
       setItemsCursor(page.cursor);
       setItemsHasMore(page.hasMore);
     } finally {
       setItemsLoading(false);
     }
-  }, [currentFolderId, itemsCursor, itemsHasMore, itemsLoading]);
+  }, [currentFolderId, itemsCursor, itemsHasMore, itemsLoading, itemsSort]);
 
   // Infinite-scroll trigger for the item gallery — declared here (not inside
   // the nested ItemGallery() render helper below) so the ref/effect belong to
@@ -1476,11 +1501,13 @@ export function CatalogPage() {
             canEdit={canEdit}
             favIds={favIds}
             bannerItemId={folders.find((f) => f.id === currentFolderId)?.bannerItemId}
+            sort={itemsSort}
             sentinelRef={itemsSentinelRef}
             onOpen={(its, idx) => setLightbox({ items: its, idx })}
             onToggleFav={toggleFavorite}
             onDelete={(id) => setDeleteConfirm(id)}
             onSetBanner={(item) => currentFolderId && setFolderBanner(currentFolderId, item)}
+            onSortChange={setItemsSort}
           />
         </>
       )}
