@@ -18,6 +18,7 @@ import {
   MoreVertical,
   ChevronLeft,
   Heart,
+  ImagePlus,
 } from "lucide-react";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
@@ -373,17 +374,21 @@ function ItemCard({
   isFav,
   canEdit,
   folderName,
+  isBanner,
   onOpen,
   onToggleFav,
   onDelete,
+  onSetBanner,
 }: {
   item: CatalogItem;
   isFav: boolean;
   canEdit: boolean;
   folderName?: string;
+  isBanner?: boolean;
   onOpen(): void;
   onToggleFav(): void;
   onDelete?(): void;
+  onSetBanner?(): void;
 }) {
   return (
     <motion.div
@@ -437,6 +442,31 @@ function ItemCard({
           >
             <Trash2 className="h-3.5 w-3.5" />
           </button>
+        )}
+        {/* Set as folder banner (admin/employee, images only) */}
+        {canEdit && onSetBanner && item.type === "image" && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onSetBanner();
+            }}
+            title={isBanner ? "Remove as folder banner" : "Set as folder banner"}
+            className={`absolute bottom-2 right-2 h-8 w-8 rounded-lg border grid place-items-center shadow-sm transition-colors
+              ${
+                isBanner
+                  ? "bg-primary text-primary-foreground border-primary"
+                  : "bg-white/90 border-border/60 text-muted-foreground hover:text-primary active:text-primary"
+              }`}
+          >
+            <ImagePlus className="h-3.5 w-3.5" />
+          </button>
+        )}
+        {isBanner && (
+          <div className="absolute bottom-2 left-2">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-primary text-primary-foreground">
+              Banner
+            </span>
+          </div>
         )}
       </button>
 
@@ -540,20 +570,24 @@ function ItemGallery({
   itemsHasMore,
   canEdit,
   favIds,
+  bannerItemId,
   sentinelRef,
   onOpen,
   onToggleFav,
   onDelete,
+  onSetBanner,
 }: {
   items: CatalogItem[];
   itemsLoading: boolean;
   itemsHasMore: boolean;
   canEdit: boolean;
   favIds: Set<string>;
+  bannerItemId?: string;
   sentinelRef: React.RefObject<HTMLDivElement | null>;
   onOpen(items: CatalogItem[], idx: number): void;
   onToggleFav(id: string): void;
   onDelete(id: string): void;
+  onSetBanner(item: CatalogItem): void;
 }) {
   if (items.length === 0 && !itemsLoading && !canEdit) return null;
   return (
@@ -573,9 +607,11 @@ function ItemGallery({
                 item={item}
                 isFav={favIds.has(item.id)}
                 canEdit={canEdit}
+                isBanner={bannerItemId === item.id}
                 onOpen={() => onOpen(items, i)}
                 onToggleFav={() => onToggleFav(item.id)}
                 onDelete={canEdit ? () => onDelete(item.id) : undefined}
+                onSetBanner={canEdit ? () => onSetBanner(item) : undefined}
               />
             )}
           />
@@ -728,9 +764,11 @@ export function CatalogPage() {
       await Promise.all(
         subfolders.map(async (folder) => {
           const ids = [folder.id, ...descendantIds(folder.id)];
+          // Skip the thumbnail lookup entirely when an explicit banner is
+          // set — folder.bannerUrl already covers rendering, no extra read needed.
           const [count, thumb] = await Promise.all([
             countCatalogItems(ids),
-            findFolderThumbnail(ids),
+            folder.bannerUrl ? Promise.resolve(null) : findFolderThumbnail(ids),
           ]);
           counts[folder.id] = count;
           thumbs[folder.id] = thumb;
@@ -813,6 +851,23 @@ export function CatalogPage() {
       if (f) f.name = val;
     });
     setRenamingId(null);
+  }
+
+  /** Toggle an image as the current folder's explicit cover — clicking the
+   *  already-set banner again clears it, reverting to the automatic
+   *  first-image thumbnail. */
+  function setFolderBanner(folderId: string, item: CatalogItem) {
+    updateDb((db) => {
+      const f = db.catalogFolders.find((f) => f.id === folderId);
+      if (!f) return;
+      if (f.bannerItemId === item.id) {
+        delete f.bannerItemId;
+        delete f.bannerUrl;
+      } else {
+        f.bannerItemId = item.id;
+        f.bannerUrl = item.data;
+      }
+    });
   }
 
   function descendantIds(id: string): string[] {
@@ -933,7 +988,7 @@ export function CatalogPage() {
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
           {subfolders.map((folder) => {
             const count = folderCounts[folder.id] ?? null;
-            const thumb = folderThumbs[folder.id];
+            const coverUrl = folder.bannerUrl ?? folderThumbs[folder.id]?.data;
             const isRenaming = renamingId === folder.id;
             return (
               <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
@@ -944,8 +999,8 @@ export function CatalogPage() {
                   className="w-full flex flex-col rounded-2xl border border-border/60 active:border-primary/40 bg-white shadow-sm overflow-hidden text-left"
                 >
                   <div className="aspect-video w-full bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden relative">
-                    {thumb ? (
-                      <img src={thumb.data} alt="" className="w-full h-full object-cover" />
+                    {coverUrl ? (
+                      <img src={coverUrl} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="absolute inset-0 flex items-center justify-center">
                         <Folder className="h-10 w-10 text-amber-400" />
@@ -1278,7 +1333,7 @@ export function CatalogPage() {
               <FavoritesFolderCard />
               {subfolders.map((folder) => {
                 const count = folderCounts[folder.id] ?? null;
-                const thumb = folderThumbs[folder.id];
+                const coverUrl = folder.bannerUrl ?? folderThumbs[folder.id]?.data;
                 const isRenaming = renamingId === folder.id;
                 return (
                   <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
@@ -1289,8 +1344,8 @@ export function CatalogPage() {
                       className="w-full flex flex-col rounded-2xl border border-border/60 active:border-primary/40 bg-white shadow-sm overflow-hidden text-left"
                     >
                       <div className="aspect-video w-full bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden relative">
-                        {thumb ? (
-                          <img src={thumb.data} alt="" className="w-full h-full object-cover" />
+                        {coverUrl ? (
+                          <img src={coverUrl} alt="" className="w-full h-full object-cover" />
                         ) : (
                           <div className="absolute inset-0 flex items-center justify-center">
                             <Folder className="h-10 w-10 text-amber-400" />
@@ -1420,10 +1475,12 @@ export function CatalogPage() {
             itemsHasMore={itemsHasMore}
             canEdit={canEdit}
             favIds={favIds}
+            bannerItemId={folders.find((f) => f.id === currentFolderId)?.bannerItemId}
             sentinelRef={itemsSentinelRef}
             onOpen={(its, idx) => setLightbox({ items: its, idx })}
             onToggleFav={toggleFavorite}
             onDelete={(id) => setDeleteConfirm(id)}
+            onSetBanner={(item) => currentFolderId && setFolderBanner(currentFolderId, item)}
           />
         </>
       )}

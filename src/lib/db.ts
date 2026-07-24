@@ -222,6 +222,8 @@ export interface CatalogFolder {
   parentId?: string | null; // null / undefined = root
   createdBy: string; // userId
   createdAt: string;
+  bannerItemId?: string; // explicitly chosen cover image — falls back to the first image found if unset
+  bannerUrl?: string; // that item's image URL, denormalized here so folder cards render without an extra fetch
 }
 
 export type CatalogItemType = "image" | "video";
