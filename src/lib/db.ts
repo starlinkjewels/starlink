@@ -114,7 +114,7 @@ export interface Order {
   contactPerson: string;
   jewelleryType:
     "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
-  metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver";
+  metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver" | "Two Tone Casting";
   diamondType: "Natural" | "Lab Grown";
   quantity: number;
   diamondWeight: number; // estimated diamond weight (ct) — entered at order creation

@@ -308,7 +308,7 @@ export function NewOrderPage() {
               <Select value={f.metal} onValueChange={setMetal}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Gold","White Gold","Rose Gold","Platinum","Silver"].map(x =>
+                  {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting"].map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
