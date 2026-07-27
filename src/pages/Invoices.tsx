@@ -8,6 +8,7 @@ import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search, Downloa
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { printBatchInvoice } from "@/lib/invoicePrint";
@@ -128,16 +129,13 @@ export function InvoicesPage() {
             />
           </div>
           {user!.role !== "client" && (
-            <select
-              value={clientFilter}
-              onChange={e => setClientFilter(e.target.value)}
-              className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            >
-              <option value="all">All Clients</option>
-              {clientOptions.map(c => (
-                <option key={c.id} value={c.id}>{c.companyName}</option>
-              ))}
-            </select>
+            <Select value={clientFilter} onValueChange={setClientFilter}>
+              <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Clients</SelectItem>
+                {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              </SelectContent>
+            </Select>
           )}
           {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
         </div>
@@ -318,16 +316,13 @@ export function InvoicesPage() {
               />
             </div>
             {user!.role !== "client" && (
-              <select
-                value={ledgerClientFilter}
-                onChange={e => setLedgerClientFilter(e.target.value)}
-                className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              >
-                <option value="all">All Clients</option>
-                {clientOptions.map(c => (
-                  <option key={c.id} value={c.id}>{c.companyName}</option>
-                ))}
-              </select>
+              <Select value={ledgerClientFilter} onValueChange={setLedgerClientFilter}>
+                <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Clients</SelectItem>
+                  {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                </SelectContent>
+              </Select>
             )}
             {ordersWithAdvance.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {ledStart + 1}–{ledEnd} of {ordersWithAdvance.length}</p>}
           </div>

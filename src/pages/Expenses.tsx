@@ -262,38 +262,30 @@ export function ExpensesPage() {
           {isAdmin && (
             <div className="flex items-center gap-2 flex-wrap">
               {/* Employee picker */}
-              <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl px-3 h-9 text-sm">
+              <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
                 <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <select
-                  value={mineFilter}
-                  onChange={e => { setMineFilter(e.target.value); setMineClientFilter("all"); }}
-                  className="bg-transparent border-none outline-none text-sm text-foreground"
-                >
-                  <option value="self">My Expenses</option>
-                  <option value="all">All Employees</option>
-                  {staffUsers
-                    .filter(u => u.id !== user!.id)
-                    .map(u => (
-                      <option key={u.id} value={u.id}>
-                        {u.name} ({u.role})
-                      </option>
+                <Select value={mineFilter} onValueChange={v => { setMineFilter(v); setMineClientFilter("all"); }}>
+                  <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="self">My Expenses</SelectItem>
+                    <SelectItem value="all">All Employees</SelectItem>
+                    {staffUsers.filter(u => u.id !== user!.id).map(u => (
+                      <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>
                     ))}
-                </select>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Client picker — only when viewing all or a specific employee */}
               {mineFilter !== "self" && (
-                <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl px-3 h-9 text-sm">
-                  <select
-                    value={mineClientFilter}
-                    onChange={e => setMineClientFilter(e.target.value)}
-                    className="bg-transparent border-none outline-none text-sm text-foreground"
-                  >
-                    <option value="all">All Clients</option>
-                    {db.clients.map(c => (
-                      <option key={c.id} value={c.id}>{c.companyName}</option>
-                    ))}
-                  </select>
+                <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
+                  <Select value={mineClientFilter} onValueChange={setMineClientFilter}>
+                    <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Clients</SelectItem>
+                      {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
               )}
 
@@ -350,18 +342,15 @@ export function ExpensesPage() {
           {/* Filters bar */}
           <div className="flex flex-wrap gap-2">
             {/* Employee filter */}
-            <div className="relative flex items-center gap-2 bg-white border border-border/80 rounded-xl px-3 h-9 text-sm min-w-[160px]">
+            <div className="relative flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm min-w-[160px]">
               <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <select
-                value={filterEmployee}
-                onChange={e => setFilterEmployee(e.target.value)}
-                className="bg-transparent border-none outline-none text-sm flex-1 text-foreground"
-              >
-                <option value="all">All Staff</option>
-                {staffUsers.map(u => (
-                  <option key={u.id} value={u.id}>{u.name} ({u.role})</option>
-                ))}
-              </select>
+              <Select value={filterEmployee} onValueChange={setFilterEmployee}>
+                <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 flex-1 focus:ring-0"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Staff</SelectItem>
+                  {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                </SelectContent>
+              </Select>
               {filterEmployee !== "all" && (
                 <button
                   onClick={() => setFilterEmployee("all")}
@@ -373,15 +362,14 @@ export function ExpensesPage() {
             </div>
 
             {/* Category filter */}
-            <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl px-3 h-9 text-sm">
-              <select
-                value={filterCategory}
-                onChange={e => setFilterCategory(e.target.value)}
-                className="bg-transparent border-none outline-none text-sm text-foreground"
-              >
-                <option value="all">All Categories</option>
-                {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+            <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
+              <Select value={filterCategory} onValueChange={setFilterCategory}>
+                <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Search */}
