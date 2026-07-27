@@ -387,7 +387,8 @@ export function OrderDetailPage() {
   const addAdvance = () => {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (advLockerId && (!advLockerAmount || Number(advLockerAmount) <= 0)) { toast.error("Enter the amount actually deposited in that locker"); return; }
+    if (!advLockerId) { toast.error("Choose which locker this was deposited into"); return; }
+    if (!advLockerAmount || Number(advLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
     let paidInFull = false;
     let isFirst = false;
     let toCredit = 0;
@@ -1205,11 +1206,10 @@ export function OrderDetailPage() {
                 </div>
                 <div className="grid md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
-                    <Label className="text-xs">Deposited to Locker (optional)</Label>
-                    <Select value={advLockerId || "__none"} onValueChange={v => { setAdvLockerId(v === "__none" ? "" : v); if (v === "__none") setAdvLockerAmount(""); }}>
-                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <Label className="text-xs">Deposited to Locker *</Label>
+                    <Select value={advLockerId} onValueChange={setAdvLockerId}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="__none">Don't track in Locker</SelectItem>
                         {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
                       </SelectContent>
                     </Select>

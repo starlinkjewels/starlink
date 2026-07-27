@@ -74,7 +74,8 @@ export function ClientHistoryPage() {
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (payLockerId && (!payLockerAmount || Number(payLockerAmount) <= 0)) { toast.error("Enter the amount actually deposited in that locker"); return; }
+    if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
+    if (!payLockerAmount || Number(payLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
@@ -405,10 +406,9 @@ export function ClientHistoryPage() {
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Select value={payLockerId || "__none"} onValueChange={v => { setPayLockerId(v === "__none" ? "" : v); if (v === "__none") setPayLockerAmount(""); }}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker (optional)" /></SelectTrigger>
+              <Select value={payLockerId} onValueChange={setPayLockerId}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="__none">Don't track in Locker</SelectItem>
                   {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
                 </SelectContent>
               </Select>

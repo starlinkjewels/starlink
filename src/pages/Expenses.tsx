@@ -5,9 +5,10 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, Minus, ChevronDown,
+  TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 
 const CATEGORIES: ExpenseCategory[] = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
@@ -120,7 +121,8 @@ export function ExpensesPage() {
     if (!form.title.trim()) { setError("Title is required."); return; }
     const amount = parseFloat(form.amount);
     if (!amount || isNaN(amount) || amount <= 0) { setError("Enter a valid amount."); return; }
-    if (expLockerId && (!expLockerAmount || Number(expLockerAmount) <= 0)) { setError("Enter the amount actually paid from that locker."); return; }
+    if (!expLockerId) { setError("Choose which locker this was paid from."); return; }
+    if (!expLockerAmount || Number(expLockerAmount) <= 0) { setError("Enter the amount actually paid from that locker."); return; }
 
     setSaving(true);
     const now = new Date().toISOString();
@@ -494,16 +496,10 @@ export function ExpensesPage() {
                   </div>
                   <div>
                     <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
-                    <div className="relative">
-                      <select
-                        value={form.category}
-                        onChange={e => setForm(f => ({ ...f, category: e.target.value as ExpenseCategory }))}
-                        className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition appearance-none pr-8"
-                      >
-                        {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                    </div>
+                    <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory }))}>
+                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+                      <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    </Select>
                   </div>
                 </div>
 
@@ -512,43 +508,35 @@ export function ExpensesPage() {
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
                     Related Client <span className="text-muted-foreground font-normal">(optional)</span>
                   </label>
-                  <div className="relative">
-                    <select
-                      value={form.clientId}
-                      onChange={e => setForm(f => ({ ...f, clientId: e.target.value }))}
-                      className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition appearance-none pr-8"
-                    >
-                      <option value="">No client</option>
-                      {db.clients.map(c => (
-                        <option key={c.id} value={c.id}>{c.companyName}</option>
-                      ))}
-                    </select>
-                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                  </div>
+                  <Select value={form.clientId || "__none"} onValueChange={v => setForm(f => ({ ...f, clientId: v === "__none" ? "" : v }))}>
+                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">No client</SelectItem>
+                      {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
                 </div>
 
-                {/* Paid from locker */}
+                {/* Paid from locker — compulsory: every expense must be traceable to an account */}
                 <div>
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Paid from Locker <span className="text-muted-foreground font-normal">(optional)</span>
+                    Paid from Locker <span className="text-destructive">*</span>
                   </label>
-                  <div className="relative">
-                    <select
-                      value={expLockerId}
-                      onChange={e => {
-                        setExpLockerId(e.target.value);
-                        const l = db.lockers.find(x => x.id === e.target.value);
-                        setExpLockerAmount(l?.currency === "USD" ? form.amount : "");
-                      }}
-                      className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition appearance-none pr-8"
-                    >
-                      <option value="">Don't track in Locker</option>
+                  <Select
+                    value={expLockerId}
+                    onValueChange={v => {
+                      setExpLockerId(v);
+                      const l = db.lockers.find(x => x.id === v);
+                      setExpLockerAmount(l?.currency === "USD" ? form.amount : "");
+                    }}
+                  >
+                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
+                    <SelectContent>
                       {db.lockers.filter(l => l.active !== false).map(l => (
-                        <option key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</option>
+                        <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
                       ))}
-                    </select>
-                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
-                  </div>
+                    </SelectContent>
+                  </Select>
                   {expLockerId && (
                     <div className="relative mt-2">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">

@@ -341,10 +341,14 @@ export function AppLayout() {
         </header>
 
         {/* ── Page content ── */}
+        {/* opacity-only (no x/y/scale) — a transform here would make this the
+            containing block for every `position: fixed` element inside any
+            page, clipping full-screen modals/backdrops to this box's height
+            instead of the real viewport. */}
         <motion.main
           key={loc.pathname}
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           <Outlet />
