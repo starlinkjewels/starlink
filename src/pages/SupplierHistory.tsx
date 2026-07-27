@@ -125,6 +125,14 @@ export function SupplierHistoryPage() {
           if (o) {
             if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
             o.linkedPurchaseIds.push(purchaseId);
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            const qty = material === "gold" ? Number(goldWeight) : Number(diaCarat);
+            const label = material === "gold" ? `${qty}g ${goldPurity} gold` : `${qty}ct diamond${diaQuality ? ` (${diaQuality})` : ""}`;
+            o.manufacturingLog.push({
+              id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+              material, amountMaterial: qty, amountInr: finalTotalInr,
+              remarks: `Purchased ${label} from ${supplier.name} for this order — ${fmtMoneyInr(finalTotalInr)}`,
+            });
           }
         }
       });

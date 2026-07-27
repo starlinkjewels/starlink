@@ -1081,10 +1081,14 @@ export function OrderDetailPage() {
             {[...order.manufacturingLog].sort((a, b) => +new Date(a.at) - +new Date(b.at)).map((entry, idx) => {
               const factory = db.factories.find(f => f.id === entry.factoryId);
               const emp = db.users.find(u => u.id === entry.employeeId);
-              const Icon = entry.type === "making_charge_added" ? Coins : entry.type === "piece_finished" ? Gem : FactoryIcon;
+              const Icon =
+                entry.type === "material_purchased" ? Truck :
+                entry.type === "making_charge_added" ? Coins :
+                entry.type === "piece_finished" ? Gem : FactoryIcon;
               const label =
+                entry.type === "material_purchased" ? "Material purchased" :
                 entry.type === "factory_assigned" ? "Factory assigned" :
-                entry.type === "gold_issued" ? "Gold issued" :
+                entry.type === "material_issued" ? "Material issued" :
                 entry.type === "piece_finished" ? "Piece finished" : "Making charge added";
               return (
                 <motion.div key={entry.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }} className="relative">
@@ -1097,8 +1101,8 @@ export function OrderDetailPage() {
                       <span className="text-xs text-muted-foreground">{new Date(entry.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {entry.amountGold !== undefined && `${entry.amountGold}g gold`}
-                      {entry.amountGold !== undefined && entry.amountInr !== undefined && " · "}
+                      {entry.amountMaterial !== undefined && `${entry.amountMaterial}${entry.material === "diamond" ? "ct" : "g"} ${entry.material || ""}`}
+                      {entry.amountMaterial !== undefined && entry.amountInr !== undefined && " · "}
                       {entry.amountInr !== undefined && fmtMoneyInr(entry.amountInr)}
                       {emp?.name && <> · By {emp.name}</>}
                       {entry.remarks && <> · {entry.remarks}</>}

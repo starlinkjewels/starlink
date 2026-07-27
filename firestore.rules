@@ -108,7 +108,7 @@ service cloud.firestore {
     match /suppliers/{id}          { allow read, write: if isStaff(); }
     match /purchases/{id}          { allow read, write: if isStaff(); }
     match /factories/{id}          { allow read, write: if isStaff(); }
-    match /goldIssuances/{id}      { allow read, write: if isStaff(); }
+    match /materialIssuances/{id}  { allow read, write: if isStaff(); }
     match /stockMovements/{id}     { allow read, write: if isStaff(); }
     // Singleton running stock balance — mutated only via a transaction in
     // src/lib/stock.ts; this rule is defense-in-depth, not the primary

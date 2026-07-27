@@ -97,7 +97,7 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "goldIssuance" | "order";
+  refType: "materialIssuance" | "order";
   refId?: string;
   createdBy: string;
   note?: string;

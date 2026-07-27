@@ -85,7 +85,7 @@ export function FactoriesPage() {
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(fac => {
-          const issuances = db.goldIssuances.filter(i => i.factoryId === fac.id);
+          const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
           const account = factoryAccount(issuances);
           return (
             <div key={fac.id} className="card-luxe card-hover p-5 flex flex-col">
@@ -105,10 +105,14 @@ export function FactoriesPage() {
                 {fac.address && <p className="flex items-center gap-2 text-muted-foreground truncate"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{fac.address}</span></p>}
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
+              <div className="mt-4 grid grid-cols-3 gap-2">
                 <div className="p-2.5 rounded-xl bg-secondary text-center">
                   <p className="text-[10px] text-muted-foreground">Gold Out</p>
                   <p className="text-xs font-semibold">{account.goldOutstanding.toLocaleString()} g</p>
+                </div>
+                <div className="p-2.5 rounded-xl bg-secondary text-center">
+                  <p className="text-[10px] text-muted-foreground">Diamond Out</p>
+                  <p className="text-xs font-semibold">{account.diamondOutstanding.toLocaleString()} ct</p>
                 </div>
                 <div className={`p-2.5 rounded-xl text-center ${account.chargesPending > 0 ? "bg-destructive/5" : "bg-success/8"}`}>
                   <p className="text-[10px] text-muted-foreground">Charges Due</p>

@@ -30,7 +30,8 @@ export function Dashboard() {
   useEffect(() => subscribeStockLevels(setStockLevels), []);
   const ordersInProduction = db.orders.filter(o => o.status === "In Production").length;
   const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
-  const makingChargesPending = factoryAccount(db.goldIssuances).chargesPending;
+  const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
+  const makingChargesPending = factoryAccount(db.materialIssuances).chargesPending;
   const supplierPaymentsPending = supplierAccount(db.purchases).balanceOwed;
 
   const today = new Date().toDateString();
@@ -234,7 +235,7 @@ export function Dashboard() {
               <p className="text-xs text-muted-foreground">Sourcing &amp; production at a glance — all figures in INR</p>
             </div>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <Link to="/orders?status=In%20Production" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
               <Package className="h-4 w-4 mx-auto mb-1.5 text-primary" />
               <p className="text-xl font-bold text-brand-dark">{ordersInProduction}</p>
@@ -244,6 +245,11 @@ export function Dashboard() {
               <Coins className="h-4 w-4 mx-auto mb-1.5 text-amber-600" />
               <p className="text-xl font-bold text-brand-dark">{goldReserveGrams.toLocaleString()}g</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">Gold Reserve</p>
+            </Link>
+            <Link to="/stock" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+              <Gem className="h-4 w-4 mx-auto mb-1.5 text-blue-500" />
+              <p className="text-xl font-bold text-brand-dark">{diamondReserveCarats.toLocaleString()}ct</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Diamond Reserve</p>
             </Link>
             <Link to="/factories" className={`rounded-xl p-4 text-center transition-colors ${makingChargesPending > 0 ? "bg-destructive/5 hover:bg-destructive/10" : "bg-secondary hover:bg-secondary/70"}`}>
               <Gem className={`h-4 w-4 mx-auto mb-1.5 ${makingChargesPending > 0 ? "text-destructive" : "text-primary"}`} />
