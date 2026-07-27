@@ -6,14 +6,14 @@ import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
 } from "@/lib/manufacturing";
-import { decreaseStock } from "@/lib/stock";
+import { decreaseStock, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
-  Download, FileText, FileSpreadsheet,
+  Download, FileText, FileSpreadsheet, Undo2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -24,7 +24,7 @@ import {
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
-type IssuanceAction = "piece" | "charge" | "pay" | null;
+type IssuanceAction = "piece" | "charge" | "pay" | "return" | null;
 
 export function FactoryHistoryPage() {
   const { id } = useParams();
@@ -138,10 +138,14 @@ export function FactoryHistoryPage() {
   const [chargeAmount, setChargeAmount] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
+  const [returnQty, setReturnQty] = useState("");
+  const [returnNote, setReturnNote] = useState("");
+  const [returning, setReturning] = useState(false);
 
   const openAction = (issuanceId: string, action: IssuanceAction) => {
     setActiveIssuance({ id: issuanceId, action });
     setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayLockerId("");
+    setReturnQty(""); setReturnNote("");
   };
 
   const recordPiece = (issuance: MaterialIssuance) => {
@@ -206,9 +210,78 @@ export function FactoryHistoryPage() {
     setActiveIssuance({ id: "", action: null });
   };
 
-  const closeIssuance = (issuance: MaterialIssuance) => {
-    updateDb(d => { const mi = d.materialIssuances.find(x => x.id === issuance.id); if (mi) mi.status = "closed"; });
-    toast.success("Issuance closed");
+  // Diamond replaced / gold under- or over-used — return the unused portion
+  // straight to Stock so it's available for the next order (matches "manage
+  // from our stock"), instead of an issuance's leftover just vanishing.
+  const returnMaterial = async (issuance: MaterialIssuance) => {
+    const qty = Number(returnQty);
+    const unit = issuance.material === "gold" ? "g" : "ct";
+    const maxReturnable = Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
+    if (!qty || qty <= 0) { toast.error(`Enter the ${issuance.material} quantity to return`); return; }
+    if (qty > maxReturnable) { toast.error(`Can't return more than the unused remainder (${maxReturnable}${unit})`); return; }
+    const now = new Date().toISOString();
+    setReturning(true);
+    try {
+      await increaseStock({
+        material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: qty,
+        refType: "manual", createdBy: user!.id,
+        note: `Returned from ${factory.name} issuance${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
+      });
+      updateDb(d => {
+        const mi = d.materialIssuances.find(x => x.id === issuance.id);
+        if (!mi) return;
+        mi.quantityIssued = Math.round((mi.quantityIssued - qty) * 100) / 100;
+        const o = d.orders.find(o => o.id === issuance.orderId);
+        if (o) {
+          if (!o.manufacturingLog) o.manufacturingLog = [];
+          o.manufacturingLog.push({
+            id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: id,
+            material: issuance.material, amountMaterial: qty,
+            remarks: `${qty}${unit} ${issuance.material} returned from ${factory.name}${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
+          });
+        }
+      });
+      toast.success(`${qty}${unit} returned to stock`);
+      setActiveIssuance({ id: "", action: null });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to return material");
+    } finally { setReturning(false); }
+  };
+
+  // Any unused material still sitting against an issuance being closed goes
+  // back to Stock automatically — nothing is silently lost to "wastage" that
+  // was actually just never consumed.
+  const closeIssuance = async (issuance: MaterialIssuance) => {
+    const leftover = Math.round(issuanceWastage(issuance) * 100) / 100;
+    const unit = issuance.material === "gold" ? "g" : "ct";
+    const now = new Date().toISOString();
+    try {
+      if (leftover > 0) {
+        await increaseStock({
+          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
+          refType: "manual", createdBy: user!.id,
+          note: `Unused material returned on closing issuance for ${factory.name}`,
+        });
+      }
+      updateDb(d => {
+        const mi = d.materialIssuances.find(x => x.id === issuance.id);
+        if (mi) mi.status = "closed";
+        if (leftover > 0) {
+          const o = d.orders.find(o => o.id === issuance.orderId);
+          if (o) {
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            o.manufacturingLog.push({
+              id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: id,
+              material: issuance.material, amountMaterial: leftover,
+              remarks: `${leftover}${unit} unused ${issuance.material} returned to stock on closing issuance`,
+            });
+          }
+        }
+      });
+      toast.success(leftover > 0 ? `Issuance closed — ${leftover}${unit} returned to stock` : "Issuance closed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to close issuance");
+    }
   };
 
   const exportCsv = () => {
@@ -403,7 +476,7 @@ export function FactoryHistoryPage() {
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     {mi.material === "gold" ? <Coins className="h-3 w-3" /> : <Gem className="h-3 w-3" />}
                     {mi.quantityIssued}{unit} {mi.purityOrQuality} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
-                    {mi.status === "closed" && wastage !== 0 ? ` · ${wastage}${unit} wastage` : ""}
+                    {mi.status === "closed" && wastage !== 0 ? (wastage > 0 ? ` · ${wastage}${unit} wastage` : ` · ${Math.abs(wastage)}${unit} over-used`) : ""}
                   </p>
                 </div>
                 <div className="text-right shrink-0">
@@ -419,6 +492,9 @@ export function FactoryHistoryPage() {
                 <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "charge")} className="rounded-lg gap-1.5"><Coins className="h-3.5 w-3.5" />Set Charge</Button>
                 {mi.makingCharges.amountInr > 0 && pending > 0 && (
                   <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "pay")} className="rounded-lg gap-1.5"><CreditCard className="h-3.5 w-3.5" />Pay</Button>
+                )}
+                {mi.status === "open" && (
+                  <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "return")} className="rounded-lg gap-1.5"><Undo2 className="h-3.5 w-3.5" />Return</Button>
                 )}
                 {mi.status === "open" && (
                   <AsyncButton size="sm" variant="outline" onClick={() => closeIssuance(mi)} className="rounded-lg">Close Issuance</AsyncButton>
@@ -454,6 +530,21 @@ export function FactoryHistoryPage() {
                   <div className="flex gap-2">
                     <AsyncButton onClick={() => payCharge(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>
                     <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
+                  </div>
+                </div>
+              )}
+              {isActive && activeIssuance.action === "return" && (
+                <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
+                  <p className="text-xs text-muted-foreground">
+                    Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {Math.round((mi.quantityIssued - used) * 100) / 100}{unit}
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} className="rounded-xl h-9" placeholder={`Return qty (${unit})`} />
+                    <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-9" placeholder="Reason (e.g. diamond replaced)" />
+                    <div className="flex gap-2">
+                      <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9 flex-1">{returning ? "Saving…" : "Save"}</AsyncButton>
+                      <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
+                    </div>
                   </div>
                 </div>
               )}

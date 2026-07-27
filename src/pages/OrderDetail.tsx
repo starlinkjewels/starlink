@@ -22,7 +22,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
-import { fmtMoneyInr, purchasePending, issuancePending } from "@/lib/manufacturing";
+import { fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness } from "@/lib/manufacturing";
 import { decreaseStock } from "@/lib/stock";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
@@ -284,7 +284,17 @@ export function OrderDetailPage() {
   const canEditStage = () => user!.role === "admin"
     || (user!.role === "employee" && (order.assignedEmployeeId === user!.id || client?.accountManagerId === user!.id));
 
-  const advanceStep = (idx: number) => {
+  // "Final Approval" can't be marked complete until the gold/diamond this
+  // order actually needs has been issued to a factory — admins can still
+  // force it through (e.g. material sourced outside this system) so a
+  // legacy or edge-case order can never get permanently stuck.
+  const readiness = manufacturingReadiness(order, db.materialIssuances);
+
+  const advanceStep = (idx: number, overrideReadiness = false) => {
+    if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
+      toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
+      return;
+    }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
@@ -301,6 +311,11 @@ export function OrderDetailPage() {
       if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
     toast.success("Stage marked complete");
+  };
+
+  const forceAdvanceStep = (idx: number) => {
+    if (!confirm(`Mark Final Approval complete without recording ${readiness.missing.join(" and ")} issuance? Only do this if the material was sourced outside this system.`)) return;
+    advanceStep(idx, true);
   };
 
   // Undo a stage marked complete by mistake — this stage becomes the current
@@ -1220,9 +1235,21 @@ export function OrderDetailPage() {
                       {emp?.name && <>By {emp.name}</>}{t.department && <> · {t.department}</>}{t.remarks && <> · {t.remarks}</>}
                     </p>
                   )}
+                  {canEditStage() && !isDone && isActive && t.step === "Final Approval" && !readiness.ready && (
+                    <div className="mt-2 p-2 rounded-lg bg-destructive/5 border border-destructive/20">
+                      <p className="text-[11px] text-destructive font-medium">
+                        Issue {readiness.missing.join(" and ")} to a factory before Final Approval
+                      </p>
+                      {user!.role === "admin" && (
+                        <button onClick={() => forceAdvanceStep(idx)} className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline">
+                          Force complete anyway (admin override)
+                        </button>
+                      )}
+                    </div>
+                  )}
                   {canEditStage() && !isDone && (
                     isActive
-                      ? <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                      ? (t.step !== "Final Approval" || readiness.ready) && <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
                   {canEditStage() && isDone && (
@@ -1261,6 +1288,13 @@ export function OrderDetailPage() {
                 <FactoryIcon className="h-4 w-4" /> Issue to Factory
               </Button>
             </div>
+          </div>
+
+          <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
+            {readiness.ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
+            {readiness.ready
+              ? "Ready for Final Approval — all required material issued to a factory"
+              : `Final Approval blocked — issue ${readiness.missing.join(" and ")} to a factory first`}
           </div>
 
           {showBuyForm && (
@@ -1438,12 +1472,14 @@ export function OrderDetailPage() {
               const emp = db.users.find(u => u.id === entry.employeeId);
               const Icon =
                 entry.type === "material_purchased" ? Truck :
+                entry.type === "material_returned" ? RotateCcw :
                 entry.type === "making_charge_added" ? Coins :
                 entry.type === "piece_finished" ? Gem : FactoryIcon;
               const label =
                 entry.type === "material_purchased" ? "Material purchased" :
                 entry.type === "factory_assigned" ? "Factory assigned" :
                 entry.type === "material_issued" ? "Material issued" :
+                entry.type === "material_returned" ? "Material returned" :
                 entry.type === "piece_finished" ? "Piece finished" : "Making charge added";
               return (
                 <motion.div key={entry.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }} className="relative">

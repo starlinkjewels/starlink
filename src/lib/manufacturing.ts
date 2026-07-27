@@ -13,9 +13,41 @@ import {
   type MaterialIssuance,
   type Locker,
   type LockerTransaction,
+  type Order,
 } from "./db";
 
 const r0 = (n: number) => Math.round(n);
+
+// This module only tracks gold (by karat purity) and diamond — Platinum/Silver
+// orders never need a factory material issuance to proceed.
+const GOLDLESS_METALS = new Set(["Platinum", "Silver"]);
+
+export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondWeight">): {
+  needsGold: boolean;
+  needsDiamond: boolean;
+} {
+  return {
+    needsGold: !GOLDLESS_METALS.has(order.metal),
+    needsDiamond: order.diamondWeight > 0,
+  };
+}
+
+/**
+ * Gates "Final Approval" on the order Timeline: gold/diamond must have been
+ * issued to a factory for THIS order before the piece can be signed off —
+ * only for whichever materials the order actually calls for.
+ */
+export function manufacturingReadiness(
+  order: Pick<Order, "id" | "metal" | "diamondWeight">,
+  issuances: MaterialIssuance[],
+): { ready: boolean; missing: ("gold" | "diamond")[] } {
+  const { needsGold, needsDiamond } = orderMaterialRequirements(order);
+  const orderIssuances = issuances.filter(i => i.orderId === order.id);
+  const missing: ("gold" | "diamond")[] = [];
+  if (needsGold && !orderIssuances.some(i => i.material === "gold")) missing.push("gold");
+  if (needsDiamond && !orderIssuances.some(i => i.material === "diamond")) missing.push("diamond");
+  return { ready: missing.length === 0, missing };
+}
 
 export function fmtMoneyInr(n: number): string {
   return new Intl.NumberFormat("en-IN", {

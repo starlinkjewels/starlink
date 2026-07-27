@@ -110,7 +110,7 @@ export interface AdvancePayment {
 // Manufacturing events shown alongside (but never mixed into) the fixed,
 // index-based `timeline` array — see Order.manufacturingLog below.
 export type ManufacturingLogEntryType =
-  "material_purchased" | "factory_assigned" | "material_issued" | "piece_finished" | "making_charge_added";
+  "material_purchased" | "factory_assigned" | "material_issued" | "material_returned" | "piece_finished" | "making_charge_added";
 
 export interface ManufacturingLogEntry {
   id: string;
