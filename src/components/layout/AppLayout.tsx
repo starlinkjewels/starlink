@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
@@ -41,6 +41,10 @@ const MORE_NAV: NavItem[] = [
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
+  { to: "/locker", label: "Locker", icon: Landmark, roles: ["admin","employee"] },
+  { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin","employee"] },
+  { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
+  { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { to: "/notifications", label: "Alerts", icon: Bell },
@@ -66,6 +70,10 @@ const PAGE_TITLES: Record<string, string> = {
   "/settings": "Settings",
   "/search": "Search",
   "/profile": "My Profile",
+  "/locker": "Locker",
+  "/suppliers": "Suppliers",
+  "/stock": "Stock",
+  "/factories": "Factories",
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -87,6 +95,10 @@ const ICON_COLORS: Record<string, string> = {
   "/settings":   "bg-slate-500/15 text-slate-600",
   "/search":     "bg-primary/15 text-primary",
   "/profile":    "bg-brand-dark/15 text-brand-dark",
+  "/locker":     "bg-teal-500/15 text-teal-600",
+  "/suppliers":  "bg-lime-500/15 text-lime-600",
+  "/stock":      "bg-cyan-500/15 text-cyan-600",
+  "/factories":  "bg-orange-500/15 text-orange-600",
 };
 
 export function AppLayout() {
@@ -133,7 +145,9 @@ export function AppLayout() {
   const pageTitle = PAGE_TITLES[loc.pathname] ??
     (loc.pathname.startsWith("/orders/") ? "Order Detail" :
      loc.pathname.startsWith("/clients/") ? "Client History" :
-     loc.pathname.startsWith("/employees/") ? "Employee Detail" : "");
+     loc.pathname.startsWith("/employees/") ? "Employee Detail" :
+     loc.pathname.startsWith("/suppliers/") ? "Supplier Ledger" :
+     loc.pathname.startsWith("/factories/") ? "Factory Ledger" : "");
 
   const initials = user?.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 

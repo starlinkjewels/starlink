@@ -12,11 +12,13 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
+  Factory as FactoryIcon, Coins, Gem,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
+import { fmtMoneyInr } from "@/lib/manufacturing";
 
 /** Compress a File to a base64 JPEG ≤800px */
 async function compressImage(file: File): Promise<string> {
@@ -1065,6 +1067,49 @@ export function OrderDetailPage() {
           })}
         </div>
       </div>
+
+      {/* Manufacturing Log — a separate, append-only array from `timeline` on
+          purpose (see src/lib/db.ts ManufacturingLogEntry comment): these are
+          immutable facts, not progression steps, so they never touch the
+          index-based advance/revert logic above. Shown in the same visual
+          style so it reads as one continuous story. */}
+      {!!order.manufacturingLog?.length && (
+        <div className="card-luxe p-6">
+          <h3 className="font-display text-xl text-brand-dark mb-5">Manufacturing Log</h3>
+          <div className="relative pl-8 space-y-4">
+            <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
+            {[...order.manufacturingLog].sort((a, b) => +new Date(a.at) - +new Date(b.at)).map((entry, idx) => {
+              const factory = db.factories.find(f => f.id === entry.factoryId);
+              const emp = db.users.find(u => u.id === entry.employeeId);
+              const Icon = entry.type === "making_charge_added" ? Coins : entry.type === "piece_finished" ? Gem : FactoryIcon;
+              const label =
+                entry.type === "factory_assigned" ? "Factory assigned" :
+                entry.type === "gold_issued" ? "Gold issued" :
+                entry.type === "piece_finished" ? "Piece finished" : "Making charge added";
+              return (
+                <motion.div key={entry.id} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }} className="relative">
+                  <div className="absolute -left-8 top-0.5 h-6 w-6 rounded-full grid place-items-center border-2 bg-white border-border text-muted-foreground">
+                    <Icon className="h-3 w-3" />
+                  </div>
+                  <div className="p-3 rounded-xl border border-border">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <p className="font-medium text-sm text-foreground">{label}{factory ? ` — ${factory.name}` : ""}</p>
+                      <span className="text-xs text-muted-foreground">{new Date(entry.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {entry.amountGold !== undefined && `${entry.amountGold}g gold`}
+                      {entry.amountGold !== undefined && entry.amountInr !== undefined && " · "}
+                      {entry.amountInr !== undefined && fmtMoneyInr(entry.amountInr)}
+                      {emp?.name && <> · By {emp.name}</>}
+                      {entry.remarks && <> · {entry.remarks}</>}
+                    </p>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
 
     {/* ── Image Lightbox ── */}

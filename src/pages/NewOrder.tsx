@@ -1,8 +1,9 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
+import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -13,7 +14,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle } from "lucide-react";
 
 /** Compress a File to a base64 JPEG ≤800px, quality 0.75 */
 async function compressImage(file: File): Promise<string> {
@@ -83,11 +84,17 @@ export function NewOrderPage() {
     advanceNote: "",
     certificate: "no" as "yes" | "no",
     certificateFee: 50,
+    materialSourcing: "later" as "later" | "stock" | "purchase",
   });
 
   const [images, setImages] = useState<string[]>([]);
   const imgRef = useRef<HTMLInputElement>(null);
   const [saving, setSaving] = useState(false);
+
+  const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
+  useEffect(() => subscribeStockLevels(setStockLevels), []);
+  const availableGold = f.productKarats ? (stockLevels?.gold[f.productKarats] ?? 0) : null;
+  const goldShort = availableGold !== null && Number(f.estimatedNetWeight) > availableGold;
 
   const handleImageFiles = async (files: FileList | null) => {
     if (!files) return;
@@ -180,6 +187,7 @@ export function NewOrderPage() {
         stamping: f.stamping || undefined,
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
+        materialSourcing: f.materialSourcing === "later" ? undefined : f.materialSourcing,
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
         priority: f.priority as Order["priority"],
@@ -500,6 +508,41 @@ export function NewOrderPage() {
             </RadioGroup>
           </div>
         </SectionCard>
+
+        {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
+        {!isClient && (
+          <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional — decide now, or leave for later">
+            <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              {[
+                { v: "later", label: "Decide later", icon: HelpCircle },
+                { v: "stock", label: "Use from Stock", icon: Boxes },
+                { v: "purchase", label: "Buy new for this order", icon: ShoppingBag },
+              ].map(opt => (
+                <label key={opt.v}
+                  className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors text-sm
+                    ${f.materialSourcing === opt.v ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
+                  <RadioGroupItem value={opt.v} id={`ms-${opt.v}`} className="shrink-0" />
+                  <opt.icon className="h-4 w-4 shrink-0" />
+                  <span>{opt.label}</span>
+                </label>
+              ))}
+            </RadioGroup>
+
+            {f.materialSourcing === "stock" && (
+              <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
+                {f.productKarats
+                  ? `Available in Stock: ${availableGold ?? 0}g ${f.productKarats} gold${goldShort ? " — not enough for the weight entered above, consider Buy New for the shortfall" : ""}`
+                  : "Select Karats above to see live stock availability."}
+                {" "}Actual gold is issued later from the order's Factory section.
+              </p>
+            )}
+            {f.materialSourcing === "purchase" && (
+              <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
+                This just notes the intent — record the actual purchase from Suppliers (using this order's number) once confirmed, and it'll link to this order automatically.
+              </p>
+            )}
+          </SectionCard>
+        )}
 
         {/* ══ 5. Certificate ══ */}
         <SectionCard

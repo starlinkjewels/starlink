@@ -1,14 +1,16 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
-import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck } from "lucide-react";
+import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tooltip, PieChart, Pie, Cell } from "recharts";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Order } from "@/lib/db";
+import { factoryAccount, supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
+import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
 function lastTrackingStep(o: Order): string {
@@ -23,6 +25,13 @@ export function Dashboard() {
   const { user } = useAuth();
   const db = useDb();
   const orders = useMemo(() => currentUserOrders(db, user!), [db, user]);
+
+  const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
+  useEffect(() => subscribeStockLevels(setStockLevels), []);
+  const ordersInProduction = db.orders.filter(o => o.status === "In Production").length;
+  const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
+  const makingChargesPending = factoryAccount(db.goldIssuances).chargesPending;
+  const supplierPaymentsPending = supplierAccount(db.purchases).balanceOwed;
 
   const today = new Date().toDateString();
   const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
@@ -208,6 +217,44 @@ export function Dashboard() {
               <p className="text-3xl font-bold text-amber-800">{fmtMoney(certIncome)}</p>
               <p className="text-[11px] text-amber-600/80 mt-1">$50 × {certCount} certificate{certCount !== 1 ? "s" : ""}</p>
             </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Admin: Manufacturing Overview ── */}
+      {user!.role === "admin" && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
+          className="card-luxe p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-9 w-9 rounded-xl bg-orange-50 grid place-items-center shrink-0">
+              <Factory className="h-5 w-5 text-orange-600" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-brand-dark">Manufacturing Overview</h3>
+              <p className="text-xs text-muted-foreground">Sourcing &amp; production at a glance — all figures in INR</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <Link to="/orders?status=In%20Production" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+              <Package className="h-4 w-4 mx-auto mb-1.5 text-primary" />
+              <p className="text-xl font-bold text-brand-dark">{ordersInProduction}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Orders in Production</p>
+            </Link>
+            <Link to="/stock" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+              <Coins className="h-4 w-4 mx-auto mb-1.5 text-amber-600" />
+              <p className="text-xl font-bold text-brand-dark">{goldReserveGrams.toLocaleString()}g</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Gold Reserve</p>
+            </Link>
+            <Link to="/factories" className={`rounded-xl p-4 text-center transition-colors ${makingChargesPending > 0 ? "bg-destructive/5 hover:bg-destructive/10" : "bg-secondary hover:bg-secondary/70"}`}>
+              <Gem className={`h-4 w-4 mx-auto mb-1.5 ${makingChargesPending > 0 ? "text-destructive" : "text-primary"}`} />
+              <p className={`text-xl font-bold ${makingChargesPending > 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtMoneyInr(makingChargesPending)}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Making Charges Pending</p>
+            </Link>
+            <Link to="/suppliers" className={`rounded-xl p-4 text-center transition-colors ${supplierPaymentsPending > 0 ? "bg-destructive/5 hover:bg-destructive/10" : "bg-secondary hover:bg-secondary/70"}`}>
+              <Wallet className={`h-4 w-4 mx-auto mb-1.5 ${supplierPaymentsPending > 0 ? "text-destructive" : "text-primary"}`} />
+              <p className={`text-xl font-bold ${supplierPaymentsPending > 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtMoneyInr(supplierPaymentsPending)}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">Supplier Payments Pending</p>
+            </Link>
           </div>
         </motion.div>
       )}

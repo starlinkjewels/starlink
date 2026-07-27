@@ -21,6 +21,12 @@ import { ExpensesPage } from "./pages/Expenses";
 import { IncomePage } from "./pages/Income";
 import { CatalogPage } from "./pages/Catalog";
 import { StarlinkAiPage } from "./pages/StarlinkAi";
+import { LockerPage } from "./pages/Locker";
+import { SuppliersPage } from "./pages/Suppliers";
+import { SupplierHistoryPage } from "./pages/SupplierHistory";
+import { StockPage } from "./pages/Stock";
+import { FactoriesPage } from "./pages/Factories";
+import { FactoryHistoryPage } from "./pages/FactoryHistory";
 import { InstallPrompt } from "./components/InstallPrompt";
 import type { Role } from "./lib/db";
 
@@ -56,6 +62,12 @@ export function App() {
           <Route path="income" element={<IncomePage />} />
           <Route path="catalog" element={<CatalogPage />} />
           <Route path="ai" element={<StarlinkAiPage />} />
+          <Route path="locker" element={<Protected roles={["admin","employee"]}><LockerPage /></Protected>} />
+          <Route path="suppliers" element={<Protected roles={["admin","employee"]}><SuppliersPage /></Protected>} />
+          <Route path="suppliers/:id" element={<Protected roles={["admin","employee"]}><SupplierHistoryPage /></Protected>} />
+          <Route path="stock" element={<Protected roles={["admin","employee"]}><StockPage /></Protected>} />
+          <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
+          <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
