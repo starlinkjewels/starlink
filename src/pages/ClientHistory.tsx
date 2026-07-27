@@ -65,12 +65,16 @@ export function ClientHistoryPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRemark, setPayRemark] = useState("");
+  const [payLockerId, setPayLockerId] = useState("");
+  const [payLockerAmount, setPayLockerAmount] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
   const account = clientAccount(allOrders, client?.creditBalance || 0);
+  const payLocker = db.lockers.find(l => l.id === payLockerId);
 
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (payLockerId && (!payLockerAmount || Number(payLockerAmount) <= 0)) { toast.error("Enter the amount actually deposited in that locker"); return; }
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
@@ -82,6 +86,20 @@ export function ClientHistoryPage() {
       // re-allocate oldest-bill-first — tagging entries with the payment method.
       const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now, note);
       c.creditBalance = leftover > 0 ? leftover : undefined;
+      // Cash-position tracking — separate from the USD billing allocation above:
+      // this is ONE deposit event, so it's recorded once here rather than split
+      // across whichever orders the FIFO allocation above happened to touch.
+      if (payLockerId) {
+        const locker = d.lockers.find(l => l.id === payLockerId);
+        if (locker) {
+          if (!d.lockerTransactions) d.lockerTransactions = [];
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: payLockerId, type: "income", amountInr: Number(payLockerAmount),
+            currency: locker.currency || "INR", category: `Client Payment — ${c.companyName}`,
+            refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
+          });
+        }
+      }
       const clientUser = d.users.find(u => u.clientId === id);
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
@@ -91,7 +109,7 @@ export function ClientHistoryPage() {
       });
     });
     toast.success(`Payment recorded (${payMethod}) & allocated to oldest bills`);
-    setPayAmount(""); setPayRemark(""); setShowPayForm(false);
+    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayLockerAmount(""); setShowPayForm(false);
   };
 
   const applyCredit = () => {
@@ -385,6 +403,22 @@ export function ClientHistoryPage() {
                 onKeyDown={e => e.key === "Enter" && recordPayment()}
                 className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
             </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Select value={payLockerId || "__none"} onValueChange={v => { setPayLockerId(v === "__none" ? "" : v); if (v === "__none") setPayLockerAmount(""); }}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker (optional)" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Don't track in Locker</SelectItem>
+                  {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {payLockerId && (
+                <Input
+                  type="number" min={0} step="0.01" value={payLockerAmount} onChange={e => setPayLockerAmount(e.target.value)}
+                  className="rounded-xl h-10" placeholder={`Amount deposited (${payLocker?.currency === "USD" ? "$" : "₹"})`} />
+              )}
+            </div>
+
             <div className="flex gap-2.5">
               <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
               <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); setPayRemark(""); }} className="rounded-xl h-10">Cancel</Button>

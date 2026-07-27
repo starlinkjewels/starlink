@@ -9,7 +9,7 @@ import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tool
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import type { Order } from "@/lib/db";
-import { factoryAccount, supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
+import { factoryAccount, supplierAccount, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
@@ -33,6 +33,21 @@ export function Dashboard() {
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
   const makingChargesPending = factoryAccount(db.materialIssuances).chargesPending;
   const supplierPaymentsPending = supplierAccount(db.purchases).balanceOwed;
+
+  // Cash Position & Profit — every payment in/out (client payments, supplier/
+  // factory payments, expenses) that was tagged to a Locker rolls up here.
+  // "Profit" = net flow only (income − expense; transfers cancel out across
+  // the group), excluding each locker's opening balance (pre-existing capital,
+  // not earned).
+  const [inrPerUsd, setInrPerUsd] = useState("");
+  const activeLockers = db.lockers.filter(l => l.active !== false);
+  const usdLockers = activeLockers.filter(l => (l.currency || "INR") === "USD");
+  const inrLockers = activeLockers.filter(l => (l.currency || "INR") === "INR");
+  const usdProfit = usdLockers.reduce((s, l) => s + (lockerBalance(l, db.lockerTransactions) - (l.openingBalance || 0)), 0);
+  const inrProfit = inrLockers.reduce((s, l) => s + (lockerBalance(l, db.lockerTransactions) - (l.openingBalance || 0)), 0);
+  const rate = Number(inrPerUsd) || 0;
+  const combinedUsd = rate > 0 ? usdProfit + inrProfit / rate : null;
+  const combinedInr = rate > 0 ? usdProfit * rate + inrProfit : null;
 
   const today = new Date().toDateString();
   const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
@@ -261,6 +276,57 @@ export function Dashboard() {
               <p className={`text-xl font-bold ${supplierPaymentsPending > 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtMoneyInr(supplierPaymentsPending)}</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">Supplier Payments Pending</p>
             </Link>
+          </div>
+        </motion.div>
+      )}
+
+      {/* ── Admin: Cash Position & Profit ── */}
+      {user!.role === "admin" && (
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}
+          className="card-luxe p-5">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="h-9 w-9 rounded-xl bg-success/10 grid place-items-center shrink-0">
+              <Wallet className="h-5 w-5 text-success" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-brand-dark">Cash Position &amp; Profit</h3>
+              <p className="text-xs text-muted-foreground">Every payment tagged to a Locker — income minus expense, per currency</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <Link to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+              <p className={`text-xl font-bold ${usdProfit >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoney(usdProfit)}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">USD Profit ({usdLockers.length} locker{usdLockers.length !== 1 ? "s" : ""})</p>
+            </Link>
+            <Link to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+              <p className={`text-xl font-bold ${inrProfit >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(inrProfit)}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">INR Profit ({inrLockers.length} locker{inrLockers.length !== 1 ? "s" : ""})</p>
+            </Link>
+          </div>
+
+          <div className="mt-4 pt-4 border-t border-border/60">
+            <div className="flex items-center gap-2 flex-wrap">
+              <label className="text-xs text-muted-foreground shrink-0">Consolidate at rate (₹ per $):</label>
+              <input
+                type="number" min={0} step="0.01" value={inrPerUsd} onChange={e => setInrPerUsd(e.target.value)}
+                placeholder="e.g. 83.5" className="w-28 h-8 px-2.5 rounded-lg border border-border text-sm outline-none focus:border-primary"
+              />
+            </div>
+            {combinedUsd !== null && combinedInr !== null ? (
+              <div className="grid grid-cols-2 gap-3 mt-3">
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-center">
+                  <p className={`text-lg font-bold ${combinedUsd >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoney(combinedUsd)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Total Profit (USD)</p>
+                </div>
+                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-center">
+                  <p className={`text-lg font-bold ${combinedInr >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(combinedInr)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Total Profit (INR)</p>
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground mt-2">Enter today's exchange rate to see one combined profit figure.</p>
+            )}
           </div>
         </motion.div>
       )}

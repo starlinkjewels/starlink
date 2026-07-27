@@ -44,6 +44,8 @@ export function ExpensesPage() {
   const [filterCategory, setFilterCategory] = useState("all");
   const [search, setSearch] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
+  const [expLockerId, setExpLockerId] = useState("");
+  const [expLockerAmount, setExpLockerAmount] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -118,8 +120,10 @@ export function ExpensesPage() {
     if (!form.title.trim()) { setError("Title is required."); return; }
     const amount = parseFloat(form.amount);
     if (!amount || isNaN(amount) || amount <= 0) { setError("Enter a valid amount."); return; }
+    if (expLockerId && (!expLockerAmount || Number(expLockerAmount) <= 0)) { setError("Enter the amount actually paid from that locker."); return; }
 
     setSaving(true);
+    const now = new Date().toISOString();
     const expense: Expense = {
       id: uid("exp_"),
       title: form.title.trim(),
@@ -128,14 +132,26 @@ export function ExpensesPage() {
       note: form.note.trim() || undefined,
       employeeId: user!.id,
       clientId: form.clientId || undefined,
-      createdAt: new Date().toISOString(),
+      createdAt: now,
+      lockerId: expLockerId || undefined,
     };
     const fresh = loadDb();
     fresh.expenses = [...fresh.expenses, expense];
+    if (expLockerId) {
+      const locker = fresh.lockers.find(l => l.id === expLockerId);
+      if (locker) {
+        fresh.lockerTransactions = [...fresh.lockerTransactions, {
+          id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: Number(expLockerAmount),
+          currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
+          refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
+        }];
+      }
+    }
     saveDb(fresh);
     setDb(fresh);
     await flush(); // keep the button in "Saving…" until Firebase confirms
     setForm(EMPTY_FORM);
+    setExpLockerId(""); setExpLockerAmount("");
     setShowAdd(false);
     setSaving(false);
   }
@@ -143,6 +159,7 @@ export function ExpensesPage() {
   function handleDelete(id: string) {
     const fresh = loadDb();
     fresh.expenses = fresh.expenses.filter(e => e.id !== id);
+    fresh.lockerTransactions = fresh.lockerTransactions.filter(t => !(t.refType === "expense" && t.refId === id));
     saveDb(fresh);
     setDb(fresh);
   }
@@ -508,6 +525,44 @@ export function ExpensesPage() {
                     </select>
                     <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
                   </div>
+                </div>
+
+                {/* Paid from locker */}
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">
+                    Paid from Locker <span className="text-muted-foreground font-normal">(optional)</span>
+                  </label>
+                  <div className="relative">
+                    <select
+                      value={expLockerId}
+                      onChange={e => {
+                        setExpLockerId(e.target.value);
+                        const l = db.lockers.find(x => x.id === e.target.value);
+                        setExpLockerAmount(l?.currency === "USD" ? form.amount : "");
+                      }}
+                      className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition appearance-none pr-8"
+                    >
+                      <option value="">Don't track in Locker</option>
+                      {db.lockers.filter(l => l.active !== false).map(l => (
+                        <option key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</option>
+                      ))}
+                    </select>
+                    <ChevronDown className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+                  </div>
+                  {expLockerId && (
+                    <div className="relative mt-2">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
+                        {db.lockers.find(l => l.id === expLockerId)?.currency === "USD" ? "$" : "₹"}
+                      </span>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={expLockerAmount}
+                        onChange={e => setExpLockerAmount(e.target.value)}
+                        placeholder="Amount actually paid from this locker"
+                        className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Note */}

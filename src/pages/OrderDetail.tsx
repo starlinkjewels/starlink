@@ -77,6 +77,8 @@ export function OrderDetailPage() {
   const [showAdvForm, setShowAdvForm] = useState(false);
   const [advAmt, setAdvAmt] = useState("");
   const [advNote, setAdvNote] = useState("");
+  const [advLockerId, setAdvLockerId] = useState("");
+  const [advLockerAmount, setAdvLockerAmount] = useState("");
 
   // CAD image
   const cadRef = useRef<HTMLInputElement>(null);
@@ -350,6 +352,7 @@ export function OrderDetailPage() {
   const addAdvance = () => {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (advLockerId && (!advLockerAmount || Number(advLockerAmount) <= 0)) { toast.error("Enter the amount actually deposited in that locker"); return; }
     let paidInFull = false;
     let isFirst = false;
     let toCredit = 0;
@@ -367,7 +370,21 @@ export function OrderDetailPage() {
         // regular payment; the one that clears the balance is the "final payment".
         paidInFull = totalAdvance(o) + applied >= orderTotal(o);
         const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
-        o.advances.push({ id: uid("adv_"), amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString() });
+        o.advances.push({
+          id: uid("adv_"), amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString(),
+          lockerId: advLockerId || undefined, lockerAmount: advLockerId ? Number(advLockerAmount) : undefined,
+        });
+        if (advLockerId) {
+          const locker = d.lockers.find(l => l.id === advLockerId);
+          if (locker) {
+            if (!d.lockerTransactions) d.lockerTransactions = [];
+            d.lockerTransactions.push({
+              id: uid("ltx_"), lockerId: advLockerId, type: "income", amountInr: Number(advLockerAmount),
+              currency: locker.currency || "INR", category: `Client Payment — ${o.orderNumber}`,
+              refType: "clientPayment", refId: o.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
+            });
+          }
+        }
       }
       if (toCredit > 0) {
         const c = d.clients.find(x => x.id === o.clientId);
@@ -391,7 +408,7 @@ export function OrderDetailPage() {
         : paidInFull ? "Final payment recorded — order paid in full"
         : isFirst ? "Advance payment recorded" : "Payment recorded"
     );
-    setAdvAmt(""); setAdvNote(""); setShowAdvForm(false);
+    setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); setShowAdvForm(false);
   };
 
   const saveCadImage = async (file: File) => {
@@ -1151,9 +1168,27 @@ export function OrderDetailPage() {
                     />
                   </div>
                 </div>
+                <div className="grid md:grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Deposited to Locker (optional)</Label>
+                    <Select value={advLockerId || "__none"} onValueChange={v => { setAdvLockerId(v === "__none" ? "" : v); if (v === "__none") setAdvLockerAmount(""); }}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Don't track in Locker</SelectItem>
+                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  {advLockerId && (
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Amount Deposited ({db.lockers.find(l => l.id === advLockerId)?.currency === "USD" ? "$" : "₹"})</Label>
+                      <Input type="number" min={0} step="0.01" value={advLockerAmount} onChange={e => setAdvLockerAmount(e.target.value)} className="rounded-xl h-10" />
+                    </div>
+                  )}
+                </div>
                 <div className="flex gap-2">
                   <AsyncButton size="sm" onClick={addAdvance} className="btn-hero rounded-xl">Save Payment</AsyncButton>
-                  <Button size="sm" variant="outline" onClick={() => { setShowAdvForm(false); setAdvAmt(""); setAdvNote(""); }} className="rounded-xl">Cancel</Button>
+                  <Button size="sm" variant="outline" onClick={() => { setShowAdvForm(false); setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); }} className="rounded-xl">Cancel</Button>
                 </div>
               </div>
             </motion.div>

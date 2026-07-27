@@ -9,6 +9,7 @@
 // contains pure, side-effect-free summary/allocator functions).
 import {
   uid,
+  fmtMoney,
   type Purchase,
   type MaterialIssuance,
   type Locker,
@@ -17,6 +18,11 @@ import {
 } from "./db";
 
 const r0 = (n: number) => Math.round(n);
+
+/** Format a Locker/LockerTransaction amount in its own currency (undefined = INR). */
+export function fmtLockerAmount(n: number, currency?: "INR" | "USD"): string {
+  return currency === "USD" ? fmtMoney(n) : fmtMoneyInr(n);
+}
 
 // This module only tracks gold (by karat purity) and diamond — Platinum/Silver
 // orders never need a factory material issuance to proceed.

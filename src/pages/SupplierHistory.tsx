@@ -384,7 +384,7 @@ export function SupplierHistoryPage() {
               <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount (₹)" />
               <Select value={payLockerId} onValueChange={setPayLockerId}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
               </Select>
               <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>

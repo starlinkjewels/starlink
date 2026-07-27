@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { updateDb, uid, type LockerType } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, type LockerType } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
-import { fmtDate } from "@/lib/db";
+import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -22,13 +21,18 @@ import {
 
 const PAGE_SIZE = 10;
 
+/** Bare number for CSV/PDF cells (no currency symbol) — jsPDF can't render ₹. */
+function plainAmt(n: number, currency?: "INR" | "USD"): string {
+  return currency === "USD" ? fmtMoney(n).replace("$", "") : fmtInrPlain(n).replace("Rs. ", "");
+}
+
 export function LockerPage() {
   const { user } = useAuth();
   const db = useDb();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [f, setF] = useState<{ name: string; type: LockerType; accountNumberLast4: string; openingBalance: string }>({
-    name: "", type: "bank", accountNumberLast4: "", openingBalance: "0",
+  const [f, setF] = useState<{ name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string }>({
+    name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0",
   });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -49,7 +53,7 @@ export function LockerPage() {
       updateDb(d => {
         if (!d.lockers) d.lockers = [];
         d.lockers.unshift({
-          id: uid("lk_"), name: f.name.trim(), type: f.type,
+          id: uid("lk_"), name: f.name.trim(), type: f.type, currency: f.currency,
           accountNumberLast4: f.accountNumberLast4.trim() || undefined,
           openingBalance: Math.max(0, Number(f.openingBalance) || 0),
           createdAt: new Date().toISOString(), active: true,
@@ -57,20 +61,20 @@ export function LockerPage() {
       });
       toast.success("Locker created");
       setOpen(false);
-      setF({ name: "", type: "bank", accountNumberLast4: "", openingBalance: "0" });
+      setF({ name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0" });
     } finally { setSaving(false); }
   };
 
   // ── Edit locker ──
   const [editId, setEditId] = useState<string | null>(null);
-  const [ef, setEf] = useState<{ name: string; type: LockerType; accountNumberLast4: string; openingBalance: string }>({
-    name: "", type: "bank", accountNumberLast4: "", openingBalance: "0",
+  const [ef, setEf] = useState<{ name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string }>({
+    name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0",
   });
   const [editSaving, setEditSaving] = useState(false);
 
   const openEditLocker = (l: typeof lockers[number]) => {
     setEditId(l.id);
-    setEf({ name: l.name, type: l.type, accountNumberLast4: l.accountNumberLast4 || "", openingBalance: String(l.openingBalance) });
+    setEf({ name: l.name, type: l.type, currency: l.currency || "INR", accountNumberLast4: l.accountNumberLast4 || "", openingBalance: String(l.openingBalance) });
   };
 
   const saveEditLocker = () => {
@@ -83,6 +87,7 @@ export function LockerPage() {
         if (!l) return;
         l.name = ef.name.trim();
         l.type = ef.type;
+        l.currency = ef.currency;
         l.accountNumberLast4 = ef.accountNumberLast4.trim() || undefined;
         l.openingBalance = Math.max(0, Number(ef.openingBalance) || 0);
       });
@@ -97,24 +102,25 @@ export function LockerPage() {
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
     const now = new Date().toISOString();
+    const currency = selected.currency || "INR";
     updateDb(d => {
       if (!d.lockerTransactions) d.lockerTransactions = [];
       if (txnType === "transfer_out") {
         const target = d.lockers.find(l => l.id === txnTargetLocker);
         if (!target) return;
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt,
+          id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency,
           category: "Transfer", pairedLockerId: target.id, note: txnNote.trim() || undefined,
           recordedBy: user!.id, createdAt: now,
         });
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: amt,
+          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: amt, currency: target.currency || "INR",
           category: "Transfer", pairedLockerId: selected.id, note: txnNote.trim() || undefined,
           recordedBy: user!.id, createdAt: now,
         });
       } else {
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt,
+          id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
           category: txnCategory.trim() || undefined, refType: "manual",
           note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
         });
@@ -149,9 +155,10 @@ export function LockerPage() {
 
   const exportCsv = () => {
     if (!selected) return;
+    const cur = selected.currency || "INR";
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
-      ["Date", "Description", "Money In (INR)", "Money Out (INR)", "Balance (INR)"],
+      ["Date", "Description", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
       txns.map(t => {
         const signed = txnSigned(t);
         return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", txnBalances.get(t.id) ?? 0];
@@ -161,18 +168,19 @@ export function LockerPage() {
 
   const exportPdf = () => {
     if (!selected) return;
+    const cur = selected.currency || "INR";
     downloadLedgerPdf({
       title: "Locker Account Statement",
       subjectLines: [
         `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
-        `Type: ${selected.type === "bank" ? "Bank" : "Cash"}`,
-        `Opening Balance: ${fmtInrPlain(selected.openingBalance || 0)}`,
+        `Type: ${selected.type === "bank" ? "Bank" : "Cash"} · Currency: ${cur}`,
+        `Opening Balance: ${plainAmt(selected.openingBalance || 0, cur)} ${cur}`,
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
-        { label: "Current Balance", value: fmtInrPlain(lockerBalance(selected, db.lockerTransactions)) },
-        { label: "Total In", value: fmtInrPlain(totalIn) },
-        { label: "Total Out", value: fmtInrPlain(totalOut) },
+        { label: "Current Balance", value: `${plainAmt(lockerBalance(selected, db.lockerTransactions), cur)} ${cur}` },
+        { label: "Total In", value: `${plainAmt(totalIn, cur)} ${cur}` },
+        { label: "Total Out", value: `${plainAmt(totalOut, cur)} ${cur}` },
       ],
       columns: [
         { header: "Date", x: 20 },
@@ -185,9 +193,9 @@ export function LockerPage() {
         const signed = txnSigned(t);
         return [
           fmtDate(t.createdAt), txnLabel(t).slice(0, 26),
-          signed > 0 ? fmtInrPlain(signed).replace("Rs. ", "") : "—",
-          signed < 0 ? fmtInrPlain(-signed).replace("Rs. ", "") : "—",
-          fmtInrPlain(txnBalances.get(t.id) ?? 0).replace("Rs. ", ""),
+          signed > 0 ? plainAmt(signed, cur) : "—",
+          signed < 0 ? plainAmt(-signed, cur) : "—",
+          plainAmt(txnBalances.get(t.id) ?? 0, cur),
         ];
       }),
       filename: `Locker-${selected.name.replace(/\s+/g, "_")}`,
@@ -212,15 +220,27 @@ export function LockerPage() {
                 <Label className="text-xs">Account Name</Label>
                 <Input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="rounded-xl mt-1" placeholder="HDFC Current A/c" />
               </div>
-              <div>
-                <Label className="text-xs">Type</Label>
-                <Select value={f.type} onValueChange={v => setF({ ...f, type: v as LockerType })}>
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="bank">Bank</SelectItem>
-                    <SelectItem value="cash">Cash</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Type</Label>
+                  <Select value={f.type} onValueChange={v => setF({ ...f, type: v as LockerType })}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bank">Bank</SelectItem>
+                      <SelectItem value="cash">Cash</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Currency</Label>
+                  <Select value={f.currency} onValueChange={v => setF({ ...f, currency: v as "INR" | "USD" })}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="INR">INR (₹)</SelectItem>
+                      <SelectItem value="USD">USD ($)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               {f.type === "bank" && (
                 <div>
@@ -229,7 +249,7 @@ export function LockerPage() {
                 </div>
               )}
               <div>
-                <Label className="text-xs">Opening Balance (₹)</Label>
+                <Label className="text-xs">Opening Balance ({f.currency === "USD" ? "$" : "₹"})</Label>
                 <Input type="number" min={0} value={f.openingBalance} onChange={e => setF({ ...f, openingBalance: e.target.value })} className="rounded-xl mt-1" />
               </div>
               <Button onClick={createLocker} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create Locker"}</Button>
@@ -264,10 +284,12 @@ export function LockerPage() {
                 </div>
                 <div className="min-w-0">
                   <p className="font-display text-lg text-brand-dark truncate leading-tight">{l.name}</p>
-                  <p className="text-xs text-muted-foreground">{l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {l.currency || "INR"}
+                  </p>
                 </div>
               </div>
-              <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtMoneyInr(bal)}</p>
+              <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtLockerAmount(bal, l.currency)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Current balance</p>
             </div>
           );
@@ -308,15 +330,15 @@ export function LockerPage() {
           <div className="grid grid-cols-3 gap-3">
             <div className="p-3 rounded-xl bg-secondary text-center">
               <p className="text-xs text-muted-foreground mb-1">Balance</p>
-              <p className="font-semibold text-sm">{fmtMoneyInr(lockerBalance(selected, db.lockerTransactions))}</p>
+              <p className="font-semibold text-sm">{fmtLockerAmount(lockerBalance(selected, db.lockerTransactions), selected.currency)}</p>
             </div>
             <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
               <p className="text-xs text-muted-foreground mb-1">Total In</p>
-              <p className="font-semibold text-sm text-success">{fmtMoneyInr(totalIn)}</p>
+              <p className="font-semibold text-sm text-success">{fmtLockerAmount(totalIn, selected.currency)}</p>
             </div>
             <div className="p-3 rounded-xl bg-destructive/5 border border-destructive/20 text-center">
               <p className="text-xs text-muted-foreground mb-1">Total Out</p>
-              <p className="font-semibold text-sm text-destructive">{fmtMoneyInr(totalOut)}</p>
+              <p className="font-semibold text-sm text-destructive">{fmtLockerAmount(totalOut, selected.currency)}</p>
             </div>
           </div>
 
@@ -332,12 +354,12 @@ export function LockerPage() {
                     <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount (₹)" />
+                <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder={`Amount (${selected.currency === "USD" ? "$" : "₹"})`} />
                 {txnType === "transfer_out" ? (
                   <Select value={txnTargetLocker} onValueChange={setTxnTargetLocker}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker" /></SelectTrigger>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker (same currency)" /></SelectTrigger>
                     <SelectContent>
-                      {lockers.filter(l => l.id !== selected.id).map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+                      {lockers.filter(l => l.id !== selected.id && (l.currency || "INR") === (selected.currency || "INR")).map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 ) : (
@@ -368,9 +390,9 @@ export function LockerPage() {
                 </div>
                 <div className="text-right shrink-0">
                   <p className={`text-sm font-semibold ${t.type === "income" || t.type === "transfer_in" ? "text-success" : "text-destructive"}`}>
-                    {t.type === "income" || t.type === "transfer_in" ? "+" : "−"}{fmtMoneyInr(t.amountInr)}
+                    {t.type === "income" || t.type === "transfer_in" ? "+" : "−"}{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(txnBalances.get(t.id) ?? 0)}</p>
+                  <p className="text-[11px] text-muted-foreground">Bal: {fmtLockerAmount(txnBalances.get(t.id) ?? 0, selected.currency)}</p>
                 </div>
               </div>
             ))}
@@ -391,15 +413,27 @@ export function LockerPage() {
               <Label className="text-xs">Account Name</Label>
               <Input value={ef.name} onChange={e => setEf({ ...ef, name: e.target.value })} className="rounded-xl mt-1" />
             </div>
-            <div>
-              <Label className="text-xs">Type</Label>
-              <Select value={ef.type} onValueChange={v => setEf({ ...ef, type: v as LockerType })}>
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="bank">Bank</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Type</Label>
+                <Select value={ef.type} onValueChange={v => setEf({ ...ef, type: v as LockerType })}>
+                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="bank">Bank</SelectItem>
+                    <SelectItem value="cash">Cash</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Currency</Label>
+                <Select value={ef.currency} onValueChange={v => setEf({ ...ef, currency: v as "INR" | "USD" })}>
+                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="INR">INR (₹)</SelectItem>
+                    <SelectItem value="USD">USD ($)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
             {ef.type === "bank" && (
               <div>
@@ -408,7 +442,7 @@ export function LockerPage() {
               </div>
             )}
             <div>
-              <Label className="text-xs">Opening Balance (₹)</Label>
+              <Label className="text-xs">Opening Balance ({ef.currency === "USD" ? "$" : "₹"})</Label>
               <Input type="number" min={0} value={ef.openingBalance} onChange={e => setEf({ ...ef, openingBalance: e.target.value })} className="rounded-xl mt-1" />
             </div>
             <div className="flex gap-2">
