@@ -66,7 +66,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/clients": "Clients",
   "/employees": "Employees",
   "/invoices": "Invoices",
-  "/income":   "Income Passbook",
+  "/income":   "Passbook",
   "/catalog":  "Catalog",
   "/ai":       "Starlink AI",
   "/expenses": "Expenses",
