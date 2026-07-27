@@ -38,9 +38,12 @@ export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondW
  * only for whichever materials the order actually calls for.
  */
 export function manufacturingReadiness(
-  order: Pick<Order, "id" | "metal" | "diamondWeight">,
+  order: Pick<Order, "id" | "metal" | "diamondWeight" | "materialSourcing">,
   issuances: MaterialIssuance[],
 ): { ready: boolean; missing: ("gold" | "diamond")[] } {
+  // Sold straight out of finished-goods inventory — nothing to issue to a
+  // factory, the piece already exists.
+  if (order.materialSourcing === "readyStock") return { ready: true, missing: [] };
   const { needsGold, needsDiamond } = orderMaterialRequirements(order);
   const orderIssuances = issuances.filter(i => i.orderId === order.id);
   const missing: ("gold" | "diamond")[] = [];

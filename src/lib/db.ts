@@ -181,11 +181,14 @@ export interface Order {
 
   // Manufacturing sourcing (optional — defaults to today's fully-manual flow
   // if never set). See src/lib/manufacturing.ts / src/lib/stock.ts.
-  materialSourcing?: "stock" | "purchase";
+  // "readyStock" = sold directly from finished-goods inventory (see
+  // ReadyStockItem below) — no factory material issuance ever applies to it.
+  materialSourcing?: "stock" | "purchase" | "readyStock";
   linkedPurchaseIds?: string[]; // Purchase docs with purpose:"order", orderId: this order
   materialIssuanceIds?: string[]; // MaterialIssuance docs for this order — each carries its own
                                    // factoryId, so this alone already supports >1 factory per order
   manufacturingLog?: ManufacturingLogEntry[]; // append-only; never index-mutated like `timeline`
+  readyStockItemId?: string; // set iff materialSourcing === "readyStock"
 }
 
 export interface Task {
@@ -402,6 +405,29 @@ export interface Factory {
   active: boolean;
 }
 
+// Finished jewelry already sitting in physical inventory — separate from the
+// raw-material Stock (gold grams / diamond carats, src/lib/stock.ts). Readable
+// by clients too (like the Catalog) so they can pick a piece to buy directly
+// in New Order; only staff can add/edit/adjust it (see firestore.rules).
+export interface ReadyStockItem {
+  id: string;
+  name: string;
+  jewelleryType: Order["jewelleryType"];
+  metal: Order["metal"];
+  productKarats?: string;
+  grossWeight?: number; // grams
+  netWeight?: number; // grams
+  diamondWeight?: number; // carats
+  diamondType?: "Natural" | "Lab Grown";
+  price: number; // USD — sale price, matches client billing currency
+  quantity: number; // identical pieces available — "Sold Out" is quantity === 0, never a separate stored flag
+  images: string[]; // Storage URLs, up to 3 — same upload pattern as Order.images
+  sku?: string;
+  notes?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export interface FinishedPiece {
   id: string;
   quantityUsed: number; // actual gold(g)/diamond(ct) that ended up in the finished piece(s) from this issuance
@@ -477,6 +503,7 @@ export interface DB {
   factories: Factory[];
   materialIssuances: MaterialIssuance[];
   stockMovements: StockMovement[];
+  readyStock: ReadyStockItem[];
   session: { userId: string | null };
 }
 
@@ -521,6 +548,7 @@ function emptyDb(): DB {
     factories: [],
     materialIssuances: [],
     stockMovements: [],
+    readyStock: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -694,7 +722,8 @@ type ArrayCol =
   | "purchases"
   | "factories"
   | "materialIssuances"
-  | "stockMovements";
+  | "stockMovements"
+  | "readyStock";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -713,6 +742,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "factories",
   "materialIssuances",
   "stockMovements",
+  "readyStock",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";

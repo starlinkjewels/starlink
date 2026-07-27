@@ -27,6 +27,7 @@ import { SupplierHistoryPage } from "./pages/SupplierHistory";
 import { StockPage } from "./pages/Stock";
 import { FactoriesPage } from "./pages/Factories";
 import { FactoryHistoryPage } from "./pages/FactoryHistory";
+import { ReadyStockPage } from "./pages/ReadyStock";
 import { InstallPrompt } from "./components/InstallPrompt";
 import type { Role } from "./lib/db";
 
@@ -68,6 +69,7 @@ export function App() {
           <Route path="stock" element={<Protected roles={["admin","employee"]}><StockPage /></Protected>} />
           <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
+          <Route path="ready-stock" element={<Protected roles={["admin","employee"]}><ReadyStockPage /></Protected>} />
           <Route path="profile" element={<ProfilePage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />

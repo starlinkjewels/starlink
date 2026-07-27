@@ -1277,6 +1277,7 @@ export function OrderDetailPage() {
               <p className="text-xs text-muted-foreground mt-0.5">
                 {order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
                   : order.materialSourcing === "purchase" ? "Sourcing plan: Buy New for this order"
+                  : order.materialSourcing === "readyStock" ? "Sold directly from Ready Stock"
                   : "No sourcing plan set at order creation"}
               </p>
             </div>
@@ -1292,7 +1293,9 @@ export function OrderDetailPage() {
 
           <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
             {readiness.ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            {readiness.ready
+            {order.materialSourcing === "readyStock"
+              ? "Sold from Ready Stock — no factory material issuance needed"
+              : readiness.ready
               ? "Ready for Final Approval — all required material issued to a factory"
               : `Final Approval blocked — issue ${readiness.missing.join(" and ")} to a factory first`}
           </div>

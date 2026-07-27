@@ -115,6 +115,11 @@ service cloud.firestore {
     // correctness guarantee (that's the transaction's floor-check).
     match /stockLevels/{id}        { allow read, write: if isStaff(); }
 
+    // Finished-goods inventory — unlike the rest of Manufacturing, a client
+    // CAN read this (to pick a piece to buy directly in New Order), same as
+    // the Catalog below; only staff can add/edit it.
+    match /readyStock/{id} { allow read: if isActive(); allow write: if isStaff(); }
+
     // Shared collections — any active user (catalog is a shared library).
     match /catalogFolders/{id}  { allow read, write: if isActive(); }
     match /catalogItems/{id}    { allow read, write: if isActive(); }

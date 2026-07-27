@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
@@ -14,7 +15,9 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck } from "lucide-react";
+
+const READY_STOCK_NONE = "none";
 
 /** Compress a File to a base64 JPEG ≤800px, quality 0.75 */
 async function compressImage(file: File): Promise<string> {
@@ -45,6 +48,7 @@ async function compressImage(file: File): Promise<string> {
 export function NewOrderPage() {
   const { user } = useAuth();
   const nav = useNavigate();
+  const db = useDb();
   const isAdmin    = user?.role === "admin";
   const isEmployee = user?.role === "employee";
   const isClient   = user?.role === "client";
@@ -84,7 +88,8 @@ export function NewOrderPage() {
     advanceNote: "",
     certificate: "no" as "yes" | "no",
     certificateFee: 50,
-    materialSourcing: "later" as "later" | "stock" | "purchase",
+    materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
+    readyStockItemId: "",
   });
 
   const [images, setImages] = useState<string[]>([]);
@@ -128,6 +133,33 @@ export function NewOrderPage() {
     setF(prev => ({ ...prev, orderValue: auto }));
   };
 
+  // ── Sell from Ready Stock (optional) — picking a finished piece auto-fills
+  // the specs/price below instead of the client/staff typing a custom order.
+  const readyStockItems = db.readyStock.filter(i => i.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+  const selectedStockItem = db.readyStock.find(i => i.id === f.readyStockItemId);
+
+  const selectReadyStock = (itemId: string) => {
+    if (!itemId) { setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later" })); return; }
+    const item = db.readyStock.find(i => i.id === itemId);
+    if (!item) return;
+    const colorGuess = item.metal === "Rose Gold" ? "Rose" : item.metal === "White Gold" ? "White" : "Yellow";
+    setF(prev => ({
+      ...prev,
+      readyStockItemId: itemId,
+      materialSourcing: "readyStock",
+      jewelleryType: item.jewelleryType,
+      metal: item.metal,
+      productKarats: item.productKarats || "",
+      productColor: prev.productColor || colorGuess,
+      diamondType: item.diamondType || prev.diamondType,
+      diamondWeight: item.diamondWeight || 0,
+      estimatedGrossWeight: item.grossWeight || 0,
+      estimatedNetWeight: item.netWeight || 0,
+      orderValue: item.price,
+      designNumber: item.sku || prev.designNumber,
+    }));
+  };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
@@ -139,6 +171,10 @@ export function NewOrderPage() {
     if (metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
     if (!f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
     if (!f.stamping)            { toast.error("Please select a Stamping option."); return; }
+    if (f.materialSourcing === "readyStock") {
+      const item = db.readyStock.find(i => i.id === f.readyStockItemId);
+      if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
+    }
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : f.clientId;
@@ -188,6 +224,7 @@ export function NewOrderPage() {
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         materialSourcing: f.materialSourcing === "later" ? undefined : f.materialSourcing,
+        readyStockItemId: f.materialSourcing === "readyStock" ? f.readyStockItemId : undefined,
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
         priority: f.priority as Order["priority"],
@@ -210,6 +247,11 @@ export function NewOrderPage() {
       };
 
       d.orders.unshift(order);
+
+      if (order.materialSourcing === "readyStock" && order.readyStockItemId) {
+        const item = d.readyStock.find(x => x.id === order.readyStockItemId);
+        if (item) item.quantity = Math.max(0, item.quantity - 1);
+      }
 
       if (isClient) {
         const admin = d.users.find(u => u.role === "admin");
@@ -297,6 +339,39 @@ export function NewOrderPage() {
             })()}
           </SectionCard>
         )}
+
+        {/* ══ 1b. Sell from Ready Stock (optional, all roles) ══ */}
+        <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional — pick an existing finished piece instead of a custom order">
+          <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => selectReadyStock(v === READY_STOCK_NONE ? "" : v)}>
+            <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="None — custom order" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={READY_STOCK_NONE}>None — custom order</SelectItem>
+              {readyStockItems.map(item => (
+                <SelectItem key={item.id} value={item.id}>
+                  {item.name} — ${item.price.toLocaleString()} ({item.quantity} available)
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {selectedStockItem && (
+            <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50 mt-3">
+              {selectedStockItem.images?.[0] ? (
+                <img src={selectedStockItem.images[0]} alt={selectedStockItem.name} className="h-14 w-14 rounded-lg object-cover shrink-0" />
+              ) : (
+                <div className="h-14 w-14 rounded-lg bg-secondary grid place-items-center shrink-0"><Gem className="h-6 w-6 text-muted-foreground/40" /></div>
+              )}
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm truncate">{selectedStockItem.name}</p>
+                <p className="text-xs text-muted-foreground">
+                  {selectedStockItem.jewelleryType} · {selectedStockItem.metal}{selectedStockItem.productKarats ? ` ${selectedStockItem.productKarats}` : ""}
+                  {selectedStockItem.diamondWeight ? ` · ${selectedStockItem.diamondWeight}ct diamond` : ""}
+                </p>
+              </div>
+              <p className="font-display text-lg font-bold text-brand-dark shrink-0">${selectedStockItem.price.toLocaleString()}</p>
+            </div>
+          )}
+        </SectionCard>
 
         {/* ══ 2. Order Details ══ */}
         <SectionCard title="Order Details">
@@ -510,7 +585,13 @@ export function NewOrderPage() {
         </SectionCard>
 
         {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
-        {!isClient && (
+        {!isClient && f.materialSourcing === "readyStock" ? (
+          <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Not applicable — sold from finished-goods stock">
+            <p className="text-xs p-2.5 rounded-xl bg-secondary text-muted-foreground">
+              This order is a direct sale from Ready Stock — the piece already exists, so no factory material issuance is needed.
+            </p>
+          </SectionCard>
+        ) : !isClient && (
           <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional — decide now, or leave for later">
             <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {[
@@ -706,7 +787,9 @@ export function NewOrderPage() {
           <div className="card-luxe p-4 flex items-start gap-3 bg-secondary/40">
             <AlertCircle className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <p className="text-sm text-muted-foreground">
-              Pricing will be set by our team after reviewing your request — no payment details are needed from you right now.
+              {f.materialSourcing === "readyStock"
+                ? `This is a fixed-price item from Ready Stock — ${f.orderValue ? `$${f.orderValue.toLocaleString()}` : "price"} — no separate quote is needed.`
+                : "Pricing will be set by our team after reviewing your request — no payment details are needed from you right now."}
             </p>
           </div>
         )}
