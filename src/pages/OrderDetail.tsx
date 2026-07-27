@@ -1,13 +1,17 @@
 import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, type Order } from "@/lib/db";
+import {
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances,
+  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
+} from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
@@ -18,7 +22,10 @@ import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, purchasePending, issuancePending } from "@/lib/manufacturing";
+import { decreaseStock } from "@/lib/stock";
+
+const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
 /** Compress a File to a base64 JPEG ≤800px */
 async function compressImage(file: File): Promise<string> {
@@ -96,6 +103,35 @@ export function OrderDetailPage() {
   const [priceValue, setPriceValue] = useState("");
   const [priceShipping, setPriceShipping] = useState("");
 
+  // Manufacturing — record a purchase / issue material for THIS order directly,
+  // without leaving the page (order is already known, no order-number lookup needed).
+  const [showBuyForm, setShowBuyForm] = useState(false);
+  const [buyMaterial, setBuyMaterial] = useState<PurchaseMaterial>("gold");
+  const [buySupplierId, setBuySupplierId] = useState("");
+  const [buyCurrency, setBuyCurrency] = useState<PurchaseCurrency>("INR");
+  const [buyGoldWeight, setBuyGoldWeight] = useState("");
+  const [buyGoldPurity, setBuyGoldPurity] = useState("22K");
+  const [buyGoldRate, setBuyGoldRate] = useState("");
+  const [buyDiaCarat, setBuyDiaCarat] = useState("");
+  const [buyDiaQuality, setBuyDiaQuality] = useState("");
+  const [buyDiaRate, setBuyDiaRate] = useState("");
+  const [buyTotalUsd, setBuyTotalUsd] = useState("");
+  const [buyExchangeRate, setBuyExchangeRate] = useState("");
+  const [buyInvoiceNumber, setBuyInvoiceNumber] = useState("");
+  const [buyNotes, setBuyNotes] = useState("");
+  const [buying, setBuying] = useState(false);
+
+  const [showIssueForm, setShowIssueForm] = useState(false);
+  const [issueMaterial, setIssueMaterial] = useState<"gold" | "diamond">("gold");
+  const [issueFactoryId, setIssueFactoryId] = useState("");
+  const [issueSource, setIssueSource] = useState<"stock" | "purchase">("stock");
+  const [issuePurchaseId, setIssuePurchaseId] = useState("");
+  const [issuePurity, setIssuePurity] = useState("22K");
+  const [issueQuality, setIssueQuality] = useState("");
+  const [issueQuantity, setIssueQuantity] = useState("");
+  const [issueNotes, setIssueNotes] = useState("");
+  const [issuing, setIssuing] = useState(false);
+
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/orders" className="text-primary underline">Back</Link></div>;
@@ -107,6 +143,141 @@ export function OrderDetailPage() {
   const balance = balanceDue(order);
   // Any actual weight recorded? Drives the "Actual Details" display (all fields optional).
   const hasActuals = !!(order.actualNetWeight || order.actualGrossWeight || order.actualDiamondWeight);
+
+  // ── Manufacturing: purchases/issuances linked to this order ──
+  const linkedPurchases = db.purchases.filter(p => p.orderId === order.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
+
+  const buyComputedInr =
+    buyMaterial === "gold" ? (Number(buyGoldWeight) || 0) * (Number(buyGoldRate) || 0)
+    : (Number(buyDiaCarat) || 0) * (Number(buyDiaRate) || 0);
+  const buyFinalTotalInr = buyCurrency === "USD" ? Math.round((Number(buyTotalUsd) || 0) * (Number(buyExchangeRate) || 0)) : Math.round(buyComputedInr);
+
+  const resetBuyForm = () => {
+    setBuyMaterial("gold"); setBuySupplierId(""); setBuyCurrency("INR");
+    setBuyGoldWeight(""); setBuyGoldPurity("22K"); setBuyGoldRate("");
+    setBuyDiaCarat(""); setBuyDiaQuality(""); setBuyDiaRate("");
+    setBuyTotalUsd(""); setBuyExchangeRate(""); setBuyInvoiceNumber(""); setBuyNotes("");
+  };
+
+  const recordPurchaseForOrder = async () => {
+    if (!buySupplierId) { toast.error("Choose a supplier"); return; }
+    if (buyMaterial === "gold" && (!buyGoldWeight || Number(buyGoldWeight) <= 0)) { toast.error("Enter gold weight"); return; }
+    if (buyMaterial === "diamond" && (!buyDiaCarat || Number(buyDiaCarat) <= 0)) { toast.error("Enter diamond carat"); return; }
+    if (buyCurrency === "USD" && (!buyTotalUsd || !buyExchangeRate)) { toast.error("Enter the USD amount and exchange rate"); return; }
+    if (buyFinalTotalInr <= 0) { toast.error("Total comes to ₹0 — check the weight/rate fields"); return; }
+
+    const supplier = db.suppliers.find(s => s.id === buySupplierId);
+    const purchaseId = uid("pur_");
+    const now = new Date().toISOString();
+    const purchase: Purchase = {
+      id: purchaseId,
+      supplierId: buySupplierId,
+      material: buyMaterial,
+      gold: buyMaterial === "gold" ? { weightGrams: Number(buyGoldWeight), purity: buyGoldPurity, ratePerGram: Number(buyGoldRate) || 0 } : undefined,
+      diamond: buyMaterial === "diamond" ? { carat: Number(buyDiaCarat), quality: buyDiaQuality || undefined, ratePerCarat: Number(buyDiaRate) || 0 } : undefined,
+      purpose: "order",
+      orderId: order.id,
+      currency: buyCurrency,
+      totalUsd: buyCurrency === "USD" ? Number(buyTotalUsd) : undefined,
+      exchangeRate: buyCurrency === "USD" ? Number(buyExchangeRate) : undefined,
+      totalInr: buyFinalTotalInr,
+      payments: [],
+      invoiceNumber: buyInvoiceNumber.trim() || undefined,
+      notes: buyNotes.trim() || undefined,
+      createdBy: user!.id,
+      createdAt: now,
+    };
+    setBuying(true);
+    try {
+      updateDb(d => {
+        if (!d.purchases) d.purchases = [];
+        d.purchases.unshift(purchase);
+        const o = d.orders.find(o => o.id === order.id);
+        if (o) {
+          if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
+          o.linkedPurchaseIds.push(purchaseId);
+          if (!o.manufacturingLog) o.manufacturingLog = [];
+          const qty = buyMaterial === "gold" ? Number(buyGoldWeight) : Number(buyDiaCarat);
+          const label = buyMaterial === "gold" ? `${qty}g ${buyGoldPurity} gold` : `${qty}ct diamond${buyDiaQuality ? ` (${buyDiaQuality})` : ""}`;
+          o.manufacturingLog.push({
+            id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+            material: buyMaterial, amountMaterial: qty, amountInr: buyFinalTotalInr,
+            remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(buyFinalTotalInr)}`,
+          });
+        }
+      });
+      toast.success(`Purchase recorded — ${fmtMoneyInr(buyFinalTotalInr)}`);
+      setShowBuyForm(false);
+      resetBuyForm();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to record purchase");
+    } finally { setBuying(false); }
+  };
+
+  // Purchases bought specifically for this order, of the selected material, not
+  // already drawn on by an earlier issuance — lets material go straight to the
+  // factory without a phantom detour through shared Stock.
+  const eligiblePurchases = linkedPurchases.filter(p => {
+    if (p.purpose !== "order" || p.material !== issueMaterial) return false;
+    const alreadyUsed = db.materialIssuances.some(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
+    return !alreadyUsed;
+  });
+
+  const resetIssueForm = () => {
+    setIssueFactoryId(""); setIssueSource("stock"); setIssuePurchaseId("");
+    setIssuePurity("22K"); setIssueQuality(""); setIssueQuantity(""); setIssueNotes("");
+  };
+
+  const issueMaterialToFactory = async () => {
+    const qty = Number(issueQuantity);
+    if (!issueFactoryId) { toast.error("Choose a factory"); return; }
+    if (!qty || qty <= 0) { toast.error(`Enter the ${issueMaterial} quantity to issue`); return; }
+    const purityOrQuality = issueMaterial === "gold" ? issuePurity : (issueQuality.trim() || "unspecified");
+    if (issueSource === "purchase" && !issuePurchaseId) { toast.error("Choose which purchase this comes from"); return; }
+
+    const factory = db.factories.find(f => f.id === issueFactoryId);
+    const issuanceId = uid("mi_");
+    const now = new Date().toISOString();
+    setIssuing(true);
+    try {
+      if (issueSource === "stock") {
+        await decreaseStock({
+          material: issueMaterial, purityOrQuality, quantity: qty,
+          type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
+          note: `Issued to ${factory?.name || "factory"} for order ${order.orderNumber}`,
+        });
+      }
+      updateDb(d => {
+        if (!d.materialIssuances) d.materialIssuances = [];
+        const issuance: MaterialIssuance = {
+          id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial,
+          purityOrQuality, quantityIssued: qty,
+          source: issueSource, sourcePurchaseId: issueSource === "purchase" ? issuePurchaseId : undefined,
+          issuedAt: now, issuedBy: user!.id, status: "open",
+          finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+          notes: issueNotes.trim() || undefined,
+        };
+        d.materialIssuances.unshift(issuance);
+        const o = d.orders.find(o => o.id === order.id);
+        if (o) {
+          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
+          o.materialIssuanceIds.push(issuanceId);
+          if (!o.manufacturingLog) o.manufacturingLog = [];
+          o.manufacturingLog.push({
+            id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
+            material: issueMaterial, amountMaterial: qty,
+            remarks: `${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} issued to ${factory?.name || "factory"}${issueSource === "purchase" ? " (from a purchase made for this order)" : ""}`,
+          });
+        }
+      });
+      toast.success(`${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} issued to ${factory?.name || "factory"}`);
+      setShowIssueForm(false);
+      resetIssueForm();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to issue material");
+    } finally { setIssuing(false); }
+  };
 
   // Admin, or the employee who owns this order (assigned to them OR the account
   // manager of the order's client) — full control of their own clients' orders.
@@ -1068,12 +1239,196 @@ export function OrderDetailPage() {
         </div>
       </div>
 
+      {/* Manufacturing — buy material / issue to a factory for THIS order,
+          without leaving the page or re-typing the order number (staff only —
+          internal sourcing cost, never shown to the client). */}
+      {user!.role !== "client" && (
+        <div className="card-luxe p-6 space-y-4">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <h3 className="font-display text-xl text-brand-dark">Manufacturing</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
+                  : order.materialSourcing === "purchase" ? "Sourcing plan: Buy New for this order"
+                  : "No sourcing plan set at order creation"}
+              </p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Button onClick={() => { setShowBuyForm(v => !v); setShowIssueForm(false); }} variant="outline" className="rounded-xl gap-2">
+                <Truck className="h-4 w-4" /> Record Purchase
+              </Button>
+              <Button onClick={() => { setShowIssueForm(v => !v); setShowBuyForm(false); }} className="btn-hero rounded-xl gap-2">
+                <FactoryIcon className="h-4 w-4" /> Issue to Factory
+              </Button>
+            </div>
+          </div>
+
+          {showBuyForm && (
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <p className="text-sm font-medium text-brand-dark">Record Material Purchase for {order.orderNumber}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Select value={buySupplierId} onValueChange={setBuySupplierId}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+                  <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={buyMaterial} onValueChange={v => setBuyMaterial(v as PurchaseMaterial)}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+                </Select>
+              </div>
+
+              {buyMaterial === "gold" ? (
+                <div className="grid grid-cols-3 gap-2.5">
+                  <Input type="number" min={0} value={buyGoldWeight} onChange={e => setBuyGoldWeight(e.target.value)} className="rounded-xl h-10" placeholder="Weight (g)" />
+                  <Select value={buyGoldPurity} onValueChange={setBuyGoldPurity}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input type="number" min={0} value={buyGoldRate} onChange={e => setBuyGoldRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/g (${buyCurrency})`} />
+                </div>
+              ) : (
+                <div className="grid grid-cols-3 gap-2.5">
+                  <Input type="number" min={0} step="0.01" value={buyDiaCarat} onChange={e => setBuyDiaCarat(e.target.value)} className="rounded-xl h-10" placeholder="Carat" />
+                  <Input value={buyDiaQuality} onChange={e => setBuyDiaQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                  <Input type="number" min={0} value={buyDiaRate} onChange={e => setBuyDiaRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/ct (${buyCurrency})`} />
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <Select value={buyCurrency} onValueChange={v => setBuyCurrency(v as PurchaseCurrency)}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
+                </Select>
+                {buyCurrency === "USD" && (
+                  <>
+                    <Input type="number" min={0} value={buyTotalUsd} onChange={e => setBuyTotalUsd(e.target.value)} className="rounded-xl h-10" placeholder="Total ($)" />
+                    <Input type="number" min={0} step="0.01" value={buyExchangeRate} onChange={e => setBuyExchangeRate(e.target.value)} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
+                  </>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Input value={buyInvoiceNumber} onChange={e => setBuyInvoiceNumber(e.target.value)} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
+                <Input value={buyNotes} onChange={e => setBuyNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+              </div>
+
+              <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
+                <span className="text-sm text-muted-foreground">Total (INR)</span>
+                <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(buyFinalTotalInr)}</span>
+              </div>
+
+              <div className="flex gap-2.5">
+                <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10">{buying ? "Saving…" : "Save Purchase"}</AsyncButton>
+                <Button variant="outline" onClick={() => { setShowBuyForm(false); resetBuyForm(); }} className="rounded-xl h-10">Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {showIssueForm && (
+            <div className="pt-2 border-t border-border/60 space-y-2.5">
+              <p className="text-sm font-medium text-brand-dark">Issue Material to Factory for {order.orderNumber}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Select value={issueFactoryId} onValueChange={setIssueFactoryId}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                  <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Select value={issueMaterial} onValueChange={v => { setIssueMaterial(v as "gold" | "diamond"); setIssueSource("stock"); setIssuePurchaseId(""); }}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+                </Select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Select value={issueSource} onValueChange={v => { setIssueSource(v as "stock" | "purchase"); setIssuePurchaseId(""); }}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="stock">From Stock</SelectItem>
+                    <SelectItem value="purchase" disabled={eligiblePurchases.length === 0}>
+                      From a purchase made for this order {eligiblePurchases.length === 0 ? "(none available)" : ""}
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
+                {issueSource === "purchase" ? (
+                  <Select value={issuePurchaseId} onValueChange={v => {
+                    setIssuePurchaseId(v);
+                    const p = eligiblePurchases.find(p => p.id === v);
+                    if (p) {
+                      if (p.material === "gold" && p.gold) { setIssuePurity(p.gold.purity); setIssueQuantity(String(p.gold.weightGrams)); }
+                      if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.quality || ""); setIssueQuantity(String(p.diamond.carat)); }
+                    }
+                  }}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose purchase" /></SelectTrigger>
+                    <SelectContent>
+                      {eligiblePurchases.map(p => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : `${p.diamond?.carat}ct ${p.diamond?.quality || ""}`} — {fmtMoneyInr(p.totalInr)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : issueMaterial === "gold" ? (
+                  <Select value={issuePurity} onValueChange={setIssuePurity}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <Input value={issueQuality} onChange={e => setIssueQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                )}
+              </div>
+
+              <Input
+                type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
+                className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight (g)" : "Carat"}
+                disabled={issueSource === "purchase" && !!issuePurchaseId}
+              />
+              <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+
+              <div className="flex gap-2.5">
+                <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10">{issuing ? "Issuing…" : "Issue Material"}</AsyncButton>
+                <Button variant="outline" onClick={() => { setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
+              </div>
+            </div>
+          )}
+
+          {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (
+            <div className="pt-2 border-t border-border/60 space-y-2">
+              {linkedPurchases.map(p => {
+                const pending = purchasePending(p);
+                const supplier = db.suppliers.find(s => s.id === p.supplierId);
+                return (
+                  <Link key={p.id} to={`/suppliers/${p.supplierId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      {p.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
+                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : `${p.diamond?.carat}ct`} from {supplier?.name || "supplier"}</span>
+                    </span>
+                    <span className={`shrink-0 font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                  </Link>
+                );
+              })}
+              {linkedIssuances.map(mi => {
+                const pending = issuancePending(mi);
+                const factory = db.factories.find(f => f.id === mi.factoryId);
+                return (
+                  <Link key={mi.id} to={`/factories/${mi.factoryId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <FactoryIcon className="h-3.5 w-3.5 text-orange-600 shrink-0" />
+                      <span className="truncate">{mi.quantityIssued}{mi.material === "gold" ? "g" : "ct"} {mi.purityOrQuality} issued to {factory?.name || "factory"}</span>
+                    </span>
+                    <span className={`shrink-0 font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Manufacturing Log — a separate, append-only array from `timeline` on
           purpose (see src/lib/db.ts ManufacturingLogEntry comment): these are
           immutable facts, not progression steps, so they never touch the
           index-based advance/revert logic above. Shown in the same visual
           style so it reads as one continuous story. */}
-      {!!order.manufacturingLog?.length && (
+      {user!.role !== "client" && !!order.manufacturingLog?.length && (
         <div className="card-luxe p-6">
           <h3 className="font-display text-xl text-brand-dark mb-5">Manufacturing Log</h3>
           <div className="relative pl-8 space-y-4">
