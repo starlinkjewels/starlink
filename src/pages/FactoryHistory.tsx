@@ -284,23 +284,43 @@ export function FactoryHistoryPage() {
     }
   };
 
+  // Full account statement — making charges (owed) and payments (paid) across
+  // all issuances, chronological, with a running balance — the money ledger,
+  // separate from the material (gold/diamond quantity) tracking above.
+  const statement = (() => {
+    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    for (const mi of issuances) {
+      const order = db.orders.find(o => o.id === mi.orderId);
+      const unit = mi.material === "gold" ? "g" : "ct";
+      if (mi.makingCharges.amountInr > 0) {
+        rows.push({
+          id: mi.id, date: mi.issuedAt,
+          particulars: `Making Charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality} (${order?.orderNumber || "order"})`,
+          debit: mi.makingCharges.amountInr, credit: 0,
+        });
+      }
+      for (const pay of mi.makingCharges.payments || []) {
+        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
+      }
+    }
+    let running = 0;
+    const withBalance = [...rows]
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
+    return withBalance.reverse();
+  })();
+
   const exportCsv = () => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}`,
-      ["Date", "Order", "Material", "Purity/Quality", "Qty Issued", "Qty Used", "Status", "Charges (INR)", "Pending (INR)"],
-      issuances.map(mi => {
-        const order = db.orders.find(o => o.id === mi.orderId);
-        return [
-          fmtDate(mi.issuedAt), order?.orderNumber || "—", mi.material, mi.purityOrQuality,
-          mi.quantityIssued, issuanceUsed(mi), mi.status, mi.makingCharges.amountInr, issuancePending(mi),
-        ];
-      }),
+      ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
+      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
   const exportPdf = () => {
     downloadLedgerPdf({
-      title: "Factory Account Ledger Report",
+      title: "Factory Account Statement",
       subjectLines: [
         `Factory: ${factory.name}`,
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
@@ -314,22 +334,17 @@ export function FactoryHistoryPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Order", x: 48 },
-        { header: "Material", x: 90 },
-        { header: "Status", x: 130 },
-        { header: "Pending", x: 160 },
+        { header: "Particulars", x: 50 },
+        { header: "Charged", x: 122 },
+        { header: "Paid", x: 148 },
+        { header: "Balance", x: 170 },
       ],
-      rows: issuances.map(mi => {
-        const order = db.orders.find(o => o.id === mi.orderId);
-        const unit = mi.material === "gold" ? "g" : "ct";
-        const pending = issuancePending(mi);
-        return [
-          fmtDate(mi.issuedAt), (order?.orderNumber || "—").slice(0, 14),
-          `${mi.quantityIssued}${unit} ${mi.purityOrQuality}`.slice(0, 20),
-          mi.status === "open" ? "In progress" : "Closed",
-          pending > 0 ? fmtInrPlain(pending).replace("Rs. ", "") : "Paid",
-        ];
-      }),
+      rows: statement.map(r => [
+        fmtDate(r.date), r.particulars.slice(0, 28),
+        r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
+        r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
+        fmtInrPlain(r.balance).replace("Rs. ", ""),
+      ]),
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}`,
     });
   };
@@ -452,6 +467,35 @@ export function FactoryHistoryPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Account Statement — making charges and payments interleaved
+          chronologically with a running balance, like a bank/vendor statement. */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60">
+          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in INR</p>
+        </div>
+        <div className="divide-y divide-border/40">
+          {statement.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                {r.debit > 0 ? <Coins className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{r.particulars}</p>
+                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
+                  {r.debit > 0 ? `+${fmtMoneyInr(r.debit)}` : `−${fmtMoneyInr(r.credit)}`}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(r.balance)}</p>
+              </div>
+            </div>
+          ))}
+          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
+        </div>
       </div>
 
       <div className="space-y-3">

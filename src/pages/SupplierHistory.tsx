@@ -190,17 +190,35 @@ export function SupplierHistoryPage() {
   const purchaseDesc = (p: Purchase) =>
     p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} gold` : `${p.diamond?.carat}ct diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
 
+  // Full account statement — every purchase (owed) and every payment (paid)
+  // across all purchases, chronological, with a running balance. This is the
+  // "professional ledger" view, not just a purchase-by-purchase list.
+  const statement = (() => {
+    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    for (const p of purchases) {
+      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}${p.invoiceNumber ? ` (Inv ${p.invoiceNumber})` : ""}`, debit: p.totalInr, credit: 0 });
+      for (const pay of p.payments || []) {
+        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
+      }
+    }
+    let running = 0;
+    const withBalance = [...rows]
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
+    return withBalance.reverse(); // newest first, matching every other list on this page
+  })();
+
   const exportCsv = () => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Material", "Purpose", "Invoice #", "Total (INR)", "Paid (INR)", "Pending (INR)"],
-      purchases.map(p => [fmtDate(p.createdAt), purchaseDesc(p), p.purpose === "order" ? "For Order" : "Stock", p.invoiceNumber || "—", p.totalInr, purchasePaid(p), purchasePending(p)]),
+      ["Date", "Particulars", "Purchased (INR)", "Paid (INR)", "Balance (INR)"],
+      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
   const exportPdf = () => {
     downloadLedgerPdf({
-      title: "Supplier Account Ledger Report",
+      title: "Supplier Account Statement",
       subjectLines: [
         `Supplier: ${supplier.name}`,
         supplier.contactPerson ? `Contact: ${supplier.contactPerson}` : "",
@@ -214,14 +232,16 @@ export function SupplierHistoryPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Material", x: 48 },
-        { header: "Purpose", x: 100 },
-        { header: "Total", x: 125 },
-        { header: "Pending", x: 160 },
+        { header: "Particulars", x: 50 },
+        { header: "Purchased", x: 122 },
+        { header: "Paid", x: 148 },
+        { header: "Balance", x: 170 },
       ],
-      rows: purchases.map(p => [
-        fmtDate(p.createdAt), purchaseDesc(p).slice(0, 24), p.purpose === "order" ? "Order" : "Stock",
-        fmtInrPlain(p.totalInr).replace("Rs. ", ""), purchasePending(p) > 0 ? fmtInrPlain(purchasePending(p)).replace("Rs. ", "") : "Paid",
+      rows: statement.map(r => [
+        fmtDate(r.date), r.particulars.slice(0, 28),
+        r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
+        r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
+        fmtInrPlain(r.balance).replace("Rs. ", ""),
       ]),
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
     });
@@ -383,6 +403,35 @@ export function SupplierHistoryPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Account Statement — full chronological ledger with a running balance,
+          purchases and payments interleaved, like a bank/vendor statement. */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60">
+          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in INR</p>
+        </div>
+        <div className="divide-y divide-border/40">
+          {statement.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                {r.debit > 0 ? <TrendingUp className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{r.particulars}</p>
+                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
+                  {r.debit > 0 ? `+${fmtMoneyInr(r.debit)}` : `−${fmtMoneyInr(r.credit)}`}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(r.balance)}</p>
+              </div>
+            </div>
+          ))}
+          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
+        </div>
       </div>
 
       {/* Purchase history */}

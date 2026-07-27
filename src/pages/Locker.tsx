@@ -136,22 +136,37 @@ export function LockerPage() {
     t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type);
   const txnSigned = (t: (typeof txns)[number]) => (t.type === "income" || t.type === "transfer_in" ? t.amountInr : -t.amountInr);
 
+  // Running balance, computed oldest-first from the account's opening balance —
+  // a proper statement, not just a flat list of unrelated amounts.
+  const txnBalances = new Map<string, number>();
+  if (selected) {
+    let running = selected.openingBalance || 0;
+    for (const t of [...txns].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))) {
+      running += txnSigned(t);
+      txnBalances.set(t.id, running);
+    }
+  }
+
   const exportCsv = () => {
     if (!selected) return;
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
-      ["Date", "Description", "Type", "Amount (INR)"],
-      txns.map(t => [fmtDate(t.createdAt), txnLabel(t), t.type, txnSigned(t)]),
+      ["Date", "Description", "Money In (INR)", "Money Out (INR)", "Balance (INR)"],
+      txns.map(t => {
+        const signed = txnSigned(t);
+        return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", txnBalances.get(t.id) ?? 0];
+      }),
     );
   };
 
   const exportPdf = () => {
     if (!selected) return;
     downloadLedgerPdf({
-      title: "Locker Ledger Report",
+      title: "Locker Account Statement",
       subjectLines: [
         `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
         `Type: ${selected.type === "bank" ? "Bank" : "Cash"}`,
+        `Opening Balance: ${fmtInrPlain(selected.openingBalance || 0)}`,
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
@@ -161,11 +176,20 @@ export function LockerPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Description", x: 55 },
-        { header: "Type", x: 130 },
-        { header: "Amount (INR)", x: 158 },
+        { header: "Description", x: 50 },
+        { header: "In", x: 118 },
+        { header: "Out", x: 140 },
+        { header: "Balance", x: 165 },
       ],
-      rows: txns.map(t => [fmtDate(t.createdAt), txnLabel(t).slice(0, 32), t.type, (txnSigned(t) >= 0 ? "+" : "-") + fmtInrPlain(Math.abs(txnSigned(t))).replace("Rs. ", "")]),
+      rows: txns.map(t => {
+        const signed = txnSigned(t);
+        return [
+          fmtDate(t.createdAt), txnLabel(t).slice(0, 26),
+          signed > 0 ? fmtInrPlain(signed).replace("Rs. ", "") : "—",
+          signed < 0 ? fmtInrPlain(-signed).replace("Rs. ", "") : "—",
+          fmtInrPlain(txnBalances.get(t.id) ?? 0).replace("Rs. ", ""),
+        ];
+      }),
       filename: `Locker-${selected.name.replace(/\s+/g, "_")}`,
     });
   };
@@ -342,9 +366,12 @@ export function LockerPage() {
                   <p className="text-sm font-medium truncate">{t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type)}</p>
                   <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
                 </div>
-                <p className={`text-sm font-semibold shrink-0 ${t.type === "income" || t.type === "transfer_in" ? "text-success" : "text-destructive"}`}>
-                  {t.type === "income" || t.type === "transfer_in" ? "+" : "−"}{fmtMoneyInr(t.amountInr)}
-                </p>
+                <div className="text-right shrink-0">
+                  <p className={`text-sm font-semibold ${t.type === "income" || t.type === "transfer_in" ? "text-success" : "text-destructive"}`}>
+                    {t.type === "income" || t.type === "transfer_in" ? "+" : "−"}{fmtMoneyInr(t.amountInr)}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(txnBalances.get(t.id) ?? 0)}</p>
+                </div>
               </div>
             ))}
             {txns.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No transactions yet.</div>}

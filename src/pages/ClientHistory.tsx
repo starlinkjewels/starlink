@@ -18,6 +18,9 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { useAuth } from "@/lib/auth";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { FileSpreadsheet } from "lucide-react";
 
 export function ClientHistoryPage() {
   const { id } = useParams();
@@ -101,6 +104,63 @@ export function ClientHistoryPage() {
       c.creditBalance = leftover > 0 ? leftover : undefined;
     });
     toast.success("Credit applied to oldest outstanding bills");
+  };
+
+  // Full account statement — every order billed and every payment received,
+  // chronological, with a running balance — the "professional ledger" view,
+  // separate from the Order History table below (which is order-by-order).
+  const statement = (() => {
+    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    for (const o of allOrders) {
+      rows.push({ id: o.id, date: o.createdAt, particulars: `Order ${o.orderNumber} — ${o.jewelleryType}`, debit: orderTotal(o), credit: 0 });
+      for (const adv of o.advances || []) {
+        rows.push({ id: adv.id, date: adv.createdAt, particulars: `${adv.note || "Payment"} (${o.orderNumber})`, debit: 0, credit: adv.amount });
+      }
+    }
+    let running = 0;
+    const withBalance = [...rows]
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
+    return withBalance.reverse();
+  })();
+
+  const exportStatementCsv = () => {
+    downloadCsv(
+      `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
+      ["Date", "Particulars", "Billed (USD)", "Received (USD)", "Balance (USD)"],
+      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+    );
+  };
+
+  const exportStatementPdf = () => {
+    downloadLedgerPdf({
+      title: "Client Account Statement",
+      subjectLines: [
+        `Client: ${client.companyName}`,
+        `Owner: ${client.ownerName}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ],
+      summary: [
+        { label: "Total Billed", value: fmtMoney(account.billed) },
+        { label: "Received", value: fmtMoney(account.allocated) },
+        { label: "Outstanding", value: fmtMoney(account.outstanding) },
+        { label: "Credit (Advance)", value: fmtMoney(account.credit) },
+      ],
+      columns: [
+        { header: "Date", x: 20 },
+        { header: "Particulars", x: 50 },
+        { header: "Billed", x: 122 },
+        { header: "Received", x: 148 },
+        { header: "Balance", x: 174 },
+      ],
+      rows: statement.map(r => [
+        fmtDate(r.date), r.particulars.slice(0, 28),
+        r.debit ? fmtMoney(r.debit) : "—",
+        r.credit ? fmtMoney(r.credit) : "—",
+        fmtMoney(r.balance),
+      ]),
+      filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
+    });
   };
 
   const filtered = allOrders.filter(o => {
@@ -255,6 +315,15 @@ export function ClientHistoryPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportStatementPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportStatementCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {account.credit > 0 && account.outstanding > 0 && (
               <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Apply Credit
@@ -326,6 +395,35 @@ export function ClientHistoryPage() {
             </p>
           </div>
         )}
+      </div>
+
+      {/* Account Statement — orders billed and payments received, interleaved
+          chronologically with a running balance, like a bank/vendor statement. */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60">
+          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
+          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in USD</p>
+        </div>
+        <div className="divide-y divide-border/40">
+          {statement.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                {r.debit > 0 ? <Package className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{r.particulars}</p>
+                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
+              </div>
+              <div className="text-right shrink-0">
+                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
+                  {r.debit > 0 ? `+${fmtMoney(r.debit)}` : `−${fmtMoney(r.credit)}`}
+                </p>
+                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoney(r.balance)}</p>
+              </div>
+            </div>
+          ))}
+          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
+        </div>
       </div>
 
       {/* Order History */}
