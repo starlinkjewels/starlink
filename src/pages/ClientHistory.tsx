@@ -405,6 +405,11 @@ export function ClientHistoryPage() {
                 className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
             </div>
 
+            {db.lockers.filter(l => l.active !== false).length === 0 && (
+              <p className="text-xs text-amber-600">
+                No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
+              </p>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <Select value={payLockerId} onValueChange={setPayLockerId}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>

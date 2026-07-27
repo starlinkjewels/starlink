@@ -49,6 +49,7 @@ export function ExpensesPage() {
   const [expLockerAmount, setExpLockerAmount] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const activeLockers = db.lockers.filter(l => l.active !== false);
 
   // Live sync with the Firebase-backed store
   useEffect(() => {
@@ -510,6 +511,11 @@ export function ExpensesPage() {
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
                     Paid from Locker <span className="text-destructive">*</span>
                   </label>
+                  {activeLockers.length === 0 && (
+                    <p className="text-xs text-amber-600 mb-1.5">
+                      No lockers yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
+                    </p>
+                  )}
                   <Select
                     value={expLockerId}
                     onValueChange={v => {
@@ -520,7 +526,7 @@ export function ExpensesPage() {
                   >
                     <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                     <SelectContent>
-                      {db.lockers.filter(l => l.active !== false).map(l => (
+                      {activeLockers.map(l => (
                         <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
                       ))}
                     </SelectContent>

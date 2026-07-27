@@ -86,6 +86,8 @@ export function NewOrderPage() {
     shippingCharge: defaultShipping,
     advanceAmount: 0,
     advanceNote: "",
+    advanceLockerId: "",
+    advanceLockerAmount: "",
     certificate: "no" as "yes" | "no",
     certificateFee: 50,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
@@ -175,6 +177,10 @@ export function NewOrderPage() {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
       if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
     }
+    if (Number(f.advanceAmount) > 0) {
+      if (!f.advanceLockerId) { toast.error("Choose which locker the advance was deposited into."); return; }
+      if (!f.advanceLockerAmount || Number(f.advanceLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker."); return; }
+    }
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : f.clientId;
@@ -237,6 +243,8 @@ export function NewOrderPage() {
           note: f.advanceNote || "Initial advance",
           recordedBy: user!.id,
           createdAt: new Date().toISOString(),
+          lockerId: f.advanceLockerId || undefined,
+          lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
         timeline: buildTimelineSteps(f.certificate === "yes").map((s, i) => ({
           step: s,
@@ -251,6 +259,18 @@ export function NewOrderPage() {
       if (order.materialSourcing === "readyStock" && order.readyStockItemId) {
         const item = d.readyStock.find(x => x.id === order.readyStockItemId);
         if (item) item.quantity = Math.max(0, item.quantity - 1);
+      }
+
+      if (advance > 0 && f.advanceLockerId) {
+        const locker = d.lockers.find(l => l.id === f.advanceLockerId);
+        if (locker) {
+          if (!d.lockerTransactions) d.lockerTransactions = [];
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: f.advanceLockerId, type: "income", amountInr: Number(f.advanceLockerAmount),
+            currency: locker.currency || "INR", category: `Client Payment — ${order.orderNumber}`,
+            refType: "clientPayment", refId: order.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
+          });
+        }
       }
 
       if (isClient) {
@@ -749,6 +769,34 @@ export function NewOrderPage() {
                     className="rounded-xl h-11" placeholder="Cash, Bank transfer, Cheque…" />
                 </Field>
               </div>
+
+              {Number(f.advanceAmount) > 0 && db.lockers.filter(l => l.active !== false).length === 0 && (
+                <p className="text-xs text-amber-600 -mt-1">
+                  No lockers yet — create one on the Locker page first before recording this advance.
+                </p>
+              )}
+              {Number(f.advanceAmount) > 0 && (
+                <div className="grid md:grid-cols-2 gap-3">
+                  <Field label="Deposited to Locker *">
+                    <Select value={f.advanceLockerId} onValueChange={v => {
+                      const l = db.lockers.find(x => x.id === v);
+                      setF(prev => ({ ...prev, advanceLockerId: v, advanceLockerAmount: l?.currency === "USD" ? String(prev.advanceAmount) : "" }));
+                    }}>
+                      <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
+                      <SelectContent>
+                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {f.advanceLockerId && (
+                    <Field label={`Amount Deposited (${db.lockers.find(l => l.id === f.advanceLockerId)?.currency === "USD" ? "$" : "₹"})`}>
+                      <Input type="number" min={0} step="0.01" value={f.advanceLockerAmount}
+                        onChange={e => set("advanceLockerAmount", e.target.value)}
+                        className="rounded-xl h-11" />
+                    </Field>
+                  )}
+                </div>
+              )}
 
               {/* Balance summary — always 2×2 on mobile */}
               <div className="grid grid-cols-2 gap-2.5">

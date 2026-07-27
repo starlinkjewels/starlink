@@ -1204,6 +1204,11 @@ export function OrderDetailPage() {
                     />
                   </div>
                 </div>
+                {db.lockers.filter(l => l.active !== false).length === 0 && (
+                  <p className="text-xs text-amber-600">
+                    No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
+                  </p>
+                )}
                 <div className="grid md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Deposited to Locker *</Label>
