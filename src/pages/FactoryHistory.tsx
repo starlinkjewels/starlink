@@ -13,9 +13,14 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
+  Download, FileText, FileSpreadsheet,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -206,6 +211,56 @@ export function FactoryHistoryPage() {
     toast.success("Issuance closed");
   };
 
+  const exportCsv = () => {
+    downloadCsv(
+      `Factory-${factory.name.replace(/\s+/g, "_")}`,
+      ["Date", "Order", "Material", "Purity/Quality", "Qty Issued", "Qty Used", "Status", "Charges (INR)", "Pending (INR)"],
+      issuances.map(mi => {
+        const order = db.orders.find(o => o.id === mi.orderId);
+        return [
+          fmtDate(mi.issuedAt), order?.orderNumber || "—", mi.material, mi.purityOrQuality,
+          mi.quantityIssued, issuanceUsed(mi), mi.status, mi.makingCharges.amountInr, issuancePending(mi),
+        ];
+      }),
+    );
+  };
+
+  const exportPdf = () => {
+    downloadLedgerPdf({
+      title: "Factory Account Ledger Report",
+      subjectLines: [
+        `Factory: ${factory.name}`,
+        factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ].filter(Boolean),
+      summary: [
+        { label: "Gold Outstanding", value: `${account.goldOutstanding.toLocaleString()} g` },
+        { label: "Diamond Outstanding", value: `${account.diamondOutstanding.toLocaleString()} ct` },
+        { label: "Charges Total", value: fmtInrPlain(account.chargesTotal) },
+        { label: "Charges Pending", value: fmtInrPlain(account.chargesPending) },
+      ],
+      columns: [
+        { header: "Date", x: 20 },
+        { header: "Order", x: 48 },
+        { header: "Material", x: 90 },
+        { header: "Status", x: 130 },
+        { header: "Pending", x: 160 },
+      ],
+      rows: issuances.map(mi => {
+        const order = db.orders.find(o => o.id === mi.orderId);
+        const unit = mi.material === "gold" ? "g" : "ct";
+        const pending = issuancePending(mi);
+        return [
+          fmtDate(mi.issuedAt), (order?.orderNumber || "—").slice(0, 14),
+          `${mi.quantityIssued}${unit} ${mi.purityOrQuality}`.slice(0, 20),
+          mi.status === "open" ? "In progress" : "Closed",
+          pending > 0 ? fmtInrPlain(pending).replace("Rs. ", "") : "Paid",
+        ];
+      }),
+      filename: `Factory-${factory.name.replace(/\s+/g, "_")}`,
+    });
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <button onClick={() => navigate("/factories")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -237,9 +292,20 @@ export function FactoryHistoryPage() {
               <p className="text-xs text-muted-foreground">Gold in grams, diamonds in carats, charges in INR</p>
             </div>
           </div>
-          <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
-            <Plus className="h-4 w-4" /> Issue Material
-          </Button>
+          <div className="flex items-center gap-2 flex-wrap">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
+              <Plus className="h-4 w-4" /> Issue Material
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">

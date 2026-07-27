@@ -12,9 +12,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History } from "lucide-react";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, FileText, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
+import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const PAGE_SIZE = 10;
 
@@ -57,6 +61,36 @@ export function LockerPage() {
     } finally { setSaving(false); }
   };
 
+  // ── Edit locker ──
+  const [editId, setEditId] = useState<string | null>(null);
+  const [ef, setEf] = useState<{ name: string; type: LockerType; accountNumberLast4: string; openingBalance: string }>({
+    name: "", type: "bank", accountNumberLast4: "", openingBalance: "0",
+  });
+  const [editSaving, setEditSaving] = useState(false);
+
+  const openEditLocker = (l: typeof lockers[number]) => {
+    setEditId(l.id);
+    setEf({ name: l.name, type: l.type, accountNumberLast4: l.accountNumberLast4 || "", openingBalance: String(l.openingBalance) });
+  };
+
+  const saveEditLocker = () => {
+    if (!editId) return;
+    if (!ef.name.trim()) { toast.error("Enter an account name"); return; }
+    setEditSaving(true);
+    try {
+      updateDb(d => {
+        const l = d.lockers.find(x => x.id === editId);
+        if (!l) return;
+        l.name = ef.name.trim();
+        l.type = ef.type;
+        l.accountNumberLast4 = ef.accountNumberLast4.trim() || undefined;
+        l.openingBalance = Math.max(0, Number(ef.openingBalance) || 0);
+      });
+      toast.success("Locker updated");
+      setEditId(null);
+    } finally { setEditSaving(false); }
+  };
+
   const recordTxn = () => {
     if (!selected) return;
     const amt = Number(txnAmount);
@@ -97,6 +131,44 @@ export function LockerPage() {
 
   const totalIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").reduce((s, t) => s + t.amountInr, 0);
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
+
+  const txnLabel = (t: (typeof txns)[number]) =>
+    t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type);
+  const txnSigned = (t: (typeof txns)[number]) => (t.type === "income" || t.type === "transfer_in" ? t.amountInr : -t.amountInr);
+
+  const exportCsv = () => {
+    if (!selected) return;
+    downloadCsv(
+      `Locker-${selected.name.replace(/\s+/g, "_")}`,
+      ["Date", "Description", "Type", "Amount (INR)"],
+      txns.map(t => [fmtDate(t.createdAt), txnLabel(t), t.type, txnSigned(t)]),
+    );
+  };
+
+  const exportPdf = () => {
+    if (!selected) return;
+    downloadLedgerPdf({
+      title: "Locker Ledger Report",
+      subjectLines: [
+        `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
+        `Type: ${selected.type === "bank" ? "Bank" : "Cash"}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ],
+      summary: [
+        { label: "Current Balance", value: fmtInrPlain(lockerBalance(selected, db.lockerTransactions)) },
+        { label: "Total In", value: fmtInrPlain(totalIn) },
+        { label: "Total Out", value: fmtInrPlain(totalOut) },
+      ],
+      columns: [
+        { header: "Date", x: 20 },
+        { header: "Description", x: 55 },
+        { header: "Type", x: 130 },
+        { header: "Amount (INR)", x: 158 },
+      ],
+      rows: txns.map(t => [fmtDate(t.createdAt), txnLabel(t).slice(0, 32), t.type, (txnSigned(t) >= 0 ? "+" : "-") + fmtInrPlain(Math.abs(txnSigned(t))).replace("Rs. ", "")]),
+      filename: `Locker-${selected.name.replace(/\s+/g, "_")}`,
+    });
+  };
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
@@ -147,12 +219,22 @@ export function LockerPage() {
           const bal = lockerBalance(l, db.lockerTransactions);
           const isSelected = selectedId === l.id;
           return (
-            <button
+            <div
               key={l.id}
+              role="button"
+              tabIndex={0}
               onClick={() => { setSelectedId(isSelected ? null : l.id); setTxnMode(false); }}
-              className={`card-luxe p-5 text-left transition-all ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
+              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(isSelected ? null : l.id); setTxnMode(false); } }}
+              className={`card-luxe p-5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
             >
-              <div className="flex items-center gap-3">
+              <button
+                onClick={e => { e.stopPropagation(); openEditLocker(l); }}
+                className="absolute top-4 right-4 h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                title="Edit locker"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </button>
+              <div className="flex items-center gap-3 pr-8">
                 <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 grid place-items-center shrink-0">
                   {l.type === "bank" ? <Landmark className="h-5 w-5 text-primary" /> : <Wallet className="h-5 w-5 text-primary" />}
                 </div>
@@ -163,7 +245,7 @@ export function LockerPage() {
               </div>
               <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtMoneyInr(bal)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Current balance</p>
-            </button>
+            </div>
           );
         })}
         {lockers.length === 0 && (
@@ -183,9 +265,20 @@ export function LockerPage() {
                 <p className="text-xs text-muted-foreground">{txns.length} transaction{txns.length !== 1 ? "s" : ""}</p>
               </div>
             </div>
-            <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> Record Transaction
-            </Button>
+            <div className="flex items-center gap-2 flex-wrap">
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
+                  <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
+                <Plus className="h-4 w-4" /> Record Transaction
+              </Button>
+            </div>
           </div>
 
           <div className="grid grid-cols-3 gap-3">
@@ -262,6 +355,42 @@ export function LockerPage() {
           )}
         </motion.div>
       )}
+
+      <Dialog open={!!editId} onOpenChange={open => !open && setEditId(null)}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader><DialogTitle className="font-display text-2xl">Edit Locker</DialogTitle></DialogHeader>
+          <div className="space-y-3 mt-2">
+            <div>
+              <Label className="text-xs">Account Name</Label>
+              <Input value={ef.name} onChange={e => setEf({ ...ef, name: e.target.value })} className="rounded-xl mt-1" />
+            </div>
+            <div>
+              <Label className="text-xs">Type</Label>
+              <Select value={ef.type} onValueChange={v => setEf({ ...ef, type: v as LockerType })}>
+                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="bank">Bank</SelectItem>
+                  <SelectItem value="cash">Cash</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            {ef.type === "bank" && (
+              <div>
+                <Label className="text-xs">Account Number (last 4, optional)</Label>
+                <Input value={ef.accountNumberLast4} onChange={e => setEf({ ...ef, accountNumberLast4: e.target.value })} maxLength={4} className="rounded-xl mt-1" />
+              </div>
+            )}
+            <div>
+              <Label className="text-xs">Opening Balance (₹)</Label>
+              <Input type="number" min={0} value={ef.openingBalance} onChange={e => setEf({ ...ef, openingBalance: e.target.value })} className="rounded-xl mt-1" />
+            </div>
+            <div className="flex gap-2">
+              <AsyncButton onClick={saveEditLocker} disabled={editSaving} className="btn-hero rounded-xl flex-1">{editSaving ? "Saving…" : "Save Changes"}</AsyncButton>
+              <Button variant="outline" onClick={() => setEditId(null)} className="rounded-xl">Cancel</Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

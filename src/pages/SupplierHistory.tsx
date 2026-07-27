@@ -14,9 +14,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
+  Download, FileText, FileSpreadsheet,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
+import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -182,6 +187,46 @@ export function SupplierHistoryPage() {
 
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
+  const purchaseDesc = (p: Purchase) =>
+    p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} gold` : `${p.diamond?.carat}ct diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
+
+  const exportCsv = () => {
+    downloadCsv(
+      `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
+      ["Date", "Material", "Purpose", "Invoice #", "Total (INR)", "Paid (INR)", "Pending (INR)"],
+      purchases.map(p => [fmtDate(p.createdAt), purchaseDesc(p), p.purpose === "order" ? "For Order" : "Stock", p.invoiceNumber || "—", p.totalInr, purchasePaid(p), purchasePending(p)]),
+    );
+  };
+
+  const exportPdf = () => {
+    downloadLedgerPdf({
+      title: "Supplier Account Ledger Report",
+      subjectLines: [
+        `Supplier: ${supplier.name}`,
+        supplier.contactPerson ? `Contact: ${supplier.contactPerson}` : "",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ].filter(Boolean),
+      summary: [
+        { label: "Total Purchased", value: fmtInrPlain(account.totalPurchased) },
+        { label: "Total Paid", value: fmtInrPlain(account.totalPaid) },
+        { label: "Balance Owed", value: fmtInrPlain(account.balanceOwed) },
+        { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
+      ],
+      columns: [
+        { header: "Date", x: 20 },
+        { header: "Material", x: 48 },
+        { header: "Purpose", x: 100 },
+        { header: "Total", x: 125 },
+        { header: "Pending", x: 160 },
+      ],
+      rows: purchases.map(p => [
+        fmtDate(p.createdAt), purchaseDesc(p).slice(0, 24), p.purpose === "order" ? "Order" : "Stock",
+        fmtInrPlain(p.totalInr).replace("Rs. ", ""), purchasePending(p) > 0 ? fmtInrPlain(purchasePending(p)).replace("Rs. ", "") : "Paid",
+      ]),
+      filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
+    });
+  };
+
   return (
     <div className="max-w-6xl mx-auto space-y-6">
       <button onClick={() => navigate("/suppliers")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -217,6 +262,15 @@ export function SupplierHistoryPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
             {account.balanceOwed > 0 && (
               <Button onClick={() => setShowPayForm(v => !v)} variant="outline" className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Record Payment
