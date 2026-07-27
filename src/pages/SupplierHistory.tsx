@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
-  Download, FileText, FileSpreadsheet,
+  Download, FileText, FileSpreadsheet, X,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -24,6 +24,45 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
+
+// One line = one Purchase doc on save — a single supplier invoice often
+// covers several sizes/qualities (e.g. two diamond parcels), so purchases are
+// entered as a list rather than forcing one open/fill/save cycle per variety.
+interface PurchaseLine {
+  material: PurchaseMaterial;
+  purpose: "order" | "stock";
+  orderNumber: string;
+  goldWeight: string;
+  goldPurity: string;
+  goldRate: string;
+  diaCarat: string;
+  diaQuality: string;
+  diaRate: string;
+  currency: PurchaseCurrency;
+  totalUsd: string;
+  exchangeRate: string;
+  invoiceNumber: string;
+  notes: string;
+}
+
+function emptyPurchaseLine(): PurchaseLine {
+  return {
+    material: "gold", purpose: "stock", orderNumber: "",
+    goldWeight: "", goldPurity: "22K", goldRate: "",
+    diaCarat: "", diaQuality: "", diaRate: "",
+    currency: "INR", totalUsd: "", exchangeRate: "",
+    invoiceNumber: "", notes: "",
+  };
+}
+
+function purchaseLineTotalInr(line: PurchaseLine): number {
+  const computed = line.material === "gold"
+    ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
+    : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
+  return line.currency === "USD"
+    ? Math.round((Number(line.totalUsd) || 0) * (Number(line.exchangeRate) || 0))
+    : Math.round(computed);
+}
 
 export function SupplierHistoryPage() {
   const { id } = useParams();
@@ -47,106 +86,106 @@ export function SupplierHistoryPage() {
 
   // ── Record purchase ──
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
-  const [material, setMaterial] = useState<PurchaseMaterial>("gold");
-  const [purpose, setPurpose] = useState<"order" | "stock">("stock");
-  const [orderNumber, setOrderNumber] = useState("");
-  const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
-  const [goldWeight, setGoldWeight] = useState("");
-  const [goldPurity, setGoldPurity] = useState("22K");
-  const [goldRate, setGoldRate] = useState("");
-  const [diaCarat, setDiaCarat] = useState("");
-  const [diaQuality, setDiaQuality] = useState("");
-  const [diaRate, setDiaRate] = useState("");
-  const [totalUsd, setTotalUsd] = useState("");
-  const [exchangeRate, setExchangeRate] = useState("");
-  const [invoiceNumber, setInvoiceNumber] = useState("");
-  const [notes, setNotes] = useState("");
+  const [purchaseLines, setPurchaseLines] = useState<PurchaseLine[]>([emptyPurchaseLine()]);
+  const [recordingPurchase, setRecordingPurchase] = useState(false);
 
-  const computedInr =
-    material === "gold" ? (Number(goldWeight) || 0) * (Number(goldRate) || 0)
-    : (Number(diaCarat) || 0) * (Number(diaRate) || 0);
-  const finalTotalInr = currency === "USD" ? Math.round((Number(totalUsd) || 0) * (Number(exchangeRate) || 0)) : Math.round(computedInr);
+  const grandTotalInr = purchaseLines.reduce((s, l) => s + purchaseLineTotalInr(l), 0);
 
-  const resetPurchaseForm = () => {
-    setMaterial("gold"); setPurpose("stock"); setOrderNumber(""); setCurrency("INR");
-    setGoldWeight(""); setGoldPurity("22K"); setGoldRate("");
-    setDiaCarat(""); setDiaQuality(""); setDiaRate("");
-    setTotalUsd(""); setExchangeRate(""); setInvoiceNumber(""); setNotes("");
-  };
+  const updatePurchaseLine = (idx: number, patch: Partial<PurchaseLine>) =>
+    setPurchaseLines(prev => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  const addPurchaseLine = () => setPurchaseLines(prev => [...prev, emptyPurchaseLine()]);
+  const removePurchaseLine = (idx: number) => setPurchaseLines(prev => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
+
+  const resetPurchaseForm = () => setPurchaseLines([emptyPurchaseLine()]);
 
   const recordPurchase = async () => {
-    if (material === "gold" && (!goldWeight || Number(goldWeight) <= 0)) { toast.error("Enter gold weight"); return; }
-    if (material === "diamond" && (!diaCarat || Number(diaCarat) <= 0)) { toast.error("Enter diamond carat"); return; }
-    if (currency === "USD" && (!totalUsd || !exchangeRate)) { toast.error("Enter the USD amount and exchange rate"); return; }
-    if (purpose === "order" && !orderNumber.trim()) { toast.error("Enter the order number this purchase is for"); return; }
-    if (finalTotalInr <= 0) { toast.error("Total comes to ₹0 — check the weight/rate fields"); return; }
-
-    let linkedOrderId: string | undefined;
-    if (purpose === "order") {
-      const order = db.orders.find(o => o.orderNumber.trim().toLowerCase() === orderNumber.trim().toLowerCase());
-      if (!order) { toast.error(`No order found matching "${orderNumber}"`); return; }
-      linkedOrderId = order.id;
+    for (const line of purchaseLines) {
+      if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
+      if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
+      if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
+      if (line.purpose === "order" && !line.orderNumber.trim()) { toast.error("Enter the order number for every 'for a specific order' line"); return; }
+      if (purchaseLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
     }
 
-    const purchaseId = uid("pur_");
-    const now = new Date().toISOString();
-    const purchase: Purchase = {
-      id: purchaseId,
-      supplierId: id!,
-      material,
-      gold: material === "gold" ? { weightGrams: Number(goldWeight), purity: goldPurity, ratePerGram: Number(goldRate) || 0 } : undefined,
-      diamond: material === "diamond" ? { carat: Number(diaCarat), quality: diaQuality || undefined, ratePerCarat: Number(diaRate) || 0 } : undefined,
-      purpose,
-      orderId: linkedOrderId,
-      currency,
-      totalUsd: currency === "USD" ? Number(totalUsd) : undefined,
-      exchangeRate: currency === "USD" ? Number(exchangeRate) : undefined,
-      totalInr: finalTotalInr,
-      payments: [],
-      invoiceNumber: invoiceNumber.trim() || undefined,
-      notes: notes.trim() || undefined,
-      createdBy: user!.id,
-      createdAt: now,
-    };
+    // Resolve order links up front so a typo fails before any writes happen.
+    const resolved: { line: PurchaseLine; linkedOrderId?: string }[] = [];
+    for (const line of purchaseLines) {
+      if (line.purpose === "order") {
+        const order = db.orders.find(o => o.orderNumber.trim().toLowerCase() === line.orderNumber.trim().toLowerCase());
+        if (!order) { toast.error(`No order found matching "${line.orderNumber}"`); return; }
+        resolved.push({ line, linkedOrderId: order.id });
+      } else {
+        resolved.push({ line });
+      }
+    }
 
+    const now = new Date().toISOString();
+    const entries = resolved.map(({ line, linkedOrderId }) => ({
+      id: uid("pur_"), line, linkedOrderId, totalInr: purchaseLineTotalInr(line),
+    }));
+
+    setRecordingPurchase(true);
     try {
-      // Stock increase must succeed before the purchase record is written, so
-      // we never end up with a purchase that silently failed to update stock.
-      if (purpose === "stock") {
-        await increaseStock({
-          material,
-          purityOrQuality: material === "gold" ? goldPurity : (diaQuality || "unspecified"),
-          quantity: material === "gold" ? Number(goldWeight) : Number(diaCarat),
-          refType: "purchase",
-          refId: purchaseId,
-          createdBy: user!.id,
-        });
+      // Stock increases must succeed before the purchase records are written,
+      // so we never end up with a purchase that silently failed to update stock.
+      for (const entry of entries) {
+        if (entry.line.purpose === "stock") {
+          await increaseStock({
+            material: entry.line.material,
+            purityOrQuality: entry.line.material === "gold" ? entry.line.goldPurity : (entry.line.diaQuality || "unspecified"),
+            quantity: entry.line.material === "gold" ? Number(entry.line.goldWeight) : Number(entry.line.diaCarat),
+            refType: "purchase",
+            refId: entry.id,
+            createdBy: user!.id,
+          });
+        }
       }
       updateDb(d => {
         if (!d.purchases) d.purchases = [];
-        d.purchases.unshift(purchase);
-        if (linkedOrderId) {
-          const o = d.orders.find(o => o.id === linkedOrderId);
-          if (o) {
-            if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
-            o.linkedPurchaseIds.push(purchaseId);
-            if (!o.manufacturingLog) o.manufacturingLog = [];
-            const qty = material === "gold" ? Number(goldWeight) : Number(diaCarat);
-            const label = material === "gold" ? `${qty}g ${goldPurity} gold` : `${qty}ct diamond${diaQuality ? ` (${diaQuality})` : ""}`;
-            o.manufacturingLog.push({
-              id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
-              material, amountMaterial: qty, amountInr: finalTotalInr,
-              remarks: `Purchased ${label} from ${supplier.name} for this order — ${fmtMoneyInr(finalTotalInr)}`,
-            });
+        for (const entry of entries) {
+          const { line, linkedOrderId, totalInr } = entry;
+          const purchase: Purchase = {
+            id: entry.id,
+            supplierId: id!,
+            material: line.material,
+            gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
+            diamond: line.material === "diamond" ? { carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0 } : undefined,
+            purpose: line.purpose,
+            orderId: linkedOrderId,
+            currency: line.currency,
+            totalUsd: line.currency === "USD" ? Number(line.totalUsd) : undefined,
+            exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
+            totalInr,
+            payments: [],
+            invoiceNumber: line.invoiceNumber.trim() || undefined,
+            notes: line.notes.trim() || undefined,
+            createdBy: user!.id,
+            createdAt: now,
+          };
+          d.purchases.unshift(purchase);
+          if (linkedOrderId) {
+            const o = d.orders.find(o => o.id === linkedOrderId);
+            if (o) {
+              if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
+              o.linkedPurchaseIds.push(purchase.id);
+              if (!o.manufacturingLog) o.manufacturingLog = [];
+              const qty = line.material === "gold" ? Number(line.goldWeight) : Number(line.diaCarat);
+              const label = line.material === "gold" ? `${qty}g ${line.goldPurity} gold` : `${qty}ct diamond${line.diaQuality ? ` (${line.diaQuality})` : ""}`;
+              o.manufacturingLog.push({
+                id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+                material: line.material, amountMaterial: qty, amountInr: totalInr,
+                remarks: `Purchased ${label} from ${supplier.name} for this order — ${fmtMoneyInr(totalInr)}`,
+              });
+            }
           }
         }
       });
-      toast.success(`Purchase recorded — ${fmtMoneyInr(finalTotalInr)}`);
+      toast.success(`${entries.length > 1 ? `${entries.length} purchases` : "Purchase"} recorded — ${fmtMoneyInr(grandTotalInr)}`);
       setShowPurchaseForm(false);
       resetPurchaseForm();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to record purchase");
-    }
+    } finally { setRecordingPurchase(false); }
   };
 
   // ── Record payment ──
@@ -313,65 +352,82 @@ export function SupplierHistoryPage() {
         </div>
 
         {showPurchaseForm && (
-          <div className="pt-2 border-t border-border/60 space-y-2.5">
+          <div className="pt-2 border-t border-border/60 space-y-3">
             <p className="text-sm font-medium text-brand-dark">Record Purchase</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Select value={material} onValueChange={v => setMaterial(v as PurchaseMaterial)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
-              </Select>
-              <Select value={purpose} onValueChange={v => setPurpose(v as "order" | "stock")}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="stock">For General Stock</SelectItem><SelectItem value="order">For a Specific Order</SelectItem></SelectContent>
-              </Select>
-            </div>
 
-            {purpose === "order" && (
-              <Input value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className="rounded-xl h-10" placeholder="Order number, e.g. SLJ-2026-1020" />
-            )}
+            {purchaseLines.map((line, idx) => (
+              <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
+                {purchaseLines.length > 1 && (
+                  <button type="button" onClick={() => removePurchaseLine(idx)} className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <p className="text-xs font-medium text-muted-foreground">Item {idx + 1}</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <Select value={line.material} onValueChange={v => updatePurchaseLine(idx, { material: v as PurchaseMaterial })}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+                  </Select>
+                  <Select value={line.purpose} onValueChange={v => updatePurchaseLine(idx, { purpose: v as "order" | "stock" })}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="stock">For General Stock</SelectItem><SelectItem value="order">For a Specific Order</SelectItem></SelectContent>
+                  </Select>
+                </div>
 
-            {material === "gold" ? (
-              <div className="grid grid-cols-3 gap-2.5">
-                <Input type="number" min={0} value={goldWeight} onChange={e => setGoldWeight(e.target.value)} className="rounded-xl h-10" placeholder="Weight (g)" />
-                <Select value={goldPurity} onValueChange={setGoldPurity}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                </Select>
-                <Input type="number" min={0} value={goldRate} onChange={e => setGoldRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/g (${currency})`} />
+                {line.purpose === "order" && (
+                  <Input value={line.orderNumber} onChange={e => updatePurchaseLine(idx, { orderNumber: e.target.value })} className="rounded-xl h-10" placeholder="Order number, e.g. SLJ-2026-1020" />
+                )}
+
+                {line.material === "gold" ? (
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
+                    <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    </Select>
+                    <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
+                    <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                    <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  <Select value={line.currency} onValueChange={v => updatePurchaseLine(idx, { currency: v as PurchaseCurrency })}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
+                  </Select>
+                  {line.currency === "USD" && (
+                    <>
+                      <Input type="number" min={0} value={line.totalUsd} onChange={e => updatePurchaseLine(idx, { totalUsd: e.target.value })} className="rounded-xl h-10" placeholder="Total ($)" />
+                      <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updatePurchaseLine(idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
+                    </>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <Input value={line.invoiceNumber} onChange={e => updatePurchaseLine(idx, { invoiceNumber: e.target.value })} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
+                  <Input value={line.notes} onChange={e => updatePurchaseLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
+                </div>
+
+                <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(purchaseLineTotalInr(line))}</span></p>
               </div>
-            ) : (
-              <div className="grid grid-cols-3 gap-2.5">
-                <Input type="number" min={0} step="0.01" value={diaCarat} onChange={e => setDiaCarat(e.target.value)} className="rounded-xl h-10" placeholder="Carat" />
-                <Input value={diaQuality} onChange={e => setDiaQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                <Input type="number" min={0} value={diaRate} onChange={e => setDiaRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/ct (${currency})`} />
-              </div>
-            )}
+            ))}
 
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
-              </Select>
-              {currency === "USD" && (
-                <>
-                  <Input type="number" min={0} value={totalUsd} onChange={e => setTotalUsd(e.target.value)} className="rounded-xl h-10" placeholder="Total ($)" />
-                  <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
-                </>
-              )}
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Input value={invoiceNumber} onChange={e => setInvoiceNumber(e.target.value)} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
-              <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
-            </div>
+            <Button type="button" variant="outline" onClick={addPurchaseLine} className="rounded-xl gap-2 w-full">
+              <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
+            </Button>
 
             <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-              <span className="text-sm text-muted-foreground">Total (INR)</span>
-              <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(finalTotalInr)}</span>
+              <span className="text-sm text-muted-foreground">Grand Total (INR)</span>
+              <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(grandTotalInr)}</span>
             </div>
 
             <div className="flex gap-2.5">
-              <AsyncButton onClick={recordPurchase} className="btn-hero rounded-xl h-10">Save Purchase</AsyncButton>
+              <AsyncButton onClick={recordPurchase} disabled={recordingPurchase} className="btn-hero rounded-xl h-10">{recordingPurchase ? "Saving…" : purchaseLines.length > 1 ? `Save ${purchaseLines.length} Purchases` : "Save Purchase"}</AsyncButton>
               <Button variant="outline" onClick={() => { setShowPurchaseForm(false); resetPurchaseForm(); }} className="rounded-xl h-10">Cancel</Button>
             </div>
           </div>

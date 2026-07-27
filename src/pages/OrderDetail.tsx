@@ -16,7 +16,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem,
+  Factory as FactoryIcon, Coins, Gem, X,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -26,6 +26,42 @@ import { fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness }
 import { decreaseStock } from "@/lib/stock";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
+
+// One line = one Purchase doc on save — lets a single supplier invoice that
+// covers several sizes/qualities (e.g. two diamond parcels) be entered in one
+// sitting instead of reopening the form for each variety.
+interface BuyLine {
+  material: PurchaseMaterial;
+  goldWeight: string;
+  goldPurity: string;
+  goldRate: string;
+  diaCarat: string;
+  diaQuality: string;
+  diaRate: string;
+  currency: PurchaseCurrency;
+  totalUsd: string;
+  exchangeRate: string;
+  invoiceNumber: string;
+  notes: string;
+}
+
+function emptyBuyLine(): BuyLine {
+  return {
+    material: "gold", goldWeight: "", goldPurity: "22K", goldRate: "",
+    diaCarat: "", diaQuality: "", diaRate: "",
+    currency: "INR", totalUsd: "", exchangeRate: "",
+    invoiceNumber: "", notes: "",
+  };
+}
+
+function buyLineTotalInr(line: BuyLine): number {
+  const computed = line.material === "gold"
+    ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
+    : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
+  return line.currency === "USD"
+    ? Math.round((Number(line.totalUsd) || 0) * (Number(line.exchangeRate) || 0))
+    : Math.round(computed);
+}
 
 /** Compress a File to a base64 JPEG ≤800px */
 async function compressImage(file: File): Promise<string> {
@@ -107,20 +143,13 @@ export function OrderDetailPage() {
 
   // Manufacturing — record a purchase / issue material for THIS order directly,
   // without leaving the page (order is already known, no order-number lookup needed).
+  // A single supplier invoice often covers several different sizes/qualities
+  // (e.g. two diamond parcels, or two gold purities) in one go — so purchases
+  // are entered as a list of lines, each an independent Purchase doc on save,
+  // rather than forcing one open/fill/save cycle per variety.
   const [showBuyForm, setShowBuyForm] = useState(false);
-  const [buyMaterial, setBuyMaterial] = useState<PurchaseMaterial>("gold");
   const [buySupplierId, setBuySupplierId] = useState("");
-  const [buyCurrency, setBuyCurrency] = useState<PurchaseCurrency>("INR");
-  const [buyGoldWeight, setBuyGoldWeight] = useState("");
-  const [buyGoldPurity, setBuyGoldPurity] = useState("22K");
-  const [buyGoldRate, setBuyGoldRate] = useState("");
-  const [buyDiaCarat, setBuyDiaCarat] = useState("");
-  const [buyDiaQuality, setBuyDiaQuality] = useState("");
-  const [buyDiaRate, setBuyDiaRate] = useState("");
-  const [buyTotalUsd, setBuyTotalUsd] = useState("");
-  const [buyExchangeRate, setBuyExchangeRate] = useState("");
-  const [buyInvoiceNumber, setBuyInvoiceNumber] = useState("");
-  const [buyNotes, setBuyNotes] = useState("");
+  const [buyLines, setBuyLines] = useState<BuyLine[]>([emptyBuyLine()]);
   const [buying, setBuying] = useState(false);
 
   const [showIssueForm, setShowIssueForm] = useState(false);
@@ -150,66 +179,72 @@ export function OrderDetailPage() {
   const linkedPurchases = db.purchases.filter(p => p.orderId === order.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
 
-  const buyComputedInr =
-    buyMaterial === "gold" ? (Number(buyGoldWeight) || 0) * (Number(buyGoldRate) || 0)
-    : (Number(buyDiaCarat) || 0) * (Number(buyDiaRate) || 0);
-  const buyFinalTotalInr = buyCurrency === "USD" ? Math.round((Number(buyTotalUsd) || 0) * (Number(buyExchangeRate) || 0)) : Math.round(buyComputedInr);
+  const buyGrandTotalInr = buyLines.reduce((s, l) => s + buyLineTotalInr(l), 0);
+
+  const updateBuyLine = (idx: number, patch: Partial<BuyLine>) =>
+    setBuyLines(prev => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  const addBuyLine = () => setBuyLines(prev => [...prev, emptyBuyLine()]);
+  const removeBuyLine = (idx: number) => setBuyLines(prev => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
   const resetBuyForm = () => {
-    setBuyMaterial("gold"); setBuySupplierId(""); setBuyCurrency("INR");
-    setBuyGoldWeight(""); setBuyGoldPurity("22K"); setBuyGoldRate("");
-    setBuyDiaCarat(""); setBuyDiaQuality(""); setBuyDiaRate("");
-    setBuyTotalUsd(""); setBuyExchangeRate(""); setBuyInvoiceNumber(""); setBuyNotes("");
+    setBuySupplierId("");
+    setBuyLines([emptyBuyLine()]);
   };
 
   const recordPurchaseForOrder = async () => {
     if (!buySupplierId) { toast.error("Choose a supplier"); return; }
-    if (buyMaterial === "gold" && (!buyGoldWeight || Number(buyGoldWeight) <= 0)) { toast.error("Enter gold weight"); return; }
-    if (buyMaterial === "diamond" && (!buyDiaCarat || Number(buyDiaCarat) <= 0)) { toast.error("Enter diamond carat"); return; }
-    if (buyCurrency === "USD" && (!buyTotalUsd || !buyExchangeRate)) { toast.error("Enter the USD amount and exchange rate"); return; }
-    if (buyFinalTotalInr <= 0) { toast.error("Total comes to ₹0 — check the weight/rate fields"); return; }
+    for (const line of buyLines) {
+      if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
+      if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
+      if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
+      if (buyLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
+    }
 
     const supplier = db.suppliers.find(s => s.id === buySupplierId);
-    const purchaseId = uid("pur_");
     const now = new Date().toISOString();
-    const purchase: Purchase = {
-      id: purchaseId,
+    const newPurchases: Purchase[] = buyLines.map(line => ({
+      id: uid("pur_"),
       supplierId: buySupplierId,
-      material: buyMaterial,
-      gold: buyMaterial === "gold" ? { weightGrams: Number(buyGoldWeight), purity: buyGoldPurity, ratePerGram: Number(buyGoldRate) || 0 } : undefined,
-      diamond: buyMaterial === "diamond" ? { carat: Number(buyDiaCarat), quality: buyDiaQuality || undefined, ratePerCarat: Number(buyDiaRate) || 0 } : undefined,
+      material: line.material,
+      gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
+      diamond: line.material === "diamond" ? { carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0 } : undefined,
       purpose: "order",
       orderId: order.id,
-      currency: buyCurrency,
-      totalUsd: buyCurrency === "USD" ? Number(buyTotalUsd) : undefined,
-      exchangeRate: buyCurrency === "USD" ? Number(buyExchangeRate) : undefined,
-      totalInr: buyFinalTotalInr,
+      currency: line.currency,
+      totalUsd: line.currency === "USD" ? Number(line.totalUsd) : undefined,
+      exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
+      totalInr: buyLineTotalInr(line),
       payments: [],
-      invoiceNumber: buyInvoiceNumber.trim() || undefined,
-      notes: buyNotes.trim() || undefined,
+      invoiceNumber: line.invoiceNumber.trim() || undefined,
+      notes: line.notes.trim() || undefined,
       createdBy: user!.id,
       createdAt: now,
-    };
+    }));
     setBuying(true);
     try {
       updateDb(d => {
         if (!d.purchases) d.purchases = [];
-        d.purchases.unshift(purchase);
         const o = d.orders.find(o => o.id === order.id);
         if (o) {
           if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
-          o.linkedPurchaseIds.push(purchaseId);
           if (!o.manufacturingLog) o.manufacturingLog = [];
-          const qty = buyMaterial === "gold" ? Number(buyGoldWeight) : Number(buyDiaCarat);
-          const label = buyMaterial === "gold" ? `${qty}g ${buyGoldPurity} gold` : `${qty}ct diamond${buyDiaQuality ? ` (${buyDiaQuality})` : ""}`;
-          o.manufacturingLog.push({
-            id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
-            material: buyMaterial, amountMaterial: qty, amountInr: buyFinalTotalInr,
-            remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(buyFinalTotalInr)}`,
-          });
+        }
+        for (const purchase of newPurchases) {
+          d.purchases.unshift(purchase);
+          if (o) {
+            o.linkedPurchaseIds!.push(purchase.id);
+            const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
+            const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity : (purchase.diamond!.quality || "");
+            const label = purchase.material === "gold" ? `${qty}g ${purityOrQuality} gold` : `${qty}ct diamond${purityOrQuality ? ` (${purityOrQuality})` : ""}`;
+            o.manufacturingLog!.push({
+              id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+              material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
+              remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(purchase.totalInr)}`,
+            });
+          }
         }
       });
-      toast.success(`Purchase recorded — ${fmtMoneyInr(buyFinalTotalInr)}`);
+      toast.success(`${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded — ${fmtMoneyInr(buyGrandTotalInr)}`);
       setShowBuyForm(false);
       resetBuyForm();
     } catch (e) {
@@ -1336,61 +1371,76 @@ export function OrderDetailPage() {
           </div>
 
           {showBuyForm && (
-            <div className="pt-2 border-t border-border/60 space-y-2.5">
+            <div className="pt-2 border-t border-border/60 space-y-3">
               <p className="text-sm font-medium text-brand-dark">Record Material Purchase for {order.orderNumber}</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Select value={buySupplierId} onValueChange={setBuySupplierId}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-                  <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={buyMaterial} onValueChange={v => setBuyMaterial(v as PurchaseMaterial)}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
-                </Select>
-              </div>
+              <Select value={buySupplierId} onValueChange={setBuySupplierId}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+                <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+              </Select>
 
-              {buyMaterial === "gold" ? (
-                <div className="grid grid-cols-3 gap-2.5">
-                  <Input type="number" min={0} value={buyGoldWeight} onChange={e => setBuyGoldWeight(e.target.value)} className="rounded-xl h-10" placeholder="Weight (g)" />
-                  <Select value={buyGoldPurity} onValueChange={setBuyGoldPurity}>
+              {buyLines.map((line, idx) => (
+                <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
+                  {buyLines.length > 1 && (
+                    <button type="button" onClick={() => removeBuyLine(idx)} className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  <p className="text-xs font-medium text-muted-foreground">Item {idx + 1}</p>
+                  <Select value={line.material} onValueChange={v => updateBuyLine(idx, { material: v as PurchaseMaterial })}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
                   </Select>
-                  <Input type="number" min={0} value={buyGoldRate} onChange={e => setBuyGoldRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/g (${buyCurrency})`} />
-                </div>
-              ) : (
-                <div className="grid grid-cols-3 gap-2.5">
-                  <Input type="number" min={0} step="0.01" value={buyDiaCarat} onChange={e => setBuyDiaCarat(e.target.value)} className="rounded-xl h-10" placeholder="Carat" />
-                  <Input value={buyDiaQuality} onChange={e => setBuyDiaQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                  <Input type="number" min={0} value={buyDiaRate} onChange={e => setBuyDiaRate(e.target.value)} className="rounded-xl h-10" placeholder={`Rate/ct (${buyCurrency})`} />
-                </div>
-              )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                <Select value={buyCurrency} onValueChange={v => setBuyCurrency(v as PurchaseCurrency)}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
-                </Select>
-                {buyCurrency === "USD" && (
-                  <>
-                    <Input type="number" min={0} value={buyTotalUsd} onChange={e => setBuyTotalUsd(e.target.value)} className="rounded-xl h-10" placeholder="Total ($)" />
-                    <Input type="number" min={0} step="0.01" value={buyExchangeRate} onChange={e => setBuyExchangeRate(e.target.value)} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
-                  </>
-                )}
-              </div>
+                  {line.material === "gold" ? (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <Input type="number" min={0} value={line.goldWeight} onChange={e => updateBuyLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
+                      <Select value={line.goldPurity} onValueChange={v => updateBuyLine(idx, { goldPurity: v })}>
+                        <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                        <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                      </Select>
+                      <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
+                      <Input value={line.diaQuality} onChange={e => updateBuyLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                      <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                    </div>
+                  )}
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Input value={buyInvoiceNumber} onChange={e => setBuyInvoiceNumber(e.target.value)} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
-                <Input value={buyNotes} onChange={e => setBuyNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
-              </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                    <Select value={line.currency} onValueChange={v => updateBuyLine(idx, { currency: v as PurchaseCurrency })}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
+                    </Select>
+                    {line.currency === "USD" && (
+                      <>
+                        <Input type="number" min={0} value={line.totalUsd} onChange={e => updateBuyLine(idx, { totalUsd: e.target.value })} className="rounded-xl h-10" placeholder="Total ($)" />
+                        <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updateBuyLine(idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
+                      </>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <Input value={line.invoiceNumber} onChange={e => updateBuyLine(idx, { invoiceNumber: e.target.value })} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
+                    <Input value={line.notes} onChange={e => updateBuyLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
+                  </div>
+
+                  <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(buyLineTotalInr(line))}</span></p>
+                </div>
+              ))}
+
+              <Button type="button" variant="outline" onClick={addBuyLine} className="rounded-xl gap-2 w-full">
+                <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
+              </Button>
 
               <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-                <span className="text-sm text-muted-foreground">Total (INR)</span>
-                <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(buyFinalTotalInr)}</span>
+                <span className="text-sm text-muted-foreground">Grand Total (INR)</span>
+                <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(buyGrandTotalInr)}</span>
               </div>
 
               <div className="flex gap-2.5">
-                <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10">{buying ? "Saving…" : "Save Purchase"}</AsyncButton>
+                <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10">{buying ? "Saving…" : buyLines.length > 1 ? `Save ${buyLines.length} Purchases` : "Save Purchase"}</AsyncButton>
                 <Button variant="outline" onClick={() => { setShowBuyForm(false); resetBuyForm(); }} className="rounded-xl h-10">Cancel</Button>
               </div>
             </div>
