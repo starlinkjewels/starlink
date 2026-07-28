@@ -5,7 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
-  factoryPoolBalance, factoryPoolBuckets, estimatedPureGoldNeeded, orderMaterialRequirements,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements,
 } from "@/lib/manufacturing";
 import { decreaseStock, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -55,18 +55,12 @@ export function FactoryHistoryPage() {
   const [issueMode, setIssueMode] = useState<"bulkDelivery" | "orderConsumption">("orderConsumption");
   const [issueOrderNumber, setIssueOrderNumber] = useState("");
   const [issueMaterial, setIssueMaterial] = useState<"gold" | "diamond">("gold");
-  const [issueSource, setIssueSource] = useState<"stock" | "purchase" | "factoryPool">("stock");
-  const [issuePurchaseId, setIssuePurchaseId] = useState("");
   const [issuePurity, setIssuePurity] = useState("22K");
   const [issueQuality, setIssueQuality] = useState("Round");
   const [issueQuantity, setIssueQuantity] = useState("");
+  const [issueChargeAmount, setIssueChargeAmount] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
   const [issuing, setIssuing] = useState(false);
-
-  const poolBuckets = useMemo(
-    () => factoryPoolBuckets(db.materialIssuances, id!, issueMaterial),
-    [db.materialIssuances, id, issueMaterial],
-  );
 
   const matchedOrder = useMemo(
     () => db.orders.find(o => o.orderNumber.trim().toLowerCase() === issueOrderNumber.trim().toLowerCase()),
@@ -85,8 +79,8 @@ export function FactoryHistoryPage() {
   }, [db.purchases, db.materialIssuances, matchedOrder, issueMaterial]);
 
   const resetIssueForm = () => {
-    setIssueOrderNumber(""); setIssueSource("stock"); setIssuePurchaseId("");
-    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueNotes("");
+    setIssueOrderNumber("");
+    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
@@ -126,29 +120,27 @@ export function FactoryHistoryPage() {
       return;
     }
 
-    // Order Consumption — earmarked to one order, either a new physical
-    // delivery (from Stock / a Purchase made for this order) or a draw
-    // against material already sitting at this factory's pool.
+    // Order Consumption — records usage + making charge for one specific
+    // order in a single save. Where the material physically comes from is
+    // resolved automatically: this factory's own pool first, then a purchase
+    // bought specifically for this order, then shared company stock.
     if (!matchedOrder) { toast.error(`No order found matching "${issueOrderNumber}"`); return; }
-    if (issueSource === "purchase" && !issuePurchaseId) { toast.error("Choose which purchase this comes from"); return; }
-    if (issueSource === "factoryPool") {
-      const balance = factoryPoolBalance(db.materialIssuances, id!, issueMaterial, purityOrQuality);
-      if (qty > balance) {
-        toast.error(`Only ${balance}${issueMaterial === "gold" ? "g" : "ct"} of ${purityOrQuality} available in this factory's pool`);
-        return;
-      }
-    }
+    const chargeAmount = Number(issueChargeAmount) || 0;
+    const poolBalance = factoryPoolBalance(db.materialIssuances, id!, issueMaterial, purityOrQuality);
+    const eligiblePurchase = eligiblePurchases[0];
+    const resolvedSource: "factoryPool" | "purchase" | "stock" =
+      poolBalance >= qty ? "factoryPool" : eligiblePurchase ? "purchase" : "stock";
 
     setIssuing(true);
     try {
       // Only draws down shared Stock when sourced FROM stock — material bought
       // specifically for this order, or drawn from this factory's own pool,
       // never touches stockLevels (see MaterialIssuance.source in db.ts).
-      if (issueSource === "stock") {
+      if (resolvedSource === "stock") {
         await decreaseStock({
           material: issueMaterial, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
-          note: `Issued to ${factory.name} for order ${matchedOrder.orderNumber}`,
+          note: `Used by ${factory.name} for order ${matchedOrder.orderNumber}`,
         });
       }
       updateDb(d => {
@@ -156,9 +148,10 @@ export function FactoryHistoryPage() {
         const issuance: MaterialIssuance = {
           id: issuanceId, factoryId: id!, orderId: matchedOrder.id, material: issueMaterial,
           purityOrQuality, quantityIssued: qty,
-          source: issueSource, sourcePurchaseId: issueSource === "purchase" ? issuePurchaseId : undefined,
+          source: resolvedSource, sourcePurchaseId: resolvedSource === "purchase" ? eligiblePurchase!.id : undefined,
           issuedAt: now, issuedBy: user!.id, status: "open",
-          finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+          finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+          makingCharges: { amountInr: chargeAmount, payments: [] },
           notes: issueNotes.trim() || undefined,
         };
         d.materialIssuances.unshift(issuance);
@@ -169,16 +162,16 @@ export function FactoryHistoryPage() {
           if (!o.manufacturingLog) o.manufacturingLog = [];
           o.manufacturingLog.push({
             id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: id,
-            material: issueMaterial, amountMaterial: qty,
-            remarks: `${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} issued to ${factory.name}${issueSource === "purchase" ? " (from a purchase made for this order)" : issueSource === "factoryPool" ? " (drawn from this factory's pool)" : ""}`,
+            material: issueMaterial, amountMaterial: qty, amountInr: chargeAmount || undefined,
+            remarks: `${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} used at ${factory.name}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
           });
         }
       });
-      toast.success(`${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} issued to ${factory.name}`);
+      toast.success(`Recorded ${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
       setShowIssueForm(false);
       resetIssueForm();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to issue material");
+      toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally { setIssuing(false); }
   };
 
@@ -534,111 +527,64 @@ export function FactoryHistoryPage() {
             <p className="text-xs text-muted-foreground">
               {issueMode === "bulkDelivery"
                 ? "Hand this factory raw material not tied to any order yet — builds up its pool for later orders to draw from."
-                : "Earmark material for one specific order — either a new delivery, or a draw against what's already sitting at this factory."}
+                : "How much this factory used for one order, and their making charge — where it physically came from is figured out automatically."}
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {issueMode === "orderConsumption" && (
                 <Input value={issueOrderNumber} onChange={e => setIssueOrderNumber(e.target.value)} className="rounded-xl h-10" placeholder="Order number" />
               )}
-              <Select value={issueMaterial} onValueChange={v => { setIssueMaterial(v as "gold" | "diamond"); setIssueSource("stock"); setIssuePurchaseId(""); }}>
+              <Select value={issueMaterial} onValueChange={v => setIssueMaterial(v as "gold" | "diamond")}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
               </Select>
             </div>
 
-            {issueMode === "orderConsumption" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Select value={issueSource} onValueChange={v => { setIssueSource(v as "stock" | "purchase" | "factoryPool"); setIssuePurchaseId(""); }}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="stock">From Stock</SelectItem>
-                    <SelectItem value="purchase" disabled={!matchedOrder || eligiblePurchases.length === 0}>
-                      From a purchase made for this order {matchedOrder && eligiblePurchases.length === 0 ? "(none available)" : ""}
-                    </SelectItem>
-                    <SelectItem value="factoryPool" disabled={poolBuckets.length === 0}>
-                      From this factory's pool {poolBuckets.length === 0 ? "(none available)" : ""}
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                {issueSource === "purchase" ? (
-                  <Select value={issuePurchaseId} onValueChange={v => {
-                    setIssuePurchaseId(v);
-                    const p = eligiblePurchases.find(p => p.id === v);
-                    if (p) {
-                      if (p.material === "gold" && p.gold) { setIssuePurity(p.gold.purity); setIssueQuantity(String(p.gold.weightGrams)); }
-                      if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.shape || p.diamond.quality || "Round"); setIssueQuantity(String(p.diamond.carat)); }
-                    }
-                  }}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose purchase" /></SelectTrigger>
-                    <SelectContent>
-                      {eligiblePurchases.map(p => (
-                        <SelectItem key={p.id} value={p.id}>
-                          {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : `${p.diamond?.carat}ct ${p.diamond?.quality || ""}`} — {fmtMoneyInr(p.totalInr)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : issueSource === "factoryPool" ? (
-                  <Select value={issuePurity} onValueChange={v => { setIssuePurity(v); setIssueQuality(v); }}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose from pool" /></SelectTrigger>
-                    <SelectContent>
-                      {poolBuckets.map(b => (
-                        <SelectItem key={b.purityOrQuality} value={b.purityOrQuality}>
-                          {b.purityOrQuality} — {b.balance}{issueMaterial === "gold" ? "g" : "ct"} available
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : issueMaterial === "gold" ? (
-                  <Select value={issuePurity} onValueChange={setIssuePurity}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                  </Select>
-                ) : (
-                  <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                  </Select>
-                )}
-              </div>
-            )}
-            {issueMode === "bulkDelivery" && (
-              issueMaterial === "gold" ? (
-                <Select value={issuePurity} onValueChange={setIssuePurity}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                </Select>
-              ) : (
-                <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                  <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
-              )
+            {issueMaterial === "gold" ? (
+              <Select value={issuePurity} onValueChange={setIssuePurity}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+              </Select>
+            ) : (
+              <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+              </Select>
             )}
 
             <Input
               type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
-              className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight (g)" : "Carat"}
-              disabled={issueMode === "orderConsumption" && issueSource === "purchase" && !!issuePurchaseId}
+              className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? (issueMode === "bulkDelivery" ? "Weight (g)" : "Weight used (g)") : (issueMode === "bulkDelivery" ? "Carat" : "Carat used")}
             />
-            <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
 
-            {issueMode === "orderConsumption" && issueSource === "factoryPool" && issueMaterial === "gold" && matchedOrder && orderMaterialRequirements(matchedOrder).needsGold && (() => {
+            {issueMode === "orderConsumption" && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Input
+                  type="number" min={0} value={issueChargeAmount} onChange={e => setIssueChargeAmount(e.target.value)}
+                  className="rounded-xl h-10" placeholder="Making charge (₹, optional)"
+                />
+                <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+              </div>
+            )}
+            {issueMode === "bulkDelivery" && (
+              <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+            )}
+
+            {issueMode === "orderConsumption" && issueMaterial === "gold" && matchedOrder && orderMaterialRequirements(matchedOrder).needsGold && (() => {
               const balance = factoryPoolBalance(db.materialIssuances, id!, "gold", issuePurity);
               const estimate = estimatedPureGoldNeeded(matchedOrder);
               if (estimate <= 0 || balance >= estimate) return null;
               return (
                 <div className="flex items-start gap-2 p-2.5 rounded-xl bg-destructive/5 text-destructive text-xs">
                   <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>Factory pool has {balance}g of {issuePurity} — {matchedOrder.orderNumber} ({matchedOrder.productKarats || "?"}) is estimated to need ~{estimate}g of pure gold. May not be enough.</span>
+                  <span>This factory's pool only has {balance}g of {issuePurity} — {matchedOrder.orderNumber} ({matchedOrder.productKarats || "?"}) is estimated to need ~{estimate}g of pure gold. The rest will come from company stock.</span>
                 </div>
               );
             })()}
 
             <div className="flex gap-2.5">
               <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10">
-                {issuing ? "Saving…" : issueMode === "bulkDelivery" ? "Record Delivery" : "Issue Material"}
+                {issuing ? "Saving…" : issueMode === "bulkDelivery" ? "Record Delivery" : "Save Usage & Charge"}
               </AsyncButton>
               <Button variant="outline" onClick={() => { setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
             </div>
