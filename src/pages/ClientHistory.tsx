@@ -10,7 +10,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import {
-  ArrowLeft, Package, Search, Mail, Phone, MapPin, Globe,
+  ArrowLeft, Package, Search, Mail, Phone, MapPin, Globe, Undo2,
   FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
   Download, ExternalLink, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
 } from "lucide-react";
@@ -127,6 +127,35 @@ export function ClientHistoryPage() {
       c.creditBalance = leftover > 0 ? leftover : undefined;
     });
     toast.success("Credit applied to oldest outstanding bills");
+  };
+
+  // Reverse a wrongly-entered payment (admin). A payment is ONE deposit event:
+  // its allocations across orders all carry the exact same timestamp, and it
+  // wrote one matching locker income line. We only allow a clean reversal — when
+  // the client isn't carrying credit — so we never have to guess how much of an
+  // opaque credit balance came from this particular payment. If credit is being
+  // held, we refuse and point the admin at Apply Credit / manual adjustment.
+  const reversePayment = (paymentCreatedAt: string) => {
+    if (user?.role !== "admin") { toast.error("Only an admin can reverse a payment."); return; }
+    if ((client?.creditBalance || 0) > 0) {
+      toast.error("This client is carrying credit on account, so a payment can't be cleanly reversed here. Clear the credit first, or adjust manually.");
+      return;
+    }
+    const affected = billableOrders.flatMap(o => (o.advances || []).filter(a => a.createdAt === paymentCreatedAt));
+    const total = affected.reduce((s, a) => s + a.amount, 0);
+    if (affected.length === 0) { toast.error("Couldn't find this payment's allocations."); return; }
+    if (!confirm(`Reverse this payment of ${fmtMoney(total)}? It will be removed from the ${affected.length} bill(s) it was applied to and from the locker. This can't be undone.`)) return;
+    updateDb(d => {
+      for (const o of d.orders.filter(o => o.clientId === id)) {
+        if (o.advances) o.advances = o.advances.filter(a => a.createdAt !== paymentCreatedAt);
+      }
+      if (d.lockerTransactions) {
+        d.lockerTransactions = d.lockerTransactions.filter(
+          t => !(t.refType === "clientPayment" && t.refId === id && t.createdAt === paymentCreatedAt),
+        );
+      }
+    });
+    toast.success("Payment reversed");
   };
 
   // Full account statement — every order billed and every payment received,
@@ -463,6 +492,15 @@ export function ClientHistoryPage() {
                 </p>
                 <p className="text-[11px] text-muted-foreground">Bal: {fmtMoney(r.balance)}</p>
               </div>
+              {r.credit > 0 && user?.role === "admin" && (
+                <button
+                  onClick={() => reversePayment(r.date)}
+                  title="Reverse this payment"
+                  className="shrink-0 text-muted-foreground hover:text-destructive p-1"
+                >
+                  <Undo2 className="h-4 w-4" />
+                </button>
+              )}
             </div>
           ))}
           {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
