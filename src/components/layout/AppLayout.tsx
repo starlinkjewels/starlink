@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
@@ -22,6 +22,7 @@ const NAV: NavItem[] = [
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee"] },
+  { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/ai", label: "Starlink AI", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
@@ -51,6 +52,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee"] },
+  { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { to: "/notifications", label: "Alerts", icon: Bell },
@@ -81,6 +83,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/stock": "Stock",
   "/factories": "Factories",
   "/ready-stock": "Ready Stock",
+  "/payments": "Payments",
 };
 
 const ROLE_LABEL: Record<string, string> = {
@@ -107,6 +110,7 @@ const ICON_COLORS: Record<string, string> = {
   "/stock":      "bg-cyan-500/15 text-cyan-600",
   "/factories":  "bg-orange-500/15 text-orange-600",
   "/ready-stock": "bg-pink-500/15 text-pink-600",
+  "/payments": "bg-indigo-500/15 text-indigo-600",
 };
 
 export function AppLayout() {

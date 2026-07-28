@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -22,6 +22,8 @@ import {
   FileText,
   ShieldCheck,
   Loader2,
+  Tag,
+  Plus,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -54,6 +56,24 @@ export function SettingsPage() {
   const saveInvoice = () => {
     saveDb(db);
     toast.success("Invoice settings saved");
+  };
+
+  // Expense categories — instant add/remove (like toggling a locker/factory
+  // active, not a staged "Save" form). Removing one is non-destructive: any
+  // Expense already using that category keeps its string untouched, it just
+  // stops appearing in the picker for new expenses.
+  const [newCategory, setNewCategory] = useState("");
+  const expenseCategories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
+  const addCategory = () => {
+    const name = newCategory.trim();
+    if (!name) return;
+    if (expenseCategories.some(c => c.toLowerCase() === name.toLowerCase())) { toast.error("That category already exists"); return; }
+    const next = { ...db, settings: { ...db.settings, expenseCategories: [...expenseCategories, name] } };
+    saveDb(next); setDb(next); setNewCategory("");
+  };
+  const removeCategory = (name: string) => {
+    const next = { ...db, settings: { ...db.settings, expenseCategories: expenseCategories.filter(c => c !== name) } };
+    saveDb(next); setDb(next);
   };
 
   const exp = () => {
@@ -572,6 +592,37 @@ export function SettingsPage() {
           <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">
             Save Pricing Rates
           </AsyncButton>
+        </div>
+      )}
+
+      {/* Expense Categories — admin only */}
+      {isAdmin && (
+        <div className="card-luxe p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Tag className="h-4 w-4 text-primary" />
+            <div>
+              <h3 className="font-semibold">Expense Categories</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Shown in the category picker when staff record an expense</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {expenseCategories.map(c => (
+              <span key={c} className="inline-flex items-center gap-1.5 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-foreground">
+                {c}
+                <button onClick={() => removeCategory(c)} className="h-4 w-4 rounded-full grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={newCategory} onChange={e => setNewCategory(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addCategory()}
+              className="rounded-xl h-10" placeholder="New category name"
+            />
+            <Button onClick={addCategory} variant="outline" className="rounded-xl gap-2 shrink-0"><Plus className="h-4 w-4" /> Add</Button>
+          </div>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate } from "@/lib/db";
+import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
@@ -12,7 +12,8 @@ import {
   TrendingUp, TrendingDown, Minus,
 } from "lucide-react";
 
-const CATEGORIES: ExpenseCategory[] = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
+const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
+const FALLBACK_CATEGORY_BG = "bg-gray-500/10 text-gray-600";
 
 const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
   Travel:        "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
@@ -51,6 +52,11 @@ export function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
+  // Configured list (Settings) for picking a category on a NEW expense —
+  // vs. every category that ever appears on an existing expense, for the
+  // filter dropdown, so a since-removed category stays filterable.
+  const configuredCategories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
+  const allCategoriesEverUsed = [...new Set([...configuredCategories, ...db.expenses.map(e => e.category)])];
 
   // Live sync with the Firebase-backed store
   useEffect(() => {
@@ -371,7 +377,7 @@ export function ExpensesPage() {
                 <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Categories</SelectItem>
-                  {CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+                  {allCategoriesEverUsed.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
@@ -490,7 +496,7 @@ export function ExpensesPage() {
                     <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
                     <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory }))}>
                       <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                      <SelectContent>{CATEGORIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                      <SelectContent>{configuredCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
                     </Select>
                   </div>
                 </div>
@@ -566,7 +572,7 @@ export function ExpensesPage() {
 
                 {/* Category preview pill */}
                 <div className="flex items-center gap-2">
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${CATEGORY_STYLE[form.category]}`}>
+                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${CATEGORY_STYLE[form.category] ?? FALLBACK_CATEGORY_STYLE}`}>
                     {form.category}
                   </span>
                   <span className="text-xs text-muted-foreground">will be tagged as this category</span>
@@ -641,7 +647,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
               className="flex items-start gap-3 px-4 py-3.5 hover:bg-secondary/20 transition-colors group"
             >
               {/* Icon */}
-              <div className={`h-9 w-9 rounded-xl grid place-items-center shrink-0 mt-0.5 ${CATEGORY_BG[exp.category as ExpenseCategory] ?? "bg-gray-100 text-gray-600"}`}>
+              <div className={`h-9 w-9 rounded-xl grid place-items-center shrink-0 mt-0.5 ${CATEGORY_BG[exp.category] ?? FALLBACK_CATEGORY_BG}`}>
                 <Receipt className="h-4 w-4" />
               </div>
 
@@ -655,7 +661,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
                 </div>
 
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_STYLE[exp.category as ExpenseCategory] ?? ""}`}>
+                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_STYLE[exp.category] ?? FALLBACK_CATEGORY_STYLE}`}>
                     {exp.category}
                   </span>
                   {showEmployee && addedBy && (

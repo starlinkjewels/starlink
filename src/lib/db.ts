@@ -195,6 +195,9 @@ export interface Order {
                                    // factoryId, so this alone already supports >1 factory per order
   manufacturingLog?: ManufacturingLogEntry[]; // append-only; never index-mutated like `timeline`
   readyStockItemId?: string; // set iff materialSourcing === "readyStock"
+  assignedFactoryId?: string; // pure informational tag — "this factory will make
+    // this order." Moves no material and never affects manufacturingReadiness;
+    // only an actual MaterialIssuance for this order does that.
 }
 
 export interface Task {
@@ -237,7 +240,10 @@ export interface Invoice {
   createdAt: string;
 }
 
-export type ExpenseCategory = "Travel" | "Food" | "Tools" | "Office" | "Communication" | "Other";
+// Categories are user-managed from Settings (Settings.expenseCategories) —
+// this is just the fallback list for a settings doc that predates that field.
+export const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
+export type ExpenseCategory = string;
 
 export interface Expense {
   id: string;
@@ -297,6 +303,9 @@ export interface Settings {
   // pixel-exact instead of being recreated with HTML/CSS.
   bankDetailsImage1?: string; // base64
   bankDetailsImage2?: string; // base64
+  // User-managed expense categories (Settings page) — falls back to
+  // DEFAULT_EXPENSE_CATEGORIES when unset (a settings doc from before this existed).
+  expenseCategories?: string[];
 }
 
 export interface CatalogFavorite {
@@ -500,19 +509,23 @@ export interface FactoryChargePayment {
   note?: string;
 }
 
-/** Gold OR diamond issued to a Factory for one order. `source` distinguishes
- *  material drawn from the shared Stock pool (deducts stockLevels, see
- *  src/lib/stock.ts) from material bought specifically for this order via a
- *  Purchase with purpose:"order" (never entered Stock, so issuing it must
- *  NOT touch stockLevels — it's tracked via `sourcePurchaseId` instead). */
+/** Gold OR diamond issued to a Factory. `orderId` unset = a bulk delivery to
+ *  this factory's own pool, not yet tied to any specific order (the client
+ *  hands a factory gold in irregular batches well before any order exists).
+ *  `source` distinguishes material drawn from the shared Stock pool (deducts
+ *  stockLevels, see src/lib/stock.ts) from material bought specifically for
+ *  an order via a Purchase with purpose:"order" (never entered Stock, so
+ *  issuing it must NOT touch stockLevels — tracked via `sourcePurchaseId`
+ *  instead), from material drawn out of a factory's own accumulated pool
+ *  (no new physical movement — see factoryPoolBalance in manufacturing.ts). */
 export interface MaterialIssuance {
   id: string;
   factoryId: string;
-  orderId: string;
+  orderId?: string; // unset = bulk delivery to this factory's pool
   material: "gold" | "diamond";
   purityOrQuality: string;
   quantityIssued: number; // grams (gold) or carats (diamond)
-  source: "stock" | "purchase";
+  source: "stock" | "purchase" | "factoryPool";
   sourcePurchaseId?: string; // set iff source === "purchase"
   diamondKind?: "loose" | "certified"; // for diamond issuances
   diamondPacketIds?: string[]; // set iff diamondKind === "certified" — the specific packets issued

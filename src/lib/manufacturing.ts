@@ -141,9 +141,82 @@ export function issuanceWastage(i: MaterialIssuance): number {
   return i.quantityIssued - issuanceUsed(i);
 }
 
+/**
+ * How much of `material`+`purityOrQuality` is currently sitting at `factoryId`,
+ * bulk-delivered but not yet drawn down for a specific order — the factory's
+ * own accumulated pool. Both terms are derived, never stored:
+ *   delivered = Σ quantityIssued of bulk deliveries (orderId unset) for this
+ *               factory/material/purity
+ *   drawn     = Σ quantityIssued of pool draws (orderId set, source
+ *               "factoryPool") for this factory/material/purity
+ * Floors at 0 defensively. This is a plain derived read over the app's normal
+ * diffed in-memory sync — same trust level as clientAccount()/Order.advances,
+ * NOT a Firestore transaction like src/lib/stock.ts's decreaseStock. Two staff
+ * drawing from the same factory's pool at the exact same instant could both
+ * pass this check (a deliberate, reviewed tradeoff — see manufacturingReadiness
+ * comment style — rather than adding a second transactional subsystem for a
+ * much lower-volume, single-factory-scoped number).
+ */
+export function factoryPoolBalance(
+  issuances: MaterialIssuance[],
+  factoryId: string,
+  material: "gold" | "diamond",
+  purityOrQuality: string,
+): number {
+  let delivered = 0, drawn = 0;
+  for (const i of issuances) {
+    if (i.factoryId !== factoryId || i.material !== material || i.purityOrQuality !== purityOrQuality) continue;
+    if (!i.orderId) delivered += i.quantityIssued;
+    else if (i.source === "factoryPool") drawn += i.quantityIssued;
+  }
+  return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
+}
+
+/** Every purity/quality this factory currently holds a positive pool balance
+ *  in, for `material` — drives the "draw from pool" picker. */
+export function factoryPoolBuckets(
+  issuances: MaterialIssuance[],
+  factoryId: string,
+  material: "gold" | "diamond",
+): { purityOrQuality: string; balance: number }[] {
+  const purities = new Set(
+    issuances.filter(i => i.factoryId === factoryId && i.material === material && !i.orderId).map(i => i.purityOrQuality),
+  );
+  return [...purities]
+    .map(purityOrQuality => ({ purityOrQuality, balance: factoryPoolBalance(issuances, factoryId, material, purityOrQuality) }))
+    .filter(b => b.balance > 0);
+}
+
+/** Karat string ("9K".."24K") -> fraction of pure (24K) gold, e.g. "18K" -> 0.75.
+ *  Jewelers' standard back-of-envelope ratio — an ESTIMATE for low-stock
+ *  warnings, never authoritative alloy/wastage accounting. Falls back to 1
+ *  (no discount) for any unparseable/missing value so a bad karat string never
+ *  produces a scary warning. */
+export function karatRatio(purity: string | undefined): number {
+  const n = purity ? parseInt(purity, 10) : NaN;
+  if (!Number.isFinite(n) || n <= 0) return 1;
+  return Math.min(1, n / 24);
+}
+
+/** Rough 24K-pure-gold-equivalent an order will need for its finished piece,
+ *  given the karat it's cast in. ESTIMATE only (see karatRatio) — uses the
+ *  best available weight guess before the piece physically exists. Caller
+ *  should guard with orderMaterialRequirements(order).needsGold first
+ *  (Platinum/Silver orders have no karat concept). */
+export function estimatedPureGoldNeeded(
+  order: Pick<Order, "productKarats" | "estimatedNetWeight" | "estimatedGrossWeight" | "metalWeight">,
+): number {
+  const weight = order.estimatedNetWeight || order.estimatedGrossWeight || order.metalWeight || 0;
+  return Math.round(weight * karatRatio(order.productKarats) * 100) / 100;
+}
+
 /** Factory account summary across all their material issuances. Gold and
  *  diamond are tracked separately since their quantities are different units
- *  (grams vs carats) — making charges are combined (always INR). */
+ *  (grams vs carats) — making charges are combined (always INR). A
+ *  source:"factoryPool" draw is NOT a new physical delivery (the material was
+ *  already counted when it was bulk-delivered) — only its actual consumption
+ *  (finishedPieces) counts toward goldUsed/diamondUsed, or goldOutstanding
+ *  would double-count the moment any order draws from a factory's pool. */
 export function factoryAccount(issuances: MaterialIssuance[]) {
   let goldIssued = 0,
     goldUsed = 0,
@@ -154,8 +227,9 @@ export function factoryAccount(issuances: MaterialIssuance[]) {
     chargesPending = 0,
     chargesOverpaid = 0;
   for (const i of issuances) {
-    if (i.material === "gold") { goldIssued += i.quantityIssued; goldUsed += issuanceUsed(i); }
-    else { diamondIssued += i.quantityIssued; diamondUsed += issuanceUsed(i); }
+    const isPoolDraw = i.source === "factoryPool";
+    if (i.material === "gold") { if (!isPoolDraw) goldIssued += i.quantityIssued; goldUsed += issuanceUsed(i); }
+    else { if (!isPoolDraw) diamondIssued += i.quantityIssued; diamondUsed += issuanceUsed(i); }
     chargesTotal += i.makingCharges.amountInr;
     const paid = issuancePaid(i);
     chargesPaid += paid;

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Factory as FactoryIconLucide } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -92,6 +92,7 @@ export function NewOrderPage() {
     certificateFee: 50,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
     readyStockItemId: "",
+    assignedFactoryId: "",
   });
 
   const [images, setImages] = useState<string[]>([]);
@@ -234,6 +235,7 @@ export function NewOrderPage() {
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         materialSourcing: f.materialSourcing === "later" ? undefined : f.materialSourcing,
         readyStockItemId: f.materialSourcing === "readyStock" ? f.readyStockItemId : undefined,
+        assignedFactoryId: f.assignedFactoryId || undefined,
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
         priority: f.priority as Order["priority"],
@@ -262,6 +264,15 @@ export function NewOrderPage() {
       if (order.materialSourcing === "readyStock" && order.readyStockItemId) {
         const item = d.readyStock.find(x => x.id === order.readyStockItemId);
         if (item) item.quantity = Math.max(0, item.quantity - 1);
+      }
+
+      if (order.assignedFactoryId) {
+        const assignedFactory = d.factories.find(fac => fac.id === order.assignedFactoryId);
+        if (!order.manufacturingLog) order.manufacturingLog = [];
+        order.manufacturingLog.push({
+          id: uid("mlog_"), type: "factory_assigned", at: order.createdAt, employeeId: user!.id, factoryId: order.assignedFactoryId,
+          remarks: `Factory assigned: ${assignedFactory?.name || "factory"}`,
+        });
       }
 
       if (advance > 0 && f.advanceLockerId) {
@@ -645,6 +656,22 @@ export function NewOrderPage() {
                 This just notes the intent — record the actual purchase from Suppliers (using this order's number) once confirmed, and it'll link to this order automatically.
               </p>
             )}
+          </SectionCard>
+        )}
+
+        {/* ══ 4c. Assign Factory (staff only, optional) — a pure tag, no
+            material movement; the client hands a factory gold in bulk well
+            before any specific order exists, so this just notes who will
+            make it. Independent of Material Sourcing above. ══ */}
+        {!isClient && (
+          <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional — which factory will make this piece">
+            <Select value={f.assignedFactoryId || "__none"} onValueChange={v => set("assignedFactoryId", v === "__none" ? "" : v)}>
+              <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">Not assigned yet</SelectItem>
+                {db.factories.filter(fac => fac.active !== false).map(fac => <SelectItem key={fac.id} value={fac.id}>{fac.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </SectionCard>
         )}
 
