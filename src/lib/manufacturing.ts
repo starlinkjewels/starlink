@@ -15,6 +15,9 @@ import {
   type Locker,
   type LockerTransaction,
   type Order,
+  type Factory,
+  type Supplier,
+  type StockMovement,
 } from "./db";
 
 const r0 = (n: number) => Math.round(n);
@@ -270,6 +273,71 @@ export function allocateFactoryChargePaymentFIFO(
     remaining -= pay;
   }
   return r0(remaining);
+}
+
+// ── Stock movement drill-down (Stock.tsx bucket history) ──────────────────
+
+export interface StockMovementLink {
+  label: string; // always present — resolved description, or the movement's own note as fallback
+  orderId?: string;
+  factoryId?: string;
+  supplierId?: string;
+}
+
+interface StockLinkContext {
+  purchases: Purchase[];
+  issuances: MaterialIssuance[];
+  orders: Order[];
+  factories: Factory[];
+  suppliers: Supplier[];
+}
+
+/** Resolve one StockMovement's refType/refId into a human label + link target
+ *  for Stock.tsx's per-bucket history. Falls back to the movement's own note
+ *  whenever the referenced record can't be found — e.g. a Purchase that
+ *  SupplierHistory's voidPurchase deletes right after writing this exact
+ *  movement (refId legitimately dangles; expected, not a bug). */
+export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext): StockMovementLink {
+  if (m.refType === "materialIssuance" && m.refId) {
+    const mi = ctx.issuances.find(i => i.id === m.refId);
+    if (!mi) return { label: m.note || "Issued to factory (record not found)" };
+    const factory = ctx.factories.find(f => f.id === mi.factoryId);
+    if (mi.orderId) {
+      const order = ctx.orders.find(o => o.id === mi.orderId);
+      return { label: `Issued to order ${order?.orderNumber ?? "?"} · ${factory?.name ?? "factory"}`, orderId: mi.orderId, factoryId: mi.factoryId };
+    }
+    return { label: `Bulk delivery to ${factory?.name ?? "factory"}'s pool`, factoryId: mi.factoryId };
+  }
+  if (m.refType === "purchase" && m.refId) {
+    const p = ctx.purchases.find(x => x.id === m.refId);
+    if (!p) return { label: m.note || "Purchase (record no longer exists)" };
+    const supplier = ctx.suppliers.find(s => s.id === p.supplierId);
+    const label = m.type === "purchase_in"
+      ? `Purchased from ${supplier?.name ?? "supplier"}`
+      : `Purchase void reversal — ${supplier?.name ?? "supplier"}`;
+    return { label, supplierId: p.supplierId };
+  }
+  if (m.refType === "order" && m.refId) {
+    const order = ctx.orders.find(o => o.id === m.refId);
+    if (!order) return { label: m.note || "Used on order" };
+    return { label: `Used directly on order ${order.orderNumber}`, orderId: order.id };
+  }
+  return { label: m.note || "Manual adjustment" };
+}
+
+/** Movements for one Stock bucket (material + purity/shape key), newest
+ *  first, each enriched with its resolved link — drives Stock.tsx's
+ *  per-bucket drill-down modal. */
+export function stockBucketHistory(
+  movements: StockMovement[],
+  material: "gold" | "diamond",
+  purityOrQuality: string,
+  ctx: StockLinkContext,
+): (StockMovement & { link: StockMovementLink })[] {
+  return movements
+    .filter(m => m.material === material && m.purityOrQuality === purityOrQuality)
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
+    .map(m => ({ ...m, link: resolveStockMovementLink(m, ctx) }));
 }
 
 // ── Lockers (bank/cash accounts) ───────────────────────────────────────────

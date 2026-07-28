@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { fmtDate, updateDb, DIAMOND_SHAPES, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
+import { stockBucketHistory } from "@/lib/manufacturing";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw, BadgeCheck, Pencil, Trash2 } from "lucide-react";
+import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw, BadgeCheck, Pencil, Trash2, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 15;
@@ -27,6 +29,7 @@ export function StockPage() {
   const [levels, setLevels] = useState<StockLevels | null>(null);
   const [recomputing, setRecomputing] = useState(false);
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
+  const [bucketDetail, setBucketDetail] = useState<{ material: "gold" | "diamond"; key: string } | null>(null);
 
   useEffect(() => subscribeStockLevels(setLevels), []);
 
@@ -116,10 +119,18 @@ export function StockPage() {
           ) : (
             <div className="space-y-2">
               {goldEntries.map(([purity, grams]) => (
-                <div key={purity} className="flex items-center justify-between p-2.5 rounded-xl bg-secondary">
+                <button
+                  key={purity}
+                  type="button"
+                  onClick={() => setBucketDetail({ material: "gold", key: purity })}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-left w-full"
+                >
                   <span className="text-sm font-medium">{purity}</span>
-                  <span className="text-sm font-semibold">{grams.toLocaleString()} g</span>
-                </div>
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm font-semibold">{grams.toLocaleString()} g</span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </span>
+                </button>
               ))}
             </div>
           )}
@@ -138,10 +149,18 @@ export function StockPage() {
           ) : (
             <div className="space-y-2">
               {diamondEntries.map(([quality, carats]) => (
-                <div key={quality} className="flex items-center justify-between p-2.5 rounded-xl bg-secondary">
+                <button
+                  key={quality}
+                  type="button"
+                  onClick={() => setBucketDetail({ material: "diamond", key: quality })}
+                  className="flex items-center justify-between p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-left w-full"
+                >
                   <span className="text-sm font-medium">{quality}</span>
-                  <span className="text-sm font-semibold">{carats.toLocaleString()} ct</span>
-                </div>
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-sm font-semibold">{carats.toLocaleString()} ct</span>
+                    <ChevronRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                  </span>
+                </button>
               ))}
             </div>
           )}
@@ -281,6 +300,56 @@ export function StockPage() {
           </div>
         </div>
       )}
+
+      {/* Bucket drill-down — resolved usage/sale history for one gold purity or diamond quality bucket */}
+      {bucketDetail && (() => {
+        const bucketRows = stockBucketHistory(db.stockMovements, bucketDetail.material, bucketDetail.key, {
+          purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
+        });
+        return (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setBucketDetail(null)}>
+          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <h3 className="font-display text-lg text-brand-dark">
+                {bucketDetail.material === "gold" ? "Gold" : "Diamond"} — {bucketDetail.key}
+              </h3>
+              <span className="text-sm font-semibold shrink-0">
+                {(levels?.[bucketDetail.material]?.[bucketDetail.key] ?? 0).toLocaleString()} {bucketDetail.material === "gold" ? "g" : "ct"}
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-4">Full movement history for this bucket</p>
+            <div className="divide-y divide-border/40 max-h-[50vh] overflow-y-auto -mx-1">
+              {bucketRows.map(m => (
+                <div key={m.id} className="flex items-center gap-3 px-1 py-3">
+                  <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${m.type === "purchase_in" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                    {m.type === "purchase_in" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      {m.link.orderId ? (
+                        <Link to={`/orders/${m.link.orderId}`} className="hover:underline">{m.link.label}</Link>
+                      ) : m.link.factoryId ? (
+                        <Link to={`/factories/${m.link.factoryId}`} className="hover:underline">{m.link.label}</Link>
+                      ) : m.link.supplierId ? (
+                        <Link to={`/suppliers/${m.link.supplierId}`} className="hover:underline">{m.link.label}</Link>
+                      ) : (
+                        m.link.label
+                      )}
+                    </p>
+                    <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)}{m.note ? ` · ${m.note}` : ""}</p>
+                  </div>
+                  <p className={`text-sm font-semibold shrink-0 ${m.type === "purchase_in" ? "text-success" : "text-destructive"}`}>
+                    {m.type === "purchase_in" ? "+" : "−"}{m.quantity} {bucketDetail.material === "gold" ? "g" : "ct"}
+                  </p>
+                </div>
+              ))}
+              {bucketRows.length === 0 && <div className="py-8 text-center text-sm text-muted-foreground">No movements recorded for this bucket.</div>}
+            </div>
+            <button onClick={() => setBucketDetail(null)} className="w-full rounded-xl border border-border py-2 text-sm mt-4">Close</button>
+          </div>
+        </div>
+        );
+      })()}
     </div>
   );
 }

@@ -42,6 +42,7 @@ export function LockerPage() {
   const [txnCategory, setTxnCategory] = useState("");
   const [txnNote, setTxnNote] = useState("");
   const [txnTargetLocker, setTxnTargetLocker] = useState("");
+  const [txnExchangeRate, setTxnExchangeRate] = useState("");
 
   const lockers = db.lockers.filter(l => l.active !== false);
   const selected = lockers.find(l => l.id === selectedId) ?? null;
@@ -101,9 +102,15 @@ export function LockerPage() {
     const amt = Number(txnAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
+    const target = txnType === "transfer_out" ? lockers.find(l => l.id === txnTargetLocker) : undefined;
+    const crossCurrency = !!target && (target.currency || "INR") !== (selected.currency || "INR");
+    const rate = Number(txnExchangeRate);
+    if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
     // Overdraw warning — money leaving the locker (expense / transfer out) that
     // would take it below zero is almost always a mistake (wrong locker, or a
     // deposit that was never recorded). Warn, but let them proceed knowingly.
+    // Reads only the SOURCE locker's own balance/currency, and the raw,
+    // unconverted amount leaving it — correct as-is for cross-currency transfers too.
     if (txnType === "expense" || txnType === "transfer_out") {
       const bal = lockerBalance(selected, db.lockerTransactions);
       if (amt > bal) {
@@ -121,14 +128,19 @@ export function LockerPage() {
       if (txnType === "transfer_out") {
         const target = d.lockers.find(l => l.id === txnTargetLocker);
         if (!target) return;
+        const destAmount = crossCurrency
+          ? Math.round((currency === "USD" ? amt * rate : amt / rate) * 100) / 100
+          : amt;
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency,
           category: "Transfer", pairedLockerId: target.id, note: txnNote.trim() || undefined,
+          exchangeRate: crossCurrency ? rate : undefined,
           recordedBy: user!.id, createdAt: now,
         });
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: amt, currency: target.currency || "INR",
+          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: destAmount, currency: target.currency || "INR",
           category: "Transfer", pairedLockerId: selected.id, note: txnNote.trim() || undefined,
+          exchangeRate: crossCurrency ? rate : undefined,
           recordedBy: user!.id, createdAt: now,
         });
       } else {
@@ -140,7 +152,7 @@ export function LockerPage() {
       }
     });
     toast.success("Transaction recorded");
-    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnMode(false);
+    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnMode(false);
   };
 
   const txns = selected
@@ -370,9 +382,12 @@ export function LockerPage() {
                 <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder={`Amount (${selected.currency === "USD" ? "$" : "₹"})`} />
                 {txnType === "transfer_out" ? (
                   <Select value={txnTargetLocker} onValueChange={setTxnTargetLocker}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker (same currency)" /></SelectTrigger>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker" /></SelectTrigger>
                     <SelectContent>
-                      {lockers.filter(l => l.id !== selected.id && (l.currency || "INR") === (selected.currency || "INR")).map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+                      {lockers.filter(l => l.id !== selected.id).map(l => {
+                        const sameCcy = (l.currency || "INR") === (selected.currency || "INR");
+                        return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${l.currency || "INR"})`}</SelectItem>;
+                      })}
                     </SelectContent>
                   </Select>
                 ) : (
@@ -380,6 +395,32 @@ export function LockerPage() {
                 )}
                 <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
               </div>
+
+              {txnType === "transfer_out" && txnTargetLocker && (() => {
+                const target = lockers.find(l => l.id === txnTargetLocker);
+                if (!target) return null;
+                const crossCurrency = (target.currency || "INR") !== (selected.currency || "INR");
+                if (!crossCurrency) return null;
+                const rate = Number(txnExchangeRate) || 0;
+                const amt = Number(txnAmount) || 0;
+                const destAmount = rate > 0 ? (selected.currency === "USD" ? amt * rate : amt / rate) : null;
+                return (
+                  <div className="p-3 rounded-xl bg-secondary space-y-2">
+                    <Label className="text-xs">Exchange rate — 1 USD = ₹</Label>
+                    <Input
+                      type="number" min={0} step="0.01" value={txnExchangeRate}
+                      onChange={e => setTxnExchangeRate(e.target.value)}
+                      className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50"
+                    />
+                    {destAmount != null && (
+                      <p className="text-xs text-muted-foreground">
+                        {fmtLockerAmount(amt, selected.currency)} → {fmtLockerAmount(Math.round(destAmount * 100) / 100, target.currency)}
+                      </p>
+                    )}
+                  </div>
+                );
+              })()}
+
               <div className="flex gap-2.5">
                 <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10">Save</AsyncButton>
                 <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10">Cancel</Button>
@@ -398,7 +439,10 @@ export function LockerPage() {
                     : t.type === "income" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type)}</p>
+                  <p className="text-sm font-medium truncate">
+                    {t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type)}
+                    {t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}
+                  </p>
                   <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
                 </div>
                 <div className="text-right shrink-0">

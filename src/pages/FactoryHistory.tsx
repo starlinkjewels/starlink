@@ -438,7 +438,9 @@ export function FactoryHistoryPage() {
         { label: "Gold Outstanding", value: `${account.goldOutstanding.toLocaleString()} g` },
         { label: "Diamond Outstanding", value: `${account.diamondOutstanding.toLocaleString()} ct` },
         { label: "Charges Total", value: fmtInrPlain(account.chargesTotal) },
+        { label: "Charges Paid", value: fmtInrPlain(account.chargesPaid) },
         { label: "Charges Pending", value: fmtInrPlain(account.chargesPending) },
+        { label: "Charges Overpaid", value: fmtInrPlain(account.chargesOverpaid) },
       ],
       columns: [
         { header: "Date", x: 20 },
@@ -511,6 +513,12 @@ export function FactoryHistoryPage() {
             <p className="text-xs text-muted-foreground mb-1">Charges Pending</p>
             <p className={`font-semibold text-sm ${account.chargesPending > 0 ? "text-destructive" : "text-success"}`}>{account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared"}</p>
           </div>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Total Charges</p><p className="font-semibold text-sm">{fmtMoneyInr(account.chargesTotal)}</p></div>
+          <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Paid</p><p className="font-semibold text-sm text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
+          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Overpaid</p><p className="font-semibold text-sm text-primary">{fmtMoneyInr(account.chargesOverpaid)}</p></div>
         </div>
 
         {showIssueForm && (
