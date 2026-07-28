@@ -1,12 +1,15 @@
 import { useEffect, useState } from "react";
-import { fmtDate } from "@/lib/db";
+import { fmtDate, updateDb, DIAMOND_SHAPES, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw, BadgeCheck } from "lucide-react";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw, BadgeCheck, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 15;
@@ -23,8 +26,51 @@ export function StockPage() {
   const db = useDb();
   const [levels, setLevels] = useState<StockLevels | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+  const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
 
   useEffect(() => subscribeStockLevels(setLevels), []);
+
+  const savePacketEdit = () => {
+    if (!editPacket) return;
+    const p = editPacket;
+    if (!p.shape) { toast.error("Choose a shape"); return; }
+    if (!p.carat || p.carat <= 0) { toast.error("Enter a valid carat weight"); return; }
+    if (!p.certificateNumber.trim()) { toast.error("Report number is required"); return; }
+    updateDb(d => {
+      const idx = (d.diamondPackets ?? []).findIndex(x => x.id === p.id);
+      if (idx >= 0) {
+        const clean = <T,>(v: T) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+        d.diamondPackets[idx] = {
+          ...d.diamondPackets[idx],
+          shape: p.shape,
+          carat: p.carat,
+          color: clean(p.color?.trim()),
+          clarity: clean(p.clarity?.trim()),
+          cut: clean(p.cut?.trim()),
+          polish: clean(p.polish?.trim()),
+          symmetry: clean(p.symmetry?.trim()),
+          fluorescence: clean(p.fluorescence?.trim()),
+          measurement: clean(p.measurement?.trim()),
+          certificateNumber: p.certificateNumber.trim(),
+          certificateLab: clean(p.certificateLab?.trim()),
+        };
+      }
+    });
+    toast.success("Certificate details updated");
+    setEditPacket(null);
+  };
+
+  const deletePacket = (p: DiamondPacket) => {
+    if (p.status !== "in_stock") {
+      toast.error("This packet is already issued or used — cancel it from the order instead.");
+      return;
+    }
+    if (!confirm(`Delete this ${p.shape} ${p.carat}ct packet (Report ${p.certificateNumber})? This can't be undone.`)) return;
+    updateDb(d => {
+      d.diamondPackets = (d.diamondPackets ?? []).filter(x => x.id !== p.id);
+    });
+    toast.success("Packet deleted");
+  };
 
   const movements = [...db.stockMovements].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const { paged, page, setPage, totalPages, start, end } = usePagination(movements, PAGE_SIZE);
@@ -127,6 +173,16 @@ export function StockPage() {
                   {grade && <p className="text-xs text-foreground/70 mt-0.5 truncate">{grade}</p>}
                   {p.measurement && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.measurement}</p>}
                   <p className="text-[11px] text-muted-foreground mt-0.5 truncate">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
+                  {user?.role === "admin" && (
+                    <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
+                      <button onClick={() => setEditPacket({ ...p })} className="text-[11px] text-primary inline-flex items-center gap-1 hover:underline">
+                        <Pencil className="h-3 w-3" /> Edit
+                      </button>
+                      <button onClick={() => deletePacket(p)} className="text-[11px] text-destructive inline-flex items-center gap-1 hover:underline">
+                        <Trash2 className="h-3 w-3" /> Delete
+                      </button>
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -162,6 +218,69 @@ export function StockPage() {
           </div>
         )}
       </div>
+
+      {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}
+      {editPacket && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setEditPacket(null)}>
+          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-lg text-brand-dark mb-1">Edit Certified Diamond</h3>
+            <p className="text-xs text-muted-foreground mb-4">Correct the certificate or grading details for this packet.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs">Shape</Label>
+                <Select value={editPacket.shape} onValueChange={v => setEditPacket({ ...editPacket, shape: v })}>
+                  <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Shape" /></SelectTrigger>
+                  <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs">Carat</Label>
+                <Input type="number" step="0.01" min={0} value={editPacket.carat} onChange={e => setEditPacket({ ...editPacket, carat: Number(e.target.value) })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Color</Label>
+                <Input value={editPacket.color ?? ""} onChange={e => setEditPacket({ ...editPacket, color: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Clarity</Label>
+                <Input value={editPacket.clarity ?? ""} onChange={e => setEditPacket({ ...editPacket, clarity: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Cut</Label>
+                <Input value={editPacket.cut ?? ""} onChange={e => setEditPacket({ ...editPacket, cut: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Polish</Label>
+                <Input value={editPacket.polish ?? ""} onChange={e => setEditPacket({ ...editPacket, polish: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Symmetry</Label>
+                <Input value={editPacket.symmetry ?? ""} onChange={e => setEditPacket({ ...editPacket, symmetry: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Fluorescence</Label>
+                <Input value={editPacket.fluorescence ?? ""} onChange={e => setEditPacket({ ...editPacket, fluorescence: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Measurement</Label>
+                <Input value={editPacket.measurement ?? ""} onChange={e => setEditPacket({ ...editPacket, measurement: e.target.value })} className="rounded-xl mt-1" placeholder="6.5 x 6.5 x 4.0 mm" />
+              </div>
+              <div>
+                <Label className="text-xs">Report Number</Label>
+                <Input value={editPacket.certificateNumber} onChange={e => setEditPacket({ ...editPacket, certificateNumber: e.target.value })} className="rounded-xl mt-1" />
+              </div>
+              <div>
+                <Label className="text-xs">Lab</Label>
+                <Input value={editPacket.certificateLab ?? ""} onChange={e => setEditPacket({ ...editPacket, certificateLab: e.target.value })} className="rounded-xl mt-1" placeholder="GIA / IGI" />
+              </div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setEditPacket(null)} className="flex-1 rounded-xl border border-border py-2 text-sm">Cancel</button>
+              <button onClick={savePacketEdit} className="btn-hero flex-1 rounded-xl py-2 text-sm">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
