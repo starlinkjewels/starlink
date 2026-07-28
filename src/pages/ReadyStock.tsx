@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { updateDb, uid, fmtDate, fmtMoney, type ReadyStockItem, type Order } from "@/lib/db";
+import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, type ReadyStockItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { uploadDataUrl } from "@/lib/storage";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin } from "lucide-react";
 import { toast } from "sonner";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
@@ -58,13 +58,14 @@ type ItemForm = {
   price: string;
   quantity: string;
   sku: string;
+  location: string;
   notes: string;
 };
 
 const EMPTY_FORM: ItemForm = {
   name: "", jewelleryType: "Ring", metal: "Gold", productKarats: "22K",
   grossWeight: "", netWeight: "", diamondWeight: "", diamondType: "Natural",
-  price: "", quantity: "1", sku: "", notes: "",
+  price: "", quantity: "1", sku: "", location: "US", notes: "",
 };
 
 export function ReadyStockPage() {
@@ -96,7 +97,7 @@ export function ReadyStockPage() {
       diamondWeight: item.diamondWeight ? String(item.diamondWeight) : "",
       diamondType: item.diamondType || "Natural",
       price: String(item.price), quantity: String(item.quantity),
-      sku: item.sku || "", notes: item.notes || "",
+      sku: item.sku || "", location: item.location || "US", notes: item.notes || "",
     });
     setImages(item.images || []);
     setOpen(true);
@@ -138,6 +139,7 @@ export function ReadyStockPage() {
           price, quantity,
           images: imageUrls,
           sku: f.sku.trim() || undefined,
+          location: f.location || undefined,
           notes: f.notes.trim() || undefined,
           createdBy: editingId ? d.readyStock.find(x => x.id === editingId)!.createdBy : user!.id,
           createdAt: editingId ? d.readyStock.find(x => x.id === editingId)!.createdAt : new Date().toISOString(),
@@ -273,9 +275,18 @@ export function ReadyStockPage() {
                 </div>
               </div>
 
-              <div>
-                <Label className="text-xs">SKU / Design # (optional)</Label>
-                <Input value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} className="rounded-xl mt-1" />
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">SKU / Design # (optional)</Label>
+                  <Input value={f.sku} onChange={e => setF({ ...f, sku: e.target.value })} className="rounded-xl mt-1" />
+                </div>
+                <div>
+                  <Label className="text-xs">Stock Location</Label>
+                  <Select value={f.location} onValueChange={v => setF({ ...f, location: v })}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>{READY_STOCK_LOCATIONS.map(l => <SelectItem key={l} value={l}>{l}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
               </div>
               <div>
                 <Label className="text-xs">Notes (optional)</Label>
@@ -318,6 +329,11 @@ export function ReadyStockPage() {
                 {item.diamondWeight ? ` · ${item.diamondWeight}ct diamond` : ""}
               </p>
               {item.sku && <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">{item.sku}</p>}
+              {item.location && (
+                <span className="inline-flex items-center gap-1 mt-1 self-start text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                  <MapPin className="h-2.5 w-2.5" /> {item.location}
+                </span>
+              )}
               <div className="flex items-center justify-between mt-3">
                 <p className="font-display text-xl font-bold text-brand-dark">{fmtMoney(item.price)}</p>
                 <div className="flex items-center gap-1.5">

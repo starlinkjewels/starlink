@@ -115,17 +115,21 @@ export function StockPage() {
           <p className="text-sm text-muted-foreground">No certified diamonds in stock.</p>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {inStockPackets.map(p => (
-              <div key={p.id} className="p-3 rounded-xl bg-secondary border border-border/40">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-sm font-semibold">{p.shape}</span>
-                  <span className="text-sm font-semibold text-cyan-700">{p.carat} ct</span>
+            {inStockPackets.map(p => {
+              const grade = [p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
+                .filter(Boolean).join(" · ");
+              return (
+                <div key={p.id} className="p-3 rounded-xl bg-secondary border border-border/40">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold">{p.shape}</span>
+                    <span className="text-sm font-semibold text-cyan-700">{p.carat} ct</span>
+                  </div>
+                  {grade && <p className="text-xs text-foreground/70 mt-0.5 truncate">{grade}</p>}
+                  {p.measurement && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.measurement}</p>}
+                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
                 </div>
-                <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                  Cert {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}{p.quality ? ` · ${p.quality}` : ""}
-                </p>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

@@ -42,6 +42,13 @@ interface PurchaseLine {
   diaShape: string;
   diaCertNo: string;
   diaLab: string;
+  diaColor: string;
+  diaClarity: string;
+  diaCut: string;
+  diaPolish: string;
+  diaSym: string;
+  diaFluor: string;
+  diaMeasure: string;
   currency: PurchaseCurrency;
   totalUsd: string;
   exchangeRate: string;
@@ -55,6 +62,7 @@ function emptyPurchaseLine(): PurchaseLine {
     goldWeight: "", goldPurity: "22K", goldRate: "",
     diaCarat: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
+    diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     currency: "INR", totalUsd: "", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
@@ -191,6 +199,13 @@ export function SupplierHistoryPage() {
               shape: line.diaShape,
               carat,
               quality: line.diaQuality || undefined,
+              color: line.diaColor.trim() || undefined,
+              clarity: line.diaClarity.trim() || undefined,
+              cut: line.diaCut.trim() || undefined,
+              polish: line.diaPolish.trim() || undefined,
+              symmetry: line.diaSym.trim() || undefined,
+              fluorescence: line.diaFluor.trim() || undefined,
+              measurement: line.diaMeasure.trim() || undefined,
               certificateNumber: line.diaCertNo.trim(),
               certificateLab: line.diaLab.trim() || undefined,
               ratePerCaratInr: carat > 0 ? Math.round((totalInr / carat) * 100) / 100 : undefined,
@@ -451,9 +466,20 @@ export function SupplierHistoryPage() {
                     </div>
                     {line.diaKind === "certified" && (
                       <>
-                        <div className="grid grid-cols-2 gap-2.5">
-                          <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Certificate #" />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                          <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Report / Certificate #" />
                           <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <Input value={line.diaColor} onChange={e => updatePurchaseLine(idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
+                          <Input value={line.diaClarity} onChange={e => updatePurchaseLine(idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
+                          <Input value={line.diaCut} onChange={e => updatePurchaseLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
+                          <Input value={line.diaFluor} onChange={e => updatePurchaseLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="FL (fluor.)" />
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          <Input value={line.diaPolish} onChange={e => updatePurchaseLine(idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
+                          <Input value={line.diaSym} onChange={e => updatePurchaseLine(idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
+                          <Input value={line.diaMeasure} onChange={e => updatePurchaseLine(idx, { diaMeasure: e.target.value })} className="rounded-xl h-10" placeholder="Measurement (mm)" />
                         </div>
                         <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one packet. Add another line for another stone.</p>
                       </>

@@ -394,9 +394,17 @@ export interface DiamondPurchaseDetail {
 export interface DiamondPacket {
   id: string;
   shape: string;
-  carat: number;
+  carat: number; // size / weight
   quality?: string;
-  certificateNumber: string;
+  // Full grading details (from the certificate / report).
+  color?: string;
+  clarity?: string;
+  cut?: string;
+  polish?: string;
+  symmetry?: string;
+  fluorescence?: string; // "FL"
+  measurement?: string;  // e.g. "6.5 x 6.5 x 4.0 mm"
+  certificateNumber: string; // report number
   certificateLab?: string;
   ratePerCaratInr?: number; // cost basis (INR) for reference
   supplierId?: string;
@@ -466,10 +474,13 @@ export interface ReadyStockItem {
   quantity: number; // identical pieces available — "Sold Out" is quantity === 0, never a separate stored flag
   images: string[]; // Storage URLs, up to 3 — same upload pattern as Order.images
   sku?: string;
+  location?: string; // where the piece physically is — US / Hong Kong / India / Other
   notes?: string;
   createdBy: string;
   createdAt: string;
 }
+
+export const READY_STOCK_LOCATIONS = ["US", "Hong Kong", "India", "Other"] as const;
 
 export interface FinishedPiece {
   id: string;

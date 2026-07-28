@@ -52,9 +52,16 @@ export async function fetchStockLevels(): Promise<StockLevels> {
   return snap.data() as StockLevels;
 }
 
+// Firestore rejects `undefined` field values; drop them before writing.
+function pruneUndefined<T extends Record<string, unknown>>(o: T): T {
+  const out: Record<string, unknown> = {};
+  for (const k in o) if (o[k] !== undefined) out[k] = o[k];
+  return out as T;
+}
+
 async function addStockMovement(m: Omit<StockMovement, "id">): Promise<void> {
   const id = uid("sm_");
-  await setDoc(doc(fsdb, "stockMovements", id), { ...m, id });
+  await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, id }));
 }
 
 /** Purchase → stock: a plain atomic increment is safe, since additions can never go negative. */
@@ -124,7 +131,7 @@ export async function decreaseStock(args: {
       },
       { merge: true },
     );
-    tx.set(doc(collection(fsdb, "stockMovements"), movementId), {
+    tx.set(doc(collection(fsdb, "stockMovements"), movementId), pruneUndefined({
       id: movementId,
       material: args.material,
       type: args.type,
@@ -135,7 +142,7 @@ export async function decreaseStock(args: {
       createdBy: args.createdBy,
       createdAt: new Date().toISOString(),
       note: args.note,
-    });
+    }));
   });
 }
 
