@@ -27,6 +27,7 @@ import { LockerPage } from "./pages/Locker";
 import { SuppliersPage } from "./pages/Suppliers";
 import { SupplierHistoryPage } from "./pages/SupplierHistory";
 import { StockPage } from "./pages/Stock";
+import { StockSectionPage } from "./pages/StockSection";
 import { FactoriesPage } from "./pages/Factories";
 import { FactoryHistoryPage } from "./pages/FactoryHistory";
 import { ReadyStockPage } from "./pages/ReadyStock";
@@ -78,6 +79,7 @@ export function App() {
           <Route path="suppliers" element={<Protected roles={["admin","employee"]}><SuppliersPage /></Protected>} />
           <Route path="suppliers/:id" element={<Protected roles={["admin","employee"]}><SupplierHistoryPage /></Protected>} />
           <Route path="stock" element={<Protected roles={["admin","employee"]}><StockPage /></Protected>} />
+          <Route path="stock/:section" element={<Protected roles={["admin","employee"]}><StockSectionPage /></Protected>} />
           <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
           <Route path="ready-stock" element={<Protected roles={["admin","employee"]}><ReadyStockPage /></Protected>} />

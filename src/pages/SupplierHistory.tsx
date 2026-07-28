@@ -258,6 +258,14 @@ export function SupplierHistoryPage() {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
+    // FIFO only ever applies up to what's actually pending — anything beyond
+    // that would leave the locker but never land on any purchase, silently
+    // vanishing from this supplier's Total Paid. Target a specific purchase
+    // instead if you need to record an intentional overpayment.
+    if (payTargetPurchase === "__fifo" && amt > account.balanceOwed + 0.01) {
+      toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
+      return;
+    }
     const now = new Date().toISOString();
 
     updateDb(d => {

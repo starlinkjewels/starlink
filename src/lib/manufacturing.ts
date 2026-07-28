@@ -331,11 +331,11 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
 export function stockBucketHistory(
   movements: StockMovement[],
   material: "gold" | "diamond",
-  purityOrQuality: string,
+  purityOrQuality: string | null,
   ctx: StockLinkContext,
 ): (StockMovement & { link: StockMovementLink })[] {
   return movements
-    .filter(m => m.material === material && m.purityOrQuality === purityOrQuality)
+    .filter(m => m.material === material && (purityOrQuality === null || m.purityOrQuality === purityOrQuality))
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .map(m => ({ ...m, link: resolveStockMovementLink(m, ctx) }));
 }

@@ -357,7 +357,12 @@ export function FactoryHistoryPage() {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (mi) {
           mi.status = "closed";
-          if (releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 100) / 100;
+          // Whether the leftover went back to shared Stock or back to the
+          // factory's own pool, it's no longer "at this factory" — shrink
+          // quantityIssued either way, or factoryPoolBalance would keep
+          // counting a bulk delivery's full amount as still delivered even
+          // after it was fully returned.
+          if (returnsToStock || releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 100) / 100;
         }
         // Certified stones are now consumed into the finished piece → mark used.
         if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {

@@ -195,6 +195,13 @@ function PaySupplier() {
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
+    // FIFO only applies up to what's actually pending — anything beyond that
+    // would leave the locker but never land on any purchase, silently
+    // vanishing from Total Paid. Target a specific purchase to overpay instead.
+    if (target === "__fifo" && amt > account.balanceOwed + 0.01) {
+      toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
+      return;
+    }
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -285,6 +292,12 @@ function PayFactory() {
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
+    // Same reasoning as PaySupplier — FIFO can't silently swallow an amount
+    // beyond what's actually pending.
+    if (target === "__fifo" && amt > account.chargesPending + 0.01) {
+      toast.error(`That's ${fmtMoneyInr(amt - account.chargesPending)} more than this factory is currently owed (${fmtMoneyInr(account.chargesPending)}). Enter a smaller amount, or choose a specific issuance to overpay.`);
+      return;
+    }
     setSaving(true);
     try {
       const now = new Date().toISOString();
