@@ -6,7 +6,7 @@ import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } fro
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw } from "lucide-react";
+import { Gem, Coins, ArrowDownCircle, ArrowUpCircle, RotateCcw, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 15;
@@ -31,6 +31,7 @@ export function StockPage() {
 
   const goldEntries = Object.entries(levels?.gold ?? {}).filter(([, g]) => g !== 0);
   const diamondEntries = Object.entries(levels?.diamond ?? {}).filter(([, c]) => c !== 0);
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
   const recompute = async () => {
     if (!confirm("Recompute current stock from the full movement history? Use this only if the balance looks wrong.")) return;
@@ -81,10 +82,13 @@ export function StockPage() {
         <div className="card-luxe p-5">
           <div className="flex items-center gap-3 mb-4">
             <div className="h-10 w-10 rounded-xl bg-cyan-500/10 grid place-items-center"><Gem className="h-5 w-5 text-cyan-600" /></div>
-            <h3 className="font-display text-lg text-brand-dark">Diamond Stock</h3>
+            <div>
+              <h3 className="font-display text-lg text-brand-dark">Loose Diamonds</h3>
+              <p className="text-xs text-muted-foreground">Pooled by shape (running carats)</p>
+            </div>
           </div>
           {diamondEntries.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No diamonds in stock.</p>
+            <p className="text-sm text-muted-foreground">No loose diamonds in stock.</p>
           ) : (
             <div className="space-y-2">
               {diamondEntries.map(([quality, carats]) => (
@@ -96,6 +100,34 @@ export function StockPage() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Certified diamonds — each its own packet */}
+      <div className="card-luxe p-5">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="h-10 w-10 rounded-xl bg-violet-500/10 grid place-items-center"><BadgeCheck className="h-5 w-5 text-violet-600" /></div>
+          <div>
+            <h3 className="font-display text-lg text-brand-dark">Certified Diamonds</h3>
+            <p className="text-xs text-muted-foreground">{inStockPackets.length} packet{inStockPackets.length !== 1 ? "s" : ""} in stock · each with its own certificate</p>
+          </div>
+        </div>
+        {inStockPackets.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No certified diamonds in stock.</p>
+        ) : (
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
+            {inStockPackets.map(p => (
+              <div key={p.id} className="p-3 rounded-xl bg-secondary border border-border/40">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-sm font-semibold">{p.shape}</span>
+                  <span className="text-sm font-semibold text-cyan-700">{p.carat} ct</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-0.5 truncate">
+                  Cert {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}{p.quality ? ` · ${p.quality}` : ""}
+                </p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="card-luxe overflow-hidden">

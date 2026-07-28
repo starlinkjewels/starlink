@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -158,7 +158,7 @@ export function OrderDetailPage() {
   const [issueSource, setIssueSource] = useState<"stock" | "purchase">("stock");
   const [issuePurchaseId, setIssuePurchaseId] = useState("");
   const [issuePurity, setIssuePurity] = useState("22K");
-  const [issueQuality, setIssueQuality] = useState("");
+  const [issueQuality, setIssueQuality] = useState("Round");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
   const [issuing, setIssuing] = useState(false);
@@ -263,7 +263,7 @@ export function OrderDetailPage() {
 
   const resetIssueForm = () => {
     setIssueFactoryId(""); setIssueSource("stock"); setIssuePurchaseId("");
-    setIssuePurity("22K"); setIssueQuality(""); setIssueQuantity(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
@@ -1481,7 +1481,7 @@ export function OrderDetailPage() {
                     const p = eligiblePurchases.find(p => p.id === v);
                     if (p) {
                       if (p.material === "gold" && p.gold) { setIssuePurity(p.gold.purity); setIssueQuantity(String(p.gold.weightGrams)); }
-                      if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.quality || ""); setIssueQuantity(String(p.diamond.carat)); }
+                      if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.shape || p.diamond.quality || "Round"); setIssueQuantity(String(p.diamond.carat)); }
                     }
                   }}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose purchase" /></SelectTrigger>
@@ -1499,7 +1499,10 @@ export function OrderDetailPage() {
                     <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                   </Select>
                 ) : (
-                  <Input value={issueQuality} onChange={e => setIssueQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                  <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  </Select>
                 )}
               </div>
 

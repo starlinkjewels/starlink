@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, type Purchase, type PurchaseMaterial, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, type Purchase, type PurchaseMaterial, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -38,6 +38,10 @@ interface PurchaseLine {
   diaCarat: string;
   diaQuality: string;
   diaRate: string;
+  diaKind: "loose" | "certified";
+  diaShape: string;
+  diaCertNo: string;
+  diaLab: string;
   currency: PurchaseCurrency;
   totalUsd: string;
   exchangeRate: string;
@@ -50,6 +54,7 @@ function emptyPurchaseLine(): PurchaseLine {
     material: "gold", purpose: "stock", orderNumber: "",
     goldWeight: "", goldPurity: "22K", goldRate: "",
     diaCarat: "", diaQuality: "", diaRate: "",
+    diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     currency: "INR", totalUsd: "", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
@@ -102,6 +107,7 @@ export function SupplierHistoryPage() {
     for (const line of purchaseLines) {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
+      if (line.material === "diamond" && line.diaKind === "certified" && !line.diaCertNo.trim()) { toast.error("Enter the certificate number for every certified diamond line"); return; }
       if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
       if (line.purpose === "order" && !line.orderNumber.trim()) { toast.error("Enter the order number for every 'for a specific order' line"); return; }
       if (purchaseLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
@@ -129,16 +135,19 @@ export function SupplierHistoryPage() {
       // Stock increases must succeed before the purchase records are written,
       // so we never end up with a purchase that silently failed to update stock.
       for (const entry of entries) {
-        if (entry.line.purpose === "stock") {
-          await increaseStock({
-            material: entry.line.material,
-            purityOrQuality: entry.line.material === "gold" ? entry.line.goldPurity : (entry.line.diaQuality || "unspecified"),
-            quantity: entry.line.material === "gold" ? Number(entry.line.goldWeight) : Number(entry.line.diaCarat),
-            refType: "purchase",
-            refId: entry.id,
-            createdBy: user!.id,
-          });
-        }
+        const line = entry.line;
+        if (line.purpose !== "stock") continue;
+        // Certified diamonds are NOT pooled into stock levels — each becomes its
+        // own packet (created in the updateDb below). Loose diamonds pool by shape.
+        if (line.material === "diamond" && line.diaKind === "certified") continue;
+        await increaseStock({
+          material: line.material,
+          purityOrQuality: line.material === "gold" ? line.goldPurity : line.diaShape,
+          quantity: line.material === "gold" ? Number(line.goldWeight) : Number(line.diaCarat),
+          refType: "purchase",
+          refId: entry.id,
+          createdBy: user!.id,
+        });
       }
       updateDb(d => {
         if (!d.purchases) d.purchases = [];
@@ -149,7 +158,15 @@ export function SupplierHistoryPage() {
             supplierId: id!,
             material: line.material,
             gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
-            diamond: line.material === "diamond" ? { carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0 } : undefined,
+            diamond: line.material === "diamond" ? {
+              carat: Number(line.diaCarat),
+              quality: line.diaQuality || undefined,
+              ratePerCarat: Number(line.diaRate) || 0,
+              kind: line.diaKind,
+              shape: line.diaShape,
+              certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
+              certificateLab: line.diaKind === "certified" ? (line.diaLab.trim() || undefined) : undefined,
+            } : undefined,
             purpose: line.purpose,
             orderId: linkedOrderId,
             currency: line.currency,
@@ -163,6 +180,29 @@ export function SupplierHistoryPage() {
             createdAt: now,
           };
           d.purchases.unshift(purchase);
+
+          // Certified diamond → its own packet (never pooled). Goes to stock, or
+          // straight onto the order if this purchase was for a specific order.
+          if (line.material === "diamond" && line.diaKind === "certified") {
+            if (!d.diamondPackets) d.diamondPackets = [];
+            const carat = Number(line.diaCarat) || 0;
+            d.diamondPackets.unshift({
+              id: uid("dp_"),
+              shape: line.diaShape,
+              carat,
+              quality: line.diaQuality || undefined,
+              certificateNumber: line.diaCertNo.trim(),
+              certificateLab: line.diaLab.trim() || undefined,
+              ratePerCaratInr: carat > 0 ? Math.round((totalInr / carat) * 100) / 100 : undefined,
+              supplierId: id!,
+              purchaseId: purchase.id,
+              status: linkedOrderId ? "used" : "in_stock",
+              orderId: linkedOrderId,
+              createdBy: user!.id,
+              createdAt: now,
+            });
+          }
+
           if (linkedOrderId) {
             const o = d.orders.find(o => o.id === linkedOrderId);
             if (o) {
@@ -170,7 +210,9 @@ export function SupplierHistoryPage() {
               o.linkedPurchaseIds.push(purchase.id);
               if (!o.manufacturingLog) o.manufacturingLog = [];
               const qty = line.material === "gold" ? Number(line.goldWeight) : Number(line.diaCarat);
-              const label = line.material === "gold" ? `${qty}g ${line.goldPurity} gold` : `${qty}ct diamond${line.diaQuality ? ` (${line.diaQuality})` : ""}`;
+              const label = line.material === "gold"
+                ? `${qty}g ${line.goldPurity} gold`
+                : `${qty}ct ${line.diaShape} diamond${line.diaKind === "certified" ? ` (Certified ${line.diaCertNo.trim()})` : line.diaQuality ? ` (${line.diaQuality})` : ""}`;
               o.manufacturingLog.push({
                 id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
                 material: line.material, amountMaterial: qty, amountInr: totalInr,
@@ -388,10 +430,34 @@ export function SupplierHistoryPage() {
                     <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                    <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                    <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                  <div className="space-y-2.5">
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <Select value={line.diaKind} onValueChange={v => updatePurchaseLine(idx, { diaKind: v as "loose" | "certified" })}>
+                        <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="loose">Loose (by shape)</SelectItem>
+                          <SelectItem value="certified">Certified (own packet)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Select value={line.diaShape} onValueChange={v => updatePurchaseLine(idx, { diaShape: v })}>
+                        <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                        <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
+                      <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                      <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                    </div>
+                    {line.diaKind === "certified" && (
+                      <>
+                        <div className="grid grid-cols-2 gap-2.5">
+                          <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Certificate #" />
+                          <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one packet. Add another line for another stone.</p>
+                      </>
+                    )}
                   </div>
                 )}
 

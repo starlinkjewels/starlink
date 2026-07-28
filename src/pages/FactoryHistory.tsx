@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, type MaterialIssuance } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, type MaterialIssuance } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -53,7 +53,7 @@ export function FactoryHistoryPage() {
   const [issueSource, setIssueSource] = useState<"stock" | "purchase">("stock");
   const [issuePurchaseId, setIssuePurchaseId] = useState("");
   const [issuePurity, setIssuePurity] = useState("22K");
-  const [issueQuality, setIssueQuality] = useState("");
+  const [issueQuality, setIssueQuality] = useState("Round");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
   const [issuing, setIssuing] = useState(false);
@@ -76,7 +76,7 @@ export function FactoryHistoryPage() {
 
   const resetIssueForm = () => {
     setIssueOrderNumber(""); setIssueSource("stock"); setIssuePurchaseId("");
-    setIssuePurity("22K"); setIssueQuality(""); setIssueQuantity(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
@@ -432,7 +432,7 @@ export function FactoryHistoryPage() {
                   const p = eligiblePurchases.find(p => p.id === v);
                   if (p) {
                     if (p.material === "gold" && p.gold) { setIssuePurity(p.gold.purity); setIssueQuantity(String(p.gold.weightGrams)); }
-                    if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.quality || ""); setIssueQuantity(String(p.diamond.carat)); }
+                    if (p.material === "diamond" && p.diamond) { setIssueQuality(p.diamond.shape || p.diamond.quality || "Round"); setIssueQuantity(String(p.diamond.carat)); }
                   }
                 }}>
                   <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose purchase" /></SelectTrigger>
@@ -450,7 +450,10 @@ export function FactoryHistoryPage() {
                   <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                 </Select>
               ) : (
-                <Input value={issueQuality} onChange={e => setIssueQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                  <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                </Select>
               )}
             </div>
 

@@ -368,12 +368,43 @@ export interface GoldPurchaseDetail {
   ratePerGram: number; // in the purchase's billing currency
 }
 
+// Standard diamond shapes for the loose-stock "bag" and packet records.
+export const DIAMOND_SHAPES = [
+  "Round", "Oval", "Pear", "Princess", "Emerald", "Marquise",
+  "Cushion", "Radiant", "Heart", "Asscher", "Baguette", "Other",
+] as const;
+
 export interface DiamondPurchaseDetail {
   carat: number;
   quality?: string; // clarity/color grade, free text
   ratePerCarat: number; // in the purchase's billing currency
+  // "loose" → pooled into stock by shape; "certified" → each stone an individual
+  // packet (see DiamondPacket). Older records without this are treated as loose.
+  kind?: "loose" | "certified";
+  shape?: string; // one of DIAMOND_SHAPES — the loose-stock bucket key
   certificateNumber?: string;
   certificateLab?: string; // GIA / IGI / etc.
+}
+
+/**
+ * A single CERTIFIED diamond — tracked as its own packet (never pooled), because
+ * each has a unique certificate. Loose diamonds instead live as a running carat
+ * total per shape in stockLevels (src/lib/stock.ts).
+ */
+export interface DiamondPacket {
+  id: string;
+  shape: string;
+  carat: number;
+  quality?: string;
+  certificateNumber: string;
+  certificateLab?: string;
+  ratePerCaratInr?: number; // cost basis (INR) for reference
+  supplierId?: string;
+  purchaseId?: string;
+  status: "in_stock" | "issued" | "used";
+  orderId?: string; // set once issued/used against an order
+  createdBy: string;
+  createdAt: string;
 }
 
 export interface PurchasePayment {
@@ -516,6 +547,7 @@ export interface DB {
   materialIssuances: MaterialIssuance[];
   stockMovements: StockMovement[];
   readyStock: ReadyStockItem[];
+  diamondPackets: DiamondPacket[];
   session: { userId: string | null };
 }
 
@@ -561,6 +593,7 @@ function emptyDb(): DB {
     materialIssuances: [],
     stockMovements: [],
     readyStock: [],
+    diamondPackets: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -735,7 +768,8 @@ type ArrayCol =
   | "factories"
   | "materialIssuances"
   | "stockMovements"
-  | "readyStock";
+  | "readyStock"
+  | "diamondPackets";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -755,6 +789,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "materialIssuances",
   "stockMovements",
   "readyStock",
+  "diamondPackets",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
