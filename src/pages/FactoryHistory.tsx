@@ -295,7 +295,13 @@ export function FactoryHistoryPage() {
 
     const qty = Number(returnQty);
     const unit = issuance.material === "gold" ? "g" : "ct";
-    const maxReturnable = Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
+    // A bulk delivery's own issuanceUsed is always 0 (orders draw against it
+    // via separate factoryPool-sourced records, never its own finishedPieces)
+    // — cap it at the true remaining pool balance instead, or this would let
+    // you "return" material a different order already has committed.
+    const maxReturnable = !issuance.orderId
+      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
+      : Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
     if (!qty || qty <= 0) { toast.error(`Enter the ${issuance.material} quantity to return`); return; }
     if (qty > maxReturnable) { toast.error(`Can't return more than the unused remainder (${maxReturnable}${unit})`); return; }
     const now = new Date().toISOString();
