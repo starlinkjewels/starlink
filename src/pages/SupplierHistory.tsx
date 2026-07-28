@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import {
   supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr,
 } from "@/lib/manufacturing";
-import { increaseStock } from "@/lib/stock";
+import { increaseStock, decreaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
-  Download, FileText, FileSpreadsheet, X,
+  Download, FileText, FileSpreadsheet, X, Trash2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -281,6 +281,62 @@ export function SupplierHistoryPage() {
     });
     toast.success("Payment recorded");
     setPayAmount(""); setPayNote(""); setPayTargetPurchase("__fifo"); setShowPayForm(false);
+  };
+
+  // ── Void a purchase ──
+  // Deliberately CONSERVATIVE: a void only proceeds when it can fully and safely
+  // reverse itself. It refuses (with a clear reason) if any payment was recorded
+  // (those may have been FIFO-allocated and can't be traced back cleanly — the
+  // payment must be reversed from the locker first), if a certified packet has
+  // already left stock, or if pooled stock has already been consumed. This keeps
+  // production money/inventory from silently drifting.
+  const [voidingId, setVoidingId] = useState<string | null>(null);
+  const voidPurchase = async (p: Purchase) => {
+    if (purchasePaid(p) > 0) {
+      toast.error("This purchase has payments recorded. Reverse the payment from the Locker first, then void it.");
+      return;
+    }
+    const relatedPackets = (db.diamondPackets ?? []).filter(pk => pk.purchaseId === p.id);
+    if (relatedPackets.some(pk => pk.status !== "in_stock")) {
+      toast.error("A certified diamond from this purchase is already issued or used on an order. Cancel it from the order first.");
+      return;
+    }
+    if (!confirm(`Void this purchase of ${purchaseDesc(p)} (${fmtMoneyInr(p.totalInr)})?\n\nStock added by it will be reversed and the record removed. This can't be undone.`)) return;
+    setVoidingId(p.id);
+    try {
+      // Reverse pooled stock first (only stock-purpose loose diamond / gold ever
+      // increased the pool). Floor-checked — throws if the material was consumed.
+      if (p.purpose === "stock" && !(p.material === "diamond" && p.diamond?.kind === "certified")) {
+        await decreaseStock({
+          material: p.material,
+          purityOrQuality: p.material === "gold" ? (p.gold?.purity ?? "") : (p.diamond?.shape ?? ""),
+          quantity: p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0),
+          type: "issuance_out",
+          refType: "purchase",
+          refId: p.id,
+          createdBy: user!.id,
+          note: `Void of purchase ${p.invoiceNumber || p.id.slice(-6)}`,
+        });
+      }
+      updateDb(d => {
+        d.purchases = (d.purchases ?? []).filter(x => x.id !== p.id);
+        // Remove the certified packets it created (all confirmed in_stock above).
+        d.diamondPackets = (d.diamondPackets ?? []).filter(pk => pk.purchaseId !== p.id);
+        // Unlink from its order + drop the "material purchased" log line.
+        if (p.orderId) {
+          const o = d.orders.find(o => o.id === p.orderId);
+          if (o) {
+            o.linkedPurchaseIds = (o.linkedPurchaseIds ?? []).filter(pid => pid !== p.id);
+            o.manufacturingLog = (o.manufacturingLog ?? []).filter(
+              m => !(m.type === "material_purchased" && m.amountInr === p.totalInr && m.at === p.createdAt),
+            );
+          }
+        }
+      });
+      toast.success("Purchase voided and stock reversed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't reverse the stock for this purchase.");
+    } finally { setVoidingId(null); }
   };
 
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
@@ -619,6 +675,15 @@ export function SupplierHistoryPage() {
                     {pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}
                   </p>
                   {paid > 0 && pending > 0 && <p className="text-[10px] text-muted-foreground">{fmtMoneyInr(paid)} paid so far</p>}
+                  {user?.role === "admin" && paid === 0 && (
+                    <button
+                      onClick={() => voidPurchase(p)}
+                      disabled={voidingId === p.id}
+                      className="mt-1 text-[11px] text-destructive inline-flex items-center gap-1 hover:underline disabled:opacity-50"
+                    >
+                      <Trash2 className="h-3 w-3" /> {voidingId === p.id ? "Voiding…" : "Void"}
+                    </button>
+                  )}
                 </div>
               </div>
             );
