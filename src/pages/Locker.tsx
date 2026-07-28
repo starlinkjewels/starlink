@@ -101,6 +101,19 @@ export function LockerPage() {
     const amt = Number(txnAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
+    // Overdraw warning — money leaving the locker (expense / transfer out) that
+    // would take it below zero is almost always a mistake (wrong locker, or a
+    // deposit that was never recorded). Warn, but let them proceed knowingly.
+    if (txnType === "expense" || txnType === "transfer_out") {
+      const bal = lockerBalance(selected, db.lockerTransactions);
+      if (amt > bal) {
+        const cur = selected.currency || "INR";
+        const ok = window.confirm(
+          `This ${txnType === "expense" ? "expense" : "transfer"} of ${fmtLockerAmount(amt, selected.currency)} is more than ${selected.name}'s balance of ${fmtLockerAmount(bal, selected.currency)} ${cur}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
+        );
+        if (!ok) return;
+      }
+    }
     const now = new Date().toISOString();
     const currency = selected.currency || "INR";
     updateDb(d => {

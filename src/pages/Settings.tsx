@@ -293,28 +293,6 @@ export function SettingsPage() {
             className="rounded-xl mt-1"
           />
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <Label className="text-xs">Currency</Label>
-            <Input
-              value={db.settings.currency}
-              onChange={(e) =>
-                setDb({ ...db, settings: { ...db.settings, currency: e.target.value } })
-              }
-              className="rounded-xl mt-1"
-            />
-          </div>
-          <div>
-            <Label className="text-xs">Language</Label>
-            <Input
-              value={db.settings.language}
-              onChange={(e) =>
-                setDb({ ...db, settings: { ...db.settings, language: e.target.value } })
-              }
-              className="rounded-xl mt-1"
-            />
-          </div>
-        </div>
         <label className="flex items-center justify-between">
           <span className="text-sm">Push notifications</span>
           <Switch
