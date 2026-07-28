@@ -335,7 +335,16 @@ export function FactoryHistoryPage() {
   // back to Stock automatically — nothing is silently lost to "wastage" that
   // was actually just never consumed.
   const closeIssuance = async (issuance: MaterialIssuance) => {
-    const leftover = Math.round(issuanceWastage(issuance) * 100) / 100;
+    // A bulk delivery (no orderId) never gets its own finishedPieces — orders
+    // draw against it as separate factoryPool-sourced records instead, so
+    // issuanceWastage(issuance) here is always the FULL original delivery,
+    // ignoring anything already drawn. The true leftover is whatever's still
+    // undrawn in the pool right now — using the naive wastage would return
+    // the whole original amount to stock even after part of it was already
+    // legitimately committed to an order, conjuring phantom gold into Stock.
+    const leftover = !issuance.orderId
+      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
+      : Math.round(issuanceWastage(issuance) * 100) / 100;
     const unit = issuance.material === "gold" ? "g" : "ct";
     const now = new Date().toISOString();
     try {
@@ -665,7 +674,9 @@ export function FactoryHistoryPage() {
               <div className="flex flex-wrap gap-2 mt-3">
                 {mi.orderId && (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "piece")} className="rounded-lg gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" />Finished Piece</Button>
+                    {used < mi.quantityIssued - 0.001 && (
+                      <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "piece")} className="rounded-lg gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" />Finished Piece</Button>
+                    )}
                     <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "charge")} className="rounded-lg gap-1.5"><Coins className="h-3.5 w-3.5" />Set Charge</Button>
                     {mi.makingCharges.amountInr > 0 && pending > 0 && (
                       <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "pay")} className="rounded-lg gap-1.5"><CreditCard className="h-3.5 w-3.5" />Pay</Button>
