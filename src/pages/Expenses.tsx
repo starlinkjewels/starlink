@@ -5,6 +5,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
 import { motion, AnimatePresence } from "framer-motion";
+import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
@@ -160,11 +161,13 @@ export function ExpensesPage() {
   }
 
   function handleDelete(id: string) {
+    if (!confirm("Delete this expense? Its linked locker entry is also removed. This cannot be undone.")) return;
     const fresh = loadDb();
     fresh.expenses = fresh.expenses.filter(e => e.id !== id);
     fresh.lockerTransactions = fresh.lockerTransactions.filter(t => !(t.refType === "expense" && t.refId === id));
     saveDb(fresh);
     setDb(fresh);
+    toast.success("Expense deleted");
   }
 
   return (

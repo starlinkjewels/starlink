@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { toast } from "sonner";
 import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/Login";
@@ -40,6 +42,14 @@ function Protected({ children, roles }: { children: React.ReactNode; roles?: Rol
 }
 
 export function App() {
+  // Surface background save failures — writes are optimistic, so without this a
+  // failed Firestore write is invisible and the user thinks the change saved.
+  useEffect(() => {
+    const onErr = () => toast.error("Couldn't save your last change — check your connection and try again.");
+    window.addEventListener("starlink-db-error", onErr);
+    return () => window.removeEventListener("starlink-db-error", onErr);
+  }, []);
+
   return (
     <>
       <Routes>

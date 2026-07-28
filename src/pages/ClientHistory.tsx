@@ -44,11 +44,15 @@ export function ClientHistoryPage() {
     .filter(o => o.clientId === id)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 
+  // Rejected orders are cancelled work — they must NOT be billed or absorb
+  // payments, so all money math runs on billable (non-rejected) orders only.
+  const billableOrders = allOrders.filter(o => o.status !== "Rejected");
+
   const allInvoices = db.invoices.filter(inv => inv.clientId === id);
 
   // Summary stats — use the full bill (incl. shipping/cert) so "Total Value"
   // matches the Account Ledger's "Total Billed".
-  const totalValue = allOrders.reduce((s, o) => s + orderTotal(o), 0);
+  const totalValue = billableOrders.reduce((s, o) => s + orderTotal(o), 0);
   const paidAmount = allInvoices.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
   const pendingAmount = allInvoices.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
   const activeOrders = allOrders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
@@ -68,7 +72,7 @@ export function ClientHistoryPage() {
   const [payLockerId, setPayLockerId] = useState("");
   const [payLockerAmount, setPayLockerAmount] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
-  const account = clientAccount(allOrders, client?.creditBalance || 0);
+  const account = clientAccount(billableOrders, client?.creditBalance || 0);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
 
   const recordPayment = () => {
@@ -81,7 +85,7 @@ export function ClientHistoryPage() {
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
-      const clientOrders = d.orders.filter(o => o.clientId === id);
+      const clientOrders = d.orders.filter(o => o.clientId === id && o.status !== "Rejected");
       const now = new Date().toISOString();
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
@@ -117,7 +121,7 @@ export function ClientHistoryPage() {
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
-      const clientOrders = d.orders.filter(o => o.clientId === id);
+      const clientOrders = d.orders.filter(o => o.clientId === id && o.status !== "Rejected");
       // Reclaim any per-order over-payment + stored credit, re-allocate oldest first.
       const leftover = reconcileClientAccount(clientOrders, 0, c.creditBalance || 0, user!.id, new Date().toISOString());
       c.creditBalance = leftover > 0 ? leftover : undefined;
@@ -130,7 +134,7 @@ export function ClientHistoryPage() {
   // separate from the Order History table below (which is order-by-order).
   const statement = (() => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
-    for (const o of allOrders) {
+    for (const o of billableOrders) {
       rows.push({ id: o.id, date: o.createdAt, particulars: `Order ${o.orderNumber} — ${o.jewelleryType}`, debit: orderTotal(o), credit: 0 });
       for (const adv of o.advances || []) {
         rows.push({ id: adv.id, date: adv.createdAt, particulars: `${adv.note || "Payment"} (${o.orderNumber})`, debit: 0, credit: adv.amount });

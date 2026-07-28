@@ -75,11 +75,13 @@ export async function increaseStock(args: {
   note?: string;
 }): Promise<void> {
   const field = args.material === "gold" ? "gold" : "diamond";
-  await updateDoc(stockRef(), {
+  // setDoc+merge (not updateDoc) so the very first stock purchase on a fresh
+  // tenant creates stockLevels/current instead of throwing "No document to update".
+  await setDoc(stockRef(), {
     [`${field}.${args.purityOrQuality}`]: increment(args.quantity),
     updatedAt: new Date().toISOString(),
     version: increment(1),
-  });
+  }, { merge: true });
   await addStockMovement({
     material: args.material,
     type: "purchase_in",

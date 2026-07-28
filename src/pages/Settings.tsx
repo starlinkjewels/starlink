@@ -70,6 +70,12 @@ export function SettingsPage() {
     r.onload = () => {
       try {
         const d = JSON.parse(r.result as string) as DB;
+        if (!d || !Array.isArray(d.orders) || !Array.isArray(d.clients)) { toast.error("This doesn't look like a valid backup file."); e.target.value = ""; return; }
+        const ok = confirm(
+          `Restore from this backup? It REPLACES all current data with the file's contents ` +
+          `(${d.clients.length} clients, ${d.orders.length} orders). This cannot be undone.`,
+        );
+        if (!ok) { e.target.value = ""; return; }
         // Push the restored data into Firestore (keep the current session).
         const fresh = loadDb();
         Object.assign(fresh, d, { session: fresh.session });
@@ -78,17 +84,18 @@ export function SettingsPage() {
         setDb(fresh);
       } catch {
         toast.error("Invalid file");
+      } finally {
+        e.target.value = ""; // allow re-selecting the same file
       }
     };
     r.readAsText(f);
   };
   const clear = async () => {
-    if (
-      !confirm(
-        "Wipe ALL data from the database and reset to the admin seed? This cannot be undone.",
-      )
-    )
-      return;
+    // Most destructive action in the app — require typing RESET, not a single OK.
+    const typed = prompt(
+      "This WIPES ALL data (clients, orders, invoices, payments, expenses, catalog) and cannot be undone.\n\nType RESET to confirm:",
+    );
+    if (typed?.trim().toUpperCase() !== "RESET") { toast.info("Cancelled — nothing was deleted."); return; }
     const fresh = loadDb();
     fresh.users = [];
     fresh.clients = [];

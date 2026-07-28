@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Loader2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button, type ButtonProps } from "@/components/ui/button";
 import { flush } from "@/lib/db";
 
@@ -30,6 +31,7 @@ export const AsyncButton = React.forwardRef<HTMLButtonElement, AsyncButtonProps>
         await flush();        // wait until the write actually commits
       } catch (err) {
         console.error("[AsyncButton] action failed:", err);
+        toast.error(err instanceof Error ? err.message : "Something went wrong — please try again.");
       } finally {
         if (mounted.current) setBusy(false);
       }

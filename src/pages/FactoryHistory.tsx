@@ -151,6 +151,12 @@ export function FactoryHistoryPage() {
   const recordPiece = (issuance: MaterialIssuance) => {
     const w = Number(pieceQty);
     if (!w || w <= 0) { toast.error(`Enter the ${issuance.material} quantity used`); return; }
+    const u = issuance.material === "gold" ? "g" : "ct";
+    const alreadyUsed = issuanceUsed(issuance);
+    if (alreadyUsed + w > issuance.quantityIssued + 0.001) {
+      toast.error(`Can't use more than issued — issued ${issuance.quantityIssued}${u}, already used ${alreadyUsed}${u}.`);
+      return;
+    }
     const now = new Date().toISOString();
     updateDb(d => {
       const mi = d.materialIssuances.find(x => x.id === issuance.id);
@@ -251,11 +257,15 @@ export function FactoryHistoryPage() {
     const now = new Date().toISOString();
     setReturning(true);
     try {
-      await increaseStock({
-        material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: qty,
-        refType: "manual", createdBy: user!.id,
-        note: `Returned from ${factory.name} issuance${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
-      });
+      // Only material that CAME from stock goes back to stock. A purchase bought
+      // for this order never entered stock, so returning it must not inflate the pool.
+      if (issuance.source === "stock") {
+        await increaseStock({
+          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: qty,
+          refType: "manual", createdBy: user!.id,
+          note: `Returned from ${factory.name} issuance${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
+        });
+      }
       updateDb(d => {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (!mi) return;
@@ -270,7 +280,7 @@ export function FactoryHistoryPage() {
           });
         }
       });
-      toast.success(`${qty}${unit} returned to stock`);
+      toast.success(issuance.source === "stock" ? `${qty}${unit} returned to stock` : `${qty}${unit} returned (was bought for this order — not added to stock)`);
       setActiveIssuance({ id: "", action: null });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to return material");
@@ -285,8 +295,10 @@ export function FactoryHistoryPage() {
     const unit = issuance.material === "gold" ? "g" : "ct";
     const now = new Date().toISOString();
     try {
-      // Certified packets are discrete stones — never pooled back to loose stock.
-      if (leftover > 0 && issuance.diamondKind !== "certified") {
+      // Only stock-sourced, non-certified leftovers return to the pool. Certified
+      // packets are discrete; purchase-sourced material was never in stock.
+      const returnsToStock = leftover > 0 && issuance.diamondKind !== "certified" && issuance.source === "stock";
+      if (returnsToStock) {
         await increaseStock({
           material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
           refType: "manual", createdBy: user!.id,
@@ -300,7 +312,7 @@ export function FactoryHistoryPage() {
         if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {
           for (const p of d.diamondPackets) if (issuance.diamondPacketIds.includes(p.id)) p.status = "used";
         }
-        if (leftover > 0) {
+        if (returnsToStock) {
           const o = d.orders.find(o => o.id === issuance.orderId);
           if (o) {
             if (!o.manufacturingLog) o.manufacturingLog = [];
@@ -312,7 +324,7 @@ export function FactoryHistoryPage() {
           }
         }
       });
-      toast.success(leftover > 0 ? `Issuance closed — ${leftover}${unit} returned to stock` : "Issuance closed");
+      toast.success(returnsToStock ? `Issuance closed — ${leftover}${unit} returned to stock` : "Issuance closed");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to close issuance");
     }
