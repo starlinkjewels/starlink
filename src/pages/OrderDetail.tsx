@@ -422,16 +422,37 @@ export function OrderDetailPage() {
   };
 
   const approve = (yes: boolean) => {
+    if (!yes && !confirm("Reject this order? You can re-open it to Waiting later if this was a mistake.")) return;
+    const now = new Date().toISOString();
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.status = yes ? "Approved" : "Rejected";
       if (yes) {
-        o.timeline[0].status = "done"; o.timeline[0].date = new Date().toISOString();
-        o.timeline[1].status = "done"; o.timeline[1].date = new Date().toISOString();
+        o.timeline[0].status = "done"; o.timeline[0].date = now;
+        o.timeline[1].status = "done"; o.timeline[1].date = now;
         if (o.timeline[2]) o.timeline[2].status = "in_progress";
       }
+      const clientUser = d.users.find(u => u.clientId === o.clientId);
+      if (clientUser) d.notifications.unshift({
+        id: uid("n_"), userId: clientUser.id,
+        title: yes ? "Order Approved" : "Order Rejected",
+        body: yes ? `${o.orderNumber} has been approved and is now in production.` : `${o.orderNumber} has been rejected.`,
+        type: "order", read: false, createdAt: now,
+      });
     });
     toast.success(yes ? "Order approved" : "Order rejected");
+  };
+
+  // Undo an accidental reject — put the order back to Waiting for a fresh decision.
+  const reopenOrder = () => {
+    if (!confirm("Re-open this rejected order back to Waiting?")) return;
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      o.status = "Waiting";
+      o.timeline.forEach((t, i) => { if (i > 0) { t.status = "pending"; t.date = undefined; } });
+      o.timeline[0].status = "done";
+    });
+    toast.success("Order re-opened — now Waiting");
   };
 
   const addAdvance = () => {
@@ -765,6 +786,14 @@ export function OrderDetailPage() {
           <div className="mt-5 flex gap-3">
             <AsyncButton onClick={() => approve(true)} className="btn-hero rounded-xl">Approve Order</AsyncButton>
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
+          </div>
+        )}
+        {canEditStage() && order.status === "Rejected" && (
+          <div className="mt-5 flex items-center gap-3 flex-wrap">
+            <span className="text-sm text-destructive font-medium">This order was rejected.</span>
+            <AsyncButton variant="outline" onClick={reopenOrder} className="rounded-xl gap-2">
+              <RotateCcw className="h-4 w-4" /> Re-open to Waiting
+            </AsyncButton>
           </div>
         )}
       </div>

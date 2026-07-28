@@ -131,7 +131,9 @@ export function NewOrderPage() {
   };
 
   const applyEstimate = () => {
-    const auto = Math.round(Number(f.diamondWeight) * diamondRate);
+    // Must match the displayed estimate (metal + diamond), not diamond alone —
+    // otherwise the button silently under-prices the order by the metal value.
+    const auto = Math.round(Number(f.estimatedNetWeight) * metalRate + Number(f.diamondWeight) * diamondRate);
     setF(prev => ({ ...prev, orderValue: auto }));
   };
 
@@ -173,6 +175,7 @@ export function NewOrderPage() {
     if (metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
     if (!f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
     if (!f.stamping)            { toast.error("Please select a Stamping option."); return; }
+    if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
       if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
@@ -559,7 +562,7 @@ export function NewOrderPage() {
             </p>
             <div className="grid grid-cols-2 gap-3">
               <Field label="Expected Date">
-                <Input type="date" value={f.expectedDelivery}
+                <Input type="date" value={f.expectedDelivery} min={new Date().toISOString().slice(0, 10)}
                   onChange={e => set("expectedDelivery", e.target.value)}
                   className="rounded-xl h-11" />
               </Field>
