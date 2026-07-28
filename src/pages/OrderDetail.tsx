@@ -1748,11 +1748,19 @@ export function OrderDetailPage() {
               {linkedIssuances.map(mi => {
                 const pending = issuancePending(mi);
                 const factory = db.factories.find(f => f.id === mi.factoryId);
+                const used = issuanceUsed(mi);
+                const unit = mi.material === "gold" ? "g" : "ct";
+                const certPackets = mi.diamondKind === "certified"
+                  ? (db.diamondPackets ?? []).filter(p => mi.diamondPacketIds?.includes(p.id))
+                  : [];
+                const label = mi.diamondKind === "certified"
+                  ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
+                  : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`;
                 return (
                   <Link key={mi.id} to={`/factories/${mi.factoryId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
                     <span className="flex items-center gap-2 min-w-0">
-                      <FactoryIcon className="h-3.5 w-3.5 text-orange-600 shrink-0" />
-                      <span className="truncate">{mi.quantityIssued}{mi.material === "gold" ? "g" : "ct"} {mi.purityOrQuality} issued to {factory?.name || "factory"}</span>
+                      {mi.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
+                      <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
                     </span>
                     <span className={`shrink-0 font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
                   </Link>
