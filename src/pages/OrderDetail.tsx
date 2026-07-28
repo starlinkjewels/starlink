@@ -1217,10 +1217,10 @@ export function OrderDetailPage() {
                 <p className="text-xs text-muted-foreground mb-1">Total Paid</p>
                 <p className="font-semibold text-sm text-success">{fmtMoney(advTotal)}</p>
               </div>
-              <div className={`p-3 rounded-xl text-center border ${balance > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
+              <div className={`p-3 rounded-xl text-center border ${balance > 0 ? "bg-destructive/5 border-destructive/20" : orderTotal(order) <= 0 ? "bg-secondary border-border/40" : "bg-success/8 border-success/20"}`}>
                 <p className="text-xs text-muted-foreground mb-1">Balance Due</p>
-                <p className={`font-semibold text-sm ${balance > 0 ? "text-destructive" : "text-success"}`}>
-                  {balance > 0 ? fmtMoney(balance) : "✓ Cleared"}
+                <p className={`font-semibold text-sm ${balance > 0 ? "text-destructive" : orderTotal(order) <= 0 ? "text-muted-foreground" : "text-success"}`}>
+                  {balance > 0 ? fmtMoney(balance) : orderTotal(order) <= 0 ? "Pricing pending" : "✓ Cleared"}
                 </p>
               </div>
               {(shipping > 0 || certFee > 0) && (
