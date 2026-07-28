@@ -161,6 +161,8 @@ export function OrderDetailPage() {
   const [issueQuality, setIssueQuality] = useState("Round");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
+  const [issueDiaKind, setIssueDiaKind] = useState<"loose" | "certified">("loose");
+  const [issueCertPacketIds, setIssueCertPacketIds] = useState<string[]>([]);
   const [issuing, setIssuing] = useState(false);
 
   const db = useDb();
@@ -264,11 +266,59 @@ export function OrderDetailPage() {
   const resetIssueForm = () => {
     setIssueFactoryId(""); setIssueSource("stock"); setIssuePurchaseId("");
     setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueNotes("");
+    setIssueDiaKind("loose"); setIssueCertPacketIds([]);
   };
 
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+
   const issueMaterialToFactory = async () => {
-    const qty = Number(issueQuantity);
     if (!issueFactoryId) { toast.error("Choose a factory"); return; }
+    const factoryC = db.factories.find(f => f.id === issueFactoryId);
+
+    // ── Certified diamond packets: issue the specific stones (not a pooled carat) ──
+    if (issueMaterial === "diamond" && issueSource === "stock" && issueDiaKind === "certified") {
+      const packets = inStockPackets.filter(p => issueCertPacketIds.includes(p.id));
+      if (packets.length === 0) { toast.error("Select at least one certified packet"); return; }
+      const totalCarat = Math.round(packets.reduce((s, p) => s + p.carat, 0) * 100) / 100;
+      const issuanceId = uid("mi_");
+      const now = new Date().toISOString();
+      setIssuing(true);
+      try {
+        updateDb(d => {
+          if (!d.materialIssuances) d.materialIssuances = [];
+          d.materialIssuances.unshift({
+            id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: "diamond",
+            purityOrQuality: "Certified", quantityIssued: totalCarat,
+            source: "stock", diamondKind: "certified", diamondPacketIds: packets.map(p => p.id),
+            issuedAt: now, issuedBy: user!.id, status: "open",
+            finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+            notes: issueNotes.trim() || undefined,
+          });
+          // Move each selected packet out of stock, tagged to this order.
+          for (const p of d.diamondPackets) {
+            if (issueCertPacketIds.includes(p.id) && p.status === "in_stock") { p.status = "issued"; p.orderId = order.id; }
+          }
+          const o = d.orders.find(o => o.id === order.id);
+          if (o) {
+            if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
+            o.materialIssuanceIds.push(issuanceId);
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            o.manufacturingLog.push({
+              id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
+              material: "diamond", amountMaterial: totalCarat,
+              remarks: `${packets.length} certified diamond${packets.length !== 1 ? "s" : ""} (${totalCarat}ct) issued to ${factoryC?.name || "factory"} — cert ${packets.map(p => p.certificateNumber).join(", ")}`,
+            });
+          }
+        });
+        toast.success(`${packets.length} certified packet${packets.length !== 1 ? "s" : ""} issued to ${factoryC?.name || "factory"}`);
+        setShowIssueForm(false); resetIssueForm();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to issue packets");
+      } finally { setIssuing(false); }
+      return;
+    }
+
+    const qty = Number(issueQuantity);
     if (!qty || qty <= 0) { toast.error(`Enter the ${issueMaterial} quantity to issue`); return; }
     const purityOrQuality = issueMaterial === "gold" ? issuePurity : (issueQuality.trim() || "unspecified");
     if (issueSource === "purchase" && !issuePurchaseId) { toast.error("Choose which purchase this comes from"); return; }
@@ -1499,18 +1549,53 @@ export function OrderDetailPage() {
                     <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                   </Select>
                 ) : (
-                  <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  <Select value={issueDiaKind} onValueChange={v => setIssueDiaKind(v as "loose" | "certified")}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="loose">Loose (by shape)</SelectItem>
+                      <SelectItem value="certified" disabled={inStockPackets.length === 0}>
+                        Certified packet{inStockPackets.length === 0 ? " (none in stock)" : ""}
+                      </SelectItem>
+                    </SelectContent>
                   </Select>
                 )}
               </div>
 
-              <Input
-                type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
-                className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight (g)" : "Carat"}
-                disabled={issueSource === "purchase" && !!issuePurchaseId}
-              />
+              {/* Loose diamond from stock → shape picker */}
+              {issueMaterial === "diamond" && issueSource === "stock" && issueDiaKind === "loose" && (
+                <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                  <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                </Select>
+              )}
+
+              {/* Certified packets from stock → pick the specific stones */}
+              {issueMaterial === "diamond" && issueSource === "stock" && issueDiaKind === "certified" ? (
+                <div className="rounded-xl border border-border/60 p-2 max-h-52 overflow-y-auto space-y-1">
+                  {inStockPackets.length === 0 && <p className="text-xs text-muted-foreground p-2">No certified diamonds in stock.</p>}
+                  {inStockPackets.map(p => {
+                    const checked = issueCertPacketIds.includes(p.id);
+                    return (
+                      <label key={p.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${checked ? "bg-primary/10" : "hover:bg-secondary"}`}>
+                        <input type="checkbox" checked={checked}
+                          onChange={e => setIssueCertPacketIds(ids => e.target.checked ? [...ids, p.id] : ids.filter(x => x !== p.id))} />
+                        <span className="text-sm flex-1 min-w-0 truncate">{p.shape} · {p.carat}ct · Cert {p.certificateNumber}{p.certificateLab ? ` (${p.certificateLab})` : ""}</span>
+                      </label>
+                    );
+                  })}
+                  {issueCertPacketIds.length > 0 && (
+                    <p className="text-xs text-muted-foreground px-2 pt-1">
+                      {issueCertPacketIds.length} selected · {Math.round(inStockPackets.filter(p => issueCertPacketIds.includes(p.id)).reduce((s, p) => s + p.carat, 0) * 100) / 100} ct total
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <Input
+                  type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
+                  className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight (g)" : "Carat"}
+                  disabled={issueSource === "purchase" && !!issuePurchaseId}
+                />
+              )}
               <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
 
               <div className="flex gap-2.5">

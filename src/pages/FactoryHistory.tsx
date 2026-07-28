@@ -214,6 +214,35 @@ export function FactoryHistoryPage() {
   // straight to Stock so it's available for the next order (matches "manage
   // from our stock"), instead of an issuance's leftover just vanishing.
   const returnMaterial = async (issuance: MaterialIssuance) => {
+    // Certified packets aren't a pooled carat total — "returning" puts the exact
+    // stones back into stock (never touches the loose-by-shape pool).
+    if (issuance.diamondKind === "certified") {
+      const now = new Date().toISOString();
+      const ids = issuance.diamondPacketIds || [];
+      setReturning(true);
+      try {
+        updateDb(d => {
+          for (const p of d.diamondPackets) if (ids.includes(p.id)) { p.status = "in_stock"; p.orderId = undefined; }
+          d.materialIssuances = d.materialIssuances.filter(x => x.id !== issuance.id);
+          const o = d.orders.find(o => o.id === issuance.orderId);
+          if (o) {
+            o.materialIssuanceIds = (o.materialIssuanceIds || []).filter(x => x !== issuance.id);
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            o.manufacturingLog.push({
+              id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: id,
+              material: "diamond", amountMaterial: issuance.quantityIssued,
+              remarks: `${ids.length} certified diamond${ids.length !== 1 ? "s" : ""} returned to stock from ${factory.name}`,
+            });
+          }
+        });
+        toast.success("Certified packets returned to stock");
+        setActiveIssuance({ id: "", action: null });
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Failed to return packets");
+      } finally { setReturning(false); }
+      return;
+    }
+
     const qty = Number(returnQty);
     const unit = issuance.material === "gold" ? "g" : "ct";
     const maxReturnable = Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
@@ -256,7 +285,8 @@ export function FactoryHistoryPage() {
     const unit = issuance.material === "gold" ? "g" : "ct";
     const now = new Date().toISOString();
     try {
-      if (leftover > 0) {
+      // Certified packets are discrete stones — never pooled back to loose stock.
+      if (leftover > 0 && issuance.diamondKind !== "certified") {
         await increaseStock({
           material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
           refType: "manual", createdBy: user!.id,
@@ -266,6 +296,10 @@ export function FactoryHistoryPage() {
       updateDb(d => {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (mi) mi.status = "closed";
+        // Certified stones are now consumed into the finished piece → mark used.
+        if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {
+          for (const p of d.diamondPackets) if (issuance.diamondPacketIds.includes(p.id)) p.status = "used";
+        }
         if (leftover > 0) {
           const o = d.orders.find(o => o.id === issuance.orderId);
           if (o) {
@@ -582,17 +616,31 @@ export function FactoryHistoryPage() {
               )}
               {isActive && activeIssuance.action === "return" && (
                 <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
-                  <p className="text-xs text-muted-foreground">
-                    Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {Math.round((mi.quantityIssued - used) * 100) / 100}{unit}
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                    <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} className="rounded-xl h-9" placeholder={`Return qty (${unit})`} />
-                    <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-9" placeholder="Reason (e.g. diamond replaced)" />
-                    <div className="flex gap-2">
-                      <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9 flex-1">{returning ? "Saving…" : "Save"}</AsyncButton>
-                      <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                    </div>
-                  </div>
+                  {mi.diamondKind === "certified" ? (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Puts these {(mi.diamondPacketIds || []).length} certified packet{(mi.diamondPacketIds || []).length !== 1 ? "s" : ""} back into stock.
+                      </p>
+                      <div className="flex gap-2">
+                        <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9">{returning ? "Saving…" : "Return packets to stock"}</AsyncButton>
+                        <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <p className="text-xs text-muted-foreground">
+                        Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {Math.round((mi.quantityIssued - used) * 100) / 100}{unit}
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                        <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} className="rounded-xl h-9" placeholder={`Return qty (${unit})`} />
+                        <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-9" placeholder="Reason (e.g. diamond replaced)" />
+                        <div className="flex gap-2">
+                          <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9 flex-1">{returning ? "Saving…" : "Save"}</AsyncButton>
+                          <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

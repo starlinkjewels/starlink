@@ -503,6 +503,8 @@ export interface MaterialIssuance {
   quantityIssued: number; // grams (gold) or carats (diamond)
   source: "stock" | "purchase";
   sourcePurchaseId?: string; // set iff source === "purchase"
+  diamondKind?: "loose" | "certified"; // for diamond issuances
+  diamondPacketIds?: string[]; // set iff diamondKind === "certified" — the specific packets issued
   issuedAt: string;
   issuedBy: string;
   status: "open" | "closed"; // "closed" = wastage finalized
