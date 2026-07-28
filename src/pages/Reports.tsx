@@ -10,6 +10,7 @@ import {
   Clock, TrendingUp, Users, X, BarChart3, Filter,
 } from "lucide-react";
 import jsPDF from "jspdf";
+import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /* ── helpers ── */
@@ -75,8 +76,17 @@ export function ReportsPage() {
     if (canSeeAll && clientFilter !== "all") {
       list = list.filter(o => o.clientId === clientFilter);
     }
-    if (dateFrom) list = list.filter(o => o.createdAt >= dateFrom);
-    if (dateTo)   list = list.filter(o => o.createdAt <= dateTo + "T23:59:59.999Z");
+    // Compare on the LOCAL calendar date so orders near midnight (IST) land in the
+    // right day and a "To" date includes same-day orders.
+    if (dateFrom || dateTo) {
+      list = list.filter(o => {
+        const d = new Date(o.createdAt);
+        const local = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        if (dateFrom && local < dateFrom) return false;
+        if (dateTo && local > dateTo) return false;
+        return true;
+      });
+    }
     return list;
   }, [myOrders, clientFilter, dateFrom, dateTo]);
 
@@ -160,6 +170,7 @@ export function ReportsPage() {
 
   /* ── PDF export ── */
   function exportPdf() {
+   try {
     const doc = new jsPDF();
     doc.setFont("helvetica","bold"); doc.setFontSize(18);
     doc.text("Starlink Jewels — Business Report", 20, 22);
@@ -198,10 +209,12 @@ export function ReportsPage() {
       });
     }
     doc.save("Starlink-Report.pdf");
+   } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
   /* ── Excel export (CSV — opens directly in Excel) ── */
   function exportExcel() {
+   try {
     const headers = [
       "Order #", "Client", "Type", "Metal", "Diamond", "Qty", "Status", "Priority",
       "Order Value", "Advance Paid", "Balance Due", "Invoice Total", "Created", "Design #",
@@ -231,6 +244,7 @@ export function ReportsPage() {
     a.click();
     a.remove();
     URL.revokeObjectURL(url);
+   } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
   /* ── render ── */
@@ -345,7 +359,7 @@ export function ReportsPage() {
           sub={total > 0 ? `${Math.round(dispatched.length/total*100)}% of orders` : undefined} />
         <SummaryCard icon={CheckCircle2} label="Delivered"      value={delivered.length}   color="success" />
         {canSeeAll
-          ? <SummaryCard icon={DollarSign}  label="Revenue"     value={fmtMoney(revenue)}  color="amber" sub="Delivered orders" />
+          ? <SummaryCard icon={DollarSign}  label="Client Billing"  value={fmtMoney(revenue)}  color="amber" sub="Delivered (USD) · costs in Passbook" />
           : <SummaryCard icon={TrendingUp}  label="In Production" value={inProd.length}    color="rose" />
         }
       </div>

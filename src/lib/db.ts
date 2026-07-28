@@ -647,7 +647,8 @@ export function orderTotal(order: Order): number {
 }
 
 export function balanceDue(order: Order): number {
-  return Math.max(0, orderTotal(order) - totalAdvance(order));
+  // Round to cents so a sub-cent floating residue never shows as a stray "$0" due.
+  return Math.max(0, Math.round((orderTotal(order) - totalAdvance(order)) * 100) / 100);
 }
 
 /**
@@ -1370,10 +1371,14 @@ export function currentUserOrders(db: DB, user: User): Order[] {
 }
 
 export function fmtMoney(n: number) {
+  // Show cents only when the amount actually has them — whole amounts stay clean
+  // ($1,500) while a $1,234.56 balance is no longer rounded to "$1,235".
+  const hasCents = Math.round(n * 100) % 100 !== 0;
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    minimumFractionDigits: hasCents ? 2 : 0,
+    maximumFractionDigits: hasCents ? 2 : 0,
   }).format(n);
 }
 

@@ -211,7 +211,9 @@ export function SupplierHistoryPage() {
               ratePerCaratInr: carat > 0 ? Math.round((totalInr / carat) * 100) / 100 : undefined,
               supplierId: id!,
               purchaseId: purchase.id,
-              status: linkedOrderId ? "used" : "in_stock",
+              // Stays in stock (reserved to the order if linked) so it flows through
+              // the normal issue-to-factory step instead of jumping straight to "used".
+              status: "in_stock",
               orderId: linkedOrderId,
               createdBy: user!.id,
               createdAt: now,
