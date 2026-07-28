@@ -23,7 +23,7 @@ import { toast } from "sonner";
 import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
 import { fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness } from "@/lib/manufacturing";
-import { decreaseStock } from "@/lib/stock";
+import { decreaseStock, increaseStock } from "@/lib/stock";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -164,6 +164,7 @@ export function OrderDetailPage() {
   const [issueDiaKind, setIssueDiaKind] = useState<"loose" | "certified">("loose");
   const [issueCertPacketIds, setIssueCertPacketIds] = useState<string[]>([]);
   const [issuing, setIssuing] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
@@ -382,6 +383,11 @@ export function OrderDetailPage() {
       toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
       return;
     }
+    // Never let goods leave without a price, and warn before shipping unpaid.
+    if (order.timeline[idx].step === "Dispatch") {
+      if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return; }
+      if (balanceDue(order) > 0 && !confirm(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`)) return;
+    }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
@@ -453,6 +459,50 @@ export function OrderDetailPage() {
       o.timeline[0].status = "done";
     });
     toast.success("Order re-opened — now Waiting");
+  };
+
+  // Cancel an order (admin) — returns any issued gold/diamond and certified
+  // packets to stock, closes its issuances, and stops billing it (Rejected is
+  // excluded from client totals). Re-openable afterwards.
+  const cancelOrder = async () => {
+    if (!confirm("Cancel this order? Any material/diamonds issued for it return to stock and it will no longer be billed. You can re-open it later.")) return;
+    const openIssuances = db.materialIssuances.filter(i => i.orderId === order.id && i.status === "open");
+    setCancelling(true);
+    try {
+      // Restore stock-sourced loose/gold remainders to the pool (transactional).
+      for (const mi of openIssuances) {
+        if (mi.source === "stock" && mi.diamondKind !== "certified") {
+          const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
+          const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
+          if (remaining > 0) {
+            await increaseStock({
+              material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining,
+              refType: "manual", createdBy: user!.id, note: `Returned on cancelling order ${order.orderNumber}`,
+            });
+          }
+        }
+      }
+      const now = new Date().toISOString();
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        o.status = "Rejected";
+        for (const mi of d.materialIssuances) {
+          if (mi.orderId === order.id && mi.status === "open") mi.status = "closed";
+        }
+        // Free every certified packet tied to this order back into stock.
+        for (const p of d.diamondPackets || []) {
+          if (p.orderId === order.id) { p.status = "in_stock"; p.orderId = undefined; }
+        }
+        const clientUser = d.users.find(u => u.clientId === o.clientId);
+        if (clientUser) d.notifications.unshift({
+          id: uid("n_"), userId: clientUser.id, title: "Order Cancelled",
+          body: `${o.orderNumber} has been cancelled.`, type: "order", read: false, createdAt: now,
+        });
+      });
+      toast.success("Order cancelled — issued material returned to stock");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel order");
+    } finally { setCancelling(false); }
   };
 
   const addAdvance = () => {
@@ -661,6 +711,11 @@ export function OrderDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={order.status} />
             <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>
+            {user!.role === "admin" && order.status !== "Rejected" && (
+              <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
+                Cancel Order
+              </AsyncButton>
+            )}
           </div>
         </div>
 
