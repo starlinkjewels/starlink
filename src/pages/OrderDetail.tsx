@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -24,7 +24,7 @@ import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, issuanceWastage,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue,
 } from "@/lib/manufacturing";
 import { decreaseStock, increaseStock } from "@/lib/stock";
 
@@ -348,13 +348,57 @@ export function OrderDetailPage() {
   // staff never open the Factory page. Ported faithfully from FactoryHistory's
   // closeIssuance: unused material auto-returns (to Stock if stock-sourced, to
   // the factory's own pool if pool-sourced) and certified stones flip to "used".
+  // "Receive finished piece" form — one issuance open at a time.
+  const [receivingId, setReceivingId] = useState<string | null>(null);
+  const [rcvNetW, setRcvNetW] = useState("");
+  const [rcvKarat, setRcvKarat] = useState("");
+  const [rcvPerGram, setRcvPerGram] = useState("");
+  const [rcvCad, setRcvCad] = useState("");
+  const [rcvDiaHandling, setRcvDiaHandling] = useState("");
+  const [rcvOther, setRcvOther] = useState("");
+  const [rcvMetalG, setRcvMetalG] = useState("");
+  const [rcvMetalRate, setRcvMetalRate] = useState("");
+
+  const openReceive = (mi: MaterialIssuance) => {
+    setRcvNetW(mi.finishedNetWeight != null ? String(mi.finishedNetWeight) : (mi.material === "gold" ? String(mi.quantityIssued) : ""));
+    setRcvKarat(mi.finishedKarat ?? (mi.material === "gold" ? mi.purityOrQuality : (order.productKarats ?? "")));
+    setRcvPerGram(mi.labour?.perGramRate != null ? String(mi.labour.perGramRate) : "");
+    setRcvCad(mi.labour?.cadCharge != null ? String(mi.labour.cadCharge) : "");
+    setRcvDiaHandling(mi.labour?.diamondHandlingRate != null ? String(mi.labour.diamondHandlingRate) : "");
+    setRcvOther(mi.labour?.otherCharges != null ? String(mi.labour.otherCharges) : "");
+    setRcvMetalG(mi.labour?.metalByFactoryGrams != null ? String(mi.labour.metalByFactoryGrams) : "");
+    setRcvMetalRate(mi.labour?.metalByFactoryRate != null ? String(mi.labour.metalByFactoryRate) : "");
+    setReceivingId(mi.id);
+  };
+
   const [closingId, setClosingId] = useState<string | null>(null);
-  const closeOrderIssuance = async (issuance: MaterialIssuance) => {
-    const leftover = Math.round(issuanceWastage(issuance) * 100) / 100;
-    const unit = issuance.material === "gold" ? "g" : "ct";
+
+  // Receive the finished piece back (the client's "RCV" step): record net weight
+  // + karat (→ pure gold nets off the factory's fine-gold balance), the labour
+  // formula (→ factory payable), and any metal the factory supplied itself. Then
+  // finalize the issuance, returning any unused material like closeOrderIssuance.
+  const receiveFinished = async (issuance: MaterialIssuance) => {
+    const isGold = issuance.material === "gold";
+    const netW = parseFloat(rcvNetW);
+    const hasNet = isGold && !isNaN(netW) && netW > 0;
+    const labour = {
+      perGramRate: rcvPerGram ? Number(rcvPerGram) : undefined,
+      diamondHandlingRate: rcvDiaHandling ? Number(rcvDiaHandling) : undefined,
+      cadCharge: rcvCad ? Number(rcvCad) : undefined,
+      otherCharges: rcvOther ? Number(rcvOther) : undefined,
+      metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
+      metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
+    };
+    const diamondCt = order.actualDiamondWeight || order.diamondWeight || 0;
+    const value = labourValue(labour, hasNet ? netW : (issuance.finishedNetWeight || 0), diamondCt);
+    const karat = rcvKarat || issuance.purityOrQuality;
+    // Gold: what's in the piece = net weight; the rest goes back. Diamonds keep
+    // their existing used amount (net weight doesn't apply).
+    const usedQty = hasNet ? Math.min(netW, issuance.quantityIssued) : issuanceUsed(issuance);
+    const leftover = Math.round((issuance.quantityIssued - usedQty) * 100) / 100;
+    const unit = isGold ? "g" : "ct";
     const factory = db.factories.find(f => f.id === issuance.factoryId);
     const now = new Date().toISOString();
-    if (!confirm(`Mark this ${issuance.material} as done?${leftover > 0 ? `\n\n${leftover}${unit} unused will be returned automatically.` : ""}`)) return;
     setClosingId(issuance.id);
     try {
       const returnsToStock = leftover > 0 && issuance.diamondKind !== "certified" && issuance.source === "stock";
@@ -363,37 +407,39 @@ export function OrderDetailPage() {
         await increaseStock({
           material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
           refType: "manual", createdBy: user!.id,
-          note: `Unused material returned on closing issuance for ${factory?.name || "factory"}`,
+          note: `Unused material returned on receiving finished piece for ${factory?.name || "factory"}`,
         });
       }
       updateDb(d => {
         const mi = d.materialIssuances.find(x => x.id === issuance.id);
         if (mi) {
           mi.status = "closed";
+          mi.labour = labour;
+          mi.makingCharges = { amountInr: value, payments: mi.makingCharges?.payments || [] };
+          if (hasNet) {
+            mi.finishedNetWeight = netW;
+            mi.finishedKarat = karat;
+            mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: usedQty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
+          }
           if (returnsToStock || releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 100) / 100;
         }
         if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {
           for (const p of d.diamondPackets) if (issuance.diamondPacketIds.includes(p.id)) p.status = "used";
         }
-        if (returnsToStock || releasesToPool) {
-          const o = d.orders.find(o => o.id === issuance.orderId);
-          if (o) {
-            if (!o.manufacturingLog) o.manufacturingLog = [];
-            o.manufacturingLog.push({
-              id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: issuance.factoryId,
-              material: issuance.material, amountMaterial: leftover,
-              remarks: `${leftover}${unit} unused ${issuance.material} returned ${returnsToStock ? "to stock" : "to the factory's pool"} on marking done`,
-            });
-          }
+        const o = d.orders.find(o => o.id === issuance.orderId);
+        if (o) {
+          if (!o.manufacturingLog) o.manufacturingLog = [];
+          o.manufacturingLog.push({
+            id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: issuance.factoryId,
+            material: issuance.material, amountMaterial: leftover > 0 ? leftover : undefined, amountInr: value || undefined,
+            remarks: `Finished piece received from ${factory?.name || "factory"}${hasNet ? ` — net ${netW}${unit} (${toPureGold(netW, karat)}g fine gold)` : ""}${value ? ` · labour ${fmtMoneyInr(value)}` : ""}${leftover > 0 ? ` · ${leftover}${unit} returned` : ""}`,
+          });
         }
       });
-      toast.success(
-        returnsToStock ? `Marked done — ${leftover}${unit} returned to stock`
-        : releasesToPool ? `Marked done — ${leftover}${unit} returned to the factory's pool`
-        : "Marked done",
-      );
+      toast.success(`Finished piece received${value ? ` — labour ${fmtMoneyInr(value)}` : ""}`);
+      setReceivingId(null);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to mark done");
+      toast.error(e instanceof Error ? e.message : "Failed to save");
     } finally { setClosingId(null); }
   };
 
@@ -1925,24 +1971,81 @@ export function OrderDetailPage() {
                 const label = mi.diamondKind === "certified"
                   ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
                   : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`;
+                const isGold = mi.material === "gold";
+                const liveLabour = labourValue({
+                  perGramRate: rcvPerGram ? Number(rcvPerGram) : undefined,
+                  diamondHandlingRate: rcvDiaHandling ? Number(rcvDiaHandling) : undefined,
+                  cadCharge: rcvCad ? Number(rcvCad) : undefined,
+                  otherCharges: rcvOther ? Number(rcvOther) : undefined,
+                  metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
+                  metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
+                }, Number(rcvNetW) || 0, order.actualDiamondWeight || order.diamondWeight || 0);
                 return (
-                  <div key={mi.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary text-sm">
-                    <Link to={`/factories/${mi.factoryId}`} className="flex items-center gap-2 min-w-0 hover:underline">
-                      {mi.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
-                    </Link>
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                      {mi.status === "open" && canEditStage() && (
-                        <button
-                          onClick={() => closeOrderIssuance(mi)}
-                          disabled={closingId === mi.id}
-                          className="rounded-lg border border-border bg-white px-2 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
-                        >
-                          {closingId === mi.id ? "…" : "Mark Done"}
-                        </button>
-                      )}
-                    </span>
+                  <div key={mi.id} className="rounded-xl bg-secondary text-sm">
+                    <div className="flex items-center justify-between gap-2 p-2.5">
+                      <Link to={`/factories/${mi.factoryId}`} className="flex items-center gap-2 min-w-0 hover:underline">
+                        {isGold ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
+                        <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
+                      </Link>
+                      <span className="flex items-center gap-2 shrink-0">
+                        <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                        {mi.status === "open" && canEditStage() && (
+                          <button
+                            onClick={() => (receivingId === mi.id ? setReceivingId(null) : openReceive(mi))}
+                            disabled={closingId === mi.id}
+                            className="rounded-lg border border-border bg-white px-2 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
+                          >
+                            {receivingId === mi.id ? "Cancel" : "Receive / Finish"}
+                          </button>
+                        )}
+                      </span>
+                    </div>
+
+                    {receivingId === mi.id && (
+                      <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border/50">
+                        {isGold && (
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div>
+                              <Label className="text-[11px]">Net Weight (g)</Label>
+                              <Input type="number" min={0} step="0.001" value={rcvNetW} onChange={e => setRcvNetW(e.target.value)} className="rounded-lg h-9 mt-1" />
+                            </div>
+                            <div>
+                              <Label className="text-[11px]">Karat</Label>
+                              <Select value={rcvKarat} onValueChange={setRcvKarat}>
+                                <SelectTrigger className="rounded-lg h-9 mt-1"><SelectValue placeholder="Karat" /></SelectTrigger>
+                                <SelectContent>{["9K","10K","14K","18K","22K","24K"].map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent>
+                              </Select>
+                            </div>
+                            {Number(rcvNetW) > 0 && rcvKarat && (
+                              <p className="col-span-2 text-[11px] text-muted-foreground -mt-1">= {toPureGold(Number(rcvNetW), rcvKarat)}g fine (24KT) gold deducted from {factory?.name || "the factory"}</p>
+                            )}
+                          </div>
+                        )}
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={rcvPerGram} onChange={e => setRcvPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                            <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={rcvCad} onChange={e => setRcvCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
+                            <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={rcvDiaHandling} onChange={e => setRcvDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
+                            <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={rcvOther} onChange={e => setRcvOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
+                          </div>
+                        </div>
+                        <div>
+                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Metal used by factory (optional)</p>
+                          <div className="grid grid-cols-2 gap-2.5">
+                            <div><Label className="text-[11px]">Grams</Label><Input type="number" min={0} step="0.001" value={rcvMetalG} onChange={e => setRcvMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
+                            <div><Label className="text-[11px]">Rate ₹ / gram</Label><Input type="number" min={0} step="0.01" value={rcvMetalRate} onChange={e => setRcvMetalRate(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          <span className="text-sm">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(liveLabour)}</span></span>
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="outline" onClick={() => setReceivingId(null)} className="rounded-lg h-9">Cancel</Button>
+                            <AsyncButton size="sm" onClick={() => receiveFinished(mi)} disabled={closingId === mi.id} className="btn-hero rounded-lg h-9">Save &amp; Finish</AsyncButton>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 );
               })}

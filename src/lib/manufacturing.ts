@@ -10,6 +10,7 @@
 import {
   uid,
   fmtMoney,
+  toPureGold,
   type Purchase,
   type MaterialIssuance,
   type Locker,
@@ -173,6 +174,39 @@ export function factoryPoolBalance(
     else if (i.source === "factoryPool") drawn += i.quantityIssued;
   }
   return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
+}
+
+/**
+ * The factory's gold expressed in PURE / fine (24KT) grams — the client's
+ * "factory gold stock". Gold ARRIVES as fine gold (each issuance's grams ×
+ * its karat purity, for every gold issuance EXCEPT internal factoryPool draws,
+ * which are just moving already-counted gold around within the factory) and
+ * LEAVES as the pure-gold equivalent of each finished piece's net weight once
+ * it's received back (finishedNetWeight × its karat). Balance = fine gold still
+ * physically in the factory's hands. Derived, never stored (same trust level as
+ * factoryPoolBalance above).
+ */
+export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string): number {
+  let inFine = 0, outFine = 0;
+  for (const i of issuances) {
+    if (i.factoryId !== factoryId || i.material !== "gold") continue;
+    if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
+    if (i.finishedNetWeight && i.finishedKarat) outFine += toPureGold(i.finishedNetWeight, i.finishedKarat);
+  }
+  return Math.round((inFine - outFine) * 1000) / 1000;
+}
+
+/** Compute the structured labour value (factory payable) from an issuance's
+ *  labour breakdown + its finished net weight + the order's diamond carats. */
+export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number, diamondCt: number): number {
+  if (!labour) return 0;
+  const v =
+    (labour.perGramRate || 0) * (netWeight || 0) +
+    (labour.diamondHandlingRate || 0) * (diamondCt || 0) +
+    (labour.cadCharge || 0) +
+    (labour.otherCharges || 0) +
+    (labour.metalByFactoryGrams || 0) * (labour.metalByFactoryRate || 0);
+  return Math.round(v * 100) / 100;
 }
 
 /** Every purity/quality this factory currently holds a positive pool balance

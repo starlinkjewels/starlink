@@ -557,6 +557,23 @@ export interface MaterialIssuance {
   finishedPieces: FinishedPiece[];
   makingCharges: { amountInr: number; payments: FactoryChargePayment[] };
   notes?: string;
+
+  // ── Finished piece received back ("RCV" step). Captured when the order's
+  // Receive form is saved; gold issuances convert the net weight to pure (24KT)
+  // gold to net off the factory's fine-gold balance (see factoryFineGoldBalance). ──
+  finishedNetWeight?: number; // grams of the finished piece (gold issuances)
+  finishedKarat?: string;     // its karat, e.g. "18K" — for the pure-gold conversion
+  // Structured labour that makes up makingCharges.amountInr (the factory payable):
+  //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
+  //   + otherCharges + metalByFactoryGrams × metalByFactoryRate
+  labour?: {
+    perGramRate?: number;
+    diamondHandlingRate?: number;
+    cadCharge?: number;
+    otherCharges?: number;
+    metalByFactoryGrams?: number; // metal the factory supplied itself
+    metalByFactoryRate?: number;  // ₹ per gram for that metal
+  };
 }
 
 export type StockMovementType = "purchase_in" | "issuance_out" | "order_direct_use" | "adjustment";

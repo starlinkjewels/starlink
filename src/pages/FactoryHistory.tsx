@@ -5,7 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStock, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -522,6 +522,7 @@ export function FactoryHistoryPage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!).toLocaleString()} g</p></div>
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Gold Outstanding</p><p className="font-semibold text-sm">{account.goldOutstanding.toLocaleString()} g</p></div>
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond Outstanding</p><p className="font-semibold text-sm">{account.diamondOutstanding.toLocaleString()} ct</p></div>
           <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
