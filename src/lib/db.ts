@@ -83,6 +83,21 @@ export type TimelineStep = string;
 
 /** Timeline steps for a NEW order — the "Certification" stage is included only
  *  when the order will be certified. */
+// Standard gold purity by karat — used to convert a finished piece's net weight
+// (in its karat) to pure/fine gold (24KT equivalent) when deducting from a
+// factory's gold, per the client's spec. Keyed by the karat number so "18K",
+// "18KT", "18kt" all resolve.
+export const KARAT_PURITY: Record<number, number> = {
+  9: 0.375, 10: 0.417, 14: 0.585, 18: 0.75, 22: 0.916, 24: 1,
+};
+
+/** Grams of a given karat → grams of pure (24KT) gold. Unknown karat → treat as pure. */
+export function toPureGold(grams: number, karat: string | number): number {
+  const n = typeof karat === "number" ? karat : parseInt(String(karat), 10);
+  const pct = KARAT_PURITY[n] ?? 1;
+  return Math.round(grams * pct * 1000) / 1000;
+}
+
 export function buildTimelineSteps(hasCertificate: boolean): string[] {
   return (TIMELINE_STEPS as readonly string[]).filter(
     (s) => s !== "Certification" || hasCertificate,

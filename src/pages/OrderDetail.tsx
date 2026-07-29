@@ -205,6 +205,9 @@ export function OrderDetailPage() {
 
   const recordPurchaseForOrder = async () => {
     if (!buySupplierId) { toast.error("Choose a supplier"); return; }
+    // Client's flow: assign the factory first, then buy — the purchased material
+    // goes STRAIGHT to that factory, no separate "issue" step.
+    if (!order.assignedFactoryId) { toast.error("Assign a factory first (Stage ① above) — the material goes straight to it."); return; }
     for (const line of buyLines) {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
@@ -234,11 +237,15 @@ export function OrderDetailPage() {
     }));
     setBuying(true);
     try {
+      const factoryId = order.assignedFactoryId!;
+      const factory = db.factories.find(f => f.id === factoryId);
       updateDb(d => {
         if (!d.purchases) d.purchases = [];
+        if (!d.materialIssuances) d.materialIssuances = [];
         const o = d.orders.find(o => o.id === order.id);
         if (o) {
           if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
+          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
           if (!o.manufacturingLog) o.manufacturingLog = [];
         }
         for (const purchase of newPurchases) {
@@ -246,17 +253,33 @@ export function OrderDetailPage() {
           if (o) {
             o.linkedPurchaseIds!.push(purchase.id);
             const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
-            const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity : (purchase.diamond!.quality || "");
-            const label = purchase.material === "gold" ? `${qty}g ${purityOrQuality} gold` : `${qty}ct diamond${purityOrQuality ? ` (${purityOrQuality})` : ""}`;
+            const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity : (purchase.diamond!.quality || "unspecified");
+            const label = purchase.material === "gold" ? `${qty}g ${purityOrQuality} gold` : `${qty}ct diamond${purchase.diamond!.quality ? ` (${purchase.diamond!.quality})` : ""}`;
             o.manufacturingLog!.push({
               id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
               material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
               remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(purchase.totalInr)}`,
             });
+            // Auto-issue straight to the assigned factory (source "purchase" — it
+            // never enters shared Stock, so no stockLevels change). One step.
+            const issuanceId = uid("mi_");
+            d.materialIssuances.unshift({
+              id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
+              purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
+              issuedAt: now, issuedBy: user!.id, status: "open",
+              finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+              makingCharges: { amountInr: 0, payments: [] },
+            });
+            o?.materialIssuanceIds!.push(issuanceId);
+            o?.manufacturingLog!.push({
+              id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId,
+              material: purchase.material, amountMaterial: qty,
+              remarks: `${qty}${purchase.material === "gold" ? "g" : "ct"} ${purityOrQuality} ${purchase.material} sent to ${factory?.name || "factory"} (bought for this order)`,
+            });
           }
         }
       });
-      toast.success(`${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded — ${fmtMoneyInr(buyGrandTotalInr)}`);
+      toast.success(`${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded (${fmtMoneyInr(buyGrandTotalInr)}) & sent to ${factory?.name || "the factory"}`);
       setShowBuyForm(false);
       resetBuyForm();
     } catch (e) {
@@ -1707,7 +1730,8 @@ export function OrderDetailPage() {
 
           {showBuyForm && (
             <div className="pt-2 border-t border-border/60 space-y-3">
-              <p className="text-sm font-medium text-brand-dark">Record Material Purchase for {order.orderNumber}</p>
+              <p className="text-sm font-medium text-brand-dark">Buy for {order.orderNumber}</p>
+              <p className="text-xs text-muted-foreground -mt-1">Goes straight to {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.</p>
               <Select value={buySupplierId} onValueChange={setBuySupplierId}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
                 <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
