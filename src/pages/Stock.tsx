@@ -26,6 +26,17 @@ export function StockPage() {
   const diamondShapes = Object.entries(diamondBal).filter(([, c]) => c !== 0).length;
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
+  // The cached counter (used by the floor-check when issuing) can drift from the
+  // ledger. Displayed balances already come from the ledger; flag drift so an
+  // admin can resync the counter so issuing stays accurate too.
+  const cacheDrift = !!levels && (() => {
+    const cmp = (a: Record<string, number>, b: Record<string, number>) => {
+      for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (Math.abs((a[k] || 0) - (b[k] || 0)) > 0.001) return true;
+      return false;
+    };
+    return cmp(goldBal, levels.gold || {}) || cmp(diamondBal, levels.diamond || {});
+  })();
+
   const recompute = async () => {
     if (!confirm("Recompute current stock from the full movement history? Use this only if the balance looks wrong.")) return;
     setRecomputing(true);
@@ -51,6 +62,13 @@ export function StockPage() {
           </AsyncButton>
         )}
       </div>
+
+      {user?.role === "admin" && cacheDrift && (
+        <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+          <span>The internal stock counter is out of sync with the movement history. The balances below are taken from the history (correct) — click to resync the counter so issuing stays accurate too.</span>
+          <AsyncButton onClick={recompute} disabled={recomputing} className="btn-hero rounded-xl shrink-0">Resync now</AsyncButton>
+        </div>
+      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="card-luxe p-5 flex flex-col">
