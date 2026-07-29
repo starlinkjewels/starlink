@@ -2154,7 +2154,7 @@ export function OrderDetailPage() {
               {/* Certified packets → pick the specific stones used */}
               {issueMaterial === "diamond" && issueDiaKind === "certified" ? (
                 <div className="space-y-1.5">
-                  {inStockPackets.length > 8 && (
+                  {inStockPackets.length > 3 && (
                     <Input
                       value={issueCertSearch} onChange={e => setIssueCertSearch(e.target.value)}
                       className="rounded-xl h-9 text-sm" placeholder="Search stock #, shape, or certificate…"

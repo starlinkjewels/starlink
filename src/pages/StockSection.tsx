@@ -217,7 +217,7 @@ function CertifiedSection() {
         </div>
       )}
 
-      {allInStockPackets.length > 8 && (
+      {allInStockPackets.length > 3 && (
         <Input value={search} onChange={e => setSearch(e.target.value)} className="rounded-xl h-10" placeholder="Search stock #, shape, or certificate…" />
       )}
 
