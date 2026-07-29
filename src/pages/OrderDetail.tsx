@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -180,6 +180,7 @@ export function OrderDetailPage() {
   const [issueNotes, setIssueNotes] = useState("");
   const [issueDiaKind, setIssueDiaKind] = useState<"loose" | "certified">("loose");
   const [issueCertPacketIds, setIssueCertPacketIds] = useState<string[]>([]);
+  const [issueCertSearch, setIssueCertSearch] = useState("");
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
@@ -296,7 +297,7 @@ export function OrderDetailPage() {
             const packetId = uid("dp_");
             const carat = Number(line.diaCarat) || 0;
             d.diamondPackets.unshift({
-              id: packetId, shape: line.diaShape, carat, quality: line.diaQuality || undefined,
+              id: packetId, stockNumber: nextDiamondStockNumber(d), shape: line.diaShape, carat, quality: line.diaQuality || undefined,
               color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
               cut: line.diaCut.trim() || undefined, polish: line.diaPolish.trim() || undefined,
               symmetry: line.diaSym.trim() || undefined, fluorescence: line.diaFluor.trim() || undefined,
@@ -350,7 +351,7 @@ export function OrderDetailPage() {
   const resetIssueForm = () => {
     setIssueFactoryId("");
     setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
-    setIssueDiaKind("loose"); setIssueCertPacketIds([]);
+    setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch("");
   };
 
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
@@ -2152,20 +2153,37 @@ export function OrderDetailPage() {
 
               {/* Certified packets → pick the specific stones used */}
               {issueMaterial === "diamond" && issueDiaKind === "certified" ? (
-                <div className="rounded-xl border border-border/60 p-2 max-h-52 overflow-y-auto space-y-1">
-                  {inStockPackets.length === 0 && <p className="text-xs text-muted-foreground p-2">No certified diamonds in stock.</p>}
-                  {inStockPackets.map(p => {
-                    const checked = issueCertPacketIds.includes(p.id);
-                    return (
-                      <label key={p.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${checked ? "bg-primary/10" : "hover:bg-secondary"}`}>
-                        <input type="checkbox" checked={checked}
-                          onChange={e => setIssueCertPacketIds(ids => e.target.checked ? [...ids, p.id] : ids.filter(x => x !== p.id))} />
-                        <span className="text-sm flex-1 min-w-0 truncate">{p.shape} · {p.carat}ct · Cert {p.certificateNumber}{p.certificateLab ? ` (${p.certificateLab})` : ""}</span>
-                      </label>
-                    );
-                  })}
+                <div className="space-y-1.5">
+                  {inStockPackets.length > 8 && (
+                    <Input
+                      value={issueCertSearch} onChange={e => setIssueCertSearch(e.target.value)}
+                      className="rounded-xl h-9 text-sm" placeholder="Search stock #, shape, or certificate…"
+                    />
+                  )}
+                  <div className="rounded-xl border border-border/60 p-2 max-h-52 overflow-y-auto space-y-1">
+                    {inStockPackets.length === 0 && <p className="text-xs text-muted-foreground p-2">No certified diamonds in stock.</p>}
+                    {inStockPackets
+                      .filter(p => {
+                        const q = issueCertSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        return [p.stockNumber, p.shape, p.certificateNumber].some(v => v?.toLowerCase().includes(q));
+                      })
+                      .map(p => {
+                        const checked = issueCertPacketIds.includes(p.id);
+                        return (
+                          <label key={p.id} className={`flex items-center gap-2 p-2 rounded-lg cursor-pointer ${checked ? "bg-primary/10" : "hover:bg-secondary"}`}>
+                            <input type="checkbox" checked={checked}
+                              onChange={e => setIssueCertPacketIds(ids => e.target.checked ? [...ids, p.id] : ids.filter(x => x !== p.id))} />
+                            <span className="text-sm flex-1 min-w-0 truncate">
+                              {p.stockNumber && <span className="font-mono text-xs font-semibold text-primary mr-1.5">{p.stockNumber}</span>}
+                              {p.shape} · {p.carat}ct · Cert {p.certificateNumber}{p.certificateLab ? ` (${p.certificateLab})` : ""}
+                            </span>
+                          </label>
+                        );
+                      })}
+                  </div>
                   {issueCertPacketIds.length > 0 && (
-                    <p className="text-xs text-muted-foreground px-2 pt-1">
+                    <p className="text-xs text-muted-foreground px-2">
                       {issueCertPacketIds.length} selected · {Math.round(inStockPackets.filter(p => issueCertPacketIds.includes(p.id)).reduce((s, p) => s + p.carat, 0) * 100) / 100} ct total
                     </p>
                   )}

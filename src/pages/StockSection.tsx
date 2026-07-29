@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { fmtDate, updateDb, DIAMOND_SHAPES, type DiamondPacket } from "@/lib/db";
+import { fmtDate, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -134,8 +135,24 @@ function CertifiedSection() {
   const { user } = useAuth();
   const db = useDb();
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
+  const [search, setSearch] = useState("");
 
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  const allInStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  const inStockPackets = allInStockPackets.filter(p => {
+    const q = search.trim().toLowerCase();
+    if (!q) return true;
+    return [p.stockNumber, p.shape, p.certificateNumber].some(v => v?.toLowerCase().includes(q));
+  });
+  const unnumberedCount = (db.diamondPackets ?? []).filter(p => !p.stockNumber).length;
+
+  const assignMissingStockNumbers = () => {
+    updateDb(d => {
+      for (const p of d.diamondPackets ?? []) {
+        if (!p.stockNumber) p.stockNumber = nextDiamondStockNumber(d);
+      }
+    });
+    toast.success("Stock numbers assigned");
+  };
 
   const savePacketEdit = () => {
     if (!editPacket) return;
@@ -189,13 +206,26 @@ function CertifiedSection() {
         <div className="h-12 w-12 rounded-2xl bg-violet-500/15 grid place-items-center shrink-0"><BadgeCheck className="h-5 w-5 text-violet-600" /></div>
         <div>
           <h1 className="font-display text-2xl text-brand-dark leading-tight">Certified Diamonds</h1>
-          <p className="text-sm text-muted-foreground">{inStockPackets.length} packet{inStockPackets.length !== 1 ? "s" : ""} in stock · each with its own certificate</p>
+          <p className="text-sm text-muted-foreground">{allInStockPackets.length} packet{allInStockPackets.length !== 1 ? "s" : ""} in stock · each with its own certificate</p>
         </div>
       </div>
 
+      {user?.role === "admin" && unnumberedCount > 0 && (
+        <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+          <span>{unnumberedCount} diamond{unnumberedCount !== 1 ? "s" : ""} {unnumberedCount !== 1 ? "don't" : "doesn't"} have a stock number yet (from before this feature existed).</span>
+          <Button size="sm" onClick={assignMissingStockNumbers} className="btn-hero rounded-xl shrink-0">Assign stock numbers</Button>
+        </div>
+      )}
+
+      {allInStockPackets.length > 8 && (
+        <Input value={search} onChange={e => setSearch(e.target.value)} className="rounded-xl h-10" placeholder="Search stock #, shape, or certificate…" />
+      )}
+
       <div className="card-luxe p-5">
-        {inStockPackets.length === 0 ? (
+        {allInStockPackets.length === 0 ? (
           <p className="text-sm text-muted-foreground">No certified diamonds in stock.</p>
+        ) : inStockPackets.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No matches for "{search}".</p>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
             {inStockPackets.map(p => {
@@ -204,7 +234,10 @@ function CertifiedSection() {
               return (
                 <div key={p.id} className="p-3 rounded-xl bg-secondary border border-border/40">
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">{p.shape}</span>
+                    <span className="text-sm font-semibold">
+                      {p.stockNumber && <span className="font-mono text-xs font-semibold text-primary mr-1.5">{p.stockNumber}</span>}
+                      {p.shape}
+                    </span>
                     <span className="text-sm font-semibold text-cyan-700">{p.carat} ct</span>
                   </div>
                   {grade && <p className="text-xs text-foreground/70 mt-0.5 truncate">{grade}</p>}

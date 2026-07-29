@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, type Purchase, type PurchaseMaterial, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, nextDiamondStockNumber, type Purchase, type PurchaseMaterial, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -196,6 +196,7 @@ export function SupplierHistoryPage() {
             const carat = Number(line.diaCarat) || 0;
             d.diamondPackets.unshift({
               id: uid("dp_"),
+              stockNumber: nextDiamondStockNumber(d),
               shape: line.diaShape,
               carat,
               quality: line.diaQuality || undefined,

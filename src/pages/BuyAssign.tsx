@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { updateDb, uid, DIAMOND_SHAPES, toPureGold, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { increaseStock, decreaseStock } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
@@ -118,7 +118,7 @@ function BuyMaterial() {
         if (kind === "certified") {
           if (!d.diamondPackets) d.diamondPackets = [];
           d.diamondPackets.unshift({
-            id: uid("dp_"), shape, carat: q, quality: quality.trim() || undefined,
+            id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape, carat: q, quality: quality.trim() || undefined,
             color: color.trim() || undefined, clarity: clarity.trim() || undefined,
             cut: cut.trim() || undefined, polish: polish.trim() || undefined, symmetry: sym.trim() || undefined,
             fluorescence: fluor.trim() || undefined, measurement: measure.trim() || undefined,

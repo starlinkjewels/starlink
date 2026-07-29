@@ -322,6 +322,9 @@ export interface Settings {
   // User-managed expense categories (Settings page) — falls back to
   // DEFAULT_EXPENSE_CATEGORIES when unset (a settings doc from before this existed).
   expenseCategories?: string[];
+  // Monotonic counter behind nextDiamondStockNumber() — never reused even if
+  // a packet is later deleted, unset = no certified packet has been numbered yet.
+  nextDiamondStockNo?: number;
 }
 
 export interface CatalogFavorite {
@@ -424,6 +427,7 @@ export interface DiamondPurchaseDetail {
  */
 export interface DiamondPacket {
   id: string;
+  stockNumber?: string; // short sequential label ("DP-0007") assigned at creation — how staff find one specific stone among hundreds in stock, since shape/carat/cert alone isn't quick to scan or search
   shape: string;
   carat: number; // size / weight
   quality?: string;
@@ -1063,6 +1067,16 @@ export function flush(): Promise<void> {
 
 export function uid(prefix = "") {
   return prefix + Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
+}
+
+/** Assigns and returns the next sequential "DP-0007" style stock number for a
+ *  new certified diamond packet, advancing Settings.nextDiamondStockNo. Never
+ *  reused even if a packet is later deleted — a reliable way to find one
+ *  specific stone among hundreds in stock. Call inside updateDb(). */
+export function nextDiamondStockNumber(d: DB): string {
+  const n = (d.settings.nextDiamondStockNo || 0) + 1;
+  d.settings.nextDiamondStockNo = n;
+  return `DP-${String(n).padStart(4, "0")}`;
 }
 
 /* ────────────────────────────────────────────────────────────────────────
