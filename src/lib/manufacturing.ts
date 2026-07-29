@@ -174,7 +174,10 @@ export function factoryPoolBalance(
   for (const i of issuances) {
     if (i.factoryId !== factoryId || i.material !== material || i.purityOrQuality !== purityOrQuality) continue;
     if (!i.orderId) delivered += i.quantityIssued;
-    else if (i.source === "factoryPool") drawn += i.quantityIssued;
+    // A draw marked "returned" at Final Approval didn't end up consuming pool
+    // material after all — exclude it so the pool balance goes back up,
+    // without needing to rewrite quantityIssued itself (re-edit safe).
+    else if (i.source === "factoryPool" && i.finishDisposition !== "returned") drawn += i.quantityIssued;
   }
   return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
 }

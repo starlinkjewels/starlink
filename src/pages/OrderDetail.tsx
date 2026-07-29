@@ -712,10 +712,15 @@ export function OrderDetailPage() {
     const now = new Date().toISOString();
     setFaSaving(true);
     try {
-      // Loose-diamond stock changes based on the transition (handles re-edits too):
-      // newly returned → back to stock; un-returned (returned→used) → out of stock again.
+      // Loose-diamond stock changes based on the transition (handles re-edits too).
+      // Only source:"stock" issuances ever touch shared Stock, matching
+      // FactoryHistory.tsx's returnMaterial: a factoryPool draw returns to the
+      // factory's own pool instead (factoryPoolBalance already excludes a
+      // finishDisposition:"returned" draw from "drawn" — no movement needed
+      // here, just the flag set below), and a purchase-sourced diamond was
+      // never in shared Stock, so "returning" it moves nothing.
       for (const i of dias) {
-        if (i.diamondKind === "certified") continue;
+        if (i.diamondKind === "certified" || i.source !== "stock") continue;
         const returnedNow = (faDia[i.id] ?? "used") === "returned";
         const returnedBefore = i.finishDisposition === "returned";
         if (returnedNow && !returnedBefore) {
@@ -2386,7 +2391,7 @@ export function OrderDetailPage() {
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">Returned diamonds go back to stock; used ones are consumed into the piece.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Returned diamonds go back to wherever they came from (company stock or the factory's own pool); used ones are consumed into the piece.</p>
                 </div>
               )}
 
@@ -2409,6 +2414,7 @@ export function OrderDetailPage() {
                   <div><Label className="text-[11px]">Final Order Value ($)</Label><Input type="number" min={0} step="0.01" value={faOrderValue} onChange={e => setFaOrderValue(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
                   <div><Label className="text-[11px]">Shipping ($)</Label><Input type="number" min={0} step="0.01" value={faShipping} onChange={e => setFaShipping(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
                 </div>
+                <p className="text-sm mt-2">Total to client: <span className="font-semibold text-brand-dark">{fmtMoney((Number(faOrderValue) || 0) + (Number(faShipping) || 0))}</span></p>
               </div>
 
               <div className="flex gap-2">
