@@ -41,6 +41,18 @@ interface BuyLine {
   diaCarat: string;
   diaQuality: string;
   diaRate: string;
+  // Diamond kind + certified grading (mirrors the Supplier purchase form).
+  diaKind: "loose" | "certified";
+  diaShape: string;
+  diaCertNo: string;
+  diaLab: string;
+  diaColor: string;
+  diaClarity: string;
+  diaCut: string;
+  diaPolish: string;
+  diaSym: string;
+  diaFluor: string;
+  diaMeasure: string;
   currency: PurchaseCurrency;
   totalUsd: string;
   exchangeRate: string;
@@ -52,6 +64,8 @@ function emptyBuyLine(): BuyLine {
   return {
     material: "gold", goldWeight: "", goldPurity: "22K", goldRate: "",
     diaCarat: "", diaQuality: "", diaRate: "",
+    diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
+    diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     currency: "INR", totalUsd: "", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
@@ -211,6 +225,7 @@ export function OrderDetailPage() {
     for (const line of buyLines) {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
+      if (line.material === "diamond" && line.diaKind === "certified" && !line.diaCertNo.trim()) { toast.error("Enter the report number for every certified diamond line"); return; }
       if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
       if (buyLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
     }
@@ -222,7 +237,12 @@ export function OrderDetailPage() {
       supplierId: buySupplierId,
       material: line.material,
       gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
-      diamond: line.material === "diamond" ? { carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0 } : undefined,
+      diamond: line.material === "diamond" ? {
+        carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0,
+        kind: line.diaKind, shape: line.diaShape,
+        certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
+        certificateLab: line.diaKind === "certified" ? (line.diaLab.trim() || undefined) : undefined,
+      } : undefined,
       purpose: "order",
       orderId: order.id,
       currency: line.currency,
@@ -248,35 +268,64 @@ export function OrderDetailPage() {
           if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
           if (!o.manufacturingLog) o.manufacturingLog = [];
         }
-        for (const purchase of newPurchases) {
+        for (let i = 0; i < newPurchases.length; i++) {
+          const purchase = newPurchases[i];
+          const line = buyLines[i];
           d.purchases.unshift(purchase);
-          if (o) {
-            o.linkedPurchaseIds!.push(purchase.id);
-            const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
-            const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity : (purchase.diamond!.quality || "unspecified");
-            const label = purchase.material === "gold" ? `${qty}g ${purityOrQuality} gold` : `${qty}ct diamond${purchase.diamond!.quality ? ` (${purchase.diamond!.quality})` : ""}`;
-            o.manufacturingLog!.push({
-              id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
-              material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
-              remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(purchase.totalInr)}`,
+          if (!o) continue;
+          o.linkedPurchaseIds!.push(purchase.id);
+          const isCertified = purchase.material === "diamond" && line.diaKind === "certified";
+          const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
+          const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
+            : isCertified ? "Certified" : (purchase.diamond!.quality || "unspecified");
+          const label = purchase.material === "gold"
+            ? `${qty}g ${purityOrQuality} gold`
+            : `${qty}ct ${line.diaShape} diamond${isCertified ? ` (Certified ${line.diaCertNo.trim()})` : purchase.diamond!.quality ? ` (${purchase.diamond!.quality})` : ""}`;
+          o.manufacturingLog!.push({
+            id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+            material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
+            remarks: `Purchased ${label} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(purchase.totalInr)}`,
+          });
+
+          // Certified diamond → its own packet, going straight to the factory.
+          let packetIds: string[] | undefined;
+          if (isCertified) {
+            if (!d.diamondPackets) d.diamondPackets = [];
+            const packetId = uid("dp_");
+            const carat = Number(line.diaCarat) || 0;
+            d.diamondPackets.unshift({
+              id: packetId, shape: line.diaShape, carat, quality: line.diaQuality || undefined,
+              color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
+              cut: line.diaCut.trim() || undefined, polish: line.diaPolish.trim() || undefined,
+              symmetry: line.diaSym.trim() || undefined, fluorescence: line.diaFluor.trim() || undefined,
+              measurement: line.diaMeasure.trim() || undefined,
+              certificateNumber: line.diaCertNo.trim(), certificateLab: line.diaLab.trim() || undefined,
+              ratePerCaratInr: carat > 0 ? Math.round((purchase.totalInr / carat) * 100) / 100 : undefined,
+              supplierId: buySupplierId, purchaseId: purchase.id,
+              status: "issued", orderId: order.id,
+              createdBy: user!.id, createdAt: now,
             });
-            // Auto-issue straight to the assigned factory (source "purchase" — it
-            // never enters shared Stock, so no stockLevels change). One step.
-            const issuanceId = uid("mi_");
-            d.materialIssuances.unshift({
-              id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
-              purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
-              issuedAt: now, issuedBy: user!.id, status: "open",
-              finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-              makingCharges: { amountInr: 0, payments: [] },
-            });
-            o?.materialIssuanceIds!.push(issuanceId);
-            o?.manufacturingLog!.push({
-              id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId,
-              material: purchase.material, amountMaterial: qty,
-              remarks: `${qty}${purchase.material === "gold" ? "g" : "ct"} ${purityOrQuality} ${purchase.material} sent to ${factory?.name || "factory"} (bought for this order)`,
-            });
+            packetIds = [packetId];
           }
+
+          // Auto-issue straight to the assigned factory (source "purchase" — it
+          // never enters shared Stock, so no stockLevels change). One step.
+          const issuanceId = uid("mi_");
+          d.materialIssuances.unshift({
+            id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
+            purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
+            diamondKind: purchase.material === "diamond" ? line.diaKind : undefined,
+            diamondPacketIds: packetIds,
+            issuedAt: now, issuedBy: user!.id, status: "open",
+            finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+            makingCharges: { amountInr: 0, payments: [] },
+          });
+          o.materialIssuanceIds!.push(issuanceId);
+          o.manufacturingLog!.push({
+            id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId,
+            material: purchase.material, amountMaterial: qty,
+            remarks: `${qty}${purchase.material === "gold" ? "g" : "ct"} ${isCertified ? `certified ${line.diaShape}` : purityOrQuality} ${purchase.material} sent to ${factory?.name || "factory"} (bought for this order)`,
+          });
         }
       });
       toast.success(`${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded (${fmtMoneyInr(buyGrandTotalInr)}) & sent to ${factory?.name || "the factory"}`);
@@ -1806,10 +1855,39 @@ export function OrderDetailPage() {
                       <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
                     </div>
                   ) : (
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                      <Input value={line.diaQuality} onChange={e => updateBuyLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                      <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                    <div className="space-y-2.5">
+                      {/* Loose vs Certified */}
+                      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+                        {(["loose", "certified"] as const).map(k => (
+                          <button key={k} type="button" onClick={() => updateBuyLine(idx, { diaKind: k })}
+                            className={`h-8 rounded-lg text-xs font-medium transition-colors ${line.diaKind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+                            {k === "loose" ? "Loose" : "Certified"}
+                          </button>
+                        ))}
+                      </div>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <Select value={line.diaShape} onValueChange={v => updateBuyLine(idx, { diaShape: v })}>
+                          <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                          <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                        </Select>
+                        <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder={line.diaKind === "certified" ? "Size (ct)" : "Carat"} />
+                        <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                      </div>
+                      {line.diaKind === "loose" ? (
+                        <Input value={line.diaQuality} onChange={e => updateBuyLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                      ) : (
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                          <Input value={line.diaColor} onChange={e => updateBuyLine(idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
+                          <Input value={line.diaClarity} onChange={e => updateBuyLine(idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
+                          <Input value={line.diaCut} onChange={e => updateBuyLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
+                          <Input value={line.diaPolish} onChange={e => updateBuyLine(idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
+                          <Input value={line.diaSym} onChange={e => updateBuyLine(idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
+                          <Input value={line.diaFluor} onChange={e => updateBuyLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="Fluorescence" />
+                          <Input value={line.diaMeasure} onChange={e => updateBuyLine(idx, { diaMeasure: e.target.value })} className="rounded-xl h-10 sm:col-span-2" placeholder="Measurement (e.g. 6.5×6.5×4.0 mm)" />
+                          <Input value={line.diaLab} onChange={e => updateBuyLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab (GIA/IGI)" />
+                          <Input value={line.diaCertNo} onChange={e => updateBuyLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10 sm:col-span-3" placeholder="Report number *" />
+                        </div>
+                      )}
                     </div>
                   )}
 
