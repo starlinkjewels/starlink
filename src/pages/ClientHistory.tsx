@@ -74,12 +74,14 @@ export function ClientHistoryPage() {
   const [showPayForm, setShowPayForm] = useState(false);
   const account = clientAccount(billableOrders, client?.creditBalance || 0);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
+  const isUsdPayLocker = (payLocker?.currency || "INR") === "USD";
 
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    if (!payLockerAmount || Number(payLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
+    const depositAmt = isUsdPayLocker ? amt : Number(payLockerAmount);
+    if (!depositAmt || depositAmt <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
@@ -99,7 +101,7 @@ export function ClientHistoryPage() {
         if (locker) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: payLockerId, type: "income", amountInr: Number(payLockerAmount),
+            id: uid("ltx_"), lockerId: payLockerId, type: "income", amountInr: depositAmt,
             currency: locker.currency || "INR", category: `Client Payment — ${c.companyName}`,
             refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
           });
@@ -450,10 +452,10 @@ export function ClientHistoryPage() {
                   {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
                 </SelectContent>
               </Select>
-              {payLockerId && (
+              {payLockerId && !isUsdPayLocker && (
                 <Input
                   type="number" min={0} step="0.01" value={payLockerAmount} onChange={e => setPayLockerAmount(e.target.value)}
-                  className="rounded-xl h-10" placeholder={`Amount deposited (${payLocker?.currency === "USD" ? "$" : "₹"})`} />
+                  className="rounded-xl h-10" placeholder="Amount deposited (₹)" />
               )}
             </div>
 

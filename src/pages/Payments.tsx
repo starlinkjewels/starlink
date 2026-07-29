@@ -91,13 +91,19 @@ function ReceiveFromClient() {
   const clients = db.clients.filter(c => c.status === "active").sort((a, b) => a.companyName.localeCompare(b.companyName));
   const locker = db.lockers.find(l => l.id === lockerId);
 
+  const isUsdLocker = (locker?.currency || "INR") === "USD";
+
   const submit = async () => {
     const c = db.clients.find(x => x.id === clientId);
     if (!c) { toast.error("Choose a client"); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    if (!lockerAmount || Number(lockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
+    // A USD locker holds the same currency the client pays in — no separate
+    // figure needed. Only a differently-denominated (INR) locker needs a
+    // manually-entered converted amount.
+    const depositAmt = isUsdLocker ? amt : Number(lockerAmount);
+    if (!depositAmt || depositAmt <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
     setSaving(true);
     try {
       const noteText = note.trim() ? `${method} · ${note.trim()}` : method;
@@ -112,7 +118,7 @@ function ReceiveFromClient() {
         if (locker) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "income", amountInr: Number(lockerAmount),
+            id: uid("ltx_"), lockerId, type: "income", amountInr: depositAmt,
             currency: locker.currency || "INR", category: `Client Payment — ${client.companyName}`,
             refType: "clientPayment", refId: client.id, note: noteText, recordedBy: user!.id, createdAt: now,
           });
@@ -163,9 +169,9 @@ function ReceiveFromClient() {
             <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {lockerId && (
+        {lockerId && !isUsdLocker && (
           <div>
-            <Label className="text-xs">Amount Deposited ({locker?.currency === "USD" ? "$" : "₹"})</Label>
+            <Label className="text-xs">Amount Deposited (₹)</Label>
             <Input type="number" min={0} step="0.01" value={lockerAmount} onChange={e => setLockerAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         )}
@@ -382,13 +388,15 @@ function PayExpense() {
 
   const categories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
   const locker = db.lockers.find(l => l.id === lockerId);
+  const isUsdLocker = (locker?.currency || "INR") === "USD";
 
   const submit = () => {
     if (!title.trim()) { toast.error("Enter a title"); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
-    if (!lockerAmount || Number(lockerAmount) <= 0) { toast.error("Enter the amount actually paid from that locker"); return; }
+    const paidAmt = isUsdLocker ? amt : Number(lockerAmount);
+    if (!paidAmt || paidAmt <= 0) { toast.error("Enter the amount actually paid from that locker"); return; }
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -402,7 +410,7 @@ function PayExpense() {
         if (l) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "expense", amountInr: Number(lockerAmount),
+            id: uid("ltx_"), lockerId, type: "expense", amountInr: paidAmt,
             currency: l.currency || "INR", category: `Expense — ${title.trim()}`,
             refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
           });
@@ -439,14 +447,14 @@ function PayExpense() {
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Paid from Locker *</Label>
-          <Select value={lockerId} onValueChange={v => { setLockerId(v); const l = db.lockers.find(x => x.id === v); setLockerAmount(l?.currency === "USD" ? amount : ""); }}>
+          <Select value={lockerId} onValueChange={setLockerId}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
             <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {lockerId && (
+        {lockerId && !isUsdLocker && (
           <div>
-            <Label className="text-xs">Amount Paid ({locker?.currency === "USD" ? "$" : "₹"})</Label>
+            <Label className="text-xs">Amount Paid (₹)</Label>
             <Input type="number" min={0} step="0.01" value={lockerAmount} onChange={e => setLockerAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         )}

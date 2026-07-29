@@ -52,6 +52,8 @@ export function ExpensesPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
+  const expLocker = db.lockers.find(l => l.id === expLockerId);
+  const isUsdExpLocker = (expLocker?.currency || "INR") === "USD";
   // Configured list (Settings) for picking a category on a NEW expense —
   // vs. every category that ever appears on an existing expense, for the
   // filter dropdown, so a since-removed category stays filterable.
@@ -130,7 +132,8 @@ export function ExpensesPage() {
     const amount = parseFloat(form.amount);
     if (!amount || isNaN(amount) || amount <= 0) { setError("Enter a valid amount."); return; }
     if (!expLockerId) { setError("Choose which locker this was paid from."); return; }
-    if (!expLockerAmount || Number(expLockerAmount) <= 0) { setError("Enter the amount actually paid from that locker."); return; }
+    const paidAmt = isUsdExpLocker ? amount : Number(expLockerAmount);
+    if (!paidAmt || paidAmt <= 0) { setError("Enter the amount actually paid from that locker."); return; }
 
     setSaving(true);
     const now = new Date().toISOString();
@@ -151,7 +154,7 @@ export function ExpensesPage() {
       const locker = fresh.lockers.find(l => l.id === expLockerId);
       if (locker) {
         fresh.lockerTransactions = [...fresh.lockerTransactions, {
-          id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: Number(expLockerAmount),
+          id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: paidAmt,
           currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
           refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
         }];
@@ -525,14 +528,7 @@ export function ExpensesPage() {
                       No lockers yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
                     </p>
                   )}
-                  <Select
-                    value={expLockerId}
-                    onValueChange={v => {
-                      setExpLockerId(v);
-                      const l = db.lockers.find(x => x.id === v);
-                      setExpLockerAmount(l?.currency === "USD" ? form.amount : "");
-                    }}
-                  >
+                  <Select value={expLockerId} onValueChange={setExpLockerId}>
                     <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                     <SelectContent>
                       {activeLockers.map(l => (
@@ -540,11 +536,9 @@ export function ExpensesPage() {
                       ))}
                     </SelectContent>
                   </Select>
-                  {expLockerId && (
+                  {expLockerId && !isUsdExpLocker && (
                     <div className="relative mt-2">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">
-                        {db.lockers.find(l => l.id === expLockerId)?.currency === "USD" ? "$" : "₹"}
-                      </span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">₹</span>
                       <input
                         type="number" min="0" step="0.01"
                         value={expLockerAmount}
