@@ -138,6 +138,7 @@ export function OrderDetailPage() {
   const [actDiamW, setActDiamW] = useState("");
   const [actOrderValue, setActOrderValue] = useState("");
   const [actShipping, setActShipping] = useState("");
+  const [actMaking, setActMaking] = useState("");
 
   // Pricing form (admin/employee set the order value — client never sets this)
   const [showPricing, setShowPricing] = useState(false);
@@ -657,9 +658,11 @@ export function OrderDetailPage() {
     const dw = parseFloat(actDiamW);
     const val = parseFloat(actOrderValue);
     const ship = parseFloat(actShipping);
+    const mk = parseFloat(actMaking);
     const has = (n: number) => !isNaN(n) && n > 0;
     const shipEntered = actShipping.trim() !== "" && !isNaN(ship) && ship >= 0;
-    if (!has(gw) && !has(nw) && !has(dw) && !has(val) && !shipEntered) {
+    const makingEntered = actMaking.trim() !== "" && !isNaN(mk) && mk >= 0;
+    if (!has(gw) && !has(nw) && !has(dw) && !has(val) && !shipEntered && !makingEntered) {
       toast.error("Enter at least one value to update");
       return;
     }
@@ -669,6 +672,7 @@ export function OrderDetailPage() {
       if (has(nw)) o.actualNetWeight     = nw;
       if (has(dw)) o.actualDiamondWeight = dw;
       if (shipEntered) o.shippingCharge = ship;
+      if (makingEntered) o.actualMakingCharges = mk;
       if (has(val)) {
         o.amount = val;
         const clientUser = d.users.find(u => u.clientId === o.clientId);
@@ -944,6 +948,7 @@ export function OrderDetailPage() {
                   setActDiamW(order.actualDiamondWeight ? String(order.actualDiamondWeight) : "");
                   setActOrderValue(order.amount ? String(order.amount) : "");
                   setActShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+                  setActMaking(order.actualMakingCharges != null ? String(order.actualMakingCharges) : "");
                   setShowActualForm(v => !v);
                 }}
               >
@@ -954,7 +959,7 @@ export function OrderDetailPage() {
           </div>
 
           {/* Estimated vs actual comparison */}
-          {(order.estimatedGrossWeight || order.estimatedNetWeight || order.diamondWeight) && (
+          {(order.estimatedGrossWeight || order.estimatedNetWeight || order.diamondWeight || order.estimatedMakingCharges != null) && (
             <div className="rounded-xl bg-secondary/60 p-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">Estimated at Order Time</p>
               <div className="grid grid-cols-3 gap-3 text-sm">
@@ -974,6 +979,12 @@ export function OrderDetailPage() {
                   <p className="text-xs text-muted-foreground">Diamond Weight</p>
                   <p className="font-medium">{order.diamondWeight}ct</p>
                 </div>
+                {order.estimatedMakingCharges != null && (
+                  <div>
+                    <p className="text-xs text-muted-foreground">Making Charge</p>
+                    <p className="font-medium">{fmtMoney(order.estimatedMakingCharges)}</p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -999,6 +1010,15 @@ export function OrderDetailPage() {
                   <div className="p-3 rounded-xl bg-secondary text-sm">
                     <p className="text-xs text-muted-foreground">Diamond Weight</p>
                     <p className="font-semibold">{order.actualDiamondWeight}ct</p>
+                  </div>
+                )}
+                {order.actualMakingCharges != null && (
+                  <div className="p-3 rounded-xl bg-secondary text-sm">
+                    <p className="text-xs text-muted-foreground">Making Charge</p>
+                    <p className="font-semibold">{fmtMoney(order.actualMakingCharges)}</p>
+                    {order.estimatedMakingCharges != null && order.estimatedMakingCharges !== order.actualMakingCharges && (
+                      <p className="text-[11px] text-muted-foreground mt-0.5">est. {fmtMoney(order.estimatedMakingCharges)}</p>
+                    )}
                   </div>
                 )}
               </div>
@@ -1082,6 +1102,13 @@ export function OrderDetailPage() {
                         <Input type="number" step="0.01" min={0} value={actShipping}
                           onChange={e => setActShipping(e.target.value)}
                           className="rounded-xl h-10" placeholder="0" />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs">Actual Making Charge ($){order.estimatedMakingCharges != null ? ` · est. ${fmtMoney(order.estimatedMakingCharges)}` : ""}</Label>
+                        <Input type="number" step="0.01" min={0} value={actMaking}
+                          onChange={e => setActMaking(e.target.value)}
+                          className="rounded-xl h-10" placeholder="0" />
+                        <p className="text-[11px] text-muted-foreground">What the factory actually charged (internal — not shown to the client)</p>
                       </div>
                     </div>
                   </div>
