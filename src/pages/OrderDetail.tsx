@@ -555,10 +555,10 @@ export function OrderDetailPage() {
     if (!qty || qty <= 0) { toast.error(`Enter the ${issueMaterial} weight/carat used`); return; }
     const purityOrQuality = issueMaterial === "gold" ? issuePurity : (issueQuality.trim() || "unspecified");
 
-    const poolBalance = factoryPoolBalance(db.materialIssuances, issueFactoryId, issueMaterial, purityOrQuality);
-    const eligiblePurchase = eligiblePurchases[0];
-    const resolvedSource: "factoryPool" | "purchase" | "stock" =
-      poolBalance >= qty ? "factoryPool" : eligiblePurchase ? "purchase" : "stock";
+    // "From Stock" is now an explicit choice, so it MUST draw from company stock
+    // (and decrement it) — no silent auto-resolve to a factory pool or a linked
+    // purchase, which was leaving stock untouched.
+    const resolvedSource: "factoryPool" | "purchase" | "stock" = "stock";
 
     const issuanceId = uid("mi_");
     const now = new Date().toISOString();
@@ -576,7 +576,7 @@ export function OrderDetailPage() {
         const issuance: MaterialIssuance = {
           id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial,
           purityOrQuality, quantityIssued: qty,
-          source: resolvedSource, sourcePurchaseId: resolvedSource === "purchase" ? eligiblePurchase!.id : undefined,
+          source: resolvedSource,
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
           makingCharges: { amountInr: chargeAmount, payments: [] },
@@ -2031,7 +2031,11 @@ export function OrderDetailPage() {
 
           {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (
             <div className="pt-2 border-t border-border/60 space-y-2">
-              {linkedPurchases.map(p => {
+              {/* Only purchases NOT already shown as an issuance below — avoids the
+                  same bought diamond appearing twice (once as a purchase, once as
+                  the auto-created issuance). The purchase's cost/₹-due is folded
+                  onto its issuance row instead. */}
+              {linkedPurchases.filter(p => !linkedIssuances.some(i => i.sourcePurchaseId === p.id)).map(p => {
                 const pending = purchasePending(p);
                 const supplier = db.suppliers.find(s => s.id === p.supplierId);
                 return (
@@ -2052,9 +2056,13 @@ export function OrderDetailPage() {
                 const certPackets = mi.diamondKind === "certified"
                   ? (db.diamondPackets ?? []).filter(p => mi.diamondPacketIds?.includes(p.id))
                   : [];
-                const label = mi.diamondKind === "certified"
+                const srcPurchase = mi.source === "purchase" && mi.sourcePurchaseId ? linkedPurchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
+                const srcSupplier = srcPurchase ? db.suppliers.find(s => s.id === srcPurchase.supplierId) : undefined;
+                const srcInfo = srcPurchase ? ` · bought from ${srcSupplier?.name || "supplier"}` : mi.source === "stock" ? " · from stock" : "";
+                const label = (mi.diamondKind === "certified"
                   ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
-                  : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`;
+                  : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`) + srcInfo;
+                const srcCost = srcPurchase ? purchasePending(srcPurchase) : 0;
                 const isGold = mi.material === "gold";
                 const liveLabour = labourValue({
                   perGramRate: rcvPerGram ? Number(rcvPerGram) : undefined,
@@ -2072,6 +2080,7 @@ export function OrderDetailPage() {
                         <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
                       </Link>
                       <span className="flex items-center gap-2 shrink-0">
+                        {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
                         {mi.status === "open" && canEditStage() && (
                           <button
