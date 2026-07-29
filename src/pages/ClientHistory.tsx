@@ -68,7 +68,6 @@ export function ClientHistoryPage() {
 
   // ── Client account / payments ──
   const [payAmount, setPayAmount] = useState("");
-  const [payReceivedCurrency, setPayReceivedCurrency] = useState<"USD" | "INR">("USD");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRemark, setPayRemark] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
@@ -77,21 +76,17 @@ export function ClientHistoryPage() {
   const account = clientAccount(billableOrders, client?.creditBalance || 0);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
   const payLockerCurrency = payLocker?.currency || "INR";
-  // Billing is always USD; the deposit lands in whatever currency the chosen
-  // locker holds — either side only needs the rate if it actually differs
-  // from what was received (only USD/INR exist, so one rate covers both).
-  const payNeedsRate = payReceivedCurrency !== "USD" || (!!payLocker && payReceivedCurrency !== payLockerCurrency);
+  // A client always pays in USD (that's what the order is billed in) — only
+  // an INR locker needs converting for the deposit side.
+  const payNeedsRate = !!payLocker && payLockerCurrency !== "USD";
   const payRate = Number(payExchangeRate);
-  const convertPayAmt = (amt: number, from: "USD" | "INR", to: "USD" | "INR"): number =>
-    from === to ? amt : from === "USD" ? amt * payRate : amt / payRate;
 
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
     if (payNeedsRate && (!payRate || payRate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
-    const usdAmt = Math.round(convertPayAmt(amt, payReceivedCurrency, "USD") * 100) / 100;
-    const depositAmt = Math.round(convertPayAmt(amt, payReceivedCurrency, payLockerCurrency) * 100) / 100;
+    const depositAmt = payNeedsRate ? Math.round(amt * payRate * 100) / 100 : amt;
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
@@ -101,7 +96,7 @@ export function ClientHistoryPage() {
       const now = new Date().toISOString();
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
-      const leftover = reconcileClientAccount(clientOrders, usdAmt, c.creditBalance || 0, user!.id, now, note);
+      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now, note);
       c.creditBalance = leftover > 0 ? leftover : undefined;
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
@@ -122,7 +117,7 @@ export function ClientHistoryPage() {
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: "Payment Received",
-        body: `${fmtMoney(usdAmt)} received via ${payMethod} and applied to your oldest pending orders.`,
+        body: `${fmtMoney(amt)} received via ${payMethod} and applied to your oldest pending orders.`,
         type: "info", read: false, createdAt: now,
       });
     });
@@ -422,29 +417,19 @@ export function ClientHistoryPage() {
         </div>
 
         {showPayForm && (() => {
-          const payUsdAmt = payAmount && (!payNeedsRate || payRate > 0) ? convertPayAmt(Number(payAmount), payReceivedCurrency, "USD") : null;
-          const payDepositPreview = payAmount && payLocker && (!payNeedsRate || payRate > 0) ? convertPayAmt(Number(payAmount), payReceivedCurrency, payLockerCurrency) : null;
+          const payDepositPreview = payAmount && payNeedsRate && payRate > 0 ? Number(payAmount) * payRate : payAmount ? Number(payAmount) : null;
           return (
           <div className="pt-2 border-t border-border/60 space-y-2.5">
             <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
-            <Select value={payReceivedCurrency} onValueChange={v => setPayReceivedCurrency(v as "USD" | "INR")}>
-              <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="USD">Received in USD ($)</SelectItem>
-                <SelectItem value="INR">Received in INR (₹)</SelectItem>
-              </SelectContent>
-            </Select>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Amount */}
               <div className="relative">
-                {payReceivedCurrency === "USD"
-                  ? <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  : <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">₹</span>}
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="number" min="1" step="0.01" autoFocus
                   value={payAmount} onChange={e => setPayAmount(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && recordPayment()}
-                  className="pl-9 rounded-xl h-10" placeholder="Amount received" />
+                  className="pl-9 rounded-xl h-10" placeholder="Amount received ($)" />
               </div>
               {/* Method */}
               <Select value={payMethod} onValueChange={setPayMethod}>
@@ -479,24 +464,20 @@ export function ClientHistoryPage() {
               <div className="p-3 rounded-xl bg-secondary space-y-2">
                 <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
                 <Input type="number" min={0} step="0.01" value={payExchangeRate} onChange={e => setPayExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
-                <p className="text-xs text-muted-foreground">
-                  {payReceivedCurrency !== "USD"
-                    ? "This client's order is billed in USD, so we need today's rate to know how much of it this payment covers."
-                    : `This locker holds ${payLockerCurrency}, not ${payReceivedCurrency} — enter the rate to convert what lands in it.`}
-                </p>
+                <p className="text-xs text-muted-foreground">This locker holds INR, not USD — enter today's rate to convert what lands in it.</p>
               </div>
             )}
 
-            {payAmount && payLockerId && payUsdAmt != null && (
+            {payAmount && payLockerId && (
               <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Received</span>
-                  <span className="font-medium text-foreground">{payReceivedCurrency === "USD" ? "$" : "₹"}{Number(payAmount).toFixed(2)} ({payReceivedCurrency})</span>
+                  <span className="font-medium text-foreground">{fmtMoney(Number(payAmount))}</span>
                 </div>
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-muted-foreground">Applied to order</span>
-                  <span className="font-semibold text-primary">{fmtMoney(payUsdAmt)}</span>
+                  <span className="font-semibold text-primary">{fmtMoney(Number(payAmount))}</span>
                 </div>
                 {payDepositPreview != null && payLocker && (
                   <div className="flex items-center justify-between text-sm">

@@ -77,21 +77,11 @@ export function PaymentsPage() {
 }
 
 /* ── Receive from Client — mirrors ClientHistory.tsx's recordPayment ── */
-// A client's order is always billed in USD, but what actually changes hands
-// (and which locker it lands in) can be either currency — so both the
-// received amount's own currency AND the deposit locker's currency can each
-// independently differ from USD, needing conversion for either side.
-function convertAmt(amt: number, from: "USD" | "INR", to: "USD" | "INR", rateInrPerUsd: number): number {
-  if (from === to) return amt;
-  return from === "USD" ? amt * rateInrPerUsd : amt / rateInrPerUsd;
-}
-
 function ReceiveFromClient() {
   const { user } = useAuth();
   const db = useDb();
   const [clientId, setClientId] = useState("");
   const [amount, setAmount] = useState("");
-  const [receivedCurrency, setReceivedCurrency] = useState<"USD" | "INR">("USD");
   const [method, setMethod] = useState("Cash");
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
@@ -101,11 +91,9 @@ function ReceiveFromClient() {
   const clients = db.clients.filter(c => c.status === "active").sort((a, b) => a.companyName.localeCompare(b.companyName));
   const locker = db.lockers.find(l => l.id === lockerId);
   const lockerCurrency = locker?.currency || "INR";
-
-  // Billing (this client's order balance) is always USD; the deposit lands in
-  // whatever currency the chosen locker holds — each needs the rate only if
-  // it actually differs from what was received.
-  const needsRate = receivedCurrency !== "USD" || (!!locker && receivedCurrency !== lockerCurrency);
+  // A client always pays in USD (that's what the order is billed in) — only
+  // an INR locker needs converting for the deposit side.
+  const needsRate = !!locker && lockerCurrency !== "USD";
   const rate = Number(exchangeRate);
 
   const submit = async () => {
@@ -115,8 +103,7 @@ function ReceiveFromClient() {
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was deposited into"); return; }
     if (needsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
-    const usdAmt = Math.round(convertAmt(amt, receivedCurrency, "USD", rate) * 100) / 100;
-    const depositAmt = Math.round(convertAmt(amt, receivedCurrency, lockerCurrency, rate) * 100) / 100;
+    const depositAmt = needsRate ? Math.round(amt * rate * 100) / 100 : amt;
     setSaving(true);
     try {
       const noteText = note.trim() ? `${method} · ${note.trim()}` : method;
@@ -125,7 +112,7 @@ function ReceiveFromClient() {
         const client = d.clients.find(x => x.id === clientId);
         if (!client) return;
         const clientOrders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
-        const leftover = reconcileClientAccount(clientOrders, usdAmt, client.creditBalance || 0, user!.id, now, noteText);
+        const leftover = reconcileClientAccount(clientOrders, amt, client.creditBalance || 0, user!.id, now, noteText);
         client.creditBalance = leftover > 0 ? leftover : undefined;
         const locker = d.lockers.find(l => l.id === lockerId);
         if (locker) {
@@ -140,17 +127,16 @@ function ReceiveFromClient() {
         const clientUser = d.users.find(u => u.clientId === clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id, title: "Payment Received",
-          body: `${fmtMoney(usdAmt)} received via ${method} and applied to your oldest pending orders.`,
+          body: `${fmtMoney(amt)} received via ${method} and applied to your oldest pending orders.`,
           type: "info", read: false, createdAt: now,
         });
       });
-      toast.success(`${fmtMoney(usdAmt)} received from ${c.companyName}`);
+      toast.success(`${fmtMoney(amt)} received from ${c.companyName}`);
       setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate("");
     } finally { setSaving(false); }
   };
 
-  const usdAmt = amount && (!needsRate || rate > 0) ? convertAmt(Number(amount), receivedCurrency, "USD", rate) : null;
-  const depositPreview = amount && locker && (!needsRate || rate > 0) ? convertAmt(Number(amount), receivedCurrency, lockerCurrency, rate) : null;
+  const depositPreview = amount && needsRate && rate > 0 ? Number(amount) * rate : amount ? Number(amount) : null;
 
   return (
     <div className="space-y-3">
@@ -161,23 +147,11 @@ function ReceiveFromClient() {
           <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
         </Select>
       </div>
-      <div>
-        <Label className="text-xs">Received In</Label>
-        <Select value={receivedCurrency} onValueChange={v => setReceivedCurrency(v as "USD" | "INR")}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="USD">USD ($)</SelectItem>
-            <SelectItem value="INR">INR (₹)</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label className="text-xs">Amount Received</Label>
+          <Label className="text-xs">Amount Received ($)</Label>
           <div className="relative mt-1">
-            {receivedCurrency === "USD"
-              ? <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              : <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">₹</span>}
+            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="pl-9 h-10 rounded-xl" />
           </div>
         </div>
@@ -201,23 +175,19 @@ function ReceiveFromClient() {
         <div className="p-3 rounded-xl bg-secondary space-y-2">
           <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
           <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
-          <p className="text-xs text-muted-foreground">
-            {receivedCurrency !== "USD"
-              ? "This client's order is billed in USD, so we need today's rate to know how much of it this payment covers."
-              : `This locker holds ${lockerCurrency}, not ${receivedCurrency} — enter the rate to convert what lands in it.`}
-          </p>
+          <p className="text-xs text-muted-foreground">This locker holds INR, not USD — enter today's rate to convert what lands in it.</p>
         </div>
       )}
-      {amount && lockerId && usdAmt != null && (
+      {amount && lockerId && (
         <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Received</span>
-            <span className="font-medium text-foreground">{receivedCurrency === "USD" ? "$" : "₹"}{Number(amount).toFixed(2)} ({receivedCurrency})</span>
+            <span className="font-medium text-foreground">{fmtMoney(Number(amount))}</span>
           </div>
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Applied to client's order</span>
-            <span className="font-semibold text-primary">{fmtMoney(usdAmt)}</span>
+            <span className="font-semibold text-primary">{fmtMoney(Number(amount))}</span>
           </div>
           {depositPreview != null && locker && (
             <div className="flex items-center justify-between text-sm">
