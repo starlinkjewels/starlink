@@ -628,6 +628,8 @@ export function OrderDetailPage() {
   // force it through (e.g. material sourced outside this system) so a
   // legacy or edge-case order can never get permanently stuck.
   const readiness = manufacturingReadiness(order, db.materialIssuances);
+  const faStepIdx = order.timeline.findIndex(t => t.step === "Final Approval");
+  const faDone = faStepIdx >= 0 && order.timeline[faStepIdx].status === "done";
 
   const advanceStep = (idx: number, overrideReadiness = false) => {
     if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
@@ -662,15 +664,25 @@ export function OrderDetailPage() {
     advanceStep(idx, true);
   };
 
+  // The single "finishing" record for an order (gold net weight + labour). Used
+  // to prefill the popup on re-edit and to update in place instead of duplicating.
+  const finishRecord = () => db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
+
   const openFinalApproval = (idx: number) => {
     const needsGold = orderMaterialRequirements(order).needsGold;
-    setFaGoldNet(needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : "");
-    setFaGoldKarat(order.productKarats || "18K");
-    const openDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
+    const finish = finishRecord();
+    setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
+    setFaGoldKarat(finish?.finishedKarat ?? order.productKarats ?? "18K");
+    setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
+    setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
+    setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
+    setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
+    setFaMetalG(finish?.labour?.metalByFactoryGrams != null ? String(finish.labour.metalByFactoryGrams) : "");
+    setFaMetalRate(finish?.labour?.metalByFactoryRate != null ? String(finish.labour.metalByFactoryRate) : "");
+    const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
     const disp: Record<string, "used" | "returned"> = {};
-    openDia.forEach(i => { disp[i.id] = "used"; });
+    dias.forEach(i => { disp[i.id] = i.finishDisposition ?? "used"; });
     setFaDia(disp);
-    setFaPerGram(""); setFaCad(""); setFaDiaHandling(""); setFaOther(""); setFaMetalG(""); setFaMetalRate("");
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
     setFaIdx(idx);
@@ -682,8 +694,8 @@ export function OrderDetailPage() {
     const netW = parseFloat(faGoldNet);
     const hasNet = needsGold && !isNaN(netW) && netW > 0;
     const karat = faGoldKarat || order.productKarats || "18K";
-    const openDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
-    const usedDiaCt = openDia.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
+    const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
+    const usedDiaCt = dias.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
     const labour = {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
@@ -696,44 +708,58 @@ export function OrderDetailPage() {
     const factoryId = order.assignedFactoryId;
     const orderVal = parseFloat(faOrderValue);
     const ship = parseFloat(faShipping);
+    const alreadyDone = order.timeline[faIdx]?.status === "done";
     const now = new Date().toISOString();
     setFaSaving(true);
     try {
-      // Returned loose diamonds go back to company stock first (async).
-      const returnedLoose = openDia.filter(i => (faDia[i.id] ?? "used") === "returned" && i.diamondKind !== "certified");
-      for (const i of returnedLoose) {
-        await increaseStock({
-          material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued,
-          refType: "manual", createdBy: user!.id, note: `Diamond returned on final approval for ${order.orderNumber}`,
-        });
+      // Loose-diamond stock changes based on the transition (handles re-edits too):
+      // newly returned → back to stock; un-returned (returned→used) → out of stock again.
+      for (const i of dias) {
+        if (i.diamondKind === "certified") continue;
+        const returnedNow = (faDia[i.id] ?? "used") === "returned";
+        const returnedBefore = i.finishDisposition === "returned";
+        if (returnedNow && !returnedBefore) {
+          await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, refType: "manual", createdBy: user!.id, note: `Diamond returned on final approval for ${order.orderNumber}` });
+        } else if (!returnedNow && returnedBefore) {
+          await decreaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` });
+        }
       }
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         if (!d.materialIssuances) d.materialIssuances = [];
-        // One "finishing" record at the factory — carries the gold net weight
-        // (→ pure-gold deduction) and the labour (→ factory payable).
+        // The finishing record — update in place if it exists (re-edit), else create.
         if (factoryId) {
-          const finishId = uid("mi_");
-          d.materialIssuances.unshift({
-            id: finishId, factoryId, orderId: order.id, material: "gold",
-            purityOrQuality: karat, quantityIssued: hasNet ? netW : 0, source: "factoryPool",
-            finishedNetWeight: hasNet ? netW : undefined, finishedKarat: hasNet ? karat : undefined,
-            labour, issuedAt: now, issuedBy: user!.id, status: "closed",
-            finishedPieces: hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [],
-            makingCharges: { amountInr: labourVal, payments: [] },
-          });
-          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
-          o.materialIssuanceIds.push(finishId);
+          let finish = d.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
+          if (!finish) {
+            finish = {
+              id: uid("mi_"), factoryId, orderId: order.id, material: "gold", purityOrQuality: karat,
+              quantityIssued: 0, source: "factoryPool", issuedAt: now, issuedBy: user!.id, status: "closed",
+              finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+            };
+            d.materialIssuances.unshift(finish);
+            if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
+            o.materialIssuanceIds.push(finish.id);
+          }
+          finish.factoryId = factoryId;
+          finish.purityOrQuality = karat;
+          finish.quantityIssued = hasNet ? netW : 0;
+          finish.finishedNetWeight = hasNet ? netW : undefined;
+          finish.finishedKarat = hasNet ? karat : undefined;
+          finish.labour = labour;
+          finish.finishedPieces = hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [];
+          finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
+          finish.status = "closed";
         }
         // Apply each diamond's used/returned disposition.
-        for (const i of openDia) {
+        for (const i of dias) {
           const mi = d.materialIssuances.find(x => x.id === i.id);
           if (!mi) continue;
           const disp = faDia[i.id] ?? "used";
           mi.status = "closed";
+          mi.finishDisposition = disp;
           if (i.diamondKind === "certified" && i.diamondPacketIds) {
             for (const p of d.diamondPackets) if (i.diamondPacketIds.includes(p.id)) {
-              if (disp === "used") p.status = "used";
+              if (disp === "used") { p.status = "used"; p.orderId = order.id; }
               else { p.status = "in_stock"; p.orderId = undefined; }
             }
           }
@@ -747,11 +773,11 @@ export function OrderDetailPage() {
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId,
           material: "gold", amountMaterial: hasNet ? netW : undefined, amountInr: labourVal || undefined,
-          remarks: `Final approval — ${hasNet ? `net ${netW}g ${karat} (${toPureGold(netW, karat)}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
+          remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g ${karat} (${toPureGold(netW, karat)}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
         });
       });
-      advanceStep(faIdx, true);
-      toast.success("Final approval saved");
+      if (!alreadyDone) advanceStep(faIdx, true);
+      toast.success(alreadyDone ? "Final details updated" : "Final approval saved");
       setFaIdx(null);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save final approval");
@@ -1878,7 +1904,7 @@ export function OrderDetailPage() {
           <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-brand-dark shrink-0">① Assign &amp; Estimate</span>
+                <span className="text-xs font-semibold text-brand-dark shrink-0">{faDone ? "Manufacturing (actual)" : "① Assign & Estimate"}</span>
                 <Select value={order.assignedFactoryId || "__none"} onValueChange={v => assignFactory(v === "__none" ? "" : v)}>
                   <SelectTrigger className="h-8 w-52 rounded-lg text-xs"><SelectValue placeholder="Choose factory" /></SelectTrigger>
                   <SelectContent>
@@ -1887,11 +1913,13 @@ export function OrderDetailPage() {
                   </SelectContent>
                 </Select>
               </div>
-              {canEditStage() && (
+              {canEditStage() && (faDone ? (
+                <Button size="sm" variant="outline" onClick={() => openFinalApproval(faStepIdx)} className="rounded-lg h-8 gap-1.5 text-xs">Edit actual details</Button>
+              ) : (
                 <Button size="sm" variant="outline" onClick={() => (showEstimate ? setShowEstimate(false) : openEstimate())} className="rounded-lg h-8 gap-1.5 text-xs">
                   {showEstimate ? "Close" : (order.estimatedMakingCharges != null || order.estimatedGrossWeight != null ? "Edit Estimate" : "Add Estimate")}
                 </Button>
-              )}
+              ))}
             </div>
 
             {/* Reserved gold sitting at the assigned factory (gold is held there, not bought per order) */}
@@ -1903,17 +1931,33 @@ export function OrderDetailPage() {
               </div>
             )}
 
-            {/* Estimate summary (read-only) */}
-            {!showEstimate && (
+            {/* After Final Approval: what was ACTUALLY used + the factory (editable). Before: the estimate. */}
+            {!showEstimate && (faDone ? (() => {
+              const finish = finishRecord();
+              const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
+              return (
+                <div className="space-y-1 text-xs">
+                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
+                    <span>Gold used: <span className="font-semibold text-foreground">{finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g ${finish.finishedKarat || ""} · ${toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")}g fine` : "—"}</span></span>
+                    <span>Labour: <span className="font-semibold text-foreground">{finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—"}</span></span>
+                  </div>
+                  {dias.map(i => {
+                    const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
+                    const lbl = i.diamondKind === "certified" ? (packs.map(p => `${p.shape} ${p.carat}ct`).join(", ") || "certified") : `${i.purityOrQuality} ${i.quantityIssued}ct`;
+                    return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className={i.finishDisposition === "returned" ? "text-amber-600 font-medium" : "text-success font-medium"}>{i.finishDisposition === "returned" ? "returned to stock" : "used in piece"}</span></div>;
+                  })}
+                </div>
+              );
+            })() : (
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
                 <span>Est. gold: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ?? order.metalWeight ?? "—"}{(order.estimatedGrossWeight ?? order.metalWeight) != null ? " g" : ""}</span></span>
                 <span>Est. diamond: <span className="font-semibold text-foreground">{order.diamondWeight ? `${order.diamondWeight} ct` : "—"}</span></span>
                 <span>Est. making: <span className="font-semibold text-foreground">{order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—"}</span></span>
               </div>
-            )}
+            ))}
 
             {/* Estimate editor */}
-            {showEstimate && (
+            {showEstimate && !faDone && (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 <div>
                   <Label className="text-[11px]">Est. Gold Weight (g)</Label>
@@ -1934,7 +1978,7 @@ export function OrderDetailPage() {
             )}
 
             {/* ② Diamond — from our stock, or buy new. (Gold stays reserved at the factory.) */}
-            {canEditStage() && orderMaterialRequirements(order).needsDiamond && (
+            {canEditStage() && !faDone && orderMaterialRequirements(order).needsDiamond && (
               <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
                 <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-secondary">
@@ -2287,7 +2331,8 @@ export function OrderDetailPage() {
       {/* ── Final Approval popup — one window for all the actual details ── */}
       {faIdx !== null && (() => {
         const needsGold = orderMaterialRequirements(order).needsGold;
-        const faOpenDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
+        // All of the order's diamonds (open on first approval, closed on a re-edit) so they stay editable.
+        const faOpenDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
         const usedDiaCt = faOpenDia.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
         const faLive = labourValue({
           perGramRate: faPerGram ? Number(faPerGram) : undefined,

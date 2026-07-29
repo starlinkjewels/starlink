@@ -563,6 +563,7 @@ export interface MaterialIssuance {
   // gold to net off the factory's fine-gold balance (see factoryFineGoldBalance). ──
   finishedNetWeight?: number; // grams of the finished piece (gold issuances)
   finishedKarat?: string;     // its karat, e.g. "18K" — for the pure-gold conversion
+  finishDisposition?: "used" | "returned"; // diamond issuances: chosen at Final Approval (so a later edit knows the current state)
   // Structured labour that makes up makingCharges.amountInr (the factory payable):
   //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
   //   + otherCharges + metalByFactoryGrams × metalByFactoryRate
