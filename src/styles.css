@@ -148,6 +148,17 @@
     border-color: var(--color-border);
   }
 
+  /* AppLayout's own shell (h-[100dvh] overflow-hidden) is meant to be the
+     only fixed-height frame, with just its inner content area scrolling —
+     but without an explicit height/overflow lock here too, a sub-pixel
+     rounding mismatch in 100dvh (varies by browser/zoom) can let the outer
+     document itself become scrollable by a sliver, showing as a second,
+     oddly short scrollbar alongside the real one. */
+  html, body, #root {
+    height: 100%;
+    overflow: hidden;
+  }
+
   body {
     background-color: var(--color-background);
     color: var(--color-foreground);
