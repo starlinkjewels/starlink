@@ -2,15 +2,14 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { updateDb, uid, DIAMOND_SHAPES, toPureGold, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { increaseStock, decreaseStock, subscribeStockLevels, type StockLevels } from "@/lib/stock";
-import { fmtMoneyInr, factoryFineGoldBalance } from "@/lib/manufacturing";
+import { increaseStock, decreaseStock } from "@/lib/stock";
+import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck } from "lucide-react";
 import { toast } from "sonner";
-import { useEffect } from "react";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 type Mode = "buy" | "assign";
@@ -216,15 +215,13 @@ function BuyMaterial() {
 function AssignGold() {
   const { user } = useAuth();
   const db = useDb();
-  const [levels, setLevels] = useState<StockLevels | null>(null);
   const [factoryId, setFactoryId] = useState("");
   const [purity, setPurity] = useState("22K");
   const [grams, setGrams] = useState("");
   const [saving, setSaving] = useState(false);
 
-  useEffect(() => subscribeStockLevels(setLevels), []);
   const factories = db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name));
-  const inStock = levels?.gold?.[purity] ?? 0;
+  const inStock = deriveStockBalances(db.stockMovements, "gold")[purity] ?? 0;
 
   const submit = async () => {
     if (!factoryId) { toast.error("Choose a factory"); return; }

@@ -362,6 +362,23 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
   return { label: m.note || "Manual adjustment" };
 }
 
+/**
+ * Current stock balance PER bucket, derived straight from the movement ledger
+ * (the auditable source of truth). Used for every on-screen balance so what a
+ * user sees always reconciles with the history right beside it — the cached
+ * stockLevels/current doc is only the transactional floor-check helper and can
+ * drift; the ledger cannot lie. Same signs as recomputeStockFromHistory.
+ */
+export function deriveStockBalances(movements: StockMovement[], material: "gold" | "diamond"): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of movements) {
+    if (m.material !== material) continue;
+    const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity) : -1;
+    out[m.purityOrQuality] = Math.round(((out[m.purityOrQuality] || 0) + sign * Math.abs(m.quantity)) * 1000) / 1000;
+  }
+  return out;
+}
+
 /** Movements for one Stock bucket (material + purity/shape key), newest
  *  first, each enriched with its resolved link — drives Stock.tsx's
  *  per-bucket drill-down modal. */

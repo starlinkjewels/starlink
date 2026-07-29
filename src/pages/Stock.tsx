@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
+import { deriveStockBalances } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Gem, Coins, BadgeCheck, RotateCcw, History } from "lucide-react";
@@ -16,10 +17,13 @@ export function StockPage() {
 
   useEffect(() => subscribeStockLevels(setLevels), []);
 
-  const goldTotal = Object.values(levels?.gold ?? {}).reduce((s, g) => s + g, 0);
-  const diamondTotal = Object.values(levels?.diamond ?? {}).reduce((s, c) => s + c, 0);
-  const goldPurities = Object.entries(levels?.gold ?? {}).filter(([, g]) => g !== 0).length;
-  const diamondShapes = Object.entries(levels?.diamond ?? {}).filter(([, c]) => c !== 0).length;
+  // Balances derived from the movement ledger (the true record) so every screen agrees.
+  const goldBal = deriveStockBalances(db.stockMovements, "gold");
+  const diamondBal = deriveStockBalances(db.stockMovements, "diamond");
+  const goldTotal = Object.values(goldBal).reduce((s, g) => s + g, 0);
+  const diamondTotal = Object.values(diamondBal).reduce((s, c) => s + c, 0);
+  const goldPurities = Object.entries(goldBal).filter(([, g]) => g !== 0).length;
+  const diamondShapes = Object.entries(diamondBal).filter(([, c]) => c !== 0).length;
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
   const recompute = async () => {

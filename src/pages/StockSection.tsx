@@ -1,10 +1,9 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmtDate, updateDb, DIAMOND_SHAPES, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
-import { stockBucketHistory } from "@/lib/manufacturing";
+import { stockBucketHistory, deriveStockBalances } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Input } from "@/components/ui/input";
@@ -31,12 +30,10 @@ export function StockSectionPage() {
 function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const navigate = useNavigate();
   const db = useDb();
-  const [levels, setLevels] = useState<StockLevels | null>(null);
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
 
-  useEffect(() => subscribeStockLevels(setLevels), []);
-
-  const entries = Object.entries(levels?.[material] ?? {}).filter(([, q]) => q !== 0);
+  // Balance derived from the movement ledger, so it always matches the history below.
+  const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
   const unit = material === "gold" ? "g" : "ct";
 
   const rows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
