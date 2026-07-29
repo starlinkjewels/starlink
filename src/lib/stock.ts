@@ -149,6 +149,32 @@ export async function decreaseStock(args: {
 }
 
 /**
+ * Same as decreaseStock, but self-heals from cache drift: if the cached
+ * counter has gone stale-low relative to the real movement history (e.g.
+ * from data that predates full movement logging), a legitimate issue would
+ * otherwise fail with a confusing "insufficient stock" error the user has no
+ * way to act on, even though Stock's own ledger-derived display shows plenty
+ * available. Resyncs the counter from history once and retries before
+ * giving up for real — invisible in the common case where the counter was
+ * already correct and the first attempt just succeeds.
+ */
+export async function decreaseStockSelfHealing(
+  args: Parameters<typeof decreaseStock>[0],
+  movements: StockMovement[],
+): Promise<void> {
+  try {
+    await decreaseStock(args);
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("Insufficient")) {
+      await recomputeStockFromHistory(movements);
+      await decreaseStock(args);
+    } else {
+      throw e;
+    }
+  }
+}
+
+/**
  * Recompute stockLevels/current from the full stockMovements history and
  * overwrite it — a reconciliation escape hatch (like a bank statement
  * reconciliation) in case of any drift, never called automatically.

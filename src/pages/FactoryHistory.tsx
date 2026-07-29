@@ -7,7 +7,7 @@ import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
-import { decreaseStock, increaseStock } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -96,11 +96,11 @@ export function FactoryHistoryPage() {
     if (issueMode === "bulkDelivery") {
       setIssuing(true);
       try {
-        await decreaseStock({
+        await decreaseStockSelfHealing({
           material: issueMaterial, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Bulk delivery to ${factory.name}`,
-        });
+        }, db.stockMovements);
         updateDb(d => {
           if (!d.materialIssuances) d.materialIssuances = [];
           d.materialIssuances.unshift({
@@ -137,11 +137,11 @@ export function FactoryHistoryPage() {
       // specifically for this order, or drawn from this factory's own pool,
       // never touches stockLevels (see MaterialIssuance.source in db.ts).
       if (resolvedSource === "stock") {
-        await decreaseStock({
+        await decreaseStockSelfHealing({
           material: issueMaterial, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Used by ${factory.name} for order ${matchedOrder.orderNumber}`,
-        });
+        }, db.stockMovements);
       }
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];

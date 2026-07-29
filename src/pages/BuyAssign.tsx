@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { increaseStock, decreaseStock } from "@/lib/stock";
+import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -233,11 +233,11 @@ function AssignGold() {
     const now = new Date().toISOString();
     setSaving(true);
     try {
-      await decreaseStock({
+      await decreaseStockSelfHealing({
         material: "gold", purityOrQuality: purity, quantity: g,
         type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
         note: `Assigned to ${factory?.name || "factory"}`,
-      });
+      }, db.stockMovements);
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
         const mi: MaterialIssuance = {

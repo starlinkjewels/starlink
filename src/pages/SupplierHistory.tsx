@@ -6,7 +6,7 @@ import { useAuth } from "@/lib/auth";
 import {
   supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr,
 } from "@/lib/manufacturing";
-import { increaseStock, decreaseStock } from "@/lib/stock";
+import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -316,7 +316,7 @@ export function SupplierHistoryPage() {
       // Reverse pooled stock first (only stock-purpose loose diamond / gold ever
       // increased the pool). Floor-checked — throws if the material was consumed.
       if (p.purpose === "stock" && !(p.material === "diamond" && p.diamond?.kind === "certified")) {
-        await decreaseStock({
+        await decreaseStockSelfHealing({
           material: p.material,
           purityOrQuality: p.material === "gold" ? (p.gold?.purity ?? "") : (p.diamond?.shape ?? ""),
           quantity: p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0),
@@ -325,7 +325,7 @@ export function SupplierHistoryPage() {
           refId: p.id,
           createdBy: user!.id,
           note: `Void of purchase ${p.invoiceNumber || p.id.slice(-6)}`,
-        });
+        }, db.stockMovements);
       }
       updateDb(d => {
         d.purchases = (d.purchases ?? []).filter(x => x.id !== p.id);

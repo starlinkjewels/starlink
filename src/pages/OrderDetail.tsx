@@ -26,7 +26,7 @@ import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
-import { decreaseStock, increaseStock } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -581,11 +581,11 @@ export function OrderDetailPage() {
     setIssuing(true);
     try {
       if (resolvedSource === "stock") {
-        await decreaseStock({
+        await decreaseStockSelfHealing({
           material: issueMaterial, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
-        });
+        }, db.stockMovements);
       }
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
@@ -727,7 +727,7 @@ export function OrderDetailPage() {
         if (returnedNow && !returnedBefore) {
           await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, refType: "manual", createdBy: user!.id, note: `Diamond returned on final approval for ${order.orderNumber}` });
         } else if (!returnedNow && returnedBefore) {
-          await decreaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` });
+          await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
         }
       }
       updateDb(d => {
