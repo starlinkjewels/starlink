@@ -30,7 +30,7 @@ export function fmtLockerAmount(n: number, currency?: "INR" | "USD"): string {
 
 // This module only tracks gold (by karat purity) and diamond — Platinum/Silver
 // orders never need a factory material issuance to proceed.
-const GOLDLESS_METALS = new Set(["Platinum", "Silver"]);
+const GOLDLESS_METALS = new Set(["Platinum", "Silver", "None (Diamond only)"]);
 
 export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondWeight">): {
   needsGold: boolean;

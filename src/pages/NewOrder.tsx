@@ -121,13 +121,13 @@ export function NewOrderPage() {
   const set = (key: string, value: unknown) =>
     setF(prev => ({ ...prev, [key]: value }));
 
-  const metalHasKarats = !["Silver", "Platinum"].includes(f.metal);
+  const metalHasKarats = !["Silver", "Platinum", "None (Diamond only)"].includes(f.metal);
 
   const setMetal = (v: string) => {
     setF(prev => ({
       ...prev,
       metal: v,
-      productKarats: ["Silver", "Platinum"].includes(v) ? "" : prev.productKarats,
+      productKarats: ["Silver", "Platinum", "None (Diamond only)"].includes(v) ? "" : prev.productKarats,
     }));
   };
 
@@ -425,7 +425,7 @@ export function NewOrderPage() {
               <Select value={f.metal} onValueChange={setMetal}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting"].map(x =>
+                  {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting","None (Diamond only)"].map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
