@@ -355,6 +355,21 @@ export function OrderDetailPage() {
 
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
+  // ── Final Approval popup: one window for all the actual details ──
+  const [faIdx, setFaIdx] = useState<number | null>(null);
+  const [faGoldNet, setFaGoldNet] = useState("");
+  const [faGoldKarat, setFaGoldKarat] = useState("");
+  const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({});
+  const [faPerGram, setFaPerGram] = useState("");
+  const [faCad, setFaCad] = useState("");
+  const [faDiaHandling, setFaDiaHandling] = useState("");
+  const [faOther, setFaOther] = useState("");
+  const [faMetalG, setFaMetalG] = useState("");
+  const [faMetalRate, setFaMetalRate] = useState("");
+  const [faOrderValue, setFaOrderValue] = useState("");
+  const [faShipping, setFaShipping] = useState("");
+  const [faSaving, setFaSaving] = useState(false);
+
   // Pure informational tag — "this factory will make this order." Moves no
   // material and never affects manufacturingReadiness; only an actual
   // MaterialIssuance for this order does that.
@@ -645,6 +660,102 @@ export function OrderDetailPage() {
   const forceAdvanceStep = (idx: number) => {
     if (!confirm(`Mark Final Approval complete without recording ${readiness.missing.join(" and ")} issuance? Only do this if the material was sourced outside this system.`)) return;
     advanceStep(idx, true);
+  };
+
+  const openFinalApproval = (idx: number) => {
+    const needsGold = orderMaterialRequirements(order).needsGold;
+    setFaGoldNet(needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : "");
+    setFaGoldKarat(order.productKarats || "18K");
+    const openDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
+    const disp: Record<string, "used" | "returned"> = {};
+    openDia.forEach(i => { disp[i.id] = "used"; });
+    setFaDia(disp);
+    setFaPerGram(""); setFaCad(""); setFaDiaHandling(""); setFaOther(""); setFaMetalG(""); setFaMetalRate("");
+    setFaOrderValue(order.amount ? String(order.amount) : "");
+    setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+    setFaIdx(idx);
+  };
+
+  const saveFinalApproval = async () => {
+    if (faIdx === null) return;
+    const needsGold = orderMaterialRequirements(order).needsGold;
+    const netW = parseFloat(faGoldNet);
+    const hasNet = needsGold && !isNaN(netW) && netW > 0;
+    const karat = faGoldKarat || order.productKarats || "18K";
+    const openDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
+    const usedDiaCt = openDia.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
+    const labour = {
+      perGramRate: faPerGram ? Number(faPerGram) : undefined,
+      diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
+      cadCharge: faCad ? Number(faCad) : undefined,
+      otherCharges: faOther ? Number(faOther) : undefined,
+      metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
+      metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
+    };
+    const labourVal = labourValue(labour, hasNet ? netW : 0, usedDiaCt);
+    const factoryId = order.assignedFactoryId;
+    const orderVal = parseFloat(faOrderValue);
+    const ship = parseFloat(faShipping);
+    const now = new Date().toISOString();
+    setFaSaving(true);
+    try {
+      // Returned loose diamonds go back to company stock first (async).
+      const returnedLoose = openDia.filter(i => (faDia[i.id] ?? "used") === "returned" && i.diamondKind !== "certified");
+      for (const i of returnedLoose) {
+        await increaseStock({
+          material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued,
+          refType: "manual", createdBy: user!.id, note: `Diamond returned on final approval for ${order.orderNumber}`,
+        });
+      }
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        if (!d.materialIssuances) d.materialIssuances = [];
+        // One "finishing" record at the factory — carries the gold net weight
+        // (→ pure-gold deduction) and the labour (→ factory payable).
+        if (factoryId) {
+          const finishId = uid("mi_");
+          d.materialIssuances.unshift({
+            id: finishId, factoryId, orderId: order.id, material: "gold",
+            purityOrQuality: karat, quantityIssued: hasNet ? netW : 0, source: "factoryPool",
+            finishedNetWeight: hasNet ? netW : undefined, finishedKarat: hasNet ? karat : undefined,
+            labour, issuedAt: now, issuedBy: user!.id, status: "closed",
+            finishedPieces: hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [],
+            makingCharges: { amountInr: labourVal, payments: [] },
+          });
+          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
+          o.materialIssuanceIds.push(finishId);
+        }
+        // Apply each diamond's used/returned disposition.
+        for (const i of openDia) {
+          const mi = d.materialIssuances.find(x => x.id === i.id);
+          if (!mi) continue;
+          const disp = faDia[i.id] ?? "used";
+          mi.status = "closed";
+          if (i.diamondKind === "certified" && i.diamondPacketIds) {
+            for (const p of d.diamondPackets) if (i.diamondPacketIds.includes(p.id)) {
+              if (disp === "used") p.status = "used";
+              else { p.status = "in_stock"; p.orderId = undefined; }
+            }
+          }
+        }
+        // Client billing.
+        if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
+        if (faShipping.trim() !== "" && !isNaN(ship) && ship >= 0) o.shippingCharge = ship;
+        const back = capOrderAdvances(o);
+        if (back > 0) { const c = d.clients.find(x => x.id === o.clientId); if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100; }
+        if (!o.manufacturingLog) o.manufacturingLog = [];
+        o.manufacturingLog.push({
+          id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId,
+          material: "gold", amountMaterial: hasNet ? netW : undefined, amountInr: labourVal || undefined,
+          remarks: `Final approval — ${hasNet ? `net ${netW}g ${karat} (${toPureGold(netW, karat)}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
+        });
+      });
+      advanceStep(faIdx, true);
+      toast.success("Final approval saved");
+      setFaIdx(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to save final approval");
+    } finally { setFaSaving(false); }
   };
 
   // Undo a stage marked complete by mistake — this stage becomes the current
@@ -1098,8 +1209,9 @@ export function OrderDetailPage() {
         )}
       </div>
 
-      {/* ── Actual Weights & Final Pricing Card ── */}
-      {user!.role !== "client" && (
+      {/* ── Actual Weights & Final Pricing — removed; these actuals are now
+             entered in the Final Approval popup (single window for everything). ── */}
+      {(false as boolean) && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <div className="flex items-center gap-3">
@@ -1726,7 +1838,9 @@ export function OrderDetailPage() {
                   )}
                   {canEditStage() && !isDone && (
                     isActive
-                      ? (t.step !== "Final Approval" || readiness.ready) && <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                      ? t.step === "Final Approval"
+                        ? readiness.ready && <AsyncButton size="sm" variant="outline" onClick={() => openFinalApproval(idx)} className="mt-2 h-7 rounded-lg text-xs">Final Approval — enter actuals</AsyncButton>
+                        : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
                   {canEditStage() && isDone && (
@@ -2082,63 +2196,8 @@ export function OrderDetailPage() {
                       <span className="flex items-center gap-2 shrink-0">
                         {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                        {mi.status === "open" && canEditStage() && (
-                          <button
-                            onClick={() => (receivingId === mi.id ? setReceivingId(null) : openReceive(mi))}
-                            disabled={closingId === mi.id}
-                            className="rounded-lg border border-border bg-white px-2 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
-                          >
-                            {receivingId === mi.id ? "Cancel" : "Receive / Finish"}
-                          </button>
-                        )}
                       </span>
                     </div>
-
-                    {receivingId === mi.id && (
-                      <div className="px-3 pb-3 pt-1 space-y-3 border-t border-border/50">
-                        {isGold && (
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <div>
-                              <Label className="text-[11px]">Net Weight (g)</Label>
-                              <Input type="number" min={0} step="0.001" value={rcvNetW} onChange={e => setRcvNetW(e.target.value)} className="rounded-lg h-9 mt-1" />
-                            </div>
-                            <div>
-                              <Label className="text-[11px]">Karat</Label>
-                              <Select value={rcvKarat} onValueChange={setRcvKarat}>
-                                <SelectTrigger className="rounded-lg h-9 mt-1"><SelectValue placeholder="Karat" /></SelectTrigger>
-                                <SelectContent>{["9K","10K","14K","18K","22K","24K"].map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent>
-                              </Select>
-                            </div>
-                            {Number(rcvNetW) > 0 && rcvKarat && (
-                              <p className="col-span-2 text-[11px] text-muted-foreground -mt-1">= {toPureGold(Number(rcvNetW), rcvKarat)}g fine (24KT) gold deducted from {factory?.name || "the factory"}</p>
-                            )}
-                          </div>
-                        )}
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={rcvPerGram} onChange={e => setRcvPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
-                            <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={rcvCad} onChange={e => setRcvCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
-                            <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={rcvDiaHandling} onChange={e => setRcvDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
-                            <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={rcvOther} onChange={e => setRcvOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
-                          </div>
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Metal used by factory (optional)</p>
-                          <div className="grid grid-cols-2 gap-2.5">
-                            <div><Label className="text-[11px]">Grams</Label><Input type="number" min={0} step="0.001" value={rcvMetalG} onChange={e => setRcvMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
-                            <div><Label className="text-[11px]">Rate ₹ / gram</Label><Input type="number" min={0} step="0.01" value={rcvMetalRate} onChange={e => setRcvMetalRate(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
-                          </div>
-                        </div>
-                        <div className="flex items-center justify-between gap-2 pt-1">
-                          <span className="text-sm">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(liveLabour)}</span></span>
-                          <div className="flex gap-2">
-                            <Button size="sm" variant="outline" onClick={() => setReceivingId(null)} className="rounded-lg h-9">Cancel</Button>
-                            <AsyncButton size="sm" onClick={() => receiveFinished(mi)} disabled={closingId === mi.id} className="btn-hero rounded-lg h-9">Save &amp; Finish</AsyncButton>
-                          </div>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -2224,6 +2283,97 @@ export function OrderDetailPage() {
           </button>
         </motion.div>
       )}
+
+      {/* ── Final Approval popup — one window for all the actual details ── */}
+      {faIdx !== null && (() => {
+        const needsGold = orderMaterialRequirements(order).needsGold;
+        const faOpenDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond" && i.status === "open");
+        const usedDiaCt = faOpenDia.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
+        const faLive = labourValue({
+          perGramRate: faPerGram ? Number(faPerGram) : undefined,
+          diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
+          cadCharge: faCad ? Number(faCad) : undefined,
+          otherCharges: faOther ? Number(faOther) : undefined,
+          metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
+          metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
+        }, needsGold ? (Number(faGoldNet) || 0) : 0, usedDiaCt);
+        const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
+        return (
+          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !faSaving && setFaIdx(null)}>
+            <div className="card-luxe w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+              <h3 className="font-display text-lg text-brand-dark mb-1">Final Approval — {order.orderNumber}</h3>
+              <p className="text-xs text-muted-foreground mb-4">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</p>
+
+              {needsGold && (
+                <div className="mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Gold used</p>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div><Label className="text-[11px]">Net Weight (g)</Label><Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
+                    <div><Label className="text-[11px]">Karat</Label>
+                      <Select value={faGoldKarat} onValueChange={setFaGoldKarat}><SelectTrigger className="rounded-lg h-9 mt-1"><SelectValue placeholder="Karat" /></SelectTrigger>
+                        <SelectContent>{["9K","10K","14K","18K","22K","24K"].map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent></Select></div>
+                  </div>
+                  {Number(faGoldNet) > 0 && faGoldKarat && <p className="text-[11px] text-muted-foreground mt-1">= {toPureGold(Number(faGoldNet), faGoldKarat)}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                </div>
+              )}
+
+              {faOpenDia.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Diamonds — used or returned?</p>
+                  <div className="space-y-1.5">
+                    {faOpenDia.map(i => {
+                      const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
+                      const lbl = i.diamondKind === "certified"
+                        ? `${packs.map(p => `${p.shape} ${p.carat}ct Cert ${p.certificateNumber}`).join("; ") || "certified"}`
+                        : `${i.purityOrQuality} · ${i.quantityIssued}ct`;
+                      return (
+                        <div key={i.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary text-sm">
+                          <span className="truncate min-w-0" title={lbl}>{lbl}</span>
+                          <div className="inline-flex gap-0.5 p-0.5 rounded-md bg-white shrink-0">
+                            {(["used", "returned"] as const).map(dd => (
+                              <button key={dd} onClick={() => setFaDia(m => ({ ...m, [i.id]: dd }))}
+                                className={`h-7 px-2.5 rounded text-xs font-medium ${(faDia[i.id] ?? "used") === dd ? (dd === "used" ? "bg-primary text-white" : "bg-amber-500 text-white") : "text-muted-foreground"}`}>
+                                {dd === "used" ? "Used" : "Returned"}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">Returned diamonds go back to stock; used ones are consumed into the piece.</p>
+                </div>
+              )}
+
+              <div className="mb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                  <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
+                  <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={faDiaHandling} onChange={e => setFaDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
+                  <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={faOther} onChange={e => setFaOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
+                  <div><Label className="text-[11px]">Metal by factory (g)</Label><Input type="number" min={0} step="0.001" value={faMetalG} onChange={e => setFaMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
+                  <div><Label className="text-[11px]">Metal rate ₹ / g</Label><Input type="number" min={0} step="0.01" value={faMetalRate} onChange={e => setFaMetalRate(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                </div>
+                <p className="text-sm mt-2">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(faLive)}</span></p>
+              </div>
+
+              <div className="mb-5">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Client billing ($)</p>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <div><Label className="text-[11px]">Final Order Value ($)</Label><Input type="number" min={0} step="0.01" value={faOrderValue} onChange={e => setFaOrderValue(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
+                  <div><Label className="text-[11px]">Shipping ($)</Label><Input type="number" min={0} step="0.01" value={faShipping} onChange={e => setFaShipping(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
+                </div>
+              </div>
+
+              <div className="flex gap-2">
+                <button onClick={() => setFaIdx(null)} disabled={faSaving} className="flex-1 rounded-xl border border-border py-2 text-sm disabled:opacity-50">Cancel</button>
+                <AsyncButton onClick={saveFinalApproval} disabled={faSaving} className="btn-hero flex-1 rounded-xl py-2 text-sm">{faSaving ? "Saving…" : "Save & Approve"}</AsyncButton>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </AnimatePresence>
     </>
   );
