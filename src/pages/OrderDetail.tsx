@@ -24,7 +24,7 @@ import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStock, increaseStock } from "@/lib/stock";
 
@@ -62,7 +62,7 @@ interface BuyLine {
 
 function emptyBuyLine(): BuyLine {
   return {
-    material: "gold", goldWeight: "", goldPurity: "22K", goldRate: "",
+    material: "diamond", goldWeight: "", goldPurity: "22K", goldRate: "",
     diaCarat: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
@@ -183,11 +183,13 @@ export function OrderDetailPage() {
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
-  // Stage ① — assign factory + quote an estimate (before the piece is made).
+  // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
   const [estGold, setEstGold] = useState("");
   const [estDia, setEstDia] = useState("");
   const [estMaking, setEstMaking] = useState("");
+  const [diaSource, setDiaSource] = useState<"stock" | "buy">("stock");
+  const [showDiamond, setShowDiamond] = useState(false);
 
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
@@ -371,6 +373,9 @@ export function OrderDetailPage() {
         });
       }
     });
+    // Keep the reused issue/buy handlers pointed at this factory, in diamond mode
+    // (gold is reserved at the factory, so the order only ever sources diamond).
+    if (factoryId) { setIssueFactoryId(factoryId); setIssueMaterial("diamond"); }
     if (factoryId) toast.success(`${factory?.name || "Factory"} assigned to this order`);
   };
 
@@ -1753,14 +1758,6 @@ export function OrderDetailPage() {
                   : "No sourcing plan set at order creation"}
               </p>
             </div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <Button onClick={() => { setShowBuyForm(v => !v); setShowIssueForm(false); }} variant="outline" className="rounded-xl gap-2">
-                <Truck className="h-4 w-4" /> Buy for this Order
-              </Button>
-              <Button onClick={() => { setShowIssueForm(v => !v); setShowBuyForm(false); if (!issueFactoryId && order.assignedFactoryId) setIssueFactoryId(order.assignedFactoryId); }} className="btn-hero rounded-xl gap-2">
-                <FactoryIcon className="h-4 w-4" /> Use from Stock
-              </Button>
-            </div>
           </div>
 
           {/* Stage ① — Assign the factory and quote an estimate before the piece is made. */}
@@ -1782,6 +1779,15 @@ export function OrderDetailPage() {
                 </Button>
               )}
             </div>
+
+            {/* Reserved gold sitting at the assigned factory (gold is held there, not bought per order) */}
+            {order.assignedFactoryId && (
+              <div className="flex items-center gap-1.5 text-xs">
+                <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                <span className="text-muted-foreground">Reserved gold at this factory:</span>
+                <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, order.assignedFactoryId).toLocaleString()} g fine (24KT)</span>
+              </div>
+            )}
 
             {/* Estimate summary (read-only) */}
             {!showEstimate && (
@@ -1812,6 +1818,30 @@ export function OrderDetailPage() {
                 </div>
               </div>
             )}
+
+            {/* ② Diamond — from our stock, or buy new. (Gold stays reserved at the factory.) */}
+            {canEditStage() && orderMaterialRequirements(order).needsDiamond && (
+              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
+                <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-secondary">
+                  {(["stock", "buy"] as const).map(s => (
+                    <button key={s} type="button"
+                      onClick={() => {
+                        if (!order.assignedFactoryId) { toast.error("Choose the factory first"); return; }
+                        setDiaSource(s); setShowDiamond(true);
+                        if (s === "stock") { setShowIssueForm(true); setShowBuyForm(false); setIssueMaterial("diamond"); setIssueFactoryId(order.assignedFactoryId); }
+                        else { setShowBuyForm(true); setShowIssueForm(false); setBuyLines(ls => ls.map(l => ({ ...l, material: "diamond" }))); }
+                      }}
+                      className={`h-7 px-3 rounded-md text-xs font-medium transition-colors ${showDiamond && diaSource === s ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+                      {s === "stock" ? "From Stock" : "Buy New"}
+                    </button>
+                  ))}
+                </div>
+                {showDiamond && (
+                  <button type="button" onClick={() => { setShowDiamond(false); setShowIssueForm(false); setShowBuyForm(false); }} className="text-xs text-muted-foreground underline">cancel</button>
+                )}
+              </div>
+            )}
           </div>
 
           <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
@@ -1819,8 +1849,8 @@ export function OrderDetailPage() {
             {order.materialSourcing === "readyStock"
               ? "Sold from Ready Stock — no factory material issuance needed"
               : readiness.ready
-              ? "Ready for Final Approval — all required material issued to a factory"
-              : `Final Approval blocked — issue ${readiness.missing.join(" and ")} to a factory first`}
+              ? "Ready for Final Approval — factory assigned and diamond sourced"
+              : `Final Approval blocked — ${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && readiness.missing.includes("diamond") ? " and " : ""}${readiness.missing.includes("diamond") ? "add the diamond (from stock or buy)" : ""} first`}
           </div>
 
           {showBuyForm && (
@@ -1839,12 +1869,7 @@ export function OrderDetailPage() {
                       <X className="h-3.5 w-3.5" />
                     </button>
                   )}
-                  <p className="text-xs font-medium text-muted-foreground">Item {idx + 1}</p>
-                  <Select value={line.material} onValueChange={v => updateBuyLine(idx, { material: v as PurchaseMaterial })}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
-                  </Select>
-
+                  <p className="text-xs font-medium text-muted-foreground">Diamond {idx + 1}</p>
                   {line.material === "gold" ? (
                     <div className="grid grid-cols-3 gap-2.5">
                       <Input type="number" min={0} value={line.goldWeight} onChange={e => updateBuyLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
@@ -1931,37 +1956,18 @@ export function OrderDetailPage() {
 
           {showIssueForm && (
             <div className="pt-2 border-t border-border/60 space-y-2.5">
-              <p className="text-sm font-medium text-brand-dark">Record Material Used for {order.orderNumber}</p>
-              <p className="text-xs text-muted-foreground -mt-1.5">How much gold/diamond the factory used, and their making charge — that's it.</p>
+              <p className="text-sm font-medium text-brand-dark">Diamond from stock → {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "factory"}</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Select value={issueFactoryId} onValueChange={setIssueFactoryId}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-                  <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
-                </Select>
-                <Select value={issueMaterial} onValueChange={v => setIssueMaterial(v as "gold" | "diamond")}>
+                <Select value={issueDiaKind} onValueChange={v => setIssueDiaKind(v as "loose" | "certified")}>
                   <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+                  <SelectContent>
+                    <SelectItem value="loose">Loose (by shape)</SelectItem>
+                    <SelectItem value="certified" disabled={inStockPackets.length === 0}>
+                      Certified packet{inStockPackets.length === 0 ? " (none in stock)" : ""}
+                    </SelectItem>
+                  </SelectContent>
                 </Select>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {issueMaterial === "gold" ? (
-                  <Select value={issuePurity} onValueChange={setIssuePurity}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                  </Select>
-                ) : (
-                  <Select value={issueDiaKind} onValueChange={v => setIssueDiaKind(v as "loose" | "certified")}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="loose">Loose (by shape)</SelectItem>
-                      <SelectItem value="certified" disabled={inStockPackets.length === 0}>
-                        Certified packet{inStockPackets.length === 0 ? " (none in stock)" : ""}
-                      </SelectItem>
-                    </SelectContent>
-                  </Select>
-                )}
-                {issueMaterial === "diamond" && issueDiaKind === "loose" && (
+                {issueDiaKind === "loose" && (
                   <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
                     <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
