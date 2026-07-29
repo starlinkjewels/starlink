@@ -149,6 +149,9 @@ function ReceiveFromClient() {
     } finally { setSaving(false); }
   };
 
+  const usdAmt = amount && (!needsRate || rate > 0) ? convertAmt(Number(amount), receivedCurrency, "USD", rate) : null;
+  const depositPreview = amount && locker && (!needsRate || rate > 0) ? convertAmt(Number(amount), receivedCurrency, lockerCurrency, rate) : null;
+
   return (
     <div className="space-y-3">
       <div>
@@ -156,6 +159,16 @@ function ReceiveFromClient() {
         <Select value={clientId} onValueChange={setClientId}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
           <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
+        </Select>
+      </div>
+      <div>
+        <Label className="text-xs">Received In</Label>
+        <Select value={receivedCurrency} onValueChange={v => setReceivedCurrency(v as "USD" | "INR")}>
+          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="USD">USD ($)</SelectItem>
+            <SelectItem value="INR">INR (₹)</SelectItem>
+          </SelectContent>
         </Select>
       </div>
       <div className="grid grid-cols-2 gap-3">
@@ -169,22 +182,12 @@ function ReceiveFromClient() {
           </div>
         </div>
         <div>
-          <Label className="text-xs">Received In</Label>
-          <Select value={receivedCurrency} onValueChange={v => setReceivedCurrency(v as "USD" | "INR")}>
+          <Label className="text-xs">Method</Label>
+          <Select value={method} onValueChange={setMethod}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="USD">USD ($)</SelectItem>
-              <SelectItem value="INR">INR (₹)</SelectItem>
-            </SelectContent>
+            <SelectContent>{["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-      </div>
-      <div>
-        <Label className="text-xs">Method</Label>
-        <Select value={method} onValueChange={setMethod}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-          <SelectContent>{["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-        </Select>
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
       <div>
@@ -199,12 +202,29 @@ function ReceiveFromClient() {
           <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
           <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
           <p className="text-xs text-muted-foreground">
-            {amount && rate > 0 ? (
-              <>${convertAmt(Number(amount), receivedCurrency, "USD", rate).toFixed(2)} applied to this client's order
-                {locker ? <>, {lockerCurrency === "USD" ? "$" : "₹"}{convertAmt(Number(amount), receivedCurrency, lockerCurrency, rate).toFixed(2)} deposited to {locker.name}</> : ""}
-              </>
-            ) : "Enter the amount and rate above to see how much applies to the order and lands in the locker — required before you can save."}
+            {receivedCurrency !== "USD"
+              ? "This client's order is billed in USD, so we need today's rate to know how much of it this payment covers."
+              : `This locker holds ${lockerCurrency}, not ${receivedCurrency} — enter the rate to convert what lands in it.`}
           </p>
+        </div>
+      )}
+      {amount && lockerId && usdAmt != null && (
+        <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Received</span>
+            <span className="font-medium text-foreground">{receivedCurrency === "USD" ? "$" : "₹"}{Number(amount).toFixed(2)} ({receivedCurrency})</span>
+          </div>
+          <div className="flex items-center justify-between text-sm">
+            <span className="text-muted-foreground">Applied to client's order</span>
+            <span className="font-semibold text-primary">{fmtMoney(usdAmt)}</span>
+          </div>
+          {depositPreview != null && locker && (
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Deposited to {locker.name}</span>
+              <span className="font-semibold text-foreground">{lockerCurrency === "USD" ? "$" : "₹"}{depositPreview.toFixed(2)}</span>
+            </div>
+          )}
         </div>
       )}
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>

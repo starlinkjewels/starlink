@@ -421,10 +421,20 @@ export function ClientHistoryPage() {
           </div>
         </div>
 
-        {showPayForm && (
+        {showPayForm && (() => {
+          const payUsdAmt = payAmount && (!payNeedsRate || payRate > 0) ? convertPayAmt(Number(payAmount), payReceivedCurrency, "USD") : null;
+          const payDepositPreview = payAmount && payLocker && (!payNeedsRate || payRate > 0) ? convertPayAmt(Number(payAmount), payReceivedCurrency, payLockerCurrency) : null;
+          return (
           <div className="pt-2 border-t border-border/60 space-y-2.5">
             <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <Select value={payReceivedCurrency} onValueChange={v => setPayReceivedCurrency(v as "USD" | "INR")}>
+              <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="USD">Received in USD ($)</SelectItem>
+                <SelectItem value="INR">Received in INR (₹)</SelectItem>
+              </SelectContent>
+            </Select>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               {/* Amount */}
               <div className="relative">
                 {payReceivedCurrency === "USD"
@@ -436,14 +446,6 @@ export function ClientHistoryPage() {
                   onKeyDown={e => e.key === "Enter" && recordPayment()}
                   className="pl-9 rounded-xl h-10" placeholder="Amount received" />
               </div>
-              {/* Received currency */}
-              <Select value={payReceivedCurrency} onValueChange={v => setPayReceivedCurrency(v as "USD" | "INR")}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="USD">Received in USD ($)</SelectItem>
-                  <SelectItem value="INR">Received in INR (₹)</SelectItem>
-                </SelectContent>
-              </Select>
               {/* Method */}
               <Select value={payMethod} onValueChange={setPayMethod}>
                 <SelectTrigger className="h-10 rounded-xl">
@@ -478,12 +480,30 @@ export function ClientHistoryPage() {
                 <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
                 <Input type="number" min={0} step="0.01" value={payExchangeRate} onChange={e => setPayExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
                 <p className="text-xs text-muted-foreground">
-                  {payAmount && payRate > 0 ? (
-                    <>${convertPayAmt(Number(payAmount), payReceivedCurrency, "USD").toFixed(2)} applied to this client's order
-                      {payLocker ? <>, {payLockerCurrency === "USD" ? "$" : "₹"}{convertPayAmt(Number(payAmount), payReceivedCurrency, payLockerCurrency).toFixed(2)} deposited to {payLocker.name}</> : ""}
-                    </>
-                  ) : "Enter the amount and rate above to see how much applies to the order and lands in the locker — required before you can save."}
+                  {payReceivedCurrency !== "USD"
+                    ? "This client's order is billed in USD, so we need today's rate to know how much of it this payment covers."
+                    : `This locker holds ${payLockerCurrency}, not ${payReceivedCurrency} — enter the rate to convert what lands in it.`}
                 </p>
+              </div>
+            )}
+
+            {payAmount && payLockerId && payUsdAmt != null && (
+              <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Received</span>
+                  <span className="font-medium text-foreground">{payReceivedCurrency === "USD" ? "$" : "₹"}{Number(payAmount).toFixed(2)} ({payReceivedCurrency})</span>
+                </div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">Applied to order</span>
+                  <span className="font-semibold text-primary">{fmtMoney(payUsdAmt)}</span>
+                </div>
+                {payDepositPreview != null && payLocker && (
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Deposited to {payLocker.name}</span>
+                    <span className="font-semibold text-foreground">{payLockerCurrency === "USD" ? "$" : "₹"}{payDepositPreview.toFixed(2)}</span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -496,7 +516,8 @@ export function ClientHistoryPage() {
               Clears the oldest pending bills first; any extra is kept as credit for future orders.
             </p>
           </div>
-        )}
+          );
+        })()}
       </div>
 
       {/* Account Statement — orders billed and payments received, interleaved
