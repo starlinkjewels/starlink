@@ -123,6 +123,10 @@ export function LockerPage() {
     }
     const now = new Date().toISOString();
     const currency = selected.currency || "INR";
+    if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
+      toast.error("That destination locker couldn't be found — pick it again and retry.");
+      return;
+    }
     updateDb(d => {
       if (!d.lockerTransactions) d.lockerTransactions = [];
       if (txnType === "transfer_out") {
@@ -406,17 +410,17 @@ export function LockerPage() {
                 const destAmount = rate > 0 ? (selected.currency === "USD" ? amt * rate : amt / rate) : null;
                 return (
                   <div className="p-3 rounded-xl bg-secondary space-y-2">
-                    <Label className="text-xs">Exchange rate — 1 USD = ₹</Label>
+                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
                     <Input
                       type="number" min={0} step="0.01" value={txnExchangeRate}
                       onChange={e => setTxnExchangeRate(e.target.value)}
                       className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50"
                     />
-                    {destAmount != null && (
-                      <p className="text-xs text-muted-foreground">
-                        {fmtLockerAmount(amt, selected.currency)} → {fmtLockerAmount(Math.round(destAmount * 100) / 100, target.currency)}
-                      </p>
-                    )}
+                    <p className="text-xs text-muted-foreground">
+                      {destAmount != null
+                        ? `${fmtLockerAmount(amt, selected.currency)} → ${fmtLockerAmount(Math.round(destAmount * 100) / 100, target.currency)}`
+                        : "Enter the rate above to see the converted amount — required before you can save this transfer."}
+                    </p>
                   </div>
                 );
               })()}

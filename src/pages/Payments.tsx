@@ -493,7 +493,11 @@ function LockerActions() {
     if (action === "transfer_out" && !targetLocker) { toast.error("Choose a destination locker"); return; }
     if (action === "transfer_out" && targetLocker === lockerId) { toast.error("Choose a different destination locker"); return; }
     const rate = Number(exchangeRate);
-    if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
+    if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter the exchange rate before saving this transfer"); return; }
+    if (action === "transfer_out" && !db.lockers.find(l => l.id === targetLocker)) {
+      toast.error("That destination locker couldn't be found — pick it again and retry.");
+      return;
+    }
     // Overdraw warning on money leaving the source locker — identical to Locker.tsx.
     if (action === "expense" || action === "transfer_out") {
       const bal = lockerBalance(selected, db.lockerTransactions);
@@ -598,7 +602,7 @@ function LockerActions() {
         </div>
         {crossCurrency ? (
           <div>
-            <Label className="text-xs">Exchange Rate (₹ per $)</Label>
+            <Label className="text-xs">Exchange Rate (₹ per $) <span className="text-destructive">*</span></Label>
             <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 83" />
           </div>
         ) : action !== "transfer_out" ? (
@@ -609,12 +613,15 @@ function LockerActions() {
         ) : <div />}
       </div>
 
-      {crossCurrency && amount && Number(exchangeRate) > 0 && (
+      {crossCurrency && (
         <p className="text-xs text-muted-foreground">
-          {target?.name} will receive{" "}
-          <span className="font-semibold text-foreground">
-            {fmtLockerAmount(cur === "USD" ? Number(amount) * Number(exchangeRate) : Number(amount) / Number(exchangeRate), target?.currency)}
-          </span>
+          {amount && Number(exchangeRate) > 0 ? (
+            <>{target?.name} will receive{" "}
+              <span className="font-semibold text-foreground">
+                {fmtLockerAmount(cur === "USD" ? Number(amount) * Number(exchangeRate) : Number(amount) / Number(exchangeRate), target?.currency)}
+              </span>
+            </>
+          ) : "Enter the amount and exchange rate above to see the converted amount — the exchange rate is required before you can save this transfer."}
         </p>
       )}
 
