@@ -453,14 +453,16 @@ export function SupplierHistoryPage() {
                 <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {account.balanceOwed > 0 && (
+            {user?.role === "admin" && account.balanceOwed > 0 && (
               <Button onClick={() => setShowPayForm(v => !v)} variant="outline" className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Record Payment
               </Button>
             )}
-            <Button onClick={() => setShowPurchaseForm(v => !v)} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> Record Purchase
-            </Button>
+            {user?.role === "admin" && (
+              <Button onClick={() => setShowPurchaseForm(v => !v)} className="btn-hero rounded-xl gap-2">
+                <Plus className="h-4 w-4" /> Record Purchase
+              </Button>
+            )}
           </div>
         </div>
 

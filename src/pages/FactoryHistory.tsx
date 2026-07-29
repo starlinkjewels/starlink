@@ -513,9 +513,11 @@ export function FactoryHistoryPage() {
                 <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> Issue Material
-            </Button>
+            {user?.role === "admin" && (
+              <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
+                <Plus className="h-4 w-4" /> Issue Material
+              </Button>
+            )}
           </div>
         </div>
 
@@ -677,6 +679,7 @@ export function FactoryHistoryPage() {
                 </div>
               </div>
 
+              {user?.role === "admin" && (
               <div className="flex flex-wrap gap-2 mt-3">
                 {mi.orderId && (
                   <>
@@ -696,6 +699,7 @@ export function FactoryHistoryPage() {
                   <AsyncButton size="sm" variant="outline" onClick={() => closeIssuance(mi)} className="rounded-lg">Close Issuance</AsyncButton>
                 )}
               </div>
+              )}
 
               {isActive && activeIssuance.action === "piece" && (
                 <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">

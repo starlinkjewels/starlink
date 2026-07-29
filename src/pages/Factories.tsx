@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { useAuth } from "@/lib/auth";
 import { factoryAccount, fmtMoneyInr } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -17,6 +18,8 @@ const PAGE_SIZE = 9;
 
 export function FactoriesPage() {
   const db = useDb();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -59,6 +62,7 @@ export function FactoriesPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Factories</h1>
           <p className="text-sm text-muted-foreground">{total} factory{total !== 1 ? "ies" : ""}</p>
         </div>
+        {isAdmin && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Factory</Button>
@@ -76,6 +80,7 @@ export function FactoriesPage() {
             <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Factory"}</Button>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
       <div className="relative">
@@ -128,6 +133,7 @@ export function FactoriesPage() {
                 <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
                   <Link to={`/factories/${fac.id}`}><History className="h-4 w-4 text-primary" />View Ledger</Link>
                 </Button>
+                {isAdmin && (
                 <div className="flex gap-2">
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(fac)} className="rounded-lg flex-1">
                     {fac.active === false ? "Activate" : "Deactivate"}
@@ -136,6 +142,7 @@ export function FactoriesPage() {
                     <Trash2 className="h-3.5 w-3.5" />
                   </AsyncButton>
                 </div>
+                )}
               </div>
             </div>
           );

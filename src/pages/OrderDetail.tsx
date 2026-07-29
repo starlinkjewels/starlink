@@ -24,7 +24,7 @@ import { printInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, issuanceWastage,
 } from "@/lib/manufacturing";
 import { decreaseStock, increaseStock } from "@/lib/stock";
 
@@ -319,6 +319,59 @@ export function OrderDetailPage() {
     });
     toast.success("Estimate saved");
     setShowEstimate(false);
+  };
+
+  // "Mark Done" on a factory issuance — finalize it from the order itself, so
+  // staff never open the Factory page. Ported faithfully from FactoryHistory's
+  // closeIssuance: unused material auto-returns (to Stock if stock-sourced, to
+  // the factory's own pool if pool-sourced) and certified stones flip to "used".
+  const [closingId, setClosingId] = useState<string | null>(null);
+  const closeOrderIssuance = async (issuance: MaterialIssuance) => {
+    const leftover = Math.round(issuanceWastage(issuance) * 100) / 100;
+    const unit = issuance.material === "gold" ? "g" : "ct";
+    const factory = db.factories.find(f => f.id === issuance.factoryId);
+    const now = new Date().toISOString();
+    if (!confirm(`Mark this ${issuance.material} as done?${leftover > 0 ? `\n\n${leftover}${unit} unused will be returned automatically.` : ""}`)) return;
+    setClosingId(issuance.id);
+    try {
+      const returnsToStock = leftover > 0 && issuance.diamondKind !== "certified" && issuance.source === "stock";
+      const releasesToPool = leftover > 0 && issuance.source === "factoryPool";
+      if (returnsToStock) {
+        await increaseStock({
+          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
+          refType: "manual", createdBy: user!.id,
+          note: `Unused material returned on closing issuance for ${factory?.name || "factory"}`,
+        });
+      }
+      updateDb(d => {
+        const mi = d.materialIssuances.find(x => x.id === issuance.id);
+        if (mi) {
+          mi.status = "closed";
+          if (returnsToStock || releasesToPool) mi.quantityIssued = Math.round((mi.quantityIssued - leftover) * 100) / 100;
+        }
+        if (issuance.diamondKind === "certified" && issuance.diamondPacketIds) {
+          for (const p of d.diamondPackets) if (issuance.diamondPacketIds.includes(p.id)) p.status = "used";
+        }
+        if (returnsToStock || releasesToPool) {
+          const o = d.orders.find(o => o.id === issuance.orderId);
+          if (o) {
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            o.manufacturingLog.push({
+              id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: issuance.factoryId,
+              material: issuance.material, amountMaterial: leftover,
+              remarks: `${leftover}${unit} unused ${issuance.material} returned ${returnsToStock ? "to stock" : "to the factory's pool"} on marking done`,
+            });
+          }
+        }
+      });
+      toast.success(
+        returnsToStock ? `Marked done — ${leftover}${unit} returned to stock`
+        : releasesToPool ? `Marked done — ${leftover}${unit} returned to the factory's pool`
+        : "Marked done",
+      );
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to mark done");
+    } finally { setClosingId(null); }
   };
 
   // Records material USE + its making charge for this order in one save.
@@ -1849,13 +1902,24 @@ export function OrderDetailPage() {
                   ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
                   : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`;
                 return (
-                  <Link key={mi.id} to={`/factories/${mi.factoryId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
-                    <span className="flex items-center gap-2 min-w-0">
+                  <div key={mi.id} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary text-sm">
+                    <Link to={`/factories/${mi.factoryId}`} className="flex items-center gap-2 min-w-0 hover:underline">
                       {mi.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
                       <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
+                    </Link>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                      {mi.status === "open" && canEditStage() && (
+                        <button
+                          onClick={() => closeOrderIssuance(mi)}
+                          disabled={closingId === mi.id}
+                          className="rounded-lg border border-border bg-white px-2 py-1 text-xs font-medium hover:bg-secondary/70 disabled:opacity-50"
+                        >
+                          {closingId === mi.id ? "…" : "Mark Done"}
+                        </button>
+                      )}
                     </span>
-                    <span className={`shrink-0 font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                  </Link>
+                  </div>
                 );
               })}
             </div>
