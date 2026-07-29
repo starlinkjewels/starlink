@@ -145,6 +145,7 @@ export interface Order {
   // Estimated weights — entered at order creation (piece not made yet)
   estimatedGrossWeight?: number; // grams
   estimatedNetWeight?: number; // grams
+  estimatedMakingCharges?: number; // flat $ making charge quoted when the factory is assigned (before the piece is made)
   // Actual details — filled in after production / Final Approval by admin
   actualGrossWeight?: number; // grams
   actualNetWeight?: number; // grams

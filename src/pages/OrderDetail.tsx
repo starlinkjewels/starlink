@@ -168,6 +168,12 @@ export function OrderDetailPage() {
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
 
+  // Stage ① — assign factory + quote an estimate (before the piece is made).
+  const [showEstimate, setShowEstimate] = useState(false);
+  const [estGold, setEstGold] = useState("");
+  const [estDia, setEstDia] = useState("");
+  const [estMaking, setEstMaking] = useState("");
+
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/orders" className="text-primary underline">Back</Link></div>;
@@ -293,6 +299,25 @@ export function OrderDetailPage() {
       }
     });
     if (factoryId) toast.success(`${factory?.name || "Factory"} assigned to this order`);
+  };
+
+  const openEstimate = () => {
+    setEstGold(order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "");
+    setEstDia(order.diamondWeight?.toString() ?? "");
+    setEstMaking(order.estimatedMakingCharges?.toString() ?? "");
+    setShowEstimate(true);
+  };
+
+  const saveEstimate = () => {
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id);
+      if (!o) return;
+      o.estimatedGrossWeight = estGold ? Number(estGold) : undefined;
+      if (estDia) o.diamondWeight = Number(estDia);
+      o.estimatedMakingCharges = estMaking ? Number(estMaking) : undefined;
+    });
+    toast.success("Estimate saved");
+    setShowEstimate(false);
   };
 
   // Records material USE + its making charge for this order in one save.
@@ -1532,23 +1557,63 @@ export function OrderDetailPage() {
             </div>
             <div className="flex items-center gap-2 flex-wrap">
               <Button onClick={() => { setShowBuyForm(v => !v); setShowIssueForm(false); }} variant="outline" className="rounded-xl gap-2">
-                <Truck className="h-4 w-4" /> Record Purchase
+                <Truck className="h-4 w-4" /> Buy for this Order
               </Button>
               <Button onClick={() => { setShowIssueForm(v => !v); setShowBuyForm(false); if (!issueFactoryId && order.assignedFactoryId) setIssueFactoryId(order.assignedFactoryId); }} className="btn-hero rounded-xl gap-2">
-                <FactoryIcon className="h-4 w-4" /> Record Material Used
+                <FactoryIcon className="h-4 w-4" /> Use from Stock
               </Button>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-muted-foreground shrink-0">Assigned Factory:</span>
-            <Select value={order.assignedFactoryId || "__none"} onValueChange={v => assignFactory(v === "__none" ? "" : v)}>
-              <SelectTrigger className="h-8 w-56 rounded-lg text-xs"><SelectValue placeholder="Not assigned" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none">Not assigned</SelectItem>
-                {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          {/* Stage ① — Assign the factory and quote an estimate before the piece is made. */}
+          <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 space-y-3">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-brand-dark shrink-0">① Assign &amp; Estimate</span>
+                <Select value={order.assignedFactoryId || "__none"} onValueChange={v => assignFactory(v === "__none" ? "" : v)}>
+                  <SelectTrigger className="h-8 w-52 rounded-lg text-xs"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Not assigned</SelectItem>
+                    {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {canEditStage() && (
+                <Button size="sm" variant="outline" onClick={() => (showEstimate ? setShowEstimate(false) : openEstimate())} className="rounded-lg h-8 gap-1.5 text-xs">
+                  {showEstimate ? "Close" : (order.estimatedMakingCharges != null || order.estimatedGrossWeight != null ? "Edit Estimate" : "Add Estimate")}
+                </Button>
+              )}
+            </div>
+
+            {/* Estimate summary (read-only) */}
+            {!showEstimate && (
+              <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
+                <span>Est. gold: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ?? order.metalWeight ?? "—"}{(order.estimatedGrossWeight ?? order.metalWeight) != null ? " g" : ""}</span></span>
+                <span>Est. diamond: <span className="font-semibold text-foreground">{order.diamondWeight ? `${order.diamondWeight} ct` : "—"}</span></span>
+                <span>Est. making: <span className="font-semibold text-foreground">{order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—"}</span></span>
+              </div>
+            )}
+
+            {/* Estimate editor */}
+            {showEstimate && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <div>
+                  <Label className="text-[11px]">Est. Gold Weight (g)</Label>
+                  <Input type="number" min={0} step="0.01" value={estGold} onChange={e => setEstGold(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
+                </div>
+                <div>
+                  <Label className="text-[11px]">Est. Diamond (ct)</Label>
+                  <Input type="number" min={0} step="0.01" value={estDia} onChange={e => setEstDia(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
+                </div>
+                <div>
+                  <Label className="text-[11px]">Est. Making Charge ($)</Label>
+                  <Input type="number" min={0} step="0.01" value={estMaking} onChange={e => setEstMaking(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
+                </div>
+                <div className="sm:col-span-3 flex justify-end">
+                  <Button size="sm" onClick={saveEstimate} className="btn-hero rounded-lg h-9 gap-1.5 text-xs">Save Estimate</Button>
+                </div>
+              </div>
+            )}
           </div>
 
           <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
