@@ -8,17 +8,17 @@ import { useDb } from "@/hooks/useDb";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
-  fmtMoneyInr,
+  fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign } from "lucide-react";
+import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark } from "lucide-react";
 import { toast } from "sonner";
 
-type Mode = "client" | "supplier" | "factory" | "expense";
+type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
 
@@ -42,12 +42,13 @@ export function PaymentsPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Receive from a client, or pay a supplier, factory, or expense — all in one place</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {([
           { m: "client", label: "Receive from Client", icon: CreditCard },
           { m: "supplier", label: "Pay Supplier", icon: Truck },
           { m: "factory", label: "Pay Factory", icon: FactoryIcon },
           { m: "expense", label: "Pay Expense", icon: Receipt },
+          { m: "locker", label: "Locker", icon: Landmark },
         ] as const).map(opt => (
           <button key={opt.m} onClick={() => setMode(opt.m)}
             className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors text-xs font-medium
@@ -69,6 +70,7 @@ export function PaymentsPage() {
         {mode === "supplier" && <PaySupplier />}
         {mode === "factory" && <PayFactory />}
         {mode === "expense" && <PayExpense />}
+        {mode === "locker" && <LockerActions />}
       </div>
     </div>
   );
@@ -450,6 +452,169 @@ function PayExpense() {
         )}
       </div>
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Expense"}</AsyncButton>
+    </div>
+  );
+}
+
+/* ── Locker — deposit, withdraw, or transfer between lockers.
+   Mirrors Locker.tsx's recordTxn exactly (overdraw warning + cross-currency
+   transfer rate) so the two entry points behave identically. ── */
+type LockerAction = "income" | "expense" | "transfer_out";
+function LockerActions() {
+  const { user } = useAuth();
+  const db = useDb();
+  const [action, setAction] = useState<LockerAction>("income");
+  const [lockerId, setLockerId] = useState("");
+  const [amount, setAmount] = useState("");
+  const [category, setCategory] = useState("");
+  const [note, setNote] = useState("");
+  const [targetLocker, setTargetLocker] = useState("");
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const lockers = db.lockers.filter(l => l.active !== false);
+  const selected = lockers.find(l => l.id === lockerId) ?? null;
+  const target = action === "transfer_out" ? lockers.find(l => l.id === targetLocker) : undefined;
+  const crossCurrency = !!selected && !!target && (target.currency || "INR") !== (selected.currency || "INR");
+  const cur = selected?.currency || "INR";
+
+  const submit = () => {
+    if (!selected) { toast.error("Choose a locker"); return; }
+    const amt = Number(amount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (action === "transfer_out" && !targetLocker) { toast.error("Choose a destination locker"); return; }
+    if (action === "transfer_out" && targetLocker === lockerId) { toast.error("Choose a different destination locker"); return; }
+    const rate = Number(exchangeRate);
+    if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
+    // Overdraw warning on money leaving the source locker — identical to Locker.tsx.
+    if (action === "expense" || action === "transfer_out") {
+      const bal = lockerBalance(selected, db.lockerTransactions);
+      if (amt > bal) {
+        const ok = window.confirm(
+          `This ${action === "expense" ? "withdrawal" : "transfer"} of ${fmtLockerAmount(amt, selected.currency)} is more than ${selected.name}'s balance of ${fmtLockerAmount(bal, selected.currency)} ${cur}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
+        );
+        if (!ok) return;
+      }
+    }
+    setSaving(true);
+    try {
+      const now = new Date().toISOString();
+      updateDb(d => {
+        if (!d.lockerTransactions) d.lockerTransactions = [];
+        if (action === "transfer_out") {
+          const dest = d.lockers.find(l => l.id === targetLocker);
+          if (!dest) return;
+          const destAmount = crossCurrency
+            ? Math.round((cur === "USD" ? amt * rate : amt / rate) * 100) / 100
+            : amt;
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency: cur,
+            category: "Transfer", pairedLockerId: dest.id, note: note.trim() || undefined,
+            exchangeRate: crossCurrency ? rate : undefined,
+            recordedBy: user!.id, createdAt: now,
+          });
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: dest.id, type: "transfer_in", amountInr: destAmount, currency: dest.currency || "INR",
+            category: "Transfer", pairedLockerId: selected.id, note: note.trim() || undefined,
+            exchangeRate: crossCurrency ? rate : undefined,
+            recordedBy: user!.id, createdAt: now,
+          });
+        } else {
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: selected.id, type: action, amountInr: amt, currency: cur,
+            category: category.trim() || undefined, refType: "manual",
+            note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
+          });
+        }
+      });
+      toast.success(
+        action === "income" ? `${fmtLockerAmount(amt, selected.currency)} deposited to ${selected.name}`
+          : action === "expense" ? `${fmtLockerAmount(amt, selected.currency)} withdrawn from ${selected.name}`
+          : `${fmtLockerAmount(amt, selected.currency)} transferred to ${target?.name}`,
+      );
+      setAmount(""); setCategory(""); setNote(""); setTargetLocker(""); setExchangeRate("");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-3">
+      {/* Current balances — so staff pick the right locker at a glance */}
+      {lockers.length > 0 && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+          {lockers.map(l => (
+            <div key={l.id} className="p-2.5 rounded-xl bg-secondary/60 border border-border/40">
+              <p className="text-xs text-muted-foreground truncate">{l.name}</p>
+              <p className="text-sm font-semibold text-brand-dark">{fmtLockerAmount(lockerBalance(l, db.lockerTransactions), l.currency)}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div>
+        <Label className="text-xs">Action</Label>
+        <Select value={action} onValueChange={v => setAction(v as LockerAction)}>
+          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="income">Deposit (money in)</SelectItem>
+            <SelectItem value="expense">Withdraw (money out)</SelectItem>
+            <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div>
+        <Label className="text-xs">{action === "transfer_out" ? "From Locker *" : "Locker *"}</Label>
+        <Select value={lockerId} onValueChange={setLockerId}>
+          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+          <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+        </Select>
+        {selected && (
+          <p className="text-xs text-muted-foreground mt-1">Current balance: <span className="font-semibold text-foreground">{fmtLockerAmount(lockerBalance(selected, db.lockerTransactions), selected.currency)}</span></p>
+        )}
+      </div>
+
+      {action === "transfer_out" && (
+        <div>
+          <Label className="text-xs">To Locker *</Label>
+          <Select value={targetLocker} onValueChange={setTargetLocker}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose destination" /></SelectTrigger>
+            <SelectContent>{lockers.filter(l => l.id !== lockerId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Amount ({cur === "USD" ? "$" : "₹"})</Label>
+          <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
+        {crossCurrency ? (
+          <div>
+            <Label className="text-xs">Exchange Rate (₹ per $)</Label>
+            <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 83" />
+          </div>
+        ) : action !== "transfer_out" ? (
+          <div>
+            <Label className="text-xs">Category (optional)</Label>
+            <Input value={category} onChange={e => setCategory(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. Owner deposit" />
+          </div>
+        ) : <div />}
+      </div>
+
+      {crossCurrency && amount && Number(exchangeRate) > 0 && (
+        <p className="text-xs text-muted-foreground">
+          {target?.name} will receive{" "}
+          <span className="font-semibold text-foreground">
+            {fmtLockerAmount(cur === "USD" ? Number(amount) * Number(exchangeRate) : Number(amount) / Number(exchangeRate), target?.currency)}
+          </span>
+        </p>
+      )}
+
+      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+
+      <AsyncButton onClick={submit} disabled={saving || lockers.length === 0} className="btn-hero rounded-xl h-10 w-full">
+        {saving ? "Saving…" : action === "income" ? "Record Deposit" : action === "expense" ? "Record Withdrawal" : "Record Transfer"}
+      </AsyncButton>
     </div>
   );
 }
