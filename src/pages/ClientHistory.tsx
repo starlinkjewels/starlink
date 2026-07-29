@@ -6,6 +6,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -67,21 +68,30 @@ export function ClientHistoryPage() {
 
   // ── Client account / payments ──
   const [payAmount, setPayAmount] = useState("");
+  const [payReceivedCurrency, setPayReceivedCurrency] = useState<"USD" | "INR">("USD");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRemark, setPayRemark] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
-  const [payLockerAmount, setPayLockerAmount] = useState("");
+  const [payExchangeRate, setPayExchangeRate] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
   const account = clientAccount(billableOrders, client?.creditBalance || 0);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
-  const isUsdPayLocker = (payLocker?.currency || "INR") === "USD";
+  const payLockerCurrency = payLocker?.currency || "INR";
+  // Billing is always USD; the deposit lands in whatever currency the chosen
+  // locker holds — either side only needs the rate if it actually differs
+  // from what was received (only USD/INR exist, so one rate covers both).
+  const payNeedsRate = payReceivedCurrency !== "USD" || (!!payLocker && payReceivedCurrency !== payLockerCurrency);
+  const payRate = Number(payExchangeRate);
+  const convertPayAmt = (amt: number, from: "USD" | "INR", to: "USD" | "INR"): number =>
+    from === to ? amt : from === "USD" ? amt * payRate : amt / payRate;
 
   const recordPayment = () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
-    const depositAmt = isUsdPayLocker ? amt : Number(payLockerAmount);
-    if (!depositAmt || depositAmt <= 0) { toast.error("Enter the amount actually deposited in that locker"); return; }
+    if (payNeedsRate && (!payRate || payRate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
+    const usdAmt = Math.round(convertPayAmt(amt, payReceivedCurrency, "USD") * 100) / 100;
+    const depositAmt = Math.round(convertPayAmt(amt, payReceivedCurrency, payLockerCurrency) * 100) / 100;
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     updateDb(d => {
@@ -91,7 +101,7 @@ export function ClientHistoryPage() {
       const now = new Date().toISOString();
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
-      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now, note);
+      const leftover = reconcileClientAccount(clientOrders, usdAmt, c.creditBalance || 0, user!.id, now, note);
       c.creditBalance = leftover > 0 ? leftover : undefined;
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
@@ -104,6 +114,7 @@ export function ClientHistoryPage() {
             id: uid("ltx_"), lockerId: payLockerId, type: "income", amountInr: depositAmt,
             currency: locker.currency || "INR", category: `Client Payment — ${c.companyName}`,
             refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
+            exchangeRate: payNeedsRate ? payRate : undefined,
           });
         }
       }
@@ -111,12 +122,12 @@ export function ClientHistoryPage() {
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: "Payment Received",
-        body: `${fmtMoney(amt)} received via ${payMethod} and applied to your oldest pending orders.`,
+        body: `${fmtMoney(usdAmt)} received via ${payMethod} and applied to your oldest pending orders.`,
         type: "info", read: false, createdAt: now,
       });
     });
     toast.success(`Payment recorded (${payMethod}) & allocated to oldest bills`);
-    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayLockerAmount(""); setShowPayForm(false);
+    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setShowPayForm(false);
   };
 
   const applyCredit = () => {
@@ -416,13 +427,23 @@ export function ClientHistoryPage() {
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {/* Amount */}
               <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                {payReceivedCurrency === "USD"
+                  ? <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  : <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-muted-foreground">₹</span>}
                 <Input
                   type="number" min="1" step="0.01" autoFocus
                   value={payAmount} onChange={e => setPayAmount(e.target.value)}
                   onKeyDown={e => e.key === "Enter" && recordPayment()}
                   className="pl-9 rounded-xl h-10" placeholder="Amount received" />
               </div>
+              {/* Received currency */}
+              <Select value={payReceivedCurrency} onValueChange={v => setPayReceivedCurrency(v as "USD" | "INR")}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="USD">Received in USD ($)</SelectItem>
+                  <SelectItem value="INR">Received in INR (₹)</SelectItem>
+                </SelectContent>
+              </Select>
               {/* Method */}
               <Select value={payMethod} onValueChange={setPayMethod}>
                 <SelectTrigger className="h-10 rounded-xl">
@@ -433,31 +454,38 @@ export function ClientHistoryPage() {
                     <SelectItem key={m} value={m}>{m}</SelectItem>)}
                 </SelectContent>
               </Select>
-              {/* Remark */}
-              <Input
-                value={payRemark} onChange={e => setPayRemark(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && recordPayment()}
-                className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
             </div>
+            {/* Remark */}
+            <Input
+              value={payRemark} onChange={e => setPayRemark(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && recordPayment()}
+              className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
 
             {db.lockers.filter(l => l.active !== false).length === 0 && (
               <p className="text-xs text-amber-600">
                 No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
               </p>
             )}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Select value={payLockerId} onValueChange={setPayLockerId}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
-                <SelectContent>
-                  {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {payLockerId && !isUsdPayLocker && (
-                <Input
-                  type="number" min={0} step="0.01" value={payLockerAmount} onChange={e => setPayLockerAmount(e.target.value)}
-                  className="rounded-xl h-10" placeholder="Amount deposited (₹)" />
-              )}
-            </div>
+            <Select value={payLockerId} onValueChange={setPayLockerId}>
+              <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
+              <SelectContent>
+                {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+              </SelectContent>
+            </Select>
+
+            {payNeedsRate && (
+              <div className="p-3 rounded-xl bg-secondary space-y-2">
+                <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+                <Input type="number" min={0} step="0.01" value={payExchangeRate} onChange={e => setPayExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
+                <p className="text-xs text-muted-foreground">
+                  {payAmount && payRate > 0 ? (
+                    <>${convertPayAmt(Number(payAmount), payReceivedCurrency, "USD").toFixed(2)} applied to this client's order
+                      {payLocker ? <>, {payLockerCurrency === "USD" ? "$" : "₹"}{convertPayAmt(Number(payAmount), payReceivedCurrency, payLockerCurrency).toFixed(2)} deposited to {payLocker.name}</> : ""}
+                    </>
+                  ) : "Enter the amount and rate above to see how much applies to the order and lands in the locker — required before you can save."}
+                </p>
+              </div>
+            )}
 
             <div className="flex gap-2.5">
               <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
