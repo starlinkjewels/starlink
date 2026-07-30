@@ -101,8 +101,8 @@ service cloud.firestore {
     match /tasks/{id}    { allow read, write: if isStaff(); }
     match /expenses/{id} { allow read, write: if isStaff(); }
 
-    // Manufacturing & Accounts — Locker, Supplier/Purchases, Factory. Purely
-    // internal business data; clients never see any of this.
+    // Manufacturing & Accounts — Locker, Supplier/Purchases/Receipts, Factory,
+    // Stock, Diamond packets. Purely internal business data; clients never see any of this.
     match /lockers/{id}            { allow read, write: if isStaff(); }
     match /lockerTransactions/{id} { allow read, write: if isStaff(); }
     match /suppliers/{id}          { allow read, write: if isStaff(); }
@@ -110,8 +110,8 @@ service cloud.firestore {
     match /supplierReceipts/{id}   { allow read, write: if isStaff(); }
     match /factories/{id}          { allow read, write: if isStaff(); }
     match /materialIssuances/{id}  { allow read, write: if isStaff(); }
-    match /stockMovements/{id}     { allow read, write: if isStaff(); }
     match /diamondPackets/{id}     { allow read, write: if isStaff(); }
+    match /stockMovements/{id}     { allow read, write: if isStaff(); }
     // Singleton running stock balance — mutated only via a transaction in
     // src/lib/stock.ts; this rule is defense-in-depth, not the primary
     // correctness guarantee (that's the transaction's floor-check).
