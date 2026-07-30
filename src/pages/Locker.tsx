@@ -457,7 +457,21 @@ export function LockerPage() {
                 </div>
               </div>
             ))}
-            {txns.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No transactions yet.</div>}
+            {/* Opening balance — the starting point every running balance builds on,
+                shown at the very bottom (after the oldest entry) so the numbers make sense. */}
+            {page === totalPages && (
+              <div className="flex items-center gap-3 px-5 py-3 bg-secondary/40">
+                <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-primary/10 text-primary">
+                  <History className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Opening balance</p>
+                  <p className="text-xs text-muted-foreground">Starting cash when this locker was created</p>
+                </div>
+                <p className="text-sm font-semibold text-right shrink-0">{fmtLockerAmount(selected.openingBalance || 0, selected.currency)}</p>
+              </div>
+            )}
+            {txns.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No transactions yet — opening balance only.</div>}
           </div>
 
           {totalPages > 1 && (
