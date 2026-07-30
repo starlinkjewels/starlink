@@ -487,7 +487,7 @@ export function SupplierHistoryPage() {
                 <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
-            {user?.role === "admin" && account.balanceOwed > 0 && (
+            {user?.role === "admin" && (
               <Button onClick={() => { setShowPayForm(v => !v); setShowReceiveForm(false); }} variant="outline" className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Pay
               </Button>
