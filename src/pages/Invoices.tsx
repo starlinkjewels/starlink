@@ -94,7 +94,7 @@ export function InvoicesPage() {
   const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE);
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Invoices</h1>
 
       {/* Summary cards */}

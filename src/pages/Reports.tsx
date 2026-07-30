@@ -249,7 +249,7 @@ export function ReportsPage() {
 
   /* ── render ── */
   return (
-    <div className="max-w-6xl mx-auto space-y-4">
+    <div className="max-w-7xl mx-auto space-y-4">
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3">

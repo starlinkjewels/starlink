@@ -243,7 +243,7 @@ export function IncomePage() {
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Passbook</h1>
         <DropdownMenu>

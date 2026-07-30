@@ -234,7 +234,7 @@ export function LockerPage() {
   };
 
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Locker</h1>

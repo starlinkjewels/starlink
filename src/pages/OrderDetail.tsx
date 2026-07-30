@@ -1181,7 +1181,7 @@ export function OrderDetailPage() {
 
   return (
     <>
-    <div className="max-w-5xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <button onClick={() => nav(-1)} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
 
       {/* Order Header */}
