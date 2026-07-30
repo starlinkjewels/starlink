@@ -58,6 +58,10 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
+  // TEMPORARY DIAGNOSTIC: disable minification so a runtime error toast shows the
+  // real variable name instead of "Cannot access 'a' before initialization".
+  // Revert (remove this build block) once the culprit is identified.
+  build: { minify: false, sourcemap: true },
   resolve: {
     alias: { "@": path.resolve(process.cwd(), "src") },
   },
