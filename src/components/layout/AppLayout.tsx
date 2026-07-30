@@ -31,6 +31,41 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
+/* Desktop sidebar — grouped into collapsible sections ("folders") so a long
+   flat list reads as a professional, organised menu. Mobile is unchanged. */
+const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
+  { title: "Overview", items: [
+    { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
+    { to: "/", label: "Dashboard", icon: LayoutDashboard },
+    { to: "/orders", label: "Orders", icon: Package },
+  ] },
+  { title: "Clients & Billing", items: [
+    { to: "/clients", label: "Clients", icon: Users, roles: ["admin", "employee"] },
+    { to: "/invoices", label: "Invoices", icon: FileText },
+    { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee"] },
+  ] },
+  { title: "Manufacturing", items: [
+    { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin", "employee"] },
+    { to: "/factories", label: "Factories", icon: Factory, roles: ["admin", "employee"] },
+    { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "employee"] },
+    { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin", "employee"] },
+  ] },
+  { title: "Money & Accounts", items: [
+    { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin", "employee"] },
+    { to: "/income", label: "Passbook", icon: BookOpen },
+    { to: "/locker", label: "Locker", icon: Landmark, roles: ["admin", "employee"] },
+    { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin", "employee"] },
+  ] },
+  { title: "Workspace", items: [
+    { to: "/messages", label: "Messages", icon: MessageSquare },
+    { to: "/notifications", label: "Alerts", icon: Bell },
+    { to: "/ai", label: "Starlink AI", icon: Sparkles },
+    { to: "/reports", label: "Reports", icon: BarChart3 },
+    { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
+    { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
+  ] },
+];
+
 /* Main 4 tabs always visible on mobile */
 const MOBILE_NAV: NavItem[] = [
   { to: "/", label: "Home", icon: LayoutDashboard },
@@ -152,6 +187,19 @@ export function AppLayout() {
 
   const nav = NAV.filter(n => !n.roles || n.roles.includes(user!.role));
   const moreNav = MORE_NAV.filter(n => !n.roles || n.roles.includes(user!.role));
+  // Desktop grouped sidebar (role-filtered, empty groups dropped) + collapse state.
+  const navGroups = NAV_GROUPS
+    .map(g => ({ ...g, items: g.items.filter(n => !n.roles || n.roles.includes(user!.role)) }))
+    .filter(g => g.items.length > 0);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem("sidebar-collapsed") || "[]")); } catch { return new Set(); }
+  });
+  const toggleGroup = (title: string) => setCollapsedGroups(prev => {
+    const next = new Set(prev);
+    next.has(title) ? next.delete(title) : next.add(title);
+    try { localStorage.setItem("sidebar-collapsed", JSON.stringify([...next])); } catch { /* ignore */ }
+    return next;
+  });
   const canCreateOrder = user?.role === "client" || user?.role === "admin" || user?.role === "employee";
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
@@ -177,25 +225,43 @@ export function AppLayout() {
         <div className="px-5 py-5 flex items-center">
           <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-auto object-contain" />
         </div>
-        <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
-          {nav.map(item => (
-            <NavLink key={item.to} to={item.to} end={item.to === "/"}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
-                 ${isActive
-                   ? "bg-primary text-primary-foreground shadow-soft"
-                   : item.highlight
-                   ? "bg-gradient-to-r from-primary/10 to-brand-light/10 text-primary ring-1 ring-primary/25 font-semibold hover:from-primary/15 hover:to-brand-light/15"
-                   : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
-              <item.icon className="h-4 w-4 shrink-0" />
-              <span>{item.label}</span>
-              {item.to === "/notifications" && unread > 0 && (
-                <span className="ml-auto bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
-                  {unread > 99 ? "99+" : unread}
-                </span>
-              )}
-            </NavLink>
-          ))}
+        <nav className="flex-1 px-3 py-2 overflow-y-auto">
+          {navGroups.map(group => {
+            const isCollapsed = collapsedGroups.has(group.title);
+            return (
+              <div key={group.title} className="mb-1.5">
+                <button
+                  onClick={() => toggleGroup(group.title)}
+                  className="w-full flex items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
+                >
+                  <span>{group.title}</span>
+                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
+                </button>
+                {!isCollapsed && (
+                  <div className="space-y-0.5 mt-0.5">
+                    {group.items.map(item => (
+                      <NavLink key={item.to} to={item.to} end={item.to === "/"}
+                        className={({ isActive }) =>
+                          `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                           ${isActive
+                             ? "bg-primary text-primary-foreground shadow-soft"
+                             : item.highlight
+                             ? "bg-gradient-to-r from-primary/10 to-brand-light/10 text-primary ring-1 ring-primary/25 font-semibold hover:from-primary/15 hover:to-brand-light/15"
+                             : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
+                        <item.icon className="h-4 w-4 shrink-0" />
+                        <span>{item.label}</span>
+                        {item.to === "/notifications" && unread > 0 && (
+                          <span className="ml-auto bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                            {unread > 99 ? "99+" : unread}
+                          </span>
+                        )}
+                      </NavLink>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </nav>
 
         {/* Sidebar user card */}
