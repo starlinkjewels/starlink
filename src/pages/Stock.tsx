@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -37,8 +37,21 @@ export function StockPage() {
     return cmp(goldBal, levels.gold || {}) || cmp(diamondBal, levels.diamond || {});
   })();
 
+  // Auto-heal: when the cached counter drifts from the ledger, silently resync
+  // it from history — no banner, no modal, no button to click. The displayed
+  // balances already come from the ledger (correct); this just keeps the
+  // internal issuing counter honest. Runs once per session; the manual button
+  // below stays as an admin escape hatch. (deriveStockBalances only rounds to
+  // 3dp vs recompute's raw sum, well inside the 0.001 drift tolerance, so one
+  // pass always clears the drift — no thrash.)
+  const healed = useRef(false);
+  useEffect(() => {
+    if (user?.role !== "admin" || !cacheDrift || healed.current) return;
+    healed.current = true;
+    recomputeStockFromHistory(db.stockMovements).then(setLevels).catch(() => { /* manual button remains */ });
+  }, [cacheDrift, user, db.stockMovements]);
+
   const recompute = async () => {
-    if (!confirm("Recompute current stock from the full movement history? Use this only if the balance looks wrong.")) return;
     setRecomputing(true);
     try {
       const fresh = await recomputeStockFromHistory(db.stockMovements);
@@ -63,12 +76,6 @@ export function StockPage() {
         )}
       </div>
 
-      {user?.role === "admin" && cacheDrift && (
-        <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
-          <span>The internal stock counter is out of sync with the movement history. The balances below are taken from the history (correct) — click to resync the counter so issuing stays accurate too.</span>
-          <AsyncButton onClick={recompute} disabled={recomputing} className="btn-hero rounded-xl shrink-0">Resync now</AsyncButton>
-        </div>
-      )}
 
       <div className="grid gap-4 md:grid-cols-3">
         <div className="card-luxe p-5 flex flex-col">
