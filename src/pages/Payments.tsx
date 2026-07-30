@@ -59,7 +59,7 @@ export function PaymentsPage() {
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         {([
           { m: "client", label: "Receive from Client", icon: CreditCard },
-          { m: "supplier", label: "Pay Supplier", icon: Truck },
+          { m: "supplier", label: "Supplier", icon: Truck },
           { m: "factory", label: "Pay Factory", icon: FactoryIcon },
           { m: "expense", label: "Pay Expense", icon: Receipt },
           { m: "locker", label: "Locker", icon: Landmark },
@@ -220,6 +220,7 @@ function ReceiveFromClient() {
 function PaySupplier() {
   const { user } = useAuth();
   const db = useDb();
+  const [dir, setDir] = useState<"pay" | "receive">("pay");
   const [supplierId, setSupplierId] = useState("");
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("__fifo");
@@ -237,7 +238,24 @@ function PaySupplier() {
     if (!s) { toast.error("Choose a supplier"); return; }
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
+    if (!lockerId) { toast.error(dir === "pay" ? "Choose which locker this was paid from" : "Choose which locker the money went into"); return; }
+    // ── Receive: money back FROM the supplier (refund / return credit). ──
+    if (dir === "receive") {
+      setSaving(true);
+      try {
+        const now = new Date().toISOString();
+        updateDb(d => {
+          if (!d.supplierReceipts) d.supplierReceipts = [];
+          d.supplierReceipts.push({ id: uid("srcpt_"), supplierId, amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+          if (!d.lockerTransactions) d.lockerTransactions = [];
+          d.lockerTransactions.push({ id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${s.name}`, refType: "manual", note: note.trim() || undefined, recordedBy: user!.id, createdAt: now });
+        });
+        toast.success(`${fmtMoneyInr(amt)} received from ${s.name}`);
+        setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId("");
+      } finally { setSaving(false); }
+      return;
+    }
+    // ── Pay: money out TO the supplier. ──
     // FIFO only applies up to what's actually pending — anything beyond that
     // would leave the locker but never land on any purchase, silently
     // vanishing from Total Paid. Target a specific purchase to overpay instead.
@@ -275,6 +293,16 @@ function PaySupplier() {
 
   return (
     <div className="space-y-3">
+      {/* Direction — pay the supplier, or receive money back (refund/return). */}
+      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+        {(["pay", "receive"] as const).map(d => (
+          <button key={d} type="button" onClick={() => setDir(d)}
+            className={`h-9 rounded-lg text-sm font-medium transition-colors ${dir === d ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+            {d === "pay" ? "Pay supplier" : "Receive from supplier"}
+          </button>
+        ))}
+      </div>
+
       <div>
         <Label className="text-xs">Supplier</Label>
         <Select value={supplierId} onValueChange={v => { setSupplierId(v); setTarget("__fifo"); }}>
@@ -283,33 +311,39 @@ function PaySupplier() {
         </Select>
       </div>
       {supplierId && (
-        <p className="text-xs text-muted-foreground">Balance owed: <span className="font-semibold text-foreground">{fmtMoneyInr(account.balanceOwed)}</span></p>
+        <p className="text-xs text-muted-foreground">
+          {account.net < 0
+            ? <>Supplier owes you: <span className="font-semibold text-blue-600">{fmtMoneyInr(-account.net)}</span></>
+            : <>Balance owed: <span className="font-semibold text-foreground">{fmtMoneyInr(account.net)}</span></>}
+        </p>
       )}
-      <div className="grid grid-cols-2 gap-3">
+      <div className={`grid gap-3 ${dir === "pay" ? "grid-cols-2" : "grid-cols-1"}`}>
         <div>
           <Label className="text-xs">Amount (₹)</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
-        <div>
-          <Label className="text-xs">Against</Label>
-          <Select value={target} onValueChange={setTarget}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__fifo">Oldest pending first</SelectItem>
-              {pendingPurchases.map(p => <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+        {dir === "pay" && (
+          <div>
+            <Label className="text-xs">Against</Label>
+            <Select value={target} onValueChange={setTarget}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__fifo">Oldest pending first</SelectItem>
+                {pendingPurchases.map(p => <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
-      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder={dir === "pay" ? "Note (optional)" : "Note (e.g. refund for returned goods)"} />
       <div>
-        <Label className="text-xs">Paid from Locker *</Label>
+        <Label className="text-xs">{dir === "pay" ? "Paid from Locker *" : "Received into Locker *"}</Label>
         <Select value={lockerId} onValueChange={setLockerId}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
           <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
         </Select>
       </div>
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Supplier Payment"}</AsyncButton>
+      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
     </div>
   );
 }
