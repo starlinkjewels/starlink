@@ -9,7 +9,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Coins } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -21,6 +21,10 @@ export function FactoriesPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("factories-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  });
+  const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Factory>>({ name: "", contactPerson: "", phone: "", address: "" });
@@ -83,11 +87,49 @@ export function FactoriesPage() {
         )}
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search factories..." className="pl-9 h-11 rounded-xl" />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search factories..." className="pl-9 h-11 rounded-xl" />
+        </div>
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
+        </div>
       </div>
 
+      {/* ── List view — name + gold held + charges due ── */}
+      {view === "list" && (
+        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
+          {paged.map(fac => {
+            const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
+            const account = factoryAccount(issuances);
+            return (
+              <Link key={fac.id} to={`/factories/${fac.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
+                <div className="h-9 w-9 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4 w-4" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
+                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Coins className="h-3 w-3 text-amber-600" />{account.goldOutstanding.toLocaleString()} g gold · {account.diamondOutstanding.toLocaleString()} ct dia</p>
+                </div>
+                <div className="text-right shrink-0">
+                  {account.chargesPending > 0
+                    ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.chargesPending)}</p><p className="text-[10px] text-muted-foreground">charges due</p></>
+                    : <p className="text-sm font-semibold text-success">✓ Cleared</p>}
+                </div>
+              </Link>
+            );
+          })}
+          {total === 0 && <div className="p-12 text-center text-muted-foreground">No factories found.</div>}
+        </div>
+      )}
+
+      {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(fac => {
           const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
@@ -149,6 +191,7 @@ export function FactoriesPage() {
         })}
         {total === 0 && <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No factories found.</div>}
       </div>
+      )}
 
       <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} factories` : undefined} />
     </div>

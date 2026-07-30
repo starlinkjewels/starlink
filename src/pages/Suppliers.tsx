@@ -9,7 +9,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -21,6 +21,10 @@ export function SuppliersPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("suppliers-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  });
+  const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Supplier>>({ name: "", contactPerson: "", phone: "", email: "", address: "", gstin: "" });
@@ -89,11 +93,51 @@ export function SuppliersPage() {
         )}
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." className="pl-9 h-11 rounded-xl" />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." className="pl-9 h-11 rounded-xl" />
+        </div>
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
+        </div>
       </div>
 
+      {/* ── List view — name + net balance (owed / supplier owes you) ── */}
+      {view === "list" && (
+        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
+          {paged.map(s => {
+            const purchases = db.purchases.filter(p => p.supplierId === s.id);
+            const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
+            return (
+              <Link key={s.id} to={`/suppliers/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
+                <div className="h-9 w-9 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4 w-4" /></div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-brand-dark truncate">{s.name}{s.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
+                  <p className="text-xs text-muted-foreground truncate">{s.contactPerson || s.phone || s.email || "—"}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  {account.net > 0
+                    ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.net)}</p><p className="text-[10px] text-muted-foreground">you owe</p></>
+                    : account.net < 0
+                    ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(-account.net)}</p><p className="text-[10px] text-muted-foreground">owes you</p></>
+                    : <p className="text-sm font-semibold text-success">✓ Settled</p>}
+                </div>
+              </Link>
+            );
+          })}
+          {total === 0 && <div className="p-12 text-center text-muted-foreground">No suppliers found.</div>}
+        </div>
+      )}
+
+      {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(s => {
           const purchases = db.purchases.filter(p => p.supplierId === s.id);
@@ -153,6 +197,7 @@ export function SuppliersPage() {
         })}
         {total === 0 && <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No suppliers found.</div>}
       </div>
+      )}
 
       <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />
     </div>
