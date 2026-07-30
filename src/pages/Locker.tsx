@@ -15,6 +15,7 @@ import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight,
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -36,6 +37,7 @@ export function LockerPage() {
   });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
   const [txnMode, setTxnMode] = useState(false);
   const [txnType, setTxnType] = useState<"income" | "expense" | "transfer_out">("expense");
   const [txnAmount, setTxnAmount] = useState("");
@@ -182,20 +184,20 @@ export function LockerPage() {
     }
   }
 
-  const exportCsv = () => {
+  const exportCsv = (from: Date | null, to: Date | null) => {
     if (!selected) return;
     const cur = selected.currency || "INR";
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
       ["Date", "Description", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
-      txns.map(t => {
+      txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
         return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", txnBalances.get(t.id) ?? 0];
       }),
     );
   };
 
-  const exportPdf = () => {
+  const exportPdf = (from: Date | null, to: Date | null) => {
     if (!selected) return;
     const cur = selected.currency || "INR";
     downloadLedgerPdf({
@@ -218,7 +220,7 @@ export function LockerPage() {
         { header: "Out", x: 140 },
         { header: "Balance", x: 165 },
       ],
-      rows: txns.map(t => {
+      rows: txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
         return [
           fmtDate(t.createdAt), txnLabel(t).slice(0, 26),
@@ -341,15 +343,11 @@ export function LockerPage() {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
-                  <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
+              <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+              <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={selected ? `${selected.name} ledger` : "locker"} options={[
+                { label: "Ledger — PDF", sublabel: "Transactions with running balance", kind: "pdf", run: exportPdf },
+                { label: "Ledger — Excel", sublabel: "Transactions with running balance", kind: "excel", run: exportCsv },
+              ]} />
               <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Transaction
               </Button>

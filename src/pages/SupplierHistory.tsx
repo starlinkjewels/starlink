@@ -19,6 +19,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -99,6 +100,7 @@ export function SupplierHistoryPage() {
   const account = supplierAccount(purchases, receipts);
 
   // ── Record purchase ──
+  const [showExport, setShowExport] = useState(false);
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
   const [purchaseLines, setPurchaseLines] = useState<PurchaseLine[]>([emptyPurchaseLine()]);
   const [recordingPurchase, setRecordingPurchase] = useState(false);
@@ -405,15 +407,15 @@ export function SupplierHistoryPage() {
     return withBalance.reverse(); // newest first, matching every other list on this page
   })();
 
-  const exportCsv = () => {
+  const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
       ["Date", "Particulars", "Purchased (INR)", "Paid (INR)", "Balance (INR)"],
-      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
-  const exportPdf = () => {
+  const exportPdf = (from: Date | null, to: Date | null) => {
     downloadLedgerPdf({
       title: "Supplier Account Statement",
       subjectLines: [
@@ -434,7 +436,7 @@ export function SupplierHistoryPage() {
         { header: "Paid", x: 148 },
         { header: "Balance", x: 170 },
       ],
-      rows: statement.map(r => [
+      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
         fmtDate(r.date), r.particulars.slice(0, 28),
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
         r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
@@ -479,15 +481,11 @@ export function SupplierHistoryPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
+              { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
+              { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
+            ]} />
             {user?.role === "admin" && (
               <Button onClick={() => { setShowPayForm(v => !v); setShowReceiveForm(false); }} variant="outline" className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Pay

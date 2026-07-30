@@ -20,6 +20,7 @@ import { toast } from "sonner";
 import jsPDF from "jspdf";
 import { useAuth } from "@/lib/auth";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
 
@@ -65,6 +66,8 @@ export function ClientHistoryPage() {
   // Filters
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
+
+  const [showExport, setShowExport] = useState(false);
 
   // ── Client account / payments ──
   const [payAmount, setPayAmount] = useState("");
@@ -184,15 +187,15 @@ export function ClientHistoryPage() {
     return withBalance.reverse();
   })();
 
-  const exportStatementCsv = () => {
+  const exportStatementCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
       ["Date", "Particulars", "Billed (USD)", "Received (USD)", "Balance (USD)"],
-      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
-  const exportStatementPdf = () => {
+  const exportStatementPdf = (from: Date | null, to: Date | null) => {
     downloadLedgerPdf({
       title: "Client Account Statement",
       subjectLines: [
@@ -213,7 +216,7 @@ export function ClientHistoryPage() {
         { header: "Received", x: 148 },
         { header: "Balance", x: 174 },
       ],
-      rows: statement.map(r => [
+      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
         fmtDate(r.date), r.particulars.slice(0, 28),
         r.debit ? fmtMoney(r.debit) : "—",
         r.credit ? fmtMoney(r.credit) : "—",
@@ -375,15 +378,11 @@ export function ClientHistoryPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportStatementPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportStatementCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
+              { label: "Account Statement — PDF", sublabel: "Bills & payments (USD)", kind: "pdf", run: exportStatementPdf },
+              { label: "Account Statement — Excel", sublabel: "Bills & payments (USD)", kind: "excel", run: exportStatementCsv },
+            ]} />
             {account.credit > 0 && account.outstanding > 0 && (
               <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Apply Credit

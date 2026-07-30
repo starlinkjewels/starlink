@@ -19,6 +19,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -51,6 +52,7 @@ export function FactoryHistoryPage() {
   // "bulkDelivery" = hand the factory raw material not tied to any order yet
   // (builds up its pool); "orderConsumption" = today's flow, earmarked to one
   // order, now also able to draw from that pool instead of a new delivery.
+  const [showExport, setShowExport] = useState(false);
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [issueMode, setIssueMode] = useState<"bulkDelivery" | "orderConsumption">("orderConsumption");
   const [issueOrderNumber, setIssueOrderNumber] = useState("");
@@ -471,18 +473,18 @@ export function FactoryHistoryPage() {
     return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
   })();
 
-  const exportGoldCsv = () => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], goldLedger.map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
-  const exportDiamondCsv = () => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], diamondLedger.map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportGoldCsv = (from: Date | null, to: Date | null) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], goldLedger.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportDiamondCsv = (from: Date | null, to: Date | null) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], diamondLedger.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
 
-  const exportCsv = () => {
+  const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}`,
       ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      statement.map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
-  const exportPdf = () => {
+  const exportPdf = (from: Date | null, to: Date | null) => {
     downloadLedgerPdf({
       title: "Factory Account Statement",
       subjectLines: [
@@ -505,7 +507,7 @@ export function FactoryHistoryPage() {
         { header: "Paid", x: 148 },
         { header: "Balance", x: 170 },
       ],
-      rows: statement.map(r => [
+      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
         fmtDate(r.date), r.particulars.slice(0, 28),
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
         r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
@@ -547,17 +549,13 @@ export function FactoryHistoryPage() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Account Statement — PDF</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Account Statement — Excel</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportGoldCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Gold Ledger — Excel</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportDiamondCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Diamond Ledger — Excel</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`} options={[
+              { label: "Account Statement — PDF", sublabel: "Making charges & payments", kind: "pdf", run: exportPdf },
+              { label: "Account Statement — Excel", sublabel: "Making charges & payments", kind: "excel", run: exportCsv },
+              { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },
+              { label: "Diamond Ledger — Excel", sublabel: "Carats in / out", kind: "excel", run: exportDiamondCsv },
+            ]} />
             {user?.role === "admin" && (
               <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Issue Material
