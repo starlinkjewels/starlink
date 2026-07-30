@@ -1,40 +1,45 @@
-import { useEffect } from "react";
+import { useEffect, lazy } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/Login";
-import { Dashboard } from "./pages/Dashboard";
-import { OrdersPage } from "./pages/Orders";
-import { OrderDetailPage } from "./pages/OrderDetail";
-import { NewOrderPage } from "./pages/NewOrder";
-import { ClientsPage } from "./pages/Clients";
-import { ClientHistoryPage } from "./pages/ClientHistory";
-import { EmployeesPage } from "./pages/Employees";
-import { EmployeeDetailPage } from "./pages/EmployeeDetail";
-import { MessagesPage } from "./pages/Messages";
-import { NotificationsPage } from "./pages/Notifications";
-import { ReportsPage } from "./pages/Reports";
-import { SettingsPage } from "./pages/Settings";
-import { ProfilePage } from "./pages/Profile";
-import { InvoicesPage } from "./pages/Invoices";
-import { SearchPage } from "./pages/Search";
-import { ExpensesPage } from "./pages/Expenses";
-import { IncomePage } from "./pages/Income";
-import { CatalogPage } from "./pages/Catalog";
-import { StarlinkAiPage } from "./pages/StarlinkAi";
-import { LockerPage } from "./pages/Locker";
-import { SuppliersPage } from "./pages/Suppliers";
-import { SupplierHistoryPage } from "./pages/SupplierHistory";
-import { StockPage } from "./pages/Stock";
-import { StockSectionPage } from "./pages/StockSection";
-import { FactoriesPage } from "./pages/Factories";
-import { FactoryHistoryPage } from "./pages/FactoryHistory";
-import { ReadyStockPage } from "./pages/ReadyStock";
-import { PaymentsPage } from "./pages/Payments";
-import { BuyAssignPage } from "./pages/BuyAssign";
 import { InstallPrompt } from "./components/InstallPrompt";
 import type { Role } from "./lib/db";
+
+// Route-level code splitting: each page is fetched on demand instead of riding
+// in one giant boot bundle, so the app opens fast on mobile. Login + the layout
+// shell stay eager (needed for the very first paint); everything else is lazy.
+// Pages use named exports, so map the named export onto `default` for lazy().
+const Dashboard = lazy(() => import("./pages/Dashboard").then(m => ({ default: m.Dashboard })));
+const OrdersPage = lazy(() => import("./pages/Orders").then(m => ({ default: m.OrdersPage })));
+const OrderDetailPage = lazy(() => import("./pages/OrderDetail").then(m => ({ default: m.OrderDetailPage })));
+const NewOrderPage = lazy(() => import("./pages/NewOrder").then(m => ({ default: m.NewOrderPage })));
+const ClientsPage = lazy(() => import("./pages/Clients").then(m => ({ default: m.ClientsPage })));
+const ClientHistoryPage = lazy(() => import("./pages/ClientHistory").then(m => ({ default: m.ClientHistoryPage })));
+const EmployeesPage = lazy(() => import("./pages/Employees").then(m => ({ default: m.EmployeesPage })));
+const EmployeeDetailPage = lazy(() => import("./pages/EmployeeDetail").then(m => ({ default: m.EmployeeDetailPage })));
+const MessagesPage = lazy(() => import("./pages/Messages").then(m => ({ default: m.MessagesPage })));
+const NotificationsPage = lazy(() => import("./pages/Notifications").then(m => ({ default: m.NotificationsPage })));
+const ReportsPage = lazy(() => import("./pages/Reports").then(m => ({ default: m.ReportsPage })));
+const SettingsPage = lazy(() => import("./pages/Settings").then(m => ({ default: m.SettingsPage })));
+const ProfilePage = lazy(() => import("./pages/Profile").then(m => ({ default: m.ProfilePage })));
+const InvoicesPage = lazy(() => import("./pages/Invoices").then(m => ({ default: m.InvoicesPage })));
+const SearchPage = lazy(() => import("./pages/Search").then(m => ({ default: m.SearchPage })));
+const ExpensesPage = lazy(() => import("./pages/Expenses").then(m => ({ default: m.ExpensesPage })));
+const IncomePage = lazy(() => import("./pages/Income").then(m => ({ default: m.IncomePage })));
+const CatalogPage = lazy(() => import("./pages/Catalog").then(m => ({ default: m.CatalogPage })));
+const StarlinkAiPage = lazy(() => import("./pages/StarlinkAi").then(m => ({ default: m.StarlinkAiPage })));
+const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.LockerPage })));
+const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
+const SupplierHistoryPage = lazy(() => import("./pages/SupplierHistory").then(m => ({ default: m.SupplierHistoryPage })));
+const StockPage = lazy(() => import("./pages/Stock").then(m => ({ default: m.StockPage })));
+const StockSectionPage = lazy(() => import("./pages/StockSection").then(m => ({ default: m.StockSectionPage })));
+const FactoriesPage = lazy(() => import("./pages/Factories").then(m => ({ default: m.FactoriesPage })));
+const FactoryHistoryPage = lazy(() => import("./pages/FactoryHistory").then(m => ({ default: m.FactoryHistoryPage })));
+const ReadyStockPage = lazy(() => import("./pages/ReadyStock").then(m => ({ default: m.ReadyStockPage })));
+const PaymentsPage = lazy(() => import("./pages/Payments").then(m => ({ default: m.PaymentsPage })));
+const BuyAssignPage = lazy(() => import("./pages/BuyAssign").then(m => ({ default: m.BuyAssignPage })));
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   const { user } = useAuth();

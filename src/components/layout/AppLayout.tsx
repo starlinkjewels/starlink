@@ -3,7 +3,8 @@ import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileTe
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
-import { useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Loader2 } from "lucide-react";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 
@@ -422,7 +423,12 @@ export function AppLayout() {
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
           className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
-          <Outlet />
+          {/* Pages are lazy-loaded (route-level code splitting) so the app opens
+              fast — only the shell + current screen download. This spinner shows
+              only while a page's chunk is fetched the first time. */}
+          <Suspense fallback={<div className="grid place-items-center py-24 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
+            <Outlet />
+          </Suspense>
         </motion.main>
 
         <SyncStatus />
