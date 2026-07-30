@@ -5,7 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -243,6 +243,9 @@ export function FactoryHistoryPage() {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
+    const payLocker = db.lockers.find(l => l.id === payLockerId);
+    if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
+        !window.confirm(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`)) return;
     const now = new Date().toISOString();
     updateDb(d => {
       const mi = d.materialIssuances.find(x => x.id === issuance.id);

@@ -4,7 +4,7 @@ import { updateDb, uid, fmtDate, DIAMOND_SHAPES, nextDiamondStockNumber, type Pu
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
-  supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr,
+  supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -267,6 +267,9 @@ export function SupplierHistoryPage() {
       toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
       return;
     }
+    const payLocker = db.lockers.find(l => l.id === payLockerId);
+    if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
+        !window.confirm(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`)) return;
     const now = new Date().toISOString();
 
     updateDb(d => {

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
-  reconcileClientAccount, type Expense,
+  reconcileClientAccount, type Expense, type Locker, type LockerTransaction,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import {
@@ -21,6 +21,20 @@ import { toast } from "sonner";
 type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
+
+/** Warn before a payment takes a locker's balance negative (money it doesn't hold).
+ *  Returns true to proceed, false to cancel. `amt` is in the locker's own currency. */
+function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], lockerId: string, amt: number): boolean {
+  const locker = lockers.find(l => l.id === lockerId);
+  if (!locker) return true;
+  const bal = lockerBalance(locker, transactions);
+  if (amt > bal) {
+    return window.confirm(
+      `This payment of ${fmtLockerAmount(amt, locker.currency)} is more than ${locker.name}'s balance of ${fmtLockerAmount(bal, locker.currency)}.\n\nThe locker will go negative — continue only if you're sure a deposit is still missing.`,
+    );
+  }
+  return true;
+}
 
 /**
  * One place to move money in or out, no matter who's on the other end —
@@ -231,6 +245,7 @@ function PaySupplier() {
       toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
       return;
     }
+    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -327,6 +342,7 @@ function PayFactory() {
       toast.error(`That's ${fmtMoneyInr(amt - account.chargesPending)} more than this factory is currently owed (${fmtMoneyInr(account.chargesPending)}). Enter a smaller amount, or choose a specific issuance to overpay.`);
       return;
     }
+    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
       const now = new Date().toISOString();
@@ -418,6 +434,7 @@ function PayExpense() {
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
     const paidAmt = isUsdLocker ? amt : Number(lockerAmount);
     if (!paidAmt || paidAmt <= 0) { toast.error("Enter the amount actually paid from that locker"); return; }
+    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, paidAmt)) return;
     setSaving(true);
     try {
       const now = new Date().toISOString();
