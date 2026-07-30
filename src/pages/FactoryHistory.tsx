@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, type MaterialIssuance } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, type MaterialIssuance } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
-  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck,
+  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -434,6 +434,46 @@ export function FactoryHistoryPage() {
     return withBalance.reverse();
   })();
 
+  // ── Gold ledger (in fine 24KT grams, so the running balance matches the
+  //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
+  const goldLedger = (() => {
+    const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
+    for (const mi of issuances) {
+      if (mi.material !== "gold") continue;
+      const order = db.orders.find(o => o.id === mi.orderId);
+      if (mi.source !== "factoryPool") {
+        rows.push({ id: mi.id + "-in", date: mi.issuedAt, particulars: `Gold received — ${mi.quantityIssued}g ${mi.purityOrQuality}${order ? ` (${order.orderNumber})` : mi.orderId ? "" : " · bulk"}`, inQ: toPureGold(mi.quantityIssued, mi.purityOrQuality), outQ: 0 });
+      }
+      if (mi.finishedNetWeight != null) {
+        const fine = mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity) : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
+        rows.push({ id: mi.id + "-out", date: mi.issuedAt, particulars: `Finished piece — net ${mi.finishedNetWeight}g${order ? ` (${order.orderNumber})` : ""}`, inQ: 0, outQ: fine });
+      }
+    }
+    let running = 0;
+    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
+  })();
+
+  // ── Diamond ledger (carats): issued in; once finished, used-in-piece + returned out. ──
+  const diamondLedger = (() => {
+    const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
+    for (const mi of issuances) {
+      if (mi.material !== "diamond") continue;
+      const order = db.orders.find(o => o.id === mi.orderId);
+      rows.push({ id: mi.id + "-in", date: mi.issuedAt, particulars: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}${order ? ` (${order.orderNumber})` : ""}`, inQ: mi.quantityIssued, outQ: 0 });
+      if (mi.status === "closed") {
+        const returned = mi.diamondKind === "certified" ? (mi.finishDisposition === "returned" ? mi.quantityIssued : 0) : (mi.finishReturnedCt || 0);
+        const used = Math.round((mi.quantityIssued - returned) * 1000) / 1000;
+        if (used > 0) rows.push({ id: mi.id + "-used", date: mi.issuedAt, particulars: `Used in piece${order ? ` (${order.orderNumber})` : ""}`, inQ: 0, outQ: used });
+        if (returned > 0) rows.push({ id: mi.id + "-ret", date: mi.issuedAt, particulars: `Returned to stock`, inQ: 0, outQ: returned });
+      }
+    }
+    let running = 0;
+    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
+  })();
+
+  const exportGoldCsv = () => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], goldLedger.map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportDiamondCsv = () => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], diamondLedger.map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+
   const exportCsv = () => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}`,
@@ -512,8 +552,10 @@ export function FactoryHistoryPage() {
                 <Button variant="outline" className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
-                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Account Statement — PDF</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Account Statement — Excel</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportGoldCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Gold Ledger — Excel</DropdownMenuItem>
+                <DropdownMenuItem onClick={exportDiamondCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Diamond Ledger — Excel</DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             {user?.role === "admin" && (
@@ -643,6 +685,48 @@ export function FactoryHistoryPage() {
             </div>
           ))}
           {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
+        </div>
+      </div>
+
+      {/* ── Gold ledger (fine 24KT) ── */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60 flex items-center gap-2">
+          <Coins className="h-4 w-4 text-amber-600" />
+          <div>
+            <h2 className="font-display text-xl text-brand-dark">Gold Ledger</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">In fine (24KT) grams · balance = gold held at factory</p>
+          </div>
+        </div>
+        <div className="divide-y divide-border/40">
+          {goldLedger.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.inQ > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{r.inQ > 0 ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}</div>
+              <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{r.particulars}</p><p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p></div>
+              <div className="text-right shrink-0"><p className={`text-sm font-semibold ${r.inQ > 0 ? "text-success" : "text-destructive"}`}>{r.inQ > 0 ? `+${r.inQ}` : `−${r.outQ}`} g</p><p className="text-[11px] text-muted-foreground">Bal: {r.balance} g</p></div>
+            </div>
+          ))}
+          {goldLedger.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No gold movements yet.</div>}
+        </div>
+      </div>
+
+      {/* ── Diamond ledger (ct) ── */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60 flex items-center gap-2">
+          <Gem className="h-4 w-4 text-blue-500" />
+          <div>
+            <h2 className="font-display text-xl text-brand-dark">Diamond Ledger</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">In carats · issued in, used/returned out</p>
+          </div>
+        </div>
+        <div className="divide-y divide-border/40">
+          {diamondLedger.map(r => (
+            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.inQ > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{r.inQ > 0 ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}</div>
+              <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{r.particulars}</p><p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p></div>
+              <div className="text-right shrink-0"><p className={`text-sm font-semibold ${r.inQ > 0 ? "text-success" : "text-destructive"}`}>{r.inQ > 0 ? `+${r.inQ}` : `−${r.outQ}`} ct</p><p className="text-[11px] text-muted-foreground">Bal: {r.balance} ct</p></div>
+            </div>
+          ))}
+          {diamondLedger.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No diamond movements yet.</div>}
         </div>
       </div>
 
