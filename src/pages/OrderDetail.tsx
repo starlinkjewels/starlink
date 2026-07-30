@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
+import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -144,6 +145,8 @@ export function OrderDetailPage() {
 
   // Dispatch form
   const [showDispatch, setShowDispatch] = useState(false);
+  const [dispatchModalIdx, setDispatchModalIdx] = useState<number | null>(null); // Dispatch-details popup on "Mark complete"
+  const [dispatchSaving, setDispatchSaving] = useState(false);
   const [courierName, setCourierName] = useState("");
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingLink, setTrackingLink] = useState("");
@@ -635,15 +638,15 @@ export function OrderDetailPage() {
   const faStepIdx = order.timeline.findIndex(t => t.step === "Final Approval");
   const faDone = faStepIdx >= 0 && order.timeline[faStepIdx].status === "done";
 
-  const advanceStep = (idx: number, overrideReadiness = false) => {
+  const advanceStep = (idx: number, overrideReadiness = false): boolean => {
     if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
       toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
-      return;
+      return false;
     }
     // Never let goods leave without a price, and warn before shipping unpaid.
     if (order.timeline[idx].step === "Dispatch") {
-      if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return; }
-      if (balanceDue(order) > 0 && !confirm(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`)) return;
+      if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return false; }
+      if (balanceDue(order) > 0 && !confirm(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`)) return false;
     }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
@@ -661,6 +664,7 @@ export function OrderDetailPage() {
       if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
     toast.success("Stage marked complete");
+    return true;
   };
 
   const forceAdvanceStep = (idx: number) => {
@@ -809,6 +813,15 @@ export function OrderDetailPage() {
     toast.success("Stage reverted");
   };
 
+  const orderEmailInfo = () => ({
+    orderNumber: order.orderNumber,
+    clientName: client?.companyName ?? "Client",
+    jewelleryType: order.jewelleryType,
+    metal: order.metal,
+    quantity: order.quantity,
+    expectedDelivery: order.expectedDelivery,
+  });
+
   const approve = (yes: boolean) => {
     if (!yes && !confirm("Reject this order? You can re-open it to Waiting later if this was a mistake.")) return;
     const now = new Date().toISOString();
@@ -828,6 +841,11 @@ export function OrderDetailPage() {
         type: "order", read: false, createdAt: now,
       });
     });
+    // Email the client on approval (fire-and-forget — never blocks the action).
+    if (yes && client?.email) {
+      const m = orderApprovedEmail(orderEmailInfo());
+      void sendMail(client.email, m.subject, m.html);
+    }
     toast.success(yes ? "Order approved" : "Order rejected");
   };
 
@@ -1051,6 +1069,41 @@ export function OrderDetailPage() {
     });
     toast.success("Dispatch info saved — client notified");
     setShowDispatch(false);
+  };
+
+  // Dispatch popup opened from the timeline's "Mark complete" — collect the
+  // courier details, then complete the step AND email the client.
+  const openDispatchModal = (idx: number) => {
+    setCourierName(order.courierName ?? "");
+    setTrackingNumber(order.trackingNumber ?? "");
+    setTrackingLink(order.trackingLink ?? "");
+    setDispatchModalIdx(idx);
+  };
+
+  const confirmDispatch = async () => {
+    if (dispatchModalIdx === null) return;
+    if (!courierName.trim()) { toast.error("Enter the courier name"); return; }
+    if (!trackingNumber.trim()) { toast.error("Enter the tracking number"); return; }
+    setDispatchSaving(true);
+    try {
+      // Save the dispatch details onto the order first…
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        o.courierName = courierName.trim();
+        o.trackingNumber = trackingNumber.trim();
+        o.trackingLink = trackingLink.trim() || undefined;
+      });
+      // …then complete the Dispatch step (runs the price/unpaid guard).
+      const advanced = advanceStep(dispatchModalIdx, false);
+      if (advanced) {
+        if (client?.email) {
+          const m = orderDispatchedEmail({ ...orderEmailInfo(), courierName: courierName.trim(), trackingNumber: trackingNumber.trim(), trackingLink: trackingLink.trim() || undefined });
+          void sendMail(client.email, m.subject, m.html);
+        }
+        setDispatchModalIdx(null);
+      }
+      // If the guard blocked (no price / declined unpaid warning) keep the popup open.
+    } finally { setDispatchSaving(false); }
   };
 
   const savePricing = () => {
@@ -1897,7 +1950,9 @@ export function OrderDetailPage() {
                     isActive
                       ? t.step === "Final Approval"
                         ? readiness.ready && <AsyncButton size="sm" variant="outline" onClick={() => openFinalApproval(idx)} className="mt-2 h-7 rounded-lg text-xs">Final Approval — enter actuals</AsyncButton>
-                        : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                        : t.step === "Dispatch"
+                          ? <AsyncButton size="sm" variant="outline" onClick={() => openDispatchModal(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                          : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
                   {canEditStage() && isDone && (
@@ -2374,6 +2429,25 @@ export function OrderDetailPage() {
             ✕
           </button>
         </motion.div>
+      )}
+
+      {/* ── Dispatch Details popup (from the timeline "Mark complete") ── */}
+      {dispatchModalIdx !== null && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !dispatchSaving && setDispatchModalIdx(null)}>
+          <div className="card-luxe w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-lg text-brand-dark mb-1">Dispatch Details — {order.orderNumber}</h3>
+            <p className="text-xs text-muted-foreground mb-4">Enter the courier details. On confirm, the order is marked dispatched and the client is emailed automatically.</p>
+            <div className="space-y-3">
+              <div><Label className="text-xs">Courier Company *</Label><Input value={courierName} onChange={e => setCourierName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. FedEx, DHL" /></div>
+              <div><Label className="text-xs">Tracking Number *</Label><Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 1234567890" /></div>
+              <div><Label className="text-xs">Tracking Link (optional)</Label><Input value={trackingLink} onChange={e => setTrackingLink(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="https://..." /></div>
+            </div>
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setDispatchModalIdx(null)} disabled={dispatchSaving} className="flex-1 rounded-xl border border-border py-2 text-sm disabled:opacity-50">Cancel</button>
+              <AsyncButton onClick={confirmDispatch} disabled={dispatchSaving} className="btn-hero flex-1 rounded-xl py-2 text-sm">{dispatchSaving ? "Sending…" : "Confirm Dispatch & Notify"}</AsyncButton>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── 360° 3D model viewer (Starlink360 embed) — responsive, full-screen ── */}

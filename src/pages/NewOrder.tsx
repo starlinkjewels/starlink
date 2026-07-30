@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
+import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
@@ -200,6 +201,9 @@ export function NewOrderPage() {
       return;
     }
 
+    // Captured inside updateDb so we can email marketing AFTER the write.
+    let mailInfo: { orderNumber: string; clientName: string; jewelleryType?: string; metal?: string; quantity?: number; expectedDelivery?: string } | null = null;
+
     updateDb(d => {
       const num = `SLJ-${new Date().getFullYear()}-${String(1000 + d.orders.length + 1).padStart(4, "0")}`;
       const advance = Number(f.advanceAmount) || 0;
@@ -260,6 +264,14 @@ export function NewOrderPage() {
       };
 
       d.orders.unshift(order);
+      mailInfo = {
+        orderNumber: order.orderNumber,
+        clientName: d.clients.find(c => c.id === clientId)?.companyName ?? "Client",
+        jewelleryType: order.jewelleryType,
+        metal: order.metal,
+        quantity: order.quantity,
+        expectedDelivery: order.expectedDelivery,
+      };
 
       if (order.materialSourcing === "readyStock" && order.readyStockItemId) {
         const item = d.readyStock.find(x => x.id === order.readyStockItemId);
@@ -316,6 +328,12 @@ export function NewOrderPage() {
         }
       }
     });
+
+    // Notify the marketing inbox that a new order came in (fire-and-forget).
+    if (mailInfo) {
+      const m = orderReceivedEmail(mailInfo);
+      void sendMail(MARKETING_EMAIL, m.subject, m.html);
+    }
 
     toast.success("Order submitted successfully");
     nav("/orders");
