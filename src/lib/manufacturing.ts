@@ -11,6 +11,7 @@ import {
   uid,
   fmtMoney,
   toPureGold,
+  pureFromPurity,
   type Purchase,
   type SupplierReceipt,
   type MaterialIssuance,
@@ -205,7 +206,12 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
   for (const i of issuances) {
     if (i.factoryId !== factoryId || i.material !== "gold") continue;
     if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
-    if (i.finishedNetWeight && i.finishedKarat) outFine += toPureGold(i.finishedNetWeight, i.finishedKarat);
+    if (i.finishedNetWeight != null) {
+      // Prefer the actual purity entered at Final Approval; fall back to karat.
+      outFine += i.finishedPurity != null
+        ? pureFromPurity(i.finishedNetWeight, i.finishedPurity)
+        : i.finishedKarat ? toPureGold(i.finishedNetWeight, i.finishedKarat) : 0;
+    }
   }
   return Math.round((inFine - outFine) * 1000) / 1000;
 }

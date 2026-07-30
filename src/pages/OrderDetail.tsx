@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -365,7 +365,7 @@ export function OrderDetailPage() {
   // ── Final Approval popup: one window for all the actual details ──
   const [faIdx, setFaIdx] = useState<number | null>(null);
   const [faGoldNet, setFaGoldNet] = useState("");
-  const [faGoldKarat, setFaGoldKarat] = useState("");
+  const [faGoldPurity, setFaGoldPurity] = useState(""); // actual purity ‰ (e.g. 750), replaces the karat dropdown
   const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({});
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
@@ -680,7 +680,9 @@ export function OrderDetailPage() {
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
     setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
-    setFaGoldKarat(finish?.finishedKarat ?? order.productKarats ?? "18K");
+    // Prefill purity ‰: saved value, else the textbook purity of the order's karat (editable).
+    const defaultPurity = order.productKarats ? Math.round((KARAT_PURITY[parseInt(order.productKarats, 10)] ?? 0) * 1000) : 0;
+    setFaGoldPurity(finish?.finishedPurity != null ? String(finish.finishedPurity) : (defaultPurity ? String(defaultPurity) : ""));
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
     setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
@@ -701,7 +703,8 @@ export function OrderDetailPage() {
     const needsGold = orderMaterialRequirements(order).needsGold;
     const netW = parseFloat(faGoldNet);
     const hasNet = needsGold && !isNaN(netW) && netW > 0;
-    const karat = faGoldKarat || order.productKarats || "18K";
+    const purity = parseFloat(faGoldPurity) || 0; // ‰ e.g. 750
+    const karat = order.productKarats || "18K"; // label only
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
     const usedDiaCt = dias.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
     const labour = {
@@ -758,6 +761,7 @@ export function OrderDetailPage() {
           finish.quantityIssued = hasNet ? netW : 0;
           finish.finishedNetWeight = hasNet ? netW : undefined;
           finish.finishedKarat = hasNet ? karat : undefined;
+          finish.finishedPurity = hasNet && purity > 0 ? purity : undefined;
           finish.labour = labour;
           finish.finishedPieces = hasNet ? [{ id: uid("fp_"), quantityUsed: netW, piecesCount: 1, recordedAt: now, recordedBy: user!.id }] : [];
           finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
@@ -786,7 +790,7 @@ export function OrderDetailPage() {
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId,
           material: "gold", amountMaterial: hasNet ? netW : undefined, amountInr: labourVal || undefined,
-          remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g ${karat} (${toPureGold(netW, karat)}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
+          remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g @ ${purity || "?"} purity (${purity > 0 ? pureFromPurity(netW, purity) : 0}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
         });
       });
       if (!alreadyDone) advanceStep(faIdx, true);
@@ -2024,7 +2028,7 @@ export function OrderDetailPage() {
               return (
                 <div className="space-y-1 text-xs">
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
-                    <span>Gold used: <span className="font-semibold text-foreground">{finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g ${finish.finishedKarat || ""} · ${toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")}g fine` : "—"}</span></span>
+                    <span>Gold used: <span className="font-semibold text-foreground">{finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g ${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")}g fine` : "—"}</span></span>
                     <span>Labour: <span className="font-semibold text-foreground">{finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—"}</span></span>
                   </div>
                   {dias.map(i => {
@@ -2496,11 +2500,9 @@ export function OrderDetailPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Gold used</p>
                   <div className="grid grid-cols-2 gap-2.5">
                     <div><Label className="text-[11px]">Net Weight (g)</Label><Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
-                    <div><Label className="text-[11px]">Karat</Label>
-                      <Select value={faGoldKarat} onValueChange={setFaGoldKarat}><SelectTrigger className="rounded-lg h-9 mt-1"><SelectValue placeholder="Karat" /></SelectTrigger>
-                        <SelectContent>{["9K","10K","14K","18K","22K","24K"].map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}</SelectContent></Select></div>
+                    <div><Label className="text-[11px]">Purity (‰ — e.g. 750, 595)</Label><Input type="number" min={0} step="0.1" value={faGoldPurity} onChange={e => setFaGoldPurity(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="actual purity from factory" /></div>
                   </div>
-                  {Number(faGoldNet) > 0 && faGoldKarat && <p className="text-[11px] text-muted-foreground mt-1">= {toPureGold(Number(faGoldNet), faGoldKarat)}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                  {Number(faGoldNet) > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(Number(faGoldNet), Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
                 </div>
               )}
 
@@ -2531,6 +2533,20 @@ export function OrderDetailPage() {
                   <p className="text-[11px] text-muted-foreground mt-1">Returned diamonds go back to wherever they came from (company stock or the factory's own pool); used ones are consumed into the piece.</p>
                 </div>
               )}
+
+              {/* Auto totals — diamond used (ct → g) and gross = gold net + diamond */}
+              {(() => {
+                const diaG = Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000;
+                const netG = needsGold ? (Number(faGoldNet) || 0) : 0;
+                const gross = Math.round((netG + diaG) * 1000) / 1000;
+                return (
+                  <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total diamond used</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({diaG} g)</span></div>
+                    {needsGold && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
+                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (gold + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
+                  </div>
+                );
+              })()}
 
               <div className="mb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>

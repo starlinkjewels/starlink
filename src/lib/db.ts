@@ -98,6 +98,16 @@ export function toPureGold(grams: number, karat: string | number): number {
   return Math.round(grams * pct * 1000) / 1000;
 }
 
+/** Grams at an explicit purity (parts-per-1000, e.g. 750 for 18K, or 748 for a
+ *  factory's measured touch) → pure (24KT) grams. Lets staff enter the real
+ *  purity the factory reports instead of the textbook karat percentage. */
+export function pureFromPurity(grams: number, purityPerMille: number): number {
+  return Math.round(grams * (purityPerMille / 1000) * 1000) / 1000;
+}
+
+/** 1 carat = 0.2 grams — for gross-weight (gold + diamond) maths. */
+export const CARAT_TO_GRAM = 0.2;
+
 export function buildTimelineSteps(hasCertificate: boolean): string[] {
   return (TIMELINE_STEPS as readonly string[]).filter(
     (s) => s !== "Certification" || hasCertificate,
@@ -583,7 +593,8 @@ export interface MaterialIssuance {
   // Receive form is saved; gold issuances convert the net weight to pure (24KT)
   // gold to net off the factory's fine-gold balance (see factoryFineGoldBalance). ──
   finishedNetWeight?: number; // grams of the finished piece (gold issuances)
-  finishedKarat?: string;     // its karat, e.g. "18K" — for the pure-gold conversion
+  finishedKarat?: string;     // its karat, e.g. "18K" — legacy / label
+  finishedPurity?: number;    // actual purity entered at Final Approval (‰, e.g. 750) — drives the pure-gold conversion
   finishDisposition?: "used" | "returned"; // diamond issuances: chosen at Final Approval (so a later edit knows the current state)
   // Structured labour that makes up makingCharges.amountInr (the factory payable):
   //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
