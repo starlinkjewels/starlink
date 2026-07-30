@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, ensureInvoiceForOrder,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -806,6 +806,7 @@ export function OrderDetailPage() {
         // Client billing.
         if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
         if (faShipping.trim() !== "" && !isNaN(ship) && ship >= 0) o.shippingCharge = ship;
+        ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
         const back = capOrderAdvances(o);
         if (back > 0) { const c = d.clients.find(x => x.id === o.clientId); if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100; }
         if (!o.manufacturingLog) o.manufacturingLog = [];
@@ -1060,6 +1061,7 @@ export function OrderDetailPage() {
       if (makingEntered) o.actualMakingCharges = mk;
       if (has(val)) {
         o.amount = val;
+        ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
         const clientUser = d.users.find(u => u.clientId === o.clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id,
@@ -1140,6 +1142,7 @@ export function OrderDetailPage() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
       o.shippingCharge = ship;
+      ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Order Priced", body: `${o.orderNumber} order value set to ${fmtMoney(val)}${ship > 0 ? ` + ${fmtMoney(ship)} shipping` : ""}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });

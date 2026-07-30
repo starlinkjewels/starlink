@@ -626,32 +626,8 @@ export function SettingsPage() {
         </div>
       )}
 
-      {/* Bulk invoice numbering — admin only, shown only when some priced orders have no invoice yet */}
-      {isAdmin && ordersNeedingInvoice.length > 0 && (
-        <div className="card-luxe p-6 space-y-3">
-          <div className="flex items-center gap-2">
-            <FileText className="h-4 w-4 text-primary" />
-            <h3 className="font-semibold">Invoice Numbering</h3>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {ordersNeedingInvoice.length} priced order
-            {ordersNeedingInvoice.length !== 1 ? "s don't" : " doesn't"} have an invoice number yet.
-            Generate them all at once — numbered{" "}
-            {String(loadDb().invoices.length + 1).padStart(4, "0")} through{" "}
-            {String(loadDb().invoices.length + ordersNeedingInvoice.length).padStart(4, "0")},
-            oldest order first.
-          </p>
-          <AsyncButton
-            onClick={generateInvoiceNumbers}
-            disabled={generatingInvoices}
-            className="btn-hero rounded-xl w-full"
-          >
-            {generatingInvoices
-              ? "Generating…"
-              : `Generate ${ordersNeedingInvoice.length} invoice number${ordersNeedingInvoice.length !== 1 ? "s" : ""}`}
-          </AsyncButton>
-        </div>
-      )}
+      {/* Invoice numbers are now assigned automatically when an order is priced
+          (and back-filled on the Invoices page) — no manual step needed. */}
 
       {/* Sync logins — admin only, shown only when there is something to migrate */}
       {isAdmin && pendingLogins.length > 0 && (

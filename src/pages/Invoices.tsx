@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, ensureInvoiceForOrder } from "@/lib/db";
 import type { Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
@@ -21,6 +21,19 @@ export function InvoicesPage() {
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
   const [batchDate, setBatchDate] = useState("");
+
+  // Auto-assign invoice numbers to any priced orders that don't have one yet
+  // (e.g. legacy orders) — runs once, so it's fully automatic with no button.
+  const backfilled = useRef(false);
+  useEffect(() => {
+    if (backfilled.current || user!.role === "client") return;
+    const missing = db.orders.filter(o => o.amount > 0 && o.status !== "Rejected" && !db.invoices.some(i => i.orderId === o.id));
+    if (missing.length === 0) return;
+    backfilled.current = true;
+    updateDb(d => {
+      [...missing].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).forEach(o => ensureInvoiceForOrder(d, o.id));
+    });
+  }, [db.orders, db.invoices, user]);
 
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);

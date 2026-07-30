@@ -740,6 +740,30 @@ export function balanceDue(order: Order): number {
 }
 
 /**
+ * Auto-assign an invoice number to a priced order that doesn't have one yet.
+ * Called wherever an order gets a price (creation, pricing, final approval),
+ * so invoice numbers happen automatically — no manual "generate" step. The
+ * number is the next sequential across all existing invoices, zero-padded.
+ * No-op if the order isn't priced, is rejected, or already has an invoice.
+ */
+export function ensureInvoiceForOrder(d: DB, orderId: string): void {
+  const o = d.orders.find(x => x.id === orderId);
+  if (!o || o.amount <= 0 || o.status === "Rejected") return;
+  if (!d.invoices) d.invoices = [];
+  if (d.invoices.some(i => i.orderId === orderId)) return;
+  const nextNum = d.invoices.reduce((m, i) => Math.max(m, parseInt(i.number, 10) || 0), 0) + 1;
+  d.invoices.push({
+    id: uid("inv_"),
+    orderId,
+    clientId: o.clientId,
+    number: String(nextNum).padStart(4, "0"),
+    amount: orderTotal(o),
+    paid: balanceDue(o) <= 0,
+    createdAt: o.createdAt,
+  });
+}
+
+/**
  * Apply `amount` across the given orders, OLDEST bill first (FIFO), by pushing a
  * payment (advance) entry onto each order until its balance is cleared. Mutates
  * the passed order objects (call inside updateDb). Returns the unallocated
