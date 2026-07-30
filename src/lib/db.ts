@@ -595,7 +595,8 @@ export interface MaterialIssuance {
   finishedNetWeight?: number; // grams of the finished piece (gold issuances)
   finishedKarat?: string;     // its karat, e.g. "18K" — legacy / label
   finishedPurity?: number;    // actual purity entered at Final Approval (‰, e.g. 750) — drives the pure-gold conversion
-  finishDisposition?: "used" | "returned"; // diamond issuances: chosen at Final Approval (so a later edit knows the current state)
+  finishDisposition?: "used" | "returned"; // certified diamond issuances: chosen at Final Approval (so a later edit knows the current state)
+  finishReturnedCt?: number; // loose diamond issuances: carats returned to stock at Final Approval (partial allowed; used = issued − this)
   // Structured labour that makes up makingCharges.amountInr (the factory payable):
   //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
   //   + otherCharges + metalByFactoryGrams × metalByFactoryRate

@@ -366,7 +366,8 @@ export function OrderDetailPage() {
   const [faIdx, setFaIdx] = useState<number | null>(null);
   const [faGoldNet, setFaGoldNet] = useState("");
   const [faGoldPurity, setFaGoldPurity] = useState(""); // actual purity ‰ (e.g. 750), replaces the karat dropdown
-  const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({});
+  const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({}); // certified packets: whole used/returned
+  const [faDiaReturnedCt, setFaDiaReturnedCt] = useState<Record<string, string>>({}); // loose diamonds: carats returned (partial allowed)
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
   const [faDiaHandling, setFaDiaHandling] = useState("");
@@ -691,8 +692,13 @@ export function OrderDetailPage() {
     setFaMetalRate(finish?.labour?.metalByFactoryRate != null ? String(finish.labour.metalByFactoryRate) : "");
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
     const disp: Record<string, "used" | "returned"> = {};
-    dias.forEach(i => { disp[i.id] = i.finishDisposition ?? "used"; });
+    const ret: Record<string, string> = {};
+    dias.forEach(i => {
+      disp[i.id] = i.finishDisposition ?? "used";
+      ret[i.id] = i.finishReturnedCt != null ? String(i.finishReturnedCt) : "0";
+    });
     setFaDia(disp);
+    setFaDiaReturnedCt(ret);
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
     setFaIdx(idx);
@@ -706,7 +712,13 @@ export function OrderDetailPage() {
     const purity = parseFloat(faGoldPurity) || 0; // ‰ e.g. 750
     const karat = order.productKarats || "18K"; // label only
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
-    const usedDiaCt = dias.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
+    // Carats actually consumed into the piece: certified = whole if "used";
+    // loose = issued minus the partial returned amount.
+    const looseReturnedCt = (i: MaterialIssuance) => Math.min(Math.max(Number(faDiaReturnedCt[i.id]) || 0, 0), i.quantityIssued);
+    const usedDiaCt = dias.reduce((s, i) => {
+      if (i.diamondKind === "certified") return s + ((faDia[i.id] ?? "used") === "used" ? i.quantityIssued : 0);
+      return s + (i.quantityIssued - looseReturnedCt(i));
+    }, 0);
     const labour = {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
@@ -732,12 +744,14 @@ export function OrderDetailPage() {
       // never in shared Stock, so "returning" it moves nothing.
       for (const i of dias) {
         if (i.diamondKind === "certified" || i.source !== "stock") continue;
-        const returnedNow = (faDia[i.id] ?? "used") === "returned";
-        const returnedBefore = i.finishDisposition === "returned";
-        if (returnedNow && !returnedBefore) {
-          await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, refType: "manual", createdBy: user!.id, note: `Diamond returned on final approval for ${order.orderNumber}` });
-        } else if (!returnedNow && returnedBefore) {
-          await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: i.quantityIssued, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
+        // Partial returns allowed — move only the DELTA in returned carats to/from stock.
+        const returnedNow = looseReturnedCt(i);
+        const returnedBefore = i.finishReturnedCt || 0;
+        const delta = Math.round((returnedNow - returnedBefore) * 1000) / 1000;
+        if (delta > 0) {
+          await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}` });
+        } else if (delta < 0) {
+          await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
         }
       }
       updateDb(d => {
@@ -767,18 +781,26 @@ export function OrderDetailPage() {
           finish.makingCharges = { amountInr: labourVal, payments: finish.makingCharges?.payments || [] };
           finish.status = "closed";
         }
-        // Apply each diamond's used/returned disposition.
+        // Apply each diamond's disposition.
         for (const i of dias) {
           const mi = d.materialIssuances.find(x => x.id === i.id);
           if (!mi) continue;
-          const disp = faDia[i.id] ?? "used";
           mi.status = "closed";
-          mi.finishDisposition = disp;
           if (i.diamondKind === "certified" && i.diamondPacketIds) {
+            // Whole packets — used or returned.
+            const disp = faDia[i.id] ?? "used";
+            mi.finishDisposition = disp;
             for (const p of d.diamondPackets) if (i.diamondPacketIds.includes(p.id)) {
               if (disp === "used") { p.status = "used"; p.orderId = order.id; }
               else { p.status = "in_stock"; p.orderId = undefined; }
             }
+          } else {
+            // Loose — record the partial returned carats; used = issued − returned.
+            const returned = looseReturnedCt(i);
+            mi.finishReturnedCt = returned;
+            mi.finishDisposition = returned >= i.quantityIssued ? "returned" : "used";
+            const usedCt = Math.round((i.quantityIssued - returned) * 1000) / 1000;
+            mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: usedCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
           }
         }
         // Client billing.
@@ -2034,6 +2056,10 @@ export function OrderDetailPage() {
                   {dias.map(i => {
                     const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
                     const lbl = i.diamondKind === "certified" ? (packs.map(p => `${p.shape} ${p.carat}ct`).join(", ") || "certified") : `${i.purityOrQuality} ${i.quantityIssued}ct`;
+                    if (i.diamondKind !== "certified" && (i.finishReturnedCt ?? 0) > 0) {
+                      const used = Math.round((i.quantityIssued - (i.finishReturnedCt ?? 0)) * 1000) / 1000;
+                      return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className="text-success font-medium">{used} ct used</span>, <span className="text-amber-600 font-medium">{i.finishReturnedCt} ct returned</span></div>;
+                    }
                     return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className={i.finishDisposition === "returned" ? "text-amber-600 font-medium" : "text-success font-medium"}>{i.finishDisposition === "returned" ? "returned to stock" : "used in piece"}</span></div>;
                   })}
                 </div>
@@ -2479,7 +2505,11 @@ export function OrderDetailPage() {
         const needsGold = orderMaterialRequirements(order).needsGold;
         // All of the order's diamonds (open on first approval, closed on a re-edit) so they stay editable.
         const faOpenDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
-        const usedDiaCt = faOpenDia.filter(i => (faDia[i.id] ?? "used") === "used").reduce((s, i) => s + i.quantityIssued, 0);
+        const usedDiaCt = faOpenDia.reduce((s, i) => {
+          if (i.diamondKind === "certified") return s + ((faDia[i.id] ?? "used") === "used" ? i.quantityIssued : 0);
+          const ret = Math.min(Math.max(Number(faDiaReturnedCt[i.id]) || 0, 0), i.quantityIssued);
+          return s + (i.quantityIssued - ret);
+        }, 0);
         const faLive = labourValue({
           perGramRate: faPerGram ? Number(faPerGram) : undefined,
           diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
@@ -2511,26 +2541,48 @@ export function OrderDetailPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Diamonds — used or returned?</p>
                   <div className="space-y-1.5">
                     {faOpenDia.map(i => {
-                      const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
-                      const lbl = i.diamondKind === "certified"
+                      const isCert = i.diamondKind === "certified";
+                      const packs = isCert ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
+                      const lbl = isCert
                         ? `${packs.map(p => `${p.shape} ${p.carat}ct Cert ${p.certificateNumber}`).join("; ") || "certified"}`
-                        : `${i.purityOrQuality} · ${i.quantityIssued}ct`;
-                      return (
-                        <div key={i.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary text-sm">
-                          <span className="truncate min-w-0" title={lbl}>{lbl}</span>
-                          <div className="inline-flex gap-0.5 p-0.5 rounded-md bg-white shrink-0">
-                            {(["used", "returned"] as const).map(dd => (
-                              <button key={dd} onClick={() => setFaDia(m => ({ ...m, [i.id]: dd }))}
-                                className={`h-7 px-2.5 rounded text-xs font-medium ${(faDia[i.id] ?? "used") === dd ? (dd === "used" ? "bg-primary text-white" : "bg-amber-500 text-white") : "text-muted-foreground"}`}>
-                                {dd === "used" ? "Used" : "Returned"}
-                              </button>
-                            ))}
+                        : `${i.purityOrQuality} · ${i.quantityIssued}ct issued`;
+                      if (isCert) {
+                        // A single certified stone can't be split — whole used or returned.
+                        return (
+                          <div key={i.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-secondary text-sm">
+                            <span className="truncate min-w-0" title={lbl}>{lbl}</span>
+                            <div className="inline-flex gap-0.5 p-0.5 rounded-md bg-white shrink-0">
+                              {(["used", "returned"] as const).map(dd => (
+                                <button key={dd} onClick={() => setFaDia(m => ({ ...m, [i.id]: dd }))}
+                                  className={`h-7 px-2.5 rounded text-xs font-medium ${(faDia[i.id] ?? "used") === dd ? (dd === "used" ? "bg-primary text-white" : "bg-amber-500 text-white") : "text-muted-foreground"}`}>
+                                  {dd === "used" ? "Used" : "Returned"}
+                                </button>
+                              ))}
+                            </div>
                           </div>
+                        );
+                      }
+                      // Loose — enter the carats RETURNED (0 = all used). Used = issued − returned.
+                      const retStr = faDiaReturnedCt[i.id] ?? "0";
+                      const ret = Math.min(Math.max(Number(retStr) || 0, 0), i.quantityIssued);
+                      const usedCt = Math.round((i.quantityIssued - ret) * 1000) / 1000;
+                      return (
+                        <div key={i.id} className="p-2 rounded-lg bg-secondary text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate min-w-0" title={lbl}>{lbl}</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[11px] text-muted-foreground">Returned (ct)</span>
+                              <Input type="number" min={0} max={i.quantityIssued} step="0.001" value={retStr}
+                                onChange={e => setFaDiaReturnedCt(m => ({ ...m, [i.id]: e.target.value }))}
+                                className="h-8 w-24 rounded-lg" />
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1">Used <span className="font-medium text-foreground">{usedCt} ct</span>{ret > 0 ? <> · Returned <span className="font-medium text-amber-600">{ret} ct</span> → stock</> : null}</p>
                         </div>
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">Returned diamonds go back to wherever they came from (company stock or the factory's own pool); used ones are consumed into the piece.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">For a loose diamond, enter how many carats came back (e.g. issued 1ct, 0.50ct returned). Returned carats go back to stock; the rest is used in the piece.</p>
                 </div>
               )}
 
