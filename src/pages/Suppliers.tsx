@@ -97,7 +97,7 @@ export function SuppliersPage() {
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(s => {
           const purchases = db.purchases.filter(p => p.supplierId === s.id);
-          const account = supplierAccount(purchases);
+          const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
           return (
             <div key={s.id} className="card-luxe card-hover p-5 flex flex-col">
               <div className="flex items-start gap-3">

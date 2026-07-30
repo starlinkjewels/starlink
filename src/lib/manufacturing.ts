@@ -12,6 +12,7 @@ import {
   fmtMoney,
   toPureGold,
   type Purchase,
+  type SupplierReceipt,
   type MaterialIssuance,
   type Locker,
   type LockerTransaction,
@@ -84,7 +85,7 @@ export function purchasePending(p: Purchase): number {
 }
 
 /** Supplier account summary across all their purchases. */
-export function supplierAccount(purchases: Purchase[]) {
+export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt[] = []) {
   let totalPurchased = 0,
     totalPaid = 0,
     balanceOwed = 0,
@@ -96,7 +97,14 @@ export function supplierAccount(purchases: Purchase[]) {
     balanceOwed += Math.max(0, p.totalInr - paid);
     overpaid += Math.max(0, paid - p.totalInr);
   }
-  return { totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed), overpaid: r0(overpaid) };
+  // Money received back from the supplier (refunds/returns) offsets what we owe.
+  const received = receipts.reduce((s, r) => s + r.amountInr, 0);
+  // Net position: > 0 we still owe them; < 0 they owe us (or we hold their credit).
+  const net = Math.round((balanceOwed - received) * 100) / 100;
+  return {
+    totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed),
+    overpaid: r0(overpaid), received: r0(received), net: r0(net),
+  };
 }
 
 /**

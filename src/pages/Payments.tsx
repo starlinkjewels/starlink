@@ -229,7 +229,7 @@ function PaySupplier() {
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const purchases = db.purchases.filter(p => p.supplierId === supplierId);
-  const account = supplierAccount(purchases);
+  const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId));
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
   const submit = () => {

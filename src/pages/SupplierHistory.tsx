@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
-  Download, FileText, FileSpreadsheet, X, Trash2,
+  Download, FileText, FileSpreadsheet, X, Trash2, ArrowDownCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -95,7 +95,8 @@ export function SupplierHistoryPage() {
   const purchases = db.purchases
     .filter(p => p.supplierId === id)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  const account = supplierAccount(purchases);
+  const receipts = (db.supplierReceipts ?? []).filter(r => r.supplierId === id);
+  const account = supplierAccount(purchases, receipts);
 
   // ── Record purchase ──
   const [showPurchaseForm, setShowPurchaseForm] = useState(false);
@@ -295,6 +296,31 @@ export function SupplierHistoryPage() {
     setPayAmount(""); setPayNote(""); setPayTargetPurchase("__fifo"); setShowPayForm(false);
   };
 
+  // ── Receive money FROM the supplier (refund / return credit) ──
+  const [showReceiveForm, setShowReceiveForm] = useState(false);
+  const [rcvAmount, setRcvAmount] = useState("");
+  const [rcvLockerId, setRcvLockerId] = useState("");
+  const [rcvNote, setRcvNote] = useState("");
+
+  const recordReceipt = () => {
+    const amt = Number(rcvAmount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!rcvLockerId) { toast.error("Choose which locker the money went into"); return; }
+    const now = new Date().toISOString();
+    updateDb(d => {
+      if (!d.supplierReceipts) d.supplierReceipts = [];
+      d.supplierReceipts.push({ id: uid("srcpt_"), supplierId: id!, amountInr: amt, lockerId: rcvLockerId, recordedBy: user!.id, createdAt: now, note: rcvNote.trim() || undefined });
+      if (!d.lockerTransactions) d.lockerTransactions = [];
+      d.lockerTransactions.push({
+        id: uid("ltx_"), lockerId: rcvLockerId, type: "income", amountInr: amt,
+        category: `Received from ${supplier.name}`, refType: "manual",
+        note: rcvNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
+      });
+    });
+    toast.success("Receipt recorded");
+    setRcvAmount(""); setRcvNote(""); setRcvLockerId(""); setShowReceiveForm(false);
+  };
+
   // ── Void a purchase ──
   // Deliberately CONSERVATIVE: a void only proceeds when it can fully and safely
   // reverse itself. It refuses (with a clear reason) if any payment was recorded
@@ -366,6 +392,10 @@ export function SupplierHistoryPage() {
       for (const pay of p.payments || []) {
         rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
       }
+    }
+    // Money received back from the supplier — a credit, like a payment.
+    for (const r of receipts) {
+      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: 0, credit: r.amountInr });
     }
     let running = 0;
     const withBalance = [...rows]
@@ -458,8 +488,13 @@ export function SupplierHistoryPage() {
               </DropdownMenuContent>
             </DropdownMenu>
             {user?.role === "admin" && account.balanceOwed > 0 && (
-              <Button onClick={() => setShowPayForm(v => !v)} variant="outline" className="rounded-xl gap-2">
-                <CreditCard className="h-4 w-4" /> Record Payment
+              <Button onClick={() => { setShowPayForm(v => !v); setShowReceiveForm(false); }} variant="outline" className="rounded-xl gap-2">
+                <CreditCard className="h-4 w-4" /> Pay
+              </Button>
+            )}
+            {user?.role === "admin" && (
+              <Button onClick={() => { setShowReceiveForm(v => !v); setShowPayForm(false); }} variant="outline" className="rounded-xl gap-2">
+                <ArrowDownCircle className="h-4 w-4" /> Receive
               </Button>
             )}
             {user?.role === "admin" && (
@@ -473,11 +508,11 @@ export function SupplierHistoryPage() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Total Purchased</p><p className="font-semibold text-sm">{fmtMoneyInr(account.totalPurchased)}</p></div>
           <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center"><p className="text-xs text-muted-foreground mb-1">Total Paid</p><p className="font-semibold text-sm text-success">{fmtMoneyInr(account.totalPaid)}</p></div>
-          <div className={`p-3 rounded-xl text-center border ${account.balanceOwed > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
-            <p className="text-xs text-muted-foreground mb-1">Balance Owed</p>
-            <p className={`font-semibold text-sm ${account.balanceOwed > 0 ? "text-destructive" : "text-success"}`}>{account.balanceOwed > 0 ? fmtMoneyInr(account.balanceOwed) : "✓ Cleared"}</p>
+          <div className="p-3 rounded-xl bg-blue-500/8 border border-blue-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Received (refunds)</p><p className="font-semibold text-sm text-blue-600">{fmtMoneyInr(account.received)}</p></div>
+          <div className={`p-3 rounded-xl text-center border ${account.net > 0 ? "bg-destructive/5 border-destructive/20" : account.net < 0 ? "bg-blue-500/8 border-blue-500/20" : "bg-success/8 border-success/20"}`}>
+            <p className="text-xs text-muted-foreground mb-1">{account.net < 0 ? "Supplier owes you" : "Net balance"}</p>
+            <p className={`font-semibold text-sm ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>{account.net > 0 ? fmtMoneyInr(account.net) : account.net < 0 ? fmtMoneyInr(-account.net) : "✓ Settled"}</p>
           </div>
-          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center"><p className="text-xs text-muted-foreground mb-1">Overpaid</p><p className="font-semibold text-sm text-primary">{fmtMoneyInr(account.overpaid)}</p></div>
         </div>
 
         {showPurchaseForm && (
@@ -620,6 +655,25 @@ export function SupplierHistoryPage() {
             <div className="flex gap-2.5">
               <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save Payment</AsyncButton>
               <Button variant="outline" onClick={() => setShowPayForm(false)} className="rounded-xl h-10">Cancel</Button>
+            </div>
+          </div>
+        )}
+
+        {showReceiveForm && (
+          <div className="pt-2 border-t border-border/60 space-y-2.5">
+            <p className="text-sm font-medium text-brand-dark">Receive from {supplier.name}</p>
+            <p className="text-xs text-muted-foreground -mt-1.5">Money the supplier gave back (refund / return credit). It goes into a locker and reduces what you owe them.</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Input type="number" min={1} value={rcvAmount} onChange={e => setRcvAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount received (₹)" />
+              <Select value={rcvLockerId} onValueChange={setRcvLockerId}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Into which locker?" /></SelectTrigger>
+                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <Input value={rcvNote} onChange={e => setRcvNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (e.g. refund for returned goods)" />
+            <div className="flex gap-2.5">
+              <AsyncButton onClick={recordReceipt} className="btn-hero rounded-xl h-10">Save Receipt</AsyncButton>
+              <Button variant="outline" onClick={() => setShowReceiveForm(false)} className="rounded-xl h-10">Cancel</Button>
             </div>
           </div>
         )}

@@ -107,6 +107,7 @@ service cloud.firestore {
     match /lockerTransactions/{id} { allow read, write: if isStaff(); }
     match /suppliers/{id}          { allow read, write: if isStaff(); }
     match /purchases/{id}          { allow read, write: if isStaff(); }
+    match /supplierReceipts/{id}   { allow read, write: if isStaff(); }
     match /factories/{id}          { allow read, write: if isStaff(); }
     match /materialIssuances/{id}  { allow read, write: if isStaff(); }
     match /stockMovements/{id}     { allow read, write: if isStaff(); }

@@ -459,6 +459,20 @@ export interface PurchasePayment {
   note?: string;
 }
 
+/** Money RECEIVED FROM a supplier (a refund, a return credit, an overpayment
+ *  given back) — the opposite direction of a payment. Reduces what we owe the
+ *  supplier (and can push the account into "supplier owes us" territory). Not
+ *  tied to a single purchase; it's a supplier-level credit. */
+export interface SupplierReceipt {
+  id: string;
+  supplierId: string;
+  amountInr: number;
+  lockerId: string; // which Locker the money landed in
+  recordedBy: string;
+  createdAt: string;
+  note?: string;
+}
+
 export interface Purchase {
   id: string;
   supplierId: string;
@@ -613,6 +627,7 @@ export interface DB {
   lockerTransactions: LockerTransaction[];
   suppliers: Supplier[];
   purchases: Purchase[];
+  supplierReceipts: SupplierReceipt[];
   factories: Factory[];
   materialIssuances: MaterialIssuance[];
   stockMovements: StockMovement[];
@@ -659,6 +674,7 @@ function emptyDb(): DB {
     lockerTransactions: [],
     suppliers: [],
     purchases: [],
+    supplierReceipts: [],
     factories: [],
     materialIssuances: [],
     stockMovements: [],
@@ -836,6 +852,7 @@ type ArrayCol =
   | "lockerTransactions"
   | "suppliers"
   | "purchases"
+  | "supplierReceipts"
   | "factories"
   | "materialIssuances"
   | "stockMovements"
@@ -856,6 +873,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "lockerTransactions",
   "suppliers",
   "purchases",
+  "supplierReceipts",
   "factories",
   "materialIssuances",
   "stockMovements",
@@ -1205,6 +1223,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "lockerTransactions" ||
         col === "suppliers" ||
         col === "purchases" ||
+        col === "supplierReceipts" ||
         col === "factories" ||
         col === "materialIssuances" ||
         col === "stockMovements"
