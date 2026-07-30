@@ -451,8 +451,8 @@ export function FactoryHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        { label: "Gold Outstanding", value: `${account.goldOutstanding.toLocaleString()} g` },
-        { label: "Diamond Outstanding", value: `${account.diamondOutstanding.toLocaleString()} ct` },
+        { label: "Fine Gold at Factory (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!).toLocaleString()} g` },
+        { label: "Diamond (net)", value: `${account.diamondOutstanding.toLocaleString()} ct` },
         { label: "Charges Total", value: fmtInrPlain(account.chargesTotal) },
         { label: "Charges Paid", value: fmtInrPlain(account.chargesPaid) },
         { label: "Charges Pending", value: fmtInrPlain(account.chargesPending) },
@@ -526,8 +526,7 @@ export function FactoryHistoryPage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!).toLocaleString()} g</p></div>
-          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Gold Outstanding</p><p className="font-semibold text-sm">{account.goldOutstanding.toLocaleString()} g</p></div>
-          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond Outstanding</p><p className="font-semibold text-sm">{account.diamondOutstanding.toLocaleString()} ct</p></div>
+          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond (net ±)</p><p className={`font-semibold text-sm ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding > 0 ? "+" : ""}{account.diamondOutstanding.toLocaleString()} ct</p></div>
           <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
             <p className="text-xs text-muted-foreground mb-1">Charges Pending</p>
             <p className={`font-semibold text-sm ${account.chargesPending > 0 ? "text-destructive" : "text-success"}`}>{account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared"}</p>

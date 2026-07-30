@@ -256,13 +256,8 @@ function PaySupplier() {
       return;
     }
     // ── Pay: money out TO the supplier. ──
-    // FIFO only applies up to what's actually pending — anything beyond that
-    // would leave the locker but never land on any purchase, silently
-    // vanishing from Total Paid. Target a specific purchase to overpay instead.
-    if (target === "__fifo" && amt > account.balanceOwed + 0.01) {
-      toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
-      return;
-    }
+    // Overpayment is allowed — the excess beyond what's owed is recorded as an
+    // overpay on the newest purchase, never silently lost.
     if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
@@ -270,7 +265,14 @@ function PaySupplier() {
       updateDb(d => {
         const supplierPurchases = d.purchases.filter(p => p.supplierId === supplierId);
         if (target === "__fifo") {
-          allocateSupplierPaymentFIFO(supplierPurchases, amt, lockerId, user!.id, now, note.trim() || undefined);
+          const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, lockerId, user!.id, now, note.trim() || undefined);
+          if (leftover > 0) {
+            const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
+            if (newest) {
+              if (!newest.payments) newest.payments = [];
+              newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+            }
+          }
         } else {
           const p = d.purchases.find(p => p.id === target);
           if (p) {
@@ -370,12 +372,8 @@ function PayFactory() {
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
-    // Same reasoning as PaySupplier — FIFO can't silently swallow an amount
-    // beyond what's actually pending.
-    if (target === "__fifo" && amt > account.chargesPending + 0.01) {
-      toast.error(`That's ${fmtMoneyInr(amt - account.chargesPending)} more than this factory is currently owed (${fmtMoneyInr(account.chargesPending)}). Enter a smaller amount, or choose a specific issuance to overpay.`);
-      return;
-    }
+    // Overpayment is allowed (you can pay more than currently owed) — the extra
+    // is recorded as an advance/overpay, never silently lost.
     if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
@@ -383,7 +381,15 @@ function PayFactory() {
       updateDb(d => {
         const factoryIssuances = d.materialIssuances.filter(i => i.factoryId === factoryId);
         if (target === "__fifo") {
-          allocateFactoryChargePaymentFIFO(factoryIssuances, amt, lockerId, user!.id, now, note.trim() || undefined);
+          const leftover = allocateFactoryChargePaymentFIFO(factoryIssuances, amt, lockerId, user!.id, now, note.trim() || undefined);
+          if (leftover > 0) {
+            // Park the excess on the newest issuance so Total Paid / Overpaid reflect it.
+            const newest = [...factoryIssuances].sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt))[0];
+            if (newest) {
+              if (!newest.makingCharges.payments) newest.makingCharges.payments = [];
+              newest.makingCharges.payments.push({ id: uid("fpay_"), amountInr: leftover, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+            }
+          }
         } else {
           const mi = d.materialIssuances.find(x => x.id === target);
           if (mi) {

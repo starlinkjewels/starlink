@@ -260,14 +260,8 @@ export function SupplierHistoryPage() {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
-    // FIFO only ever applies up to what's actually pending — anything beyond
-    // that would leave the locker but never land on any purchase, silently
-    // vanishing from this supplier's Total Paid. Target a specific purchase
-    // instead if you need to record an intentional overpayment.
-    if (payTargetPurchase === "__fifo" && amt > account.balanceOwed + 0.01) {
-      toast.error(`That's ${fmtMoneyInr(amt - account.balanceOwed)} more than this supplier is currently owed (${fmtMoneyInr(account.balanceOwed)}). Enter a smaller amount, or choose a specific purchase to overpay.`);
-      return;
-    }
+    // Overpayment allowed — the excess beyond what's owed is parked on the newest
+    // purchase (shows as Overpaid), never silently lost.
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
         !window.confirm(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`)) return;
@@ -276,7 +270,14 @@ export function SupplierHistoryPage() {
     updateDb(d => {
       const supplierPurchases = d.purchases.filter(p => p.supplierId === id);
       if (payTargetPurchase === "__fifo") {
-        allocateSupplierPaymentFIFO(supplierPurchases, amt, payLockerId, user!.id, now, payNote.trim() || undefined);
+        const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, payLockerId, user!.id, now, payNote.trim() || undefined);
+        if (leftover > 0) {
+          const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
+          if (newest) {
+            if (!newest.payments) newest.payments = [];
+            newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
+          }
+        }
       } else {
         const p = d.purchases.find(p => p.id === payTargetPurchase);
         if (p) {
