@@ -193,6 +193,9 @@ export interface Order {
   stamping?: string; // "No Stamping" | "KT Stamping" | "Diamond Weight + KT Stamp" | "Other"
   // CAD design image (uploaded after CAD Approved step)
   cadImage?: string;
+  // Optional 3D model file (.3dm) — when present, the order shows a "View 360°"
+  // button that opens it in the Starlink360 web viewer (mobile + desktop).
+  cad3dmUrl?: string;
   // Dispatch info
   courierName?: string;
   trackingNumber?: string;

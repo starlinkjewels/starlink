@@ -6,7 +6,7 @@ import {
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { uploadDataUrl } from "@/lib/storage";
+import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,7 +16,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X,
+  Factory as FactoryIcon, Coins, Gem, X, Box,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -138,6 +138,9 @@ export function OrderDetailPage() {
   const [cadUploading, setCadUploading] = useState(false);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const [cadView, setCadView] = useState<"fit" | "full">("fit"); // CAD preview: contained vs full-width
+  const model3dmRef = useRef<HTMLInputElement>(null);
+  const [model3dmUploading, setModel3dmUploading] = useState(false);
+  const [show360, setShow360] = useState(false); // 3D model viewer modal
 
   // Dispatch form
   const [showDispatch, setShowDispatch] = useState(false);
@@ -969,6 +972,25 @@ export function OrderDetailPage() {
     setCadUploading(false);
   };
 
+  const save3dmModel = async (file: File) => {
+    if (!/\.3dm$/i.test(file.name)) { toast.error("Please choose a .3dm file"); return; }
+    setModel3dmUploading(true);
+    try {
+      const url = await uploadFile(file, `orders/${order.id}/model3dm`);
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        o.cad3dmUrl = url;
+      });
+      toast.success("3D model uploaded — View 360° is now available");
+    } catch { toast.error("Failed to upload the 3D model"); }
+    setModel3dmUploading(false);
+  };
+
+  // The Starlink360 web viewer needs the file URL passed (encoded) as ?file=…
+  const viewer360Url = order.cad3dmUrl
+    ? `https://starlink360.vercel.app/?file=${encodeURIComponent(order.cad3dmUrl)}&embed=true`
+    : "";
+
   const saveActualDetails = () => {
     // Every field is optional — update only what was actually filled in, and
     // never overwrite an existing value with a blank.
@@ -1459,31 +1481,34 @@ export function OrderDetailPage() {
                 </p>
               </div>
             </div>
-            {canEditStage() && (
-              <div>
-                <input
-                  ref={cadRef}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={async e => {
-                    const file = e.target.files?.[0];
-                    if (file) await saveCadImage(file);
-                    e.target.value = "";
-                  }}
-                />
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => cadRef.current?.click()}
-                  disabled={cadUploading}
-                  className="rounded-xl gap-2"
-                >
-                  <ImagePlus className="h-4 w-4" />
-                  {cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD" : "Upload CAD Image"}
+            <div className="flex items-center gap-2 flex-wrap">
+              {/* Visible to everyone (incl. client) once a 3D model is on file. */}
+              {order.cad3dmUrl && (
+                <Button size="sm" onClick={() => setShow360(true)} className="btn-hero rounded-xl gap-2">
+                  <Box className="h-4 w-4" /> View 360°
                 </Button>
-              </div>
-            )}
+              )}
+              {canEditStage() && (
+                <>
+                  <input
+                    ref={cadRef} type="file" accept="image/*" className="hidden"
+                    onChange={async e => { const file = e.target.files?.[0]; if (file) await saveCadImage(file); e.target.value = ""; }}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => cadRef.current?.click()} disabled={cadUploading} className="rounded-xl gap-2">
+                    <ImagePlus className="h-4 w-4" />
+                    {cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD" : "Upload CAD Image"}
+                  </Button>
+                  <input
+                    ref={model3dmRef} type="file" accept=".3dm" className="hidden"
+                    onChange={async e => { const file = e.target.files?.[0]; if (file) await save3dmModel(file); e.target.value = ""; }}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => model3dmRef.current?.click()} disabled={model3dmUploading} className="rounded-xl gap-2">
+                    <Box className="h-4 w-4" />
+                    {model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D Model" : "Upload 3D Model (.3dm)"}
+                  </Button>
+                </>
+              )}
+            </div>
           </div>
 
           {order.cadImage && (
@@ -2349,6 +2374,26 @@ export function OrderDetailPage() {
             ✕
           </button>
         </motion.div>
+      )}
+
+      {/* ── 360° 3D model viewer (Starlink360 embed) — responsive, full-screen ── */}
+      {show360 && viewer360Url && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex flex-col p-2 sm:p-4" onClick={() => setShow360(false)}>
+          <div className="flex items-center justify-between px-2 pb-2 shrink-0">
+            <p className="text-white text-sm font-medium">360° View — {order.orderNumber}</p>
+            <button onClick={() => setShow360(false)} className="h-9 w-9 rounded-full bg-white/20 hover:bg-white/30 text-white grid place-items-center" aria-label="Close">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <div className="flex-1 min-h-0 rounded-2xl overflow-hidden bg-white" onClick={e => e.stopPropagation()}>
+            <iframe
+              src={viewer360Url}
+              title="360° 3D model"
+              className="w-full h-full border-0"
+              allow="fullscreen"
+            />
+          </div>
+        </div>
       )}
 
       {/* ── Final Approval popup — one window for all the actual details ── */}
