@@ -4,6 +4,7 @@ import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { factoryAccount, fmtMoneyInr } from "@/lib/manufacturing";
+import { AccountSummary } from "@/components/AccountSummary";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,15 @@ export function FactoriesPage() {
     fac.name.toLowerCase().includes(q.toLowerCase()) || (fac.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
   );
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
+
+  // Grand totals across ALL factories: charges we still owe (payable) vs charges
+  // we overpaid and the factory owes us back (receivable).
+  const totals = db.factories.reduce((acc, fac) => {
+    const a = factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id));
+    acc.payable += a.chargesPending;
+    acc.receivable += a.chargesOverpaid;
+    return acc;
+  }, { payable: 0, receivable: 0 });
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a factory name"); return; }
@@ -86,6 +96,14 @@ export function FactoriesPage() {
         </Dialog>
         )}
       </div>
+
+      <AccountSummary
+        receivable={totals.receivable}
+        payable={totals.payable}
+        fmt={fmtMoneyInr}
+        receivableSub="factories owe us · ughrani"
+        payableSub="charges due · chukavni"
+      />
 
       <div className="flex items-center gap-2">
         <div className="relative flex-1">

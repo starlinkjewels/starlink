@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, uid, type Client } from "@/lib/db";
+import { loadDb, updateDb, uid, fmtMoney, clientAccount, type Client } from "@/lib/db";
+import { AccountSummary } from "@/components/AccountSummary";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -140,6 +141,16 @@ export function ClientsPage() {
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
+  // Grand totals across all clients this user can see: outstanding = money
+  // clients owe us (receivable · ughrani); credit = advances we hold for them,
+  // i.e. money we'd owe back (payable · chukavni). Rejected orders aren't billed.
+  const totals = scoped.reduce((acc, c) => {
+    const a = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
+    acc.receivable += a.outstanding;
+    acc.payable += a.credit;
+    return acc;
+  }, { payable: 0, receivable: 0 });
+
   const create = async () => {
     if (!f.companyName || !f.email || !f.password) { toast.error("Fill company, email and password"); return; }
     const email = f.email!.trim().toLowerCase();
@@ -249,6 +260,14 @@ export function ClientsPage() {
           </Dialog>
         )}
       </div>
+
+      <AccountSummary
+        receivable={totals.receivable}
+        payable={totals.payable}
+        fmt={fmtMoney}
+        receivableSub="clients owe us · ughrani"
+        payableSub="client advances held · chukavni"
+      />
 
       <div className="flex items-center gap-2">
         <div className="relative flex-1">

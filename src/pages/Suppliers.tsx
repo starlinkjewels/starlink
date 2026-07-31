@@ -4,6 +4,7 @@ import { updateDb, uid, fmtDate, type Supplier } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
+import { AccountSummary } from "@/components/AccountSummary";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -33,6 +34,14 @@ export function SuppliersPage() {
     s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
   );
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
+
+  // Grand totals across ALL suppliers (not just the search/current page):
+  // net > 0 → we still owe them (payable); net < 0 → they owe us (receivable).
+  const totals = db.suppliers.reduce((acc, s) => {
+    const a = supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
+    if (a.net > 0) acc.payable += a.net; else acc.receivable += -a.net;
+    return acc;
+  }, { payable: 0, receivable: 0 });
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a supplier name"); return; }
@@ -92,6 +101,14 @@ export function SuppliersPage() {
         </Dialog>
         )}
       </div>
+
+      <AccountSummary
+        receivable={totals.receivable}
+        payable={totals.payable}
+        fmt={fmtMoneyInr}
+        receivableSub="suppliers owe us · ughrani"
+        payableSub="we owe suppliers · chukavni"
+      />
 
       <div className="flex items-center gap-2">
         <div className="relative flex-1">
