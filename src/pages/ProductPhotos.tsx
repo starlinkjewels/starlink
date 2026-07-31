@@ -134,9 +134,10 @@ export function ProductPhotosPage() {
               initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
               className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm" onClick={() => setOpenDesign(null)}
             />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
             <motion.div
               initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 24 }}
-              className="fixed inset-x-4 bottom-4 sm:inset-auto sm:top-1/2 sm:left-1/2 sm:-translate-x-1/2 sm:-translate-y-1/2 z-50 bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto"
+              className="pointer-events-auto bg-white rounded-2xl shadow-2xl p-6 max-w-2xl w-full max-h-[85vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between gap-3 mb-4">
                 <div className="min-w-0">
@@ -229,6 +230,7 @@ export function ProductPhotosPage() {
                 ))}
               </div>
             </motion.div>
+            </div>
           </>
         )}
       </AnimatePresence>
