@@ -7,6 +7,8 @@ import { chatCompletion, type ChatMessage, type ToolDef } from "./lib/sarvam";
 import { buildToolDefs } from "./tools/schema";
 import { executeTool } from "./tools/execute";
 
+export { sendNotificationPush } from "./notifications";
+
 const SARVAM_API_KEY = defineSecret("SARVAM_API_KEY");
 
 const MAX_MESSAGE_CHARS = 2000;

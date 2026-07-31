@@ -5,6 +5,7 @@ import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/Login";
 import { InstallPrompt } from "./components/InstallPrompt";
+import { initForegroundPush } from "./lib/push";
 import type { Role } from "./lib/db";
 
 // Route-level code splitting: each page is fetched on demand instead of riding
@@ -50,6 +51,8 @@ function Protected({ children, roles }: { children: React.ReactNode; roles?: Rol
 }
 
 export function App() {
+  const { user } = useAuth();
+
   // Surface background save failures — writes are optimistic, so without this a
   // failed Firestore write is invisible and the user thinks the change saved.
   useEffect(() => {
@@ -57,6 +60,14 @@ export function App() {
     window.addEventListener("starlink-db-error", onErr);
     return () => window.removeEventListener("starlink-db-error", onErr);
   }, []);
+
+  // Foreground push handler — a notification that arrives while this tab is
+  // focused shows as an in-app toast instead (FCM never fires an OS-level
+  // notification for a foreground message by design).
+  useEffect(() => {
+    if (!user) return;
+    initForegroundPush();
+  }, [user]);
 
   return (
     <>

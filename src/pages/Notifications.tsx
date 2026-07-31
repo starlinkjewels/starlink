@@ -5,6 +5,7 @@ import { Bell, Info, Package, AlertCircle, Trash2 } from "lucide-react";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 
 const PAGE_SIZE = 15;
 
@@ -49,6 +50,7 @@ export function NotificationsPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
+      <PushPermissionBanner />
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Notifications</h1>

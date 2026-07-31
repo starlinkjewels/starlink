@@ -42,6 +42,11 @@ export interface User {
   // Firebase Auth uid — set only on the admin profile (admins authenticate via
   // Firebase Authentication). Used to match the profile independently of email.
   authUid?: string;
+  // Web push (FCM) registration tokens — one per browser/device this user has
+  // granted notification permission on. The sendNotificationPush Cloud
+  // Function (functions/src/notifications.ts) reads this to deliver a real
+  // OS-level push whenever a Notification doc is created for this user.
+  fcmTokens?: string[];
 }
 
 export interface Client {

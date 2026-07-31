@@ -14,6 +14,12 @@ export default defineConfig({
       registerType: "autoUpdate",
       injectRegister: "auto",
       includeAssets: ["favicon.ico", "favicon.png", "icon.png", "logo.png"],
+      // Custom service worker (src/sw.ts) instead of the auto-generated one —
+      // it needs to also handle Firebase Cloud Messaging background push,
+      // and two separate service workers can't both control the root scope.
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       manifest: {
         name: "Starlink Jewels",
         short_name: "Starlink",
@@ -28,32 +34,11 @@ export default defineConfig({
           { src: "/icon.png", sizes: "192x192", type: "image/png", purpose: "any" },
         ],
       },
-      workbox: {
-        navigateFallback: "/index.html",
+      injectManifest: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,webp,woff2}"],
         // Firebase SDK grows the main chunk past the default 2 MiB precache
         // limit — raise it so the service worker can still precache the app.
         maximumFileSizeToCacheInBytes: 6 * 1024 * 1024,
-        // Cache order/CAD photos from Firebase Storage. Download URLs are unique
-        // per file token, so CacheFirst never serves a stale image — once loaded,
-        // it's served instantly (even offline) on every later view/scroll.
-        runtimeCaching: [
-          {
-            urlPattern: ({ url }) =>
-              url.hostname.includes("firebasestorage") ||
-              url.hostname.endsWith(".firebasestorage.app"),
-            handler: "CacheFirst",
-            options: {
-              cacheName: "sl-firebase-images",
-              expiration: {
-                maxEntries: 600,
-                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
-                purgeOnQuotaError: true,
-              },
-              cacheableResponse: { statuses: [0, 200] },
-            },
-          },
-        ],
       },
       devOptions: { enabled: false },
     }),

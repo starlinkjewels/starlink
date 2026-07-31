@@ -8,6 +8,7 @@ import { Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tooltip, PieChart, Pie, Cell } from "recharts";
 import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
+import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import type { Order } from "@/lib/db";
 import { factoryAccount, supplierAccount, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
@@ -151,6 +152,7 @@ export function Dashboard() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
+      <PushPermissionBanner />
       <div>
         <p className="text-sm text-muted-foreground">Good day,</p>
         <h1 className="font-display text-2xl md:text-4xl text-brand-dark leading-tight truncate">{client?.companyName || user?.name}</h1>

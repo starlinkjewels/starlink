@@ -9,6 +9,7 @@ import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import { getFirestore, type Firestore } from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { getFunctions, type Functions } from "firebase/functions";
+import { getMessaging, isSupported as isMessagingSupported, type Messaging } from "firebase/messaging";
 import {
   getAuth, createUserWithEmailAndPassword, signOut, type Auth,
 } from "firebase/auth";
@@ -84,6 +85,20 @@ export const auth: Auth = getAuth(app);
 export const functions: Functions = getFunctions(app, "us-central1");
 
 export const firebaseConfigPublic = firebaseConfig;
+
+// Messaging isn't available in every browser/context (e.g. no service worker
+// support, some privacy modes) — isSupported() must be checked before use
+// rather than assuming getMessaging() will succeed everywhere.
+let messagingInstance: Messaging | null | undefined;
+export async function getMessagingIfSupported(): Promise<Messaging | null> {
+  if (messagingInstance !== undefined) return messagingInstance;
+  try {
+    messagingInstance = (await isMessagingSupported()) ? getMessaging(app) : null;
+  } catch {
+    messagingInstance = null;
+  }
+  return messagingInstance;
+}
 
 /**
  * Create a Firebase Auth account WITHOUT disrupting the current (admin) session.
