@@ -3,14 +3,14 @@ import { Link } from "react-router-dom";
 import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { factoryAccount, fmtMoneyInr } from "@/lib/manufacturing";
+import { factoryAccount, factoryPoolBuckets, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Coins } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Coins, Package } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -128,12 +128,17 @@ export function FactoriesPage() {
           {paged.map(fac => {
             const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
             const account = factoryAccount(issuances);
+            const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
+            const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
             return (
               <Link key={fac.id} to={`/factories/${fac.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
                 <div className="h-9 w-9 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4 w-4" /></div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
                   <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Coins className="h-3 w-3 text-amber-600" />{account.goldOutstanding.toLocaleString()} g gold · {account.diamondOutstanding.toLocaleString()} ct dia</p>
+                  {(goldPool > 0 || diaPool > 0) && (
+                    <p className="text-[11px] text-orange-600 truncate flex items-center gap-1"><Package className="h-3 w-3" />Pool stock: {goldPool.toLocaleString()} g gold · {diaPool.toLocaleString()} ct dia</p>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
                   {account.chargesPending > 0
@@ -154,6 +159,8 @@ export function FactoriesPage() {
         {paged.map(fac => {
           const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
           const account = factoryAccount(issuances);
+          const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
+          const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
           return (
             <div key={fac.id} className="card-luxe card-hover p-5 flex flex-col">
               <div className="flex items-start gap-3">
@@ -188,6 +195,10 @@ export function FactoriesPage() {
                   </p>
                 </div>
               </div>
+
+              {(goldPool > 0 || diaPool > 0) && (
+                <p className="mt-2 text-[11px] text-orange-600 flex items-center gap-1"><Package className="h-3 w-3" />Pool stock: {goldPool.toLocaleString()} g gold · {diaPool.toLocaleString()} ct dia</p>
+              )}
 
               <p className="text-[11px] text-muted-foreground mt-2">Added {fmtDate(fac.createdAt)}</p>
 
