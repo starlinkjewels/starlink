@@ -38,6 +38,9 @@ export function LockerPage() {
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
+  const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "transfer_in" | "transfer_out">("all");
   const [txnMode, setTxnMode] = useState(false);
   const [txnType, setTxnType] = useState<"income" | "expense" | "transfer_out">("expense");
   const [txnAmount, setTxnAmount] = useState("");
@@ -164,7 +167,15 @@ export function LockerPage() {
   const txns = selected
     ? db.lockerTransactions.filter(t => t.lockerId === selected.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     : [];
-  const { paged, page, setPage, totalPages, start, end } = usePagination(txns, PAGE_SIZE);
+
+  const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
+  const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
+  const filtersActive = !!filterFrom || !!filterTo || filterType !== "all";
+  // Filters narrow what's SHOWN — the running balance below is always computed
+  // from the full, unfiltered history, so a filtered view still shows each
+  // entry's true balance-at-the-time, like a bank statement search does.
+  const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (filterType === "all" || t.type === filterType));
+  const { paged, page, setPage, totalPages, start, end } = usePagination(filteredTxns, PAGE_SIZE);
 
   const totalIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").reduce((s, t) => s + t.amountInr, 0);
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
@@ -339,7 +350,9 @@ export function LockerPage() {
               </div>
               <div>
                 <h3 className="font-display text-lg text-brand-dark">{selected.name} — Ledger</h3>
-                <p className="text-xs text-muted-foreground">{txns.length} transaction{txns.length !== 1 ? "s" : ""}</p>
+                <p className="text-xs text-muted-foreground">
+                  {filtersActive ? `${filteredTxns.length} of ${txns.length} transactions` : `${txns.length} transaction${txns.length !== 1 ? "s" : ""}`}
+                </p>
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -367,6 +380,27 @@ export function LockerPage() {
               <p className="text-xs text-muted-foreground mb-1">Total Out</p>
               <p className="font-semibold text-sm text-destructive">{fmtLockerAmount(totalOut, selected.currency)}</p>
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <Input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+            <span className="text-xs text-muted-foreground">to</span>
+            <Input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+            <Select value={filterType} onValueChange={v => setFilterType(v as typeof filterType)}>
+              <SelectTrigger className="h-9 rounded-xl w-40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="income">Income</SelectItem>
+                <SelectItem value="expense">Expense</SelectItem>
+                <SelectItem value="transfer_in">Transfer in</SelectItem>
+                <SelectItem value="transfer_out">Transfer out</SelectItem>
+              </SelectContent>
+            </Select>
+            {filtersActive && (
+              <button onClick={() => { setFilterFrom(""); setFilterTo(""); setFilterType("all"); }} className="text-xs text-primary hover:underline">
+                Reset
+              </button>
+            )}
           </div>
 
           {txnMode && (
@@ -430,11 +464,22 @@ export function LockerPage() {
             </div>
           )}
 
+          {paged.length > 0 && (
+            <div className="flex items-center gap-3 px-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="h-8 w-8 shrink-0" />
+              <div className="flex-1 min-w-0">Particulars</div>
+              <div className="w-20 sm:w-24 text-right shrink-0">Debit</div>
+              <div className="w-20 sm:w-24 text-right shrink-0">Credit</div>
+              <div className="w-20 sm:w-24 text-right shrink-0">Balance</div>
+            </div>
+          )}
           <div className="divide-y divide-border/40 -mx-5">
-            {paged.map(t => (
+            {paged.map(t => {
+              const isCredit = t.type === "income" || t.type === "transfer_in";
+              return (
               <div key={t.id} className="flex items-center gap-3 px-5 py-3">
                 <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${
-                  t.type === "income" || t.type === "transfer_in" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
+                  isCredit ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
                 }`}>
                   {t.type === "transfer_in" || t.type === "transfer_out"
                     ? <ArrowLeftRight className="h-4 w-4" />
@@ -447,14 +492,18 @@ export function LockerPage() {
                   </p>
                   <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className={`text-sm font-semibold ${t.type === "income" || t.type === "transfer_in" ? "text-success" : "text-destructive"}`}>
-                    {t.type === "income" || t.type === "transfer_in" ? "+" : "−"}{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">Bal: {fmtLockerAmount(txnBalances.get(t.id) ?? 0, selected.currency)}</p>
+                <div className="w-20 sm:w-24 text-right shrink-0">
+                  {!isCredit && <p className="text-sm font-semibold text-destructive">{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}</p>}
+                </div>
+                <div className="w-20 sm:w-24 text-right shrink-0">
+                  {isCredit && <p className="text-sm font-semibold text-success">{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}</p>}
+                </div>
+                <div className="w-20 sm:w-24 text-right shrink-0">
+                  <p className="text-sm font-medium text-foreground">{fmtLockerAmount(txnBalances.get(t.id) ?? 0, selected.currency)}</p>
                 </div>
               </div>
-            ))}
+              );
+            })}
             {/* Opening balance — the starting point every running balance builds on,
                 shown at the very bottom (after the oldest entry) so the numbers make sense. */}
             {page === totalPages && (
@@ -469,11 +518,15 @@ export function LockerPage() {
                 <p className="text-sm font-semibold text-right shrink-0">{fmtLockerAmount(selected.openingBalance || 0, selected.currency)}</p>
               </div>
             )}
-            {txns.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No transactions yet — opening balance only.</div>}
+            {filteredTxns.length === 0 && (
+              <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+                {txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
+              </div>
+            )}
           </div>
 
           {totalPages > 1 && (
-            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${txns.length}`} />
+            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${filteredTxns.length}`} />
           )}
         </motion.div>
       )}
