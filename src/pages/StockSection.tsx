@@ -6,11 +6,13 @@ import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2 } from "lucide-react";
+import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE_SIZE = 15;
@@ -32,6 +34,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const navigate = useNavigate();
   const db = useDb();
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
+  const [showExport, setShowExport] = useState(false);
 
   // Balance derived from the movement ledger, so it always matches the history below.
   const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
@@ -41,6 +44,44 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
   });
   const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE_SIZE);
+
+  const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
+
+  const exportCsv = (from: Date | null, to: Date | null) => {
+    downloadCsv(
+      `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
+      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`],
+      rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => [
+        fmtDate(m.createdAt), m.link.label,
+        m.type === "purchase_in" ? m.quantity : "",
+        m.type === "purchase_in" ? "" : m.quantity,
+      ]),
+    );
+  };
+
+  const exportPdf = (from: Date | null, to: Date | null) => {
+    const filtered = rows.filter(m => inDateRange(m.createdAt, from, to));
+    downloadLedgerPdf({
+      title: `${materialLabel} — Movement History`,
+      subjectLines: [
+        selectedBucket ? `Bucket: ${selectedBucket}` : "All purities/shapes",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ],
+      summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
+      columns: [
+        { header: "Date", x: 20 },
+        { header: "Particulars", x: 50 },
+        { header: "In", x: 150 },
+        { header: "Out", x: 170 },
+      ],
+      rows: filtered.map(m => [
+        fmtDate(m.createdAt), m.link.label.slice(0, 40),
+        m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
+        m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
+      ]),
+      filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
+    });
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -87,9 +128,16 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       </div>
 
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Movement History{selectedBucket ? ` — ${selectedBucket}` : ""}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{rows.length} movement{rows.length !== 1 ? "s" : ""}</p>
+        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-display text-xl text-brand-dark">Movement History{selectedBucket ? ` — ${selectedBucket}` : ""}</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{rows.length} movement{rows.length !== 1 ? "s" : ""}</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+          <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${materialLabel}${selectedBucket ? ` — ${selectedBucket}` : ""}`} options={[
+            { label: "Movement History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportPdf },
+            { label: "Movement History — Excel", sublabel: "Filterable by date range", kind: "excel", run: exportCsv },
+          ]} />
         </div>
         <div className="divide-y divide-border/40">
           {paged.map(m => (
