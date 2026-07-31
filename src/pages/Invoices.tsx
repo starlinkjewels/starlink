@@ -13,6 +13,15 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { printBatchInvoice } from "@/lib/invoicePrint";
 
+// Timeline dates are stored as full ISO timestamps (UTC). The date filter below
+// must compare against the LOCAL calendar day — the same day every other date in
+// the app displays via fmtDate() — not the UTC day, or a dispatch marked complete
+// in the early-morning hours (IST) lands one day off from what the picker shows.
+function localDateKey(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export function InvoicesPage() {
   const { user } = useAuth();
   const db = useDb();
@@ -67,7 +76,7 @@ export function InvoicesPage() {
     const dispatchedOrders = db.orders.filter(o => {
       if (o.clientId !== clientFilter) return false;
       const dispatchStep = o.timeline.find(t => t.step === "Dispatch" && t.status === "done");
-      return dispatchStep?.date?.slice(0, 10) === batchDate;
+      return !!dispatchStep?.date && localDateKey(dispatchStep.date) === batchDate;
     });
     if (!dispatchedOrders.length) {
       toast.error(`No orders dispatched for ${batchClient?.companyName ?? "this client"} on ${batchDate}`);
