@@ -1,8 +1,9 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { TasksPanel } from "@/components/TasksPanel";
@@ -11,6 +12,7 @@ import { SyncStatus } from "@/components/SyncStatus";
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
   { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
+  { to: "/product-photos", label: "Product Photos", icon: Camera },
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/orders", label: "Orders", icon: Package },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
@@ -37,6 +39,7 @@ const NAV: NavItem[] = [
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Overview", items: [
     { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
+    { to: "/product-photos", label: "Product Photos", icon: Camera },
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
     { to: "/orders", label: "Orders", icon: Package },
   ] },
@@ -79,6 +82,7 @@ const MOBILE_NAV: NavItem[] = [
 const MORE_NAV: NavItem[] = [
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/catalog",  label: "Catalog",  icon: FolderOpen },
+  { to: "/product-photos", label: "Product Photos", icon: Camera },
   { to: "/income",   label: "Passbook", icon: BookOpen },
   { to: "/ai",       label: "Starlink AI", icon: Sparkles },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
@@ -107,6 +111,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/invoices": "Invoices",
   "/income":   "Passbook",
   "/catalog":  "Catalog",
+  "/product-photos": "Product Photos",
   "/ai":       "Starlink AI",
   "/expenses": "Expenses",
   "/messages": "Messages",
@@ -133,6 +138,7 @@ const ROLE_LABEL: Record<string, string> = {
 const ICON_COLORS: Record<string, string> = {
   "/invoices":   "bg-blue-500/15 text-blue-600",
   "/catalog":    "bg-amber-500/15 text-amber-600",
+  "/product-photos": "bg-fuchsia-500/15 text-fuchsia-600",
   "/income":     "bg-emerald-500/15 text-emerald-600",
   "/ai":         "bg-primary/15 text-primary",
   "/expenses":   "bg-rose-500/15 text-rose-600",
@@ -152,6 +158,7 @@ const ICON_COLORS: Record<string, string> = {
 
 export function AppLayout() {
   const { user, logout } = useAuth();
+  const db = useDb();
   const navigate = useNavigate();
   const loc = useLocation();
   const [unread, setUnread] = useState(0);
@@ -186,11 +193,17 @@ export function AppLayout() {
   /* Close More drawer when route changes */
   useEffect(() => { setMoreOpen(false); }, [loc.pathname]);
 
-  const nav = NAV.filter(n => !n.roles || n.roles.includes(user!.role));
-  const moreNav = MORE_NAV.filter(n => !n.roles || n.roles.includes(user!.role));
+  // Product Photos is opt-in per client — a client without the grant on their
+  // own record never sees the nav entry at all (admin/employee always do).
+  const canSeeProductPhotos = user!.role !== "client" || !!db.clients.find(c => c.id === user!.clientId)?.productPhotoAccess;
+  const navFilter = (n: NavItem) =>
+    (!n.roles || n.roles.includes(user!.role)) && (n.to !== "/product-photos" || canSeeProductPhotos);
+
+  const nav = NAV.filter(navFilter);
+  const moreNav = MORE_NAV.filter(navFilter);
   // Desktop grouped sidebar (role-filtered, empty groups dropped) + collapse state.
   const navGroups = NAV_GROUPS
-    .map(g => ({ ...g, items: g.items.filter(n => !n.roles || n.roles.includes(user!.role)) }))
+    .map(g => ({ ...g, items: g.items.filter(navFilter) }))
     .filter(g => g.items.length > 0);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
     try { return new Set(JSON.parse(localStorage.getItem("sidebar-collapsed") || "[]")); } catch { return new Set(); }

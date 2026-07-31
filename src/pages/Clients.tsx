@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -195,6 +195,14 @@ export function ClientsPage() {
       if (u) u.status = x.status;
     });
     toast.success("Status updated");
+  };
+
+  const togglePhotoAccess = (c: Client) => {
+    updateDb(d => {
+      const x = d.clients.find(x => x.id === c.id)!;
+      x.productPhotoAccess = !x.productPhotoAccess;
+    });
+    toast.success(c.productPhotoAccess ? "Photo access revoked" : "Photo access granted");
   };
 
   const del = (id: string) => {
@@ -388,6 +396,13 @@ export function ClientsPage() {
                 <div className="flex gap-2 mt-2">
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
                     {c.status === "active" ? "Deactivate" : "Activate"}
+                  </AsyncButton>
+                  <AsyncButton
+                    size="sm" variant="outline" onClick={() => togglePhotoAccess(c)}
+                    className={`rounded-lg w-9 px-0 ${c.productPhotoAccess ? "text-primary border-primary/40 bg-primary/5" : ""}`}
+                    title={c.productPhotoAccess ? "Revoke Product Photos access" : "Grant Product Photos access"}
+                  >
+                    <Camera className="h-3.5 w-3.5" />
                   </AsyncButton>
                   <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
                     <KeyRound className="h-3.5 w-3.5" />

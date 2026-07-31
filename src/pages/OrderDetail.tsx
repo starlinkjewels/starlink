@@ -3,11 +3,10 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, ensureInvoiceForOrder,
-  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance, type CatalogItemType,
+  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
-import { createCatalogItem } from "@/lib/catalogItems";
 import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -1041,37 +1040,6 @@ export function OrderDetailPage() {
   };
 
   // ── Finished-product photography ────────────────────────────────────────
-  // Find-or-create a catalog folder by (name, parent) and return its id. updateDb
-  // is synchronous, so the id assigned inside is available right after the call.
-  const ensureCatalogFolder = (name: string, parentId: string | null): string => {
-    let id = "";
-    updateDb(d => {
-      if (!d.catalogFolders) d.catalogFolders = [];
-      const existing = d.catalogFolders.find(f => (f.parentId ?? null) === parentId && f.name === name);
-      if (existing) { id = existing.id; return; }
-      id = uid("cf_");
-      d.catalogFolders.push({ id, name, parentId, createdBy: user!.id, createdAt: new Date().toISOString() });
-    });
-    return id;
-  };
-
-  // File the product media into Catalog → "Product Photography" → <design number>,
-  // reusing the same Storage URLs (no re-upload). Best-effort: the order already
-  // holds the media, so a catalog hiccup must never fail the upload.
-  const fileProductMediaInCatalog = async (media: { url: string; type: CatalogItemType; name: string }[]) => {
-    try {
-      const parentId = ensureCatalogFolder("Product Photography", null);
-      const design = (order.designNumber || order.orderNumber || "Unlabelled").trim();
-      const folderId = ensureCatalogFolder(design, parentId);
-      for (const m of media) {
-        await createCatalogItem({
-          id: uid("ci_"), folderId, name: m.name, type: m.type, data: m.url,
-          createdBy: user!.id, createdAt: new Date().toISOString(),
-        });
-      }
-    } catch { /* non-fatal — catalog copy is a bonus */ }
-  };
-
   const addProductPhotos = async (files: FileList) => {
     const current = order.productPhotos?.length ?? 0;
     const incoming = Array.from(files).filter(f => f.type.startsWith("image/"));
@@ -1086,8 +1054,6 @@ export function OrderDetailPage() {
         const o = d.orders.find(x => x.id === order.id)!;
         o.productPhotos = [...(o.productPhotos ?? []), ...urls];
       });
-      const design = order.designNumber || order.orderNumber;
-      await fileProductMediaInCatalog(urls.map((u, i) => ({ url: u, type: "image" as CatalogItemType, name: `${design} · photo ${current + i + 1}` })));
       toast.success(`${urls.length} photo${urls.length !== 1 ? "s" : ""} added${batch.length < incoming.length ? " · max 8" : ""}`);
     } catch { toast.error("Failed to upload photos"); }
     setPhotoUploading(false);
@@ -1102,7 +1068,6 @@ export function OrderDetailPage() {
       const url = await uploadFile(file, `orders/${order.id}/product`);
       updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productVideo = url; });
       if (prev) await deleteByUrl(prev);
-      await fileProductMediaInCatalog([{ url, type: "video" as CatalogItemType, name: `${order.designNumber || order.orderNumber} · video` }]);
       toast.success("Product video uploaded");
     } catch { toast.error("Failed to upload the video"); }
     setVideoUploading(false);
@@ -1961,7 +1926,7 @@ export function OrderDetailPage() {
           {/* Empty state — staff, nothing uploaded yet */}
           {!hasProductMedia && canEditStage() && (
             <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-              No product photos yet. Tap <span className="font-medium text-foreground">Add Photos</span> for 4–5 pictures and <span className="font-medium text-foreground">Add Video</span> for a short clip — the client can then download them, and a copy is saved in the Catalog under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
+              No product photos yet. Tap <span className="font-medium text-foreground">Add Photos</span> for 4–5 pictures and <span className="font-medium text-foreground">Add Video</span> for a short clip — the client can then view and download them from the Product Photos page under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
             </div>
           )}
         </div>

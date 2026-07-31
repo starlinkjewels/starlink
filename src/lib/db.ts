@@ -67,6 +67,9 @@ export interface Client {
   // Overpayment carried forward as advance credit — auto-applied (oldest bill
   // first) whenever a payment is recorded or "Apply Credit" is used.
   creditBalance?: number;
+  // Explicit per-client grant for the Product Photos page — unset/false means
+  // that client can't see it (avoids exposing other clients' designs by default).
+  productPhotoAccess?: boolean;
 }
 
 // Streamlined production stages. "Certification" is only added for orders that
@@ -216,8 +219,8 @@ export interface Order {
   trackingNumber?: string;
   trackingLink?: string;
   // Finished-product photography (captured at/after dispatch, optional). Photos
-  // + one short video of the actual piece; the client can view/download them and
-  // a copy is filed in the Catalog under the design number. Storage download URLs.
+  // + one short video of the actual piece; shown on the dedicated Product Photos
+  // page (grouped by design number), not the shared Catalog. Storage download URLs.
   productPhotos?: string[];
   productVideo?: string;
   // Certificate
