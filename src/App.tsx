@@ -5,6 +5,7 @@ import { useAuth } from "./lib/auth";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/Login";
 import { InstallPrompt } from "./components/InstallPrompt";
+import { NotificationPermissionModal } from "./components/NotificationPermissionModal";
 import { initForegroundPush } from "./lib/push";
 import type { Role } from "./lib/db";
 
@@ -109,6 +110,7 @@ export function App() {
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <InstallPrompt />
+      {user && <NotificationPermissionModal />}
     </>
   );
 }
