@@ -12,7 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -115,6 +115,10 @@ export function ClientsPage() {
   const { user } = useAuth();
   const db = useDb();
   const [q, setQ] = useState("");
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("clients-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  });
+  const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("clients-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Client>>({
@@ -246,11 +250,50 @@ export function ClientsPage() {
         )}
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." className="pl-9 h-11 rounded-xl" />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." className="pl-9 h-11 rounded-xl" />
+        </div>
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
+        </div>
       </div>
 
+      {/* ── List view — avatar, company/owner, status + order counts, quick link ── */}
+      {view === "list" && (
+        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
+          {paged.map(c => {
+            const orderCount = db.orders.filter(o => o.clientId === c.id).length;
+            const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
+            return (
+              <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
+                <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center shrink-0 ring-1 ring-primary/10">
+                  {(c.companyName || "?").charAt(0).toUpperCase()}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-medium text-brand-dark truncate">{c.companyName}{c.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
+                  <p className="text-xs text-muted-foreground truncate">{c.ownerName || c.email || c.phone || "—"}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold text-brand-dark">{orderCount} order{orderCount !== 1 ? "s" : ""}</p>
+                  {activeCount > 0 && <p className="text-[10px] text-primary font-medium">{activeCount} active</p>}
+                </div>
+              </Link>
+            );
+          })}
+          {total === 0 && <div className="p-12 text-center text-muted-foreground">No clients found.</div>}
+        </div>
+      )}
+
+      {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(c => {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
@@ -342,6 +385,7 @@ export function ClientsPage() {
           <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No clients found.</div>
         )}
       </div>
+      )}
 
       <PaginationBar
         page={page}
