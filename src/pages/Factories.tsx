@@ -138,6 +138,8 @@ export function FactoriesPage() {
                 <div className="text-right shrink-0">
                   {account.chargesPending > 0
                     ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.chargesPending)}</p><p className="text-[10px] text-muted-foreground">charges due</p></>
+                    : account.chargesOverpaid > 0
+                    ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(account.chargesOverpaid)}</p><p className="text-[10px] text-muted-foreground">advance paid</p></>
                     : <p className="text-sm font-semibold text-success">✓ Cleared</p>}
                 </div>
               </Link>
@@ -179,10 +181,10 @@ export function FactoriesPage() {
                   <p className="text-[10px] text-muted-foreground">Diamond Out</p>
                   <p className="text-xs font-semibold">{account.diamondOutstanding.toLocaleString()} ct</p>
                 </div>
-                <div className={`p-2.5 rounded-xl text-center ${account.chargesPending > 0 ? "bg-destructive/5" : "bg-success/8"}`}>
-                  <p className="text-[10px] text-muted-foreground">Charges Due</p>
-                  <p className={`text-xs font-semibold ${account.chargesPending > 0 ? "text-destructive" : "text-success"}`}>
-                    {account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared"}
+                <div className={`p-2.5 rounded-xl text-center ${account.chargesPending > 0 ? "bg-destructive/5" : account.chargesOverpaid > 0 ? "bg-blue-500/5" : "bg-success/8"}`}>
+                  <p className="text-[10px] text-muted-foreground">{account.chargesOverpaid > 0 && account.chargesPending === 0 ? "Advance Paid" : "Charges Due"}</p>
+                  <p className={`text-xs font-semibold ${account.chargesPending > 0 ? "text-destructive" : account.chargesOverpaid > 0 ? "text-blue-600" : "text-success"}`}>
+                    {account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : account.chargesOverpaid > 0 ? fmtMoneyInr(account.chargesOverpaid) : "✓ Cleared"}
                   </p>
                 </div>
               </div>
