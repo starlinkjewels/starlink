@@ -3,10 +3,11 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, ensureInvoiceForOrder,
-  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
+  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance, type CatalogItemType,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { uploadDataUrl, uploadFile } from "@/lib/storage";
+import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
+import { createCatalogItem } from "@/lib/catalogItems";
 import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -142,6 +143,14 @@ export function OrderDetailPage() {
   const model3dmRef = useRef<HTMLInputElement>(null);
   const [model3dmUploading, setModel3dmUploading] = useState(false);
   const [show360, setShow360] = useState(false); // 3D model viewer modal
+
+  // Finished-product photography (photos + one video, uploaded at/after dispatch)
+  const productPhotoRef = useRef<HTMLInputElement>(null);
+  const productVideoRef = useRef<HTMLInputElement>(null);
+  const [photoUploading, setPhotoUploading] = useState(false);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [downloadingAll, setDownloadingAll] = useState(false);
+  const MAX_VIDEO_MB = 60;
 
   // Dispatch form
   const [showDispatch, setShowDispatch] = useState(false);
@@ -1031,6 +1040,111 @@ export function OrderDetailPage() {
     setModel3dmUploading(false);
   };
 
+  // ── Finished-product photography ────────────────────────────────────────
+  // Find-or-create a catalog folder by (name, parent) and return its id. updateDb
+  // is synchronous, so the id assigned inside is available right after the call.
+  const ensureCatalogFolder = (name: string, parentId: string | null): string => {
+    let id = "";
+    updateDb(d => {
+      if (!d.catalogFolders) d.catalogFolders = [];
+      const existing = d.catalogFolders.find(f => (f.parentId ?? null) === parentId && f.name === name);
+      if (existing) { id = existing.id; return; }
+      id = uid("cf_");
+      d.catalogFolders.push({ id, name, parentId, createdBy: user!.id, createdAt: new Date().toISOString() });
+    });
+    return id;
+  };
+
+  // File the product media into Catalog → "Product Photography" → <design number>,
+  // reusing the same Storage URLs (no re-upload). Best-effort: the order already
+  // holds the media, so a catalog hiccup must never fail the upload.
+  const fileProductMediaInCatalog = async (media: { url: string; type: CatalogItemType; name: string }[]) => {
+    try {
+      const parentId = ensureCatalogFolder("Product Photography", null);
+      const design = (order.designNumber || order.orderNumber || "Unlabelled").trim();
+      const folderId = ensureCatalogFolder(design, parentId);
+      for (const m of media) {
+        await createCatalogItem({
+          id: uid("ci_"), folderId, name: m.name, type: m.type, data: m.url,
+          createdBy: user!.id, createdAt: new Date().toISOString(),
+        });
+      }
+    } catch { /* non-fatal — catalog copy is a bonus */ }
+  };
+
+  const addProductPhotos = async (files: FileList) => {
+    const current = order.productPhotos?.length ?? 0;
+    const incoming = Array.from(files).filter(f => f.type.startsWith("image/"));
+    if (!incoming.length) { toast.error("Please choose image files"); return; }
+    const room = Math.max(0, 8 - current);
+    if (room === 0) { toast.error("Up to 8 photos — remove one first"); return; }
+    const batch = incoming.slice(0, room);
+    setPhotoUploading(true);
+    try {
+      const urls = await Promise.all(batch.map(async f => uploadDataUrl(await compressImage(f), `orders/${order.id}/product`)));
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        o.productPhotos = [...(o.productPhotos ?? []), ...urls];
+      });
+      const design = order.designNumber || order.orderNumber;
+      await fileProductMediaInCatalog(urls.map((u, i) => ({ url: u, type: "image" as CatalogItemType, name: `${design} · photo ${current + i + 1}` })));
+      toast.success(`${urls.length} photo${urls.length !== 1 ? "s" : ""} added${batch.length < incoming.length ? " · max 8" : ""}`);
+    } catch { toast.error("Failed to upload photos"); }
+    setPhotoUploading(false);
+  };
+
+  const addProductVideo = async (file: File) => {
+    if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
+    if (file.size > MAX_VIDEO_MB * 1024 * 1024) { toast.error(`Video is too large — keep it under ${MAX_VIDEO_MB} MB`); return; }
+    setVideoUploading(true);
+    try {
+      const prev = order.productVideo;
+      const url = await uploadFile(file, `orders/${order.id}/product`);
+      updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productVideo = url; });
+      if (prev) await deleteByUrl(prev);
+      await fileProductMediaInCatalog([{ url, type: "video" as CatalogItemType, name: `${order.designNumber || order.orderNumber} · video` }]);
+      toast.success("Product video uploaded");
+    } catch { toast.error("Failed to upload the video"); }
+    setVideoUploading(false);
+  };
+
+  const removeProductPhoto = async (photoUrl: string) => {
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productPhotos = (o.productPhotos ?? []).filter(u => u !== photoUrl); });
+    await deleteByUrl(photoUrl);
+    toast.success("Photo removed");
+  };
+
+  const removeProductVideo = async () => {
+    const videoUrl = order.productVideo;
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productVideo = undefined; });
+    await deleteByUrl(videoUrl);
+    toast.success("Video removed");
+  };
+
+  // Force a real download (Storage URLs otherwise open in a tab). Fetch the blob
+  // and save it with a friendly filename; fall back to opening the URL on error.
+  const downloadOne = async (fileUrl: string, filename: string) => {
+    try {
+      const res = await fetch(fileUrl);
+      const blob = await res.blob();
+      const obj = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = obj; a.download = filename;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(obj), 4000);
+    } catch { window.open(fileUrl, "_blank"); }
+  };
+
+  const downloadAllMedia = async () => {
+    const design = (order.designNumber || order.orderNumber || "product").replace(/[^\w.-]+/g, "_");
+    const photos = order.productPhotos ?? [];
+    setDownloadingAll(true);
+    try {
+      for (let i = 0; i < photos.length; i++) await downloadOne(photos[i], `${design}-photo-${i + 1}.jpg`);
+      if (order.productVideo) await downloadOne(order.productVideo, `${design}-video.mp4`);
+    } finally { setDownloadingAll(false); }
+  };
+
   // The Starlink360 web viewer needs the file URL passed (encoded) as ?file=…
   const viewer360Url = order.cad3dmUrl
     ? `https://starlink360.vercel.app/?file=${encodeURIComponent(order.cad3dmUrl)}&embed=true`
@@ -1157,6 +1271,11 @@ export function OrderDetailPage() {
   const showDispSection = !!order.courierName || (
     canEditStage() && dispStepIdx >= 0 && order.timeline[dispStepIdx].status !== "pending"
   );
+  // Product photography: staff get the option once the piece is dispatched; the
+  // card also stays visible to everyone (incl. the client) whenever media exists.
+  const isDispatched = order.status === "Dispatched" || order.status === "Delivered";
+  const hasProductMedia = (order.productPhotos?.length ?? 0) > 0 || !!order.productVideo;
+  const showPhotographySection = isDispatched || hasProductMedia;
 
   const handlePrintInvoice = () => {
     const existing = db.invoices.find(i => i.orderId === order.id);
@@ -1736,6 +1855,115 @@ export function OrderDetailPage() {
               </motion.div>
             )}
           </AnimatePresence>
+        </div>
+      )}
+
+      {/* ── Product Photography Card ── */}
+      {showPhotographySection && (
+        <div className="card-luxe p-6 space-y-4">
+          <div className="flex items-center justify-between gap-4 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-xl bg-fuchsia-500/10 grid place-items-center">
+                <Camera className="h-5 w-5 text-fuchsia-500" />
+              </div>
+              <div>
+                <h3 className="font-display text-lg text-brand-dark">Product Photography</h3>
+                <p className="text-xs text-muted-foreground">
+                  {hasProductMedia
+                    ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""} · download anytime`
+                    : "Upload 4–5 photos and a short video of the finished piece"}
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              {hasProductMedia && (
+                <AsyncButton size="sm" variant="outline" onClick={downloadAllMedia} disabled={downloadingAll} className="rounded-xl gap-2">
+                  <Download className="h-4 w-4" />
+                  {downloadingAll ? "Downloading…" : "Download All"}
+                </AsyncButton>
+              )}
+              {canEditStage() && (
+                <>
+                  <input
+                    ref={productPhotoRef} type="file" accept="image/*" multiple className="hidden"
+                    onChange={async e => { if (e.target.files?.length) await addProductPhotos(e.target.files); e.target.value = ""; }}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => productPhotoRef.current?.click()} disabled={photoUploading} className="rounded-xl gap-2">
+                    <Camera className="h-4 w-4" />
+                    {photoUploading ? "Uploading…" : "Add Photos"}
+                  </Button>
+                  <input
+                    ref={productVideoRef} type="file" accept="video/*" className="hidden"
+                    onChange={async e => { const f = e.target.files?.[0]; if (f) await addProductVideo(f); e.target.value = ""; }}
+                  />
+                  <Button size="sm" variant="outline" onClick={() => productVideoRef.current?.click()} disabled={videoUploading} className="rounded-xl gap-2">
+                    <Video className="h-4 w-4" />
+                    {videoUploading ? "Uploading…" : order.productVideo ? "Replace Video" : "Add Video"}
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Photo grid */}
+          {(order.productPhotos?.length ?? 0) > 0 && (
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+              {order.productPhotos!.map((src, i) => (
+                <div key={i} className="relative group aspect-square rounded-xl border border-border bg-secondary/40 overflow-hidden">
+                  <img src={src} alt={`Product photo ${i + 1}`} className="h-full w-full object-cover cursor-pointer" onClick={() => setLightboxSrc(src)} />
+                  <button
+                    type="button" onClick={() => setLightboxSrc(src)}
+                    className="absolute top-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                    aria-label="Zoom photo">
+                    <Eye className="h-3.5 w-3.5" />
+                  </button>
+                  <button
+                    type="button" onClick={() => downloadOne(src, `photo-${i + 1}.jpg`)}
+                    className="absolute bottom-1.5 right-1.5 h-7 w-7 rounded-lg bg-black/50 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                    aria-label="Download photo">
+                    <Download className="h-3.5 w-3.5" />
+                  </button>
+                  {canEditStage() && (
+                    <button
+                      type="button" onClick={() => removeProductPhoto(src)}
+                      className="absolute top-1.5 left-1.5 h-7 w-7 rounded-lg bg-destructive/80 text-white grid place-items-center opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity"
+                      aria-label="Remove photo">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Video */}
+          {order.productVideo && (
+            <div className="space-y-2">
+              <div className="rounded-xl border border-border bg-black overflow-hidden">
+                <video src={order.productVideo} controls playsInline className="w-full max-h-80 mx-auto" />
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Video className="h-3.5 w-3.5" /> Product video</p>
+                <div className="flex items-center gap-2">
+                  <Button size="sm" variant="outline" onClick={() => downloadOne(order.productVideo!, "product-video.mp4")} className="rounded-lg gap-1.5 h-8">
+                    <Download className="h-3.5 w-3.5" /> Download
+                  </Button>
+                  {canEditStage() && (
+                    <AsyncButton size="sm" variant="outline" onClick={removeProductVideo} className="rounded-lg h-8 w-8 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove video">
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </AsyncButton>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Empty state — staff, nothing uploaded yet */}
+          {!hasProductMedia && canEditStage() && (
+            <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
+              No product photos yet. Tap <span className="font-medium text-foreground">Add Photos</span> for 4–5 pictures and <span className="font-medium text-foreground">Add Video</span> for a short clip — the client can then download them, and a copy is saved in the Catalog under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
+            </div>
+          )}
         </div>
       )}
 

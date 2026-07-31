@@ -210,6 +210,11 @@ export interface Order {
   courierName?: string;
   trackingNumber?: string;
   trackingLink?: string;
+  // Finished-product photography (captured at/after dispatch, optional). Photos
+  // + one short video of the actual piece; the client can view/download them and
+  // a copy is filed in the Catalog under the design number. Storage download URLs.
+  productPhotos?: string[];
+  productVideo?: string;
   // Certificate
   certificate?: boolean;
   certificateFee?: number; // editable per order
