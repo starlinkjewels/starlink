@@ -565,10 +565,12 @@ export function NewOrderPage() {
         {/* ══ 4. Product Specifications ══ */}
         <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond — no jewellery piece involved" : "Design details required for manufacturing"}>
 
-          <Field label={isDiamondOnly ? "Design Number — optional" : "Design Number *"}>
-            <Input value={f.designNumber} onChange={e => set("designNumber", e.target.value)}
-              className="rounded-xl h-11" placeholder="e.g. SL-2024-001" required={!isDiamondOnly} />
-          </Field>
+          {!isDiamondOnly && (
+            <Field label="Design Number *">
+              <Input value={f.designNumber} onChange={e => set("designNumber", e.target.value)}
+                className="rounded-xl h-11" placeholder="e.g. SL-2024-001" required />
+            </Field>
+          )}
 
           {!isDiamondOnly && (
             <>
