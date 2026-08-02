@@ -47,6 +47,10 @@ export interface User {
   // Function (functions/src/notifications.ts) reads this to deliver a real
   // OS-level push whenever a Notification doc is created for this user.
   fcmTokens?: string[];
+  // Heartbeat timestamp, refreshed every ~45s while this user has the app open
+  // (see src/lib/presence.ts) — drives the online/offline + "last seen" display
+  // on the Clients page. Not real socket presence, just recency of activity.
+  lastActiveAt?: string;
 }
 
 export interface Client {
@@ -1556,4 +1560,26 @@ export function fmtDate(iso?: string) {
     day: "numeric",
     year: "numeric",
   });
+}
+
+// Heartbeat cadence (see src/lib/presence.ts) is ~45s — anything fresher than
+// this is treated as "still here", with slack for a missed beat + network lag.
+export const ONLINE_THRESHOLD_MS = 2 * 60 * 1000;
+
+export function isOnline(lastActiveAt?: string): boolean {
+  return !!lastActiveAt && Date.now() - new Date(lastActiveAt).getTime() < ONLINE_THRESHOLD_MS;
+}
+
+/** "Last seen" style relative time — "Just now" / "5m ago" / "3h ago" / "2d ago" / a date once it's old. */
+export function timeAgo(iso?: string): string {
+  if (!iso) return "Never";
+  const ms = Date.now() - new Date(iso).getTime();
+  if (ms < 45 * 1000) return "Just now";
+  const min = Math.floor(ms / 60000);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return fmtDate(iso);
 }

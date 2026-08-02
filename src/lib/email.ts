@@ -143,6 +143,31 @@ export interface DispatchEmailInfo extends OrderEmailInfo {
   trackingLink?: string;
 }
 
+export interface ClientLoginEmailInfo {
+  companyName: string;
+  email: string;
+  at: string; // ISO
+}
+
+/** 3.5 — a client just signed into the portal → to the marketing inbox, so
+ *  staff notice engagement (or the lack of it) without watching the app. */
+export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; html: string } {
+  const when = new Date(o.at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  return {
+    subject: `Client Login — ${o.companyName}`,
+    html: shell({
+      preheader: `${o.companyName} just logged into the portal`,
+      heading: "Client Logged In",
+      intro: `${esc(o.companyName)} just signed into the Starlink Jewels portal.`,
+      body: detailRows([
+        ["Client", esc(o.companyName)],
+        ["Login Email", esc(o.email)],
+        ["Time", esc(when)],
+      ]),
+    }),
+  };
+}
+
 /** 3 — the order was dispatched → to the client, with courier/tracking. */
 export function orderDispatchedEmail(o: DispatchEmailInfo): { subject: string; html: string } {
   return {

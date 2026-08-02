@@ -7,6 +7,7 @@ import { LoginPage } from "./pages/Login";
 import { InstallPrompt } from "./components/InstallPrompt";
 import { NotificationPermissionModal } from "./components/NotificationPermissionModal";
 import { initForegroundPush } from "./lib/push";
+import { usePresenceHeartbeat } from "./lib/presence";
 import type { Role } from "./lib/db";
 
 // Route-level code splitting: each page is fetched on demand instead of riding
@@ -54,6 +55,8 @@ function Protected({ children, roles }: { children: React.ReactNode; roles?: Rol
 
 export function App() {
   const { user } = useAuth();
+
+  usePresenceHeartbeat(user?.id);
 
   // Surface background save failures — writes are optimistic, so without this a
   // failed Firestore write is invisible and the user thinks the change saved.

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, uid, fmtMoney, clientAccount, type Client } from "@/lib/db";
+import { loadDb, updateDb, uid, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
 import { AccountSummary } from "@/components/AccountSummary";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
@@ -120,6 +120,15 @@ export function ClientsPage() {
     try { return (localStorage.getItem("clients-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("clients-view", v); } catch { /* ignore */ } };
+
+  // Online/"last seen" is time-relative, not just data-relative — force a
+  // re-render every 30s so it keeps ticking forward even with no db changes.
+  const [, bumpClock] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => bumpClock(n => n + 1), 30_000);
+    return () => clearInterval(t);
+  }, []);
+
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Client>>({
@@ -378,14 +387,28 @@ export function ClientsPage() {
             const orderCount = db.orders.filter(o => o.clientId === c.id).length;
             const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
             const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
+            const clientUser = db.users.find(u => u.clientId === c.id);
             return (
               <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
-                <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center shrink-0 ring-1 ring-primary/10">
-                  {(c.companyName || "?").charAt(0).toUpperCase()}
+                <div className="relative shrink-0">
+                  <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center ring-1 ring-primary/10">
+                    {(c.companyName || "?").charAt(0).toUpperCase()}
+                  </div>
+                  <span
+                    className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${isOnline(clientUser?.lastActiveAt) ? "bg-success" : "bg-muted-foreground/40"}`}
+                    title={isOnline(clientUser?.lastActiveAt) ? "Online" : `Last seen ${timeAgo(clientUser?.lastActiveAt)}`}
+                  />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-brand-dark truncate">{c.companyName}{c.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
-                  <p className="text-xs text-muted-foreground truncate">{c.ownerName || c.email || c.phone || "—"}</p>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {c.ownerName || c.email || c.phone || "—"}
+                    {clientUser && (
+                      <span className={isOnline(clientUser.lastActiveAt) ? "text-success" : ""}>
+                        {" · "}{isOnline(clientUser.lastActiveAt) ? "Online" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
+                      </span>
+                    )}
+                  </p>
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
@@ -411,16 +434,26 @@ export function ClientsPage() {
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
           const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
           const manager = employees.find(e => e.id === c.accountManagerId);
+          const clientUser = db.users.find(u => u.clientId === c.id);
+          const online = isOnline(clientUser?.lastActiveAt);
           return (
             <div key={c.id} className="card-luxe card-hover p-5 flex flex-col">
               <div className="flex items-start gap-3">
-                <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display text-lg grid place-items-center shrink-0 ring-1 ring-primary/10">
-                  {(c.companyName || "?").charAt(0).toUpperCase()}
+                <div className="relative shrink-0">
+                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display text-lg grid place-items-center ring-1 ring-primary/10">
+                    {(c.companyName || "?").charAt(0).toUpperCase()}
+                  </div>
+                  <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${online ? "bg-success" : "bg-muted-foreground/40"}`} />
                 </div>
                 <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
                   <div className="min-w-0">
                     <p className="font-display text-lg text-brand-dark truncate leading-tight">{c.companyName}</p>
                     <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
+                    {clientUser && (
+                      <p className={`text-[11px] mt-0.5 ${online ? "text-success font-medium" : "text-muted-foreground"}`}>
+                        {online ? "Online now" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
+                      </p>
+                    )}
                   </div>
                   <StatusBadge status={c.status} />
                 </div>

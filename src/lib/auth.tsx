@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { auth, isAdminEmail } from "./firebase";
 import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, type User } from "./db";
+import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
 interface AuthCtx {
   user: User | null;
@@ -145,7 +146,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       await handleAuth(cred.user);
       const p = resolveProfile(cred.user);
-      return p && p.status === "active" ? p : null;
+      if (!p || p.status !== "active") return null;
+      // Only a real, explicit sign-in fires this — not the automatic session
+      // restore on every page load (handleAuth alone doesn't distinguish those).
+      if (p.role === "client") {
+        const client = loadDb().clients.find(c => c.id === p.clientId);
+        const m = clientLoginEmail({ companyName: client?.companyName ?? p.name, email: p.email, at: new Date().toISOString() });
+        void sendMail(MARKETING_EMAIL, m.subject, m.html);
+      }
+      return p;
     } catch {
       return null;
     }
