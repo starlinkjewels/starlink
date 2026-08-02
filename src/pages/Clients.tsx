@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -126,6 +126,44 @@ export function ClientsPage() {
     companyName: "", ownerName: "", email: "", phone: "",
     country: "USA", zip: "", gstVat: "", address: "", username: "", password: "",
   });
+
+  // Editing an existing client — login email/password aren't included here:
+  // email is the Firebase Auth identifier (changing it needs a privileged
+  // Admin SDK operation, not a plain Firestore write) and password already has
+  // its own "Reset Password" email-link flow just below.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [ef, setEf] = useState<Partial<Client>>({});
+  const [savingEdit, setSavingEdit] = useState(false);
+  const openEdit = (c: Client) => {
+    setEf({
+      companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
+      country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address,
+      accountManagerId: c.accountManagerId,
+    });
+    setEditingId(c.id);
+  };
+  const saveEdit = async () => {
+    if (!editingId) return;
+    if (!ef.companyName?.trim()) { toast.error("Company name is required"); return; }
+    setSavingEdit(true);
+    try {
+      updateDb(d => {
+        const c = d.clients.find(x => x.id === editingId)!;
+        c.companyName = ef.companyName!.trim();
+        c.ownerName = ef.ownerName?.trim() || "";
+        c.phone = ef.phone?.trim() || "";
+        c.country = ef.country?.trim() || "";
+        c.zip = ef.zip?.trim() || undefined;
+        c.gstVat = ef.gstVat?.trim() || "";
+        c.address = ef.address?.trim() || "";
+        if (user!.role === "admin") c.accountManagerId = ef.accountManagerId;
+        const u = d.users.find(u => u.clientId === c.id);
+        if (u) { u.name = c.ownerName || c.companyName; u.phone = c.phone; }
+      });
+      toast.success("Client details updated");
+      setEditingId(null);
+    } finally { setSavingEdit(false); }
+  };
 
   const employees = db.users.filter(u => u.role === "employee");
 
@@ -269,6 +307,45 @@ export function ClientsPage() {
         )}
       </div>
 
+      <Dialog open={!!editingId} onOpenChange={v => !v && setEditingId(null)}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader><DialogTitle className="font-display text-2xl">Edit Client</DialogTitle></DialogHeader>
+          <p className="text-xs text-muted-foreground -mt-2">
+            Login email and password aren't editable here — use "Reset Password" for credentials.
+          </p>
+          <div className="grid grid-cols-2 gap-3 mt-2">
+            {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address"] as const).map(k => (
+              <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
+                <Label className="text-xs capitalize">
+                  {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k.replace(/([A-Z])/g, " $1")}
+                </Label>
+                <Input
+                  value={(ef as Record<string, string>)[k] || ""}
+                  onChange={e => setEf({ ...ef, [k]: e.target.value })}
+                  className="rounded-xl mt-1"
+                />
+              </div>
+            ))}
+          </div>
+          {user!.role === "admin" && (
+            <div className="mt-3">
+              <Label className="text-xs">Assign Employee</Label>
+              <Select
+                value={ef.accountManagerId || "__none"}
+                onValueChange={v => setEf({ ...ef, accountManagerId: v === "__none" ? undefined : v })}
+              >
+                <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — Admin handles this client" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
+                  {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          <Button onClick={saveEdit} disabled={savingEdit} className="btn-hero rounded-xl mt-3">{savingEdit ? "Saving…" : "Save Changes"}</Button>
+        </DialogContent>
+      </Dialog>
+
       <AccountSummary
         receivable={totals.receivable}
         payable={totals.payable}
@@ -403,6 +480,9 @@ export function ClientsPage() {
                     title={c.productPhotoAccess ? "Revoke Product Photos access" : "Grant Product Photos access"}
                   >
                     <Camera className="h-3.5 w-3.5" />
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-9 px-0" title="Edit client details">
+                    <Pencil className="h-3.5 w-3.5" />
                   </AsyncButton>
                   <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
                     <KeyRound className="h-3.5 w-3.5" />
