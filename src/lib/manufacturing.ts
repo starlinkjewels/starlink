@@ -21,6 +21,8 @@ import {
   type Factory,
   type Supplier,
   type StockMovement,
+  type DiamondSale,
+  type Client,
 } from "./db";
 
 const r0 = (n: number) => Math.round(n);
@@ -336,6 +338,7 @@ export interface StockMovementLink {
   orderId?: string;
   factoryId?: string;
   supplierId?: string;
+  clientId?: string;
 }
 
 interface StockLinkContext {
@@ -344,6 +347,8 @@ interface StockLinkContext {
   orders: Order[];
   factories: Factory[];
   suppliers: Supplier[];
+  diamondSales?: DiamondSale[];
+  clients?: Client[];
 }
 
 /** Resolve one StockMovement's refType/refId into a human label + link target
@@ -375,6 +380,15 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
     const order = ctx.orders.find(o => o.id === m.refId);
     if (!order) return { label: m.note || "Used on order" };
     return { label: `Used directly on order ${order.orderNumber}`, orderId: order.id };
+  }
+  if (m.refType === "diamondSale" && m.refId) {
+    const sale = ctx.diamondSales?.find(s => s.id === m.refId);
+    if (!sale) return { label: m.note || "Diamond sale (record not found)" };
+    if (sale.clientId) {
+      const client = ctx.clients?.find(c => c.id === sale.clientId);
+      return { label: `Sold to ${client?.companyName ?? "client"}`, clientId: sale.clientId };
+    }
+    return { label: `Sold to ${sale.buyerName || "buyer"}` };
   }
   return { label: m.note || "Manual adjustment" };
 }

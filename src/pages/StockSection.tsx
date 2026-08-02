@@ -46,6 +46,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
 
   const rows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
+    diamondSales: db.diamondSales, clients: db.clients,
   });
 
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
@@ -173,6 +174,8 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                     <Link to={`/factories/${m.link.factoryId}`} className="hover:underline">{m.link.label}</Link>
                   ) : m.link.supplierId ? (
                     <Link to={`/suppliers/${m.link.supplierId}`} className="hover:underline">{m.link.label}</Link>
+                  ) : m.link.clientId ? (
+                    <Link to={`/clients/${m.link.clientId}`} className="hover:underline">{m.link.label}</Link>
                   ) : (
                     m.link.label
                   )}

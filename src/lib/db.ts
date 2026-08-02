@@ -470,9 +470,34 @@ export interface DiamondPacket {
   ratePerCaratInr?: number; // cost basis (INR) for reference
   supplierId?: string;
   purchaseId?: string;
-  status: "in_stock" | "issued" | "used";
+  status: "in_stock" | "issued" | "used" | "sold";
   orderId?: string; // set once issued/used against an order
   createdBy: string;
+  createdAt: string;
+}
+
+/** A diamond (loose, pooled by shape/quality — or one specific certified
+ *  packet) sold directly to a buyer, not incorporated into any jewellery
+ *  order. Loose sales deduct stockLevels via decreaseStockSelfHealing, same
+ *  as any other issuance; certified sales flip the packet's status to "sold"
+ *  instead (it's never pooled). */
+export interface DiamondSale {
+  id: string;
+  kind: "loose" | "certified";
+  shape: string; // bucket key (loose) or the packet's own shape (certified)
+  quality?: string; // loose only, optional
+  packetId?: string; // set iff kind === "certified"
+  carat: number;
+  ratePerCarat: number;
+  currency: PurchaseCurrency;
+  totalUsd?: number;
+  exchangeRate?: number;
+  totalInr: number;
+  clientId?: string; // set iff sold to an existing client
+  buyerName?: string; // free text — set iff no clientId
+  lockerId?: string; // set iff sale proceeds were deposited into a Locker
+  notes?: string;
+  soldBy: string; // userId
   createdAt: string;
 }
 
@@ -631,7 +656,7 @@ export interface StockMovement {
   type: StockMovementType;
   purityOrQuality: string;
   quantity: number; // always positive; direction implied by `type`
-  refType?: "purchase" | "materialIssuance" | "order" | "manual";
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual";
   refId?: string;
   createdBy: string;
   createdAt: string;
@@ -661,6 +686,7 @@ export interface DB {
   stockMovements: StockMovement[];
   readyStock: ReadyStockItem[];
   diamondPackets: DiamondPacket[];
+  diamondSales: DiamondSale[];
   session: { userId: string | null };
 }
 
@@ -708,6 +734,7 @@ function emptyDb(): DB {
     stockMovements: [],
     readyStock: [],
     diamondPackets: [],
+    diamondSales: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -909,7 +936,8 @@ type ArrayCol =
   | "materialIssuances"
   | "stockMovements"
   | "readyStock"
-  | "diamondPackets";
+  | "diamondPackets"
+  | "diamondSales";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -931,6 +959,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "stockMovements",
   "readyStock",
   "diamondPackets",
+  "diamondSales",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
