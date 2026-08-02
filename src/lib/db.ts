@@ -169,7 +169,7 @@ export interface Order {
   clientId: string;
   contactPerson: string;
   jewelleryType:
-    "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom";
+    "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom" | "Diamond Only";
   metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver" | "Two Tone Casting" | "None (Diamond only)";
   diamondType: "Natural" | "Lab Grown";
   quantity: number;

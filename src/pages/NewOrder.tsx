@@ -123,12 +123,24 @@ export function NewOrderPage() {
     setF(prev => ({ ...prev, [key]: value }));
 
   const metalHasKarats = !["Silver", "Platinum", "None (Diamond only)"].includes(f.metal);
+  // A pure diamond sale, no jewellery piece at all — hides every field that
+  // only makes sense for a manufactured piece (size, plating, factory, etc.).
+  const isDiamondOnly = f.jewelleryType === "Diamond Only";
 
   const setMetal = (v: string) => {
     setF(prev => ({
       ...prev,
       metal: v,
       productKarats: ["Silver", "Platinum", "None (Diamond only)"].includes(v) ? "" : prev.productKarats,
+    }));
+  };
+
+  const setJewelleryType = (v: string) => {
+    setF(prev => ({
+      ...prev,
+      jewelleryType: v,
+      metal: v === "Diamond Only" ? "None (Diamond only)" : prev.metal,
+      productKarats: v === "Diamond Only" ? "" : prev.productKarats,
     }));
   };
 
@@ -171,12 +183,12 @@ export function NewOrderPage() {
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
     if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
     if (!isClient && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
-    if (!f.designNumber.trim()) { toast.error("Design Number is required."); return; }
-    if (!f.productSize.trim())  { toast.error("Product Size is required."); return; }
-    if (!f.productColor)        { toast.error("Color of Product is required."); return; }
-    if (metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
-    if (!f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
-    if (!f.stamping)            { toast.error("Please select a Stamping option."); return; }
+    if (!isDiamondOnly && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
+    if (!isDiamondOnly && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
+    if (!isDiamondOnly && !f.productColor)        { toast.error("Color of Product is required."); return; }
+    if (!isDiamondOnly && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
+    if (!isDiamondOnly && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
+    if (!isDiamondOnly && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
     if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
@@ -431,23 +443,27 @@ export function NewOrderPage() {
           {/* Type + Metal — 2 cols on all screens (both short) */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Jewellery Type">
-              <Select value={f.jewelleryType} onValueChange={v => set("jewelleryType", v)}>
+              <Select value={f.jewelleryType} onValueChange={setJewelleryType}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Ring","Ring + Band","Pendant","Necklace","Bracelet","Earrings","Custom"].map(x =>
+                  {["Ring","Ring + Band","Pendant","Necklace","Bracelet","Earrings","Custom","Diamond Only"].map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
             </Field>
 
             <Field label="Metal">
-              <Select value={f.metal} onValueChange={setMetal}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting","None (Diamond only)"].map(x =>
-                    <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              {isDiamondOnly ? (
+                <div className="rounded-xl h-11 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">None (Diamond only)</div>
+              ) : (
+                <Select value={f.metal} onValueChange={setMetal}>
+                  <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting","None (Diamond only)"].map(x =>
+                      <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
             </Field>
 
             <Field label="Diamond Type">
@@ -482,22 +498,26 @@ export function NewOrderPage() {
                 className="rounded-xl h-11" placeholder="0.00" />
             </Field>
 
-            {/* Estimated weight note */}
-            <div className="col-span-2 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
-              <span className="shrink-0">⚖️</span>
-              <span>Estimated weights — actual values will be confirmed after the piece is made</span>
-            </div>
+            {!isDiamondOnly && (
+              <>
+                {/* Estimated weight note */}
+                <div className="col-span-2 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
+                  <span className="shrink-0">⚖️</span>
+                  <span>Estimated weights — actual values will be confirmed after the piece is made</span>
+                </div>
 
-            <Field label="Est. Gross Weight (g)  —  optional">
-              <Input type="number" step="0.001" min={0} value={f.estimatedGrossWeight || ""}
-                onChange={e => set("estimatedGrossWeight", +e.target.value)}
-                className="rounded-xl h-11" placeholder="0.000" />
-            </Field>
-            <Field label="Est. Net Weight (g)  —  optional">
-              <Input type="number" step="0.001" min={0} value={f.estimatedNetWeight || ""}
-                onChange={e => set("estimatedNetWeight", +e.target.value)}
-                className="rounded-xl h-11" placeholder="0.000" />
-            </Field>
+                <Field label="Est. Gross Weight (g)  —  optional">
+                  <Input type="number" step="0.001" min={0} value={f.estimatedGrossWeight || ""}
+                    onChange={e => set("estimatedGrossWeight", +e.target.value)}
+                    className="rounded-xl h-11" placeholder="0.000" />
+                </Field>
+                <Field label="Est. Net Weight (g)  —  optional">
+                  <Input type="number" step="0.001" min={0} value={f.estimatedNetWeight || ""}
+                    onChange={e => set("estimatedNetWeight", +e.target.value)}
+                    className="rounded-xl h-11" placeholder="0.000" />
+                </Field>
+              </>
+            )}
           </div>
 
           <Field label="Special Instructions">
@@ -543,47 +563,51 @@ export function NewOrderPage() {
         </SectionCard>
 
         {/* ══ 4. Product Specifications ══ */}
-        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle="Design details required for manufacturing">
+        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond — no jewellery piece involved" : "Design details required for manufacturing"}>
 
-          <Field label="Design Number *">
+          <Field label={isDiamondOnly ? "Design Number — optional" : "Design Number *"}>
             <Input value={f.designNumber} onChange={e => set("designNumber", e.target.value)}
-              className="rounded-xl h-11" placeholder="e.g. SL-2024-001" required />
+              className="rounded-xl h-11" placeholder="e.g. SL-2024-001" required={!isDiamondOnly} />
           </Field>
 
-          <div className="space-y-1">
-            <Field label="Product Size *">
-              <Input value={f.productSize} onChange={e => set("productSize", e.target.value)}
-                className="rounded-xl h-11" placeholder="e.g. Ring size 7, Bracelet 18cm, Chain 20 inches" required />
-            </Field>
-            <p className="text-xs text-muted-foreground pl-0.5">Mention any ring size, bracelet size or chain details here</p>
-          </div>
-
-          {/* Color + Karats — 2 cols always */}
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Color *">
-              <Select value={f.productColor} onValueChange={v => set("productColor", v)} required>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
-                <SelectContent>
-                  {["Yellow","Rose","White"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </Field>
-
-            {metalHasKarats ? (
-              <Field label="Karats *">
-                <Select value={f.productKarats} onValueChange={v => set("productKarats", v)} required>
-                  <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
-                  <SelectContent>
-                    {["9K","10K","14K","18K","22K","24K"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </Field>
-            ) : (
-              <div className="flex items-end pb-1">
-                <p className="text-xs text-muted-foreground">No karats for {f.metal}</p>
+          {!isDiamondOnly && (
+            <>
+              <div className="space-y-1">
+                <Field label="Product Size *">
+                  <Input value={f.productSize} onChange={e => set("productSize", e.target.value)}
+                    className="rounded-xl h-11" placeholder="e.g. Ring size 7, Bracelet 18cm, Chain 20 inches" required />
+                </Field>
+                <p className="text-xs text-muted-foreground pl-0.5">Mention any ring size, bracelet size or chain details here</p>
               </div>
-            )}
-          </div>
+
+              {/* Color + Karats — 2 cols always */}
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Color *">
+                  <Select value={f.productColor} onValueChange={v => set("productColor", v)} required>
+                    <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
+                    <SelectContent>
+                      {["Yellow","Rose","White"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </Field>
+
+                {metalHasKarats ? (
+                  <Field label="Karats *">
+                    <Select value={f.productKarats} onValueChange={v => set("productKarats", v)} required>
+                      <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
+                      <SelectContent>
+                        {["9K","10K","14K","18K","22K","24K"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                ) : (
+                  <div className="flex items-end pb-1">
+                    <p className="text-xs text-muted-foreground">No karats for {f.metal}</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
 
           {/* Delivery — 2 cols always */}
           <div>
@@ -604,37 +628,41 @@ export function NewOrderPage() {
             </div>
           </div>
 
-          {/* Rhodium — 2 cols mobile, 4 cols desktop */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Rhodium *</p>
-            <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
-              className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {["No Rhodium","Diamond Part White","Full White","Other"].map(opt => (
-                <label key={opt}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
-                    ${f.rhodium === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
-                  <RadioGroupItem value={opt} id={`r-${opt}`} className="shrink-0" />
-                  <span>{opt}</span>
-                </label>
-              ))}
-            </RadioGroup>
-          </div>
+          {!isDiamondOnly && (
+            <>
+              {/* Rhodium — 2 cols mobile, 4 cols desktop */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Rhodium *</p>
+                <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
+                  className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {["No Rhodium","Diamond Part White","Full White","Other"].map(opt => (
+                    <label key={opt}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
+                        ${f.rhodium === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
+                      <RadioGroupItem value={opt} id={`r-${opt}`} className="shrink-0" />
+                      <span>{opt}</span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </div>
 
-          {/* Stamping — 2 cols mobile, 4 cols desktop */}
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Stamping *</p>
-            <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
-              className="grid grid-cols-2 md:grid-cols-4 gap-2">
-              {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Other"].map(opt => (
-                <label key={opt}
-                  className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
-                    ${f.stamping === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
-                  <RadioGroupItem value={opt} id={`s-${opt}`} className="shrink-0" />
-                  <span>{opt}</span>
-                </label>
-              ))}
-            </RadioGroup>
-          </div>
+              {/* Stamping — 2 cols mobile, 4 cols desktop */}
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Stamping *</p>
+                <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
+                  className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Other"].map(opt => (
+                    <label key={opt}
+                      className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
+                        ${f.stamping === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
+                      <RadioGroupItem value={opt} id={`s-${opt}`} className="shrink-0" />
+                      <span>{opt}</span>
+                    </label>
+                  ))}
+                </RadioGroup>
+              </div>
+            </>
+          )}
         </SectionCard>
 
         {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
@@ -663,12 +691,18 @@ export function NewOrderPage() {
             </RadioGroup>
 
             {f.materialSourcing === "stock" && (
-              <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
-                {f.productKarats
-                  ? `Available in Stock: ${availableGold ?? 0}g ${f.productKarats} gold${goldShort ? " — not enough for the weight entered above, consider Buy New for the shortfall" : ""}`
-                  : "Select Karats above to see live stock availability."}
-                {" "}Actual gold is issued later from the order's Factory section.
-              </p>
+              isDiamondOnly ? (
+                <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
+                  Actual diamond sourcing (from stock or a new purchase) happens later from this order's Diamond section.
+                </p>
+              ) : (
+                <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
+                  {f.productKarats
+                    ? `Available in Stock: ${availableGold ?? 0}g ${f.productKarats} gold${goldShort ? " — not enough for the weight entered above, consider Buy New for the shortfall" : ""}`
+                    : "Select Karats above to see live stock availability."}
+                  {" "}Actual gold is issued later from the order's Factory section.
+                </p>
+              )
             )}
             {f.materialSourcing === "purchase" && (
               <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
@@ -681,8 +715,9 @@ export function NewOrderPage() {
         {/* ══ 4c. Assign Factory (staff only, optional) — a pure tag, no
             material movement; the client hands a factory gold in bulk well
             before any specific order exists, so this just notes who will
-            make it. Independent of Material Sourcing above. ══ */}
-        {!isClient && (
+            make it. Independent of Material Sourcing above. Not applicable to
+            a diamond-only sale — nothing is being manufactured. ══ */}
+        {!isClient && !isDiamondOnly && (
           <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional — which factory will make this piece">
             <Select value={f.assignedFactoryId || "__none"} onValueChange={v => set("assignedFactoryId", v === "__none" ? "" : v)}>
               <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
