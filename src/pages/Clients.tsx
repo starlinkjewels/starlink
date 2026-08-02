@@ -377,6 +377,7 @@ export function ClientsPage() {
           {paged.map(c => {
             const orderCount = db.orders.filter(o => o.clientId === c.id).length;
             const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
+            const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
             return (
               <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
                 <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center shrink-0 ring-1 ring-primary/10">
@@ -387,8 +388,14 @@ export function ClientsPage() {
                   <p className="text-xs text-muted-foreground truncate">{c.ownerName || c.email || c.phone || "—"}</p>
                 </div>
                 <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold text-brand-dark">{orderCount} order{orderCount !== 1 ? "s" : ""}</p>
-                  {activeCount > 0 && <p className="text-[10px] text-primary font-medium">{activeCount} active</p>}
+                  <p className="text-sm font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
+                  <p className="text-[10px]">
+                    <span className="text-success font-medium">{fmtMoney(acc.received)} recv</span>
+                    {acc.outstanding > 0 && <span className="text-destructive font-medium"> · {fmtMoney(acc.outstanding)} due</span>}
+                  </p>
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    {orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}
+                  </p>
                 </div>
               </Link>
             );
@@ -402,6 +409,7 @@ export function ClientsPage() {
         {paged.map(c => {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
+          const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
           const manager = employees.find(e => e.id === c.accountManagerId);
           return (
             <div key={c.id} className="card-luxe card-hover p-5 flex flex-col">
@@ -447,6 +455,23 @@ export function ClientsPage() {
                     {activeCount} active
                   </span>
                 )}
+              </div>
+
+              <div className="grid grid-cols-3 gap-1.5 mt-3 pt-3 border-t border-border/50">
+                <div className="text-center">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Total</p>
+                  <p className="text-xs font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Received</p>
+                  <p className="text-xs font-semibold text-success">{fmtMoney(acc.received)}</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Pending</p>
+                  <p className={`text-xs font-semibold ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
+                    {acc.outstanding > 0 ? fmtMoney(acc.outstanding) : "Cleared"}
+                  </p>
+                </div>
               </div>
 
               <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
