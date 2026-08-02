@@ -35,15 +35,25 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const db = useDb();
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
+  const [filterFrom, setFilterFrom] = useState("");
+  const [filterTo, setFilterTo] = useState("");
 
-  // Balance derived from the movement ledger, so it always matches the history below.
+  // Balance derived from the FULL (unfiltered) movement ledger, so it always
+  // reflects the true current total — the date filter below only narrows which
+  // history rows are shown, same as Locker's ledger filter.
   const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
   const unit = material === "gold" ? "g" : "ct";
 
   const rows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
   });
-  const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE_SIZE);
+
+  const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
+  const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
+  const filtersActive = !!filterFrom || !!filterTo;
+  const filteredRows = rows.filter(m => inDateRange(m.createdAt, filterFromDate, filterToDate));
+
+  const { paged, page, setPage, totalPages, start, end } = usePagination(filteredRows, PAGE_SIZE);
 
   const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
 
@@ -131,13 +141,23 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
         <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
           <div>
             <h2 className="font-display text-xl text-brand-dark">Movement History{selectedBucket ? ` — ${selectedBucket}` : ""}</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{rows.length} movement{rows.length !== 1 ? "s" : ""}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">{filteredRows.length} movement{filteredRows.length !== 1 ? "s" : ""}</p>
           </div>
           <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
           <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${materialLabel}${selectedBucket ? ` — ${selectedBucket}` : ""}`} options={[
             { label: "Movement History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportPdf },
             { label: "Movement History — Excel", sublabel: "Filterable by date range", kind: "excel", run: exportCsv },
           ]} />
+        </div>
+        <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
+          <Input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+          {filtersActive && (
+            <button onClick={() => { setFilterFrom(""); setFilterTo(""); }} className="text-xs text-primary hover:underline">
+              Reset
+            </button>
+          )}
         </div>
         <div className="divide-y divide-border/40">
           {paged.map(m => (
@@ -164,11 +184,15 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
               </p>
             </div>
           ))}
-          {rows.length === 0 && <div className="px-5 py-12 text-center text-muted-foreground">No movements recorded.</div>}
+          {filteredRows.length === 0 && (
+            <div className="px-5 py-12 text-center text-muted-foreground">
+              {rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
+            </div>
+          )}
         </div>
         {totalPages > 1 && (
           <div className="px-5 border-t border-border/60">
-            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${rows.length}`} />
+            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${filteredRows.length}`} />
           </div>
         )}
       </div>
