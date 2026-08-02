@@ -55,7 +55,6 @@ interface BuyLine {
   diaFluor: string;
   diaMeasure: string;
   currency: PurchaseCurrency;
-  totalUsd: string;
   exchangeRate: string;
   invoiceNumber: string;
   notes: string;
@@ -67,18 +66,24 @@ function emptyBuyLine(): BuyLine {
     diaCarat: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
-    currency: "INR", totalUsd: "", exchangeRate: "",
+    currency: "INR", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
 }
 
-function buyLineTotalInr(line: BuyLine): number {
-  const computed = line.material === "gold"
+/** Weight × rate, in the line's own billing currency — always the source of
+ *  truth for the amount (never manually typed). */
+function buyLineBaseAmount(line: BuyLine): number {
+  return line.material === "gold"
     ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
     : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
+}
+
+function buyLineTotalInr(line: BuyLine): number {
+  const base = buyLineBaseAmount(line);
   return line.currency === "USD"
-    ? Math.round((Number(line.totalUsd) || 0) * (Number(line.exchangeRate) || 0))
-    : Math.round(computed);
+    ? Math.round(base * (Number(line.exchangeRate) || 0))
+    : Math.round(base);
 }
 
 /** Compress a File to a base64 JPEG ≤800px */
@@ -243,7 +248,7 @@ export function OrderDetailPage() {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
       if (line.material === "diamond" && line.diaKind === "certified" && !line.diaCertNo.trim()) { toast.error("Enter the report number for every certified diamond line"); return; }
-      if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
+      if (line.currency === "USD" && !line.exchangeRate) { toast.error("Enter the exchange rate for every USD line"); return; }
       if (buyLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
     }
 
@@ -263,7 +268,7 @@ export function OrderDetailPage() {
       purpose: "order",
       orderId: order.id,
       currency: line.currency,
-      totalUsd: line.currency === "USD" ? Number(line.totalUsd) : undefined,
+      totalUsd: line.currency === "USD" ? Math.round(buyLineBaseAmount(line) * 100) / 100 : undefined,
       exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
       totalInr: buyLineTotalInr(line),
       payments: [],
@@ -2419,7 +2424,9 @@ export function OrderDetailPage() {
                     </Select>
                     {line.currency === "USD" && (
                       <>
-                        <Input type="number" min={0} value={line.totalUsd} onChange={e => updateBuyLine(idx, { totalUsd: e.target.value })} className="rounded-xl h-10" placeholder="Total ($)" />
+                        <div className="rounded-xl h-10 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">
+                          Total: <span className="font-semibold text-foreground ml-1">${buyLineBaseAmount(line).toFixed(2)}</span>
+                        </div>
                         <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updateBuyLine(idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
                       </>
                     )}
