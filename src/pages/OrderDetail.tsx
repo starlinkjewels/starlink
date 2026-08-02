@@ -27,7 +27,7 @@ import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
-import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -272,10 +272,38 @@ export function OrderDetailPage() {
       createdBy: user!.id,
       createdAt: now,
     }));
+
+    // Precompute each line's pooled-stock bucket up front — needed both for the
+    // stock-movement logging below (which must happen before updateDb, so a
+    // failed write there fails the whole action instead of leaving an orphaned
+    // purchase with no stock trail) and inside updateDb itself.
+    const lineMeta = newPurchases.map((purchase, i) => {
+      const line = buyLines[i];
+      const isCertified = purchase.material === "diamond" && line.diaKind === "certified";
+      const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
+      const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
+        : isCertified ? "Certified" : (purchase.diamond!.quality || "unspecified");
+      return { isCertified, qty, purityOrQuality };
+    });
+
     setBuying(true);
     try {
       const factoryId = order.assignedFactoryId!;
       const factory = db.factories.find(f => f.id === factoryId);
+
+      // Material bought for this order goes straight to the factory and never
+      // enters the shared stock pool — but log it (paired in+out, nets to zero)
+      // so it still shows up on the Stock report. Certified diamonds are tracked
+      // individually via DiamondPacket instead and are never pooled.
+      for (let i = 0; i < newPurchases.length; i++) {
+        const { isCertified, qty, purityOrQuality } = lineMeta[i];
+        if (isCertified) continue;
+        await logOrderDirectPurchase({
+          material: newPurchases[i].material, purityOrQuality, quantity: qty,
+          purchaseId: newPurchases[i].id, orderId: order.id, createdBy: user!.id,
+        });
+      }
+
       updateDb(d => {
         if (!d.purchases) d.purchases = [];
         if (!d.materialIssuances) d.materialIssuances = [];
@@ -291,10 +319,7 @@ export function OrderDetailPage() {
           d.purchases.unshift(purchase);
           if (!o) continue;
           o.linkedPurchaseIds!.push(purchase.id);
-          const isCertified = purchase.material === "diamond" && line.diaKind === "certified";
-          const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
-          const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
-            : isCertified ? "Certified" : (purchase.diamond!.quality || "unspecified");
+          const { isCertified, qty, purityOrQuality } = lineMeta[i];
           const label = purchase.material === "gold"
             ? `${qty}g ${purityOrQuality} gold`
             : `${qty}ct ${line.diaShape} diamond${isCertified ? ` (Certified ${line.diaCertNo.trim()})` : purchase.diamond!.quality ? ` (${purchase.diamond!.quality})` : ""}`;
@@ -325,8 +350,9 @@ export function OrderDetailPage() {
             packetIds = [packetId];
           }
 
-          // Auto-issue straight to the assigned factory (source "purchase" — it
-          // never enters shared Stock, so no stockLevels change). One step.
+          // Auto-issue straight to the assigned factory (source "purchase" — the
+          // pooled stockLevels balance is untouched, though it's now logged in
+          // stockMovements for reporting; see logOrderDirectPurchase above). One step.
           const issuanceId = uid("mi_");
           d.materialIssuances.unshift({
             id: issuanceId, factoryId, orderId: order.id, material: purchase.material,

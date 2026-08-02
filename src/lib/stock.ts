@@ -149,6 +149,42 @@ export async function decreaseStock(args: {
 }
 
 /**
+ * Material bought specifically for one order and sent straight to a factory
+ * (see recordPurchaseForOrder in OrderDetail.tsx) never enters the shared
+ * stockLevels pool by design — no other order could ever draw on it, so
+ * pooling it would be a phantom detour. But that left it with no footprint
+ * on the Stock report at all. This logs a purchase_in + order_direct_use pair
+ * for the SAME quantity — netting to zero in deriveStockBalances (matching
+ * the true zero effect on the shared pool) while giving both legs a row in
+ * Stock's movement history, so "bought X, used X directly on this order" is
+ * actually visible. Deliberately bypasses stockLevels/current entirely (no
+ * increment then decrement) since the net effect is zero and skipping it
+ * avoids any race with a concurrent shared-pool operation on the same bucket.
+ * Certified diamonds are excluded by the caller — they're tracked individually
+ * via DiamondPacket, never pooled, same as a Buy & Assign certified purchase.
+ */
+export async function logOrderDirectPurchase(args: {
+  material: "gold" | "diamond";
+  purityOrQuality: string;
+  quantity: number;
+  purchaseId: string;
+  orderId: string;
+  createdBy: string;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  await Promise.all([
+    addStockMovement({
+      material: args.material, type: "purchase_in", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      refType: "purchase", refId: args.purchaseId, createdBy: args.createdBy, createdAt: now,
+    }),
+    addStockMovement({
+      material: args.material, type: "order_direct_use", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      refType: "order", refId: args.orderId, createdBy: args.createdBy, createdAt: now,
+    }),
+  ]);
+}
+
+/**
  * Same as decreaseStock, but self-heals from cache drift: if the cached
  * counter has gone stale-low relative to the real movement history (e.g.
  * from data that predates full movement logging), a legitimate issue would
