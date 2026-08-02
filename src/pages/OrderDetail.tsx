@@ -1236,11 +1236,11 @@ export function OrderDetailPage() {
   const showDispSection = !!order.courierName || (
     canEditStage() && dispStepIdx >= 0 && order.timeline[dispStepIdx].status !== "pending"
   );
-  // Product photography: staff get the option once the piece is dispatched; the
-  // card also stays visible to everyone (incl. the client) whenever media exists.
-  const isDispatched = order.status === "Dispatched" || order.status === "Delivered";
+  // Product photography: staff can upload at any stage of the order, not just
+  // after dispatch; the card stays visible to everyone (incl. the client) once
+  // media exists, even if the uploader's own edit rights change later.
   const hasProductMedia = (order.productPhotos?.length ?? 0) > 0 || !!order.productVideo;
-  const showPhotographySection = isDispatched || hasProductMedia;
+  const showPhotographySection = canEditStage() || hasProductMedia;
 
   const handlePrintInvoice = () => {
     const existing = db.invoices.find(i => i.orderId === order.id);
