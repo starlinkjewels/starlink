@@ -325,6 +325,21 @@ export interface CatalogItem {
   createdAt: string;
 }
 
+// Manually-organised Product Photos library — staff create category folders,
+// then product-id folders inside them, and upload images/videos. Folders reuse
+// the CatalogFolder shape (nestable via parentId) but live in their OWN synced
+// array (db.productPhotoFolders) so they never mix with the design Catalog.
+// Media lives in Firebase Storage; only the download URL is stored here.
+export interface ProductPhotoItem {
+  id: string;
+  folderId: string; // a folder in db.productPhotoFolders
+  name: string;
+  type: CatalogItemType; // "image" | "video"
+  url: string; // Firebase Storage download URL
+  createdBy: string; // userId
+  createdAt: string;
+}
+
 export interface Settings {
   companyName: string;
   currency: string;
@@ -680,6 +695,8 @@ export interface DB {
   catalogFolders: CatalogFolder[];
   catalogItems: CatalogItem[];
   catalogFavorites: CatalogFavorite[];
+  productPhotoFolders: CatalogFolder[];
+  productPhotoItems: ProductPhotoItem[];
   lockers: Locker[];
   lockerTransactions: LockerTransaction[];
   suppliers: Supplier[];
@@ -728,6 +745,8 @@ function emptyDb(): DB {
     catalogFolders: [],
     catalogItems: [],
     catalogFavorites: [],
+    productPhotoFolders: [],
+    productPhotoItems: [],
     lockers: [],
     lockerTransactions: [],
     suppliers: [],
@@ -931,6 +950,8 @@ type ArrayCol =
   | "expenses"
   | "catalogFolders"
   | "catalogFavorites"
+  | "productPhotoFolders"
+  | "productPhotoItems"
   | "lockers"
   | "lockerTransactions"
   | "suppliers"
@@ -953,6 +974,8 @@ const ARRAY_COLS: ArrayCol[] = [
   "expenses",
   "catalogFolders",
   "catalogFavorites",
+  "productPhotoFolders",
+  "productPhotoItems",
   "lockers",
   "lockerTransactions",
   "suppliers",

@@ -127,6 +127,11 @@ service cloud.firestore {
     match /catalogItems/{id}    { allow read, write: if isActive(); }
     match /catalogFavorites/{id}{ allow read, write: if isActive(); }
 
+    // Product Photos library — staff author folders/media; any active user may
+    // read (per-client visibility is gated in the app via Client.productPhotoAccess).
+    match /productPhotoFolders/{id} { allow read: if isActive(); allow write: if isStaff(); }
+    match /productPhotoItems/{id}   { allow read: if isActive(); allow write: if isStaff(); }
+
     // App settings / branding — readable by any active user; edited by staff.
     match /meta/{doc} {
       allow read:  if isActive();
