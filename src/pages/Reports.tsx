@@ -67,6 +67,49 @@ function SummaryCard({
   );
 }
 
+/** Quick-preset date range → { from, to } as YYYY-MM-DD. */
+function rangePreset(which: "this" | "last" | "year" | "all"): { from: string; to: string } {
+  if (which === "all") return { from: "", to: "" };
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  if (which === "year") return { from: `${now.getFullYear()}-01-01`, to: ymd(now.toISOString()) };
+  const base = which === "this" ? now : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+  const y = base.getFullYear(), m = base.getMonth();
+  const last = new Date(y, m + 1, 0);
+  return { from: `${y}-${pad(m + 1)}-01`, to: `${y}-${pad(m + 1)}-${pad(last.getDate())}` };
+}
+function periodLabel(from: string, to: string): string {
+  return from || to ? `${from || "start"} → ${to || "today"}` : "All time";
+}
+
+/** Reusable per-report period control: quick presets + custom From→To range. */
+function PeriodBar({ from, to, setFrom, setTo }: {
+  from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void;
+}) {
+  const apply = (w: "this" | "last" | "year" | "all") => { const r = rangePreset(w); setFrom(r.from); setTo(r.to); };
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      {([["this", "This month"], ["last", "Last month"], ["year", "This year"], ["all", "All time"]] as const).map(([k, lbl]) => {
+        const active = k === "all" && !from && !to;
+        return (
+          <button key={k} onClick={() => apply(k)}
+            className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
+            {lbl}
+          </button>
+        );
+      })}
+      <div className="flex items-center gap-1.5 sm:ml-auto">
+        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        <span className="text-muted-foreground text-xs">→</span>
+        <input type="date" value={to} onChange={e => setTo(e.target.value)}
+          className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+      </div>
+    </div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────── */
 export function ReportsPage() {
   const { user } = useAuth();
@@ -89,30 +132,24 @@ export function ReportsPage() {
   };
   const hasFilters = clientFilter !== "all" || !!dateFrom || !!dateTo;
 
-  /* ── Material purchase report — its own period selector so staff can do a
-     clean monthly analysis ("this month I bought X gold, Y diamonds") ── */
-  const [matFrom, setMatFrom] = useState("");
-  const [matTo,   setMatTo]   = useState("");
-  const setMatPreset = (which: "this" | "last" | "year" | "all") => {
-    if (which === "all") { setMatFrom(""); setMatTo(""); return; }
-    const now = new Date();
-    const pad = (n: number) => String(n).padStart(2, "0");
-    if (which === "year") { setMatFrom(`${now.getFullYear()}-01-01`); setMatTo(ymd(now.toISOString())); return; }
-    const base = which === "this" ? now : new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const y = base.getFullYear(), m = base.getMonth();
-    const last = new Date(y, m + 1, 0);
-    setMatFrom(`${y}-${pad(m + 1)}-01`);
-    setMatTo(`${y}-${pad(m + 1)}-${pad(last.getDate())}`);
+  /* ── Financial reports — each has its OWN date range so staff can generate
+     them separately (e.g. Purchases for Jan, Sales for Mar) ── */
+  const [matFrom, setMatFrom]     = useState("");
+  const [matTo,   setMatTo]       = useState("");
+  const [payFrom, setPayFrom]     = useState("");
+  const [payTo,   setPayTo]       = useState("");
+  const [salesFrom, setSalesFrom] = useState("");
+  const [salesTo,   setSalesTo]   = useState("");
+  const makeInRange = (from: string, to: string) => (iso: string) => {
+    const k = ymd(iso);
+    if (from && k < from) return false;
+    if (to && k > to) return false;
+    return true;
   };
 
   const materialReport = useMemo(() => {
     if (!canSeeAll) return null;
-    const inRange = (iso: string) => {
-      const k = ymd(iso);
-      if (matFrom && k < matFrom) return false;
-      if (matTo && k > matTo) return false;
-      return true;
-    };
+    const inRange = makeInRange(matFrom, matTo);
     // Purchase date = supplier invoice date when recorded, else when it was entered.
     const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt));
     const mk = () => ({ qty: 0, amount: 0, count: 0, stockQty: 0, stockAmt: 0, orderQty: 0, orderAmt: 0 });
@@ -143,7 +180,9 @@ export function ReportsPage() {
     };
   }, [db.purchases, matFrom, matTo, canSeeAll]);
 
-  const matPeriodLabel = matFrom || matTo ? `${matFrom || "start"} → ${matTo || "today"}` : "All time";
+  const matPeriodLabel   = periodLabel(matFrom, matTo);
+  const payPeriodLabel   = periodLabel(payFrom, payTo);
+  const salesPeriodLabel = periodLabel(salesFrom, salesTo);
 
   /* ── Material report — PDF ── */
   function exportMaterialPdf() {
@@ -208,12 +247,6 @@ export function ReportsPage() {
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
-  const inMatRange = (iso: string) => {
-    const k = ymd(iso);
-    if (matFrom && k < matFrom) return false;
-    if (matTo && k > matTo) return false;
-    return true;
-  };
   const rupees = (n: number) => "Rs " + Math.round(n).toLocaleString("en-IN");
   const csvDownload = (name: string, headers: string[], rows: (string | number)[][]) => {
     const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
@@ -229,28 +262,30 @@ export function ReportsPage() {
   /* ── Payments made (money out) — supplier + factory payments in the period ── */
   const paymentsReport = useMemo(() => {
     if (!canSeeAll) return null;
+    const inRange = makeInRange(payFrom, payTo);
     const suppliers = db.suppliers ?? [];
     const factories = db.factories ?? [];
     type Row = { date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number };
     const rows: Row[] = [];
     for (const p of db.purchases ?? [])
       for (const pay of p.payments ?? [])
-        if (inMatRange(pay.createdAt))
+        if (inRange(pay.createdAt))
           rows.push({ date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr });
     for (const i of db.materialIssuances ?? [])
       for (const pay of i.makingCharges?.payments ?? [])
-        if (inMatRange(pay.createdAt))
+        if (inRange(pay.createdAt))
           rows.push({ date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr });
     const supTotal = rows.filter(r => r.kind === "Supplier").reduce((s, r) => s + r.amount, 0);
     const facTotal = rows.filter(r => r.kind === "Factory").reduce((s, r) => s + r.amount, 0);
     rows.sort((a, b) => +new Date(b.date) - +new Date(a.date));
     return { rows, supTotal, facTotal, grand: supTotal + facTotal };
-  }, [db.purchases, db.materialIssuances, db.suppliers, db.factories, matFrom, matTo, canSeeAll]);
+  }, [db.purchases, db.materialIssuances, db.suppliers, db.factories, payFrom, payTo, canSeeAll]);
 
   /* ── Sales / client billing — orders placed in the period ── */
   const salesReport = useMemo(() => {
     if (!canSeeAll) return null;
-    const orders = (db.orders ?? []).filter(o => o.status !== "Rejected" && inMatRange(o.createdAt));
+    const inRange = makeInRange(salesFrom, salesTo);
+    const orders = (db.orders ?? []).filter(o => o.status !== "Rejected" && inRange(o.createdAt));
     const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
     const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
@@ -266,7 +301,7 @@ export function ReportsPage() {
       billed, received, outstanding,
       byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
     };
-  }, [db.orders, clients, matFrom, matTo, canSeeAll]);
+  }, [db.orders, clients, salesFrom, salesTo, canSeeAll]);
 
   /* ── Payments report exports ── */
   function exportPaymentsPdf() {
@@ -277,7 +312,7 @@ export function ReportsPage() {
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
       doc.text("Starlink Jewels — Payments Made Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
+      doc.text(`Period: ${payPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
       doc.setFontSize(11);
       doc.text(`Supplier payments: ${rupees(r.supTotal)}`, 20, 44);
       doc.text(`Factory payments:  ${rupees(r.facTotal)}`, 20, 52);
@@ -294,14 +329,14 @@ export function ReportsPage() {
         y += 5;
         if (y > 280) { doc.addPage(); y = 20; }
       });
-      doc.save(`Starlink-Payments-${matFrom || "all"}.pdf`);
+      doc.save(`Starlink-Payments-${payFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportPaymentsExcel() {
     if (!paymentsReport) return;
     try {
       csvDownload(
-        `Starlink-Payments-${matFrom || "all"}.csv`,
+        `Starlink-Payments-${payFrom || "all"}.csv`,
         ["Date", "Party", "Type", "Reference", "Amount (Rs)"],
         paymentsReport.rows.map(r => [fmtDate(r.date), r.party, r.kind, r.ref, Math.round(r.amount)]),
       );
@@ -317,7 +352,7 @@ export function ReportsPage() {
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
       doc.text("Starlink Jewels — Sales / Billing Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
+      doc.text(`Period: ${salesPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
       doc.setFontSize(11);
       doc.text(`Orders: ${r.orders.length}`, 20, 44);
       doc.text(`Billed: ${fmtMoney(r.billed)}`, 20, 52);
@@ -334,14 +369,14 @@ export function ReportsPage() {
         y += 6;
         if (y > 280) { doc.addPage(); y = 20; }
       });
-      doc.save(`Starlink-Sales-${matFrom || "all"}.pdf`);
+      doc.save(`Starlink-Sales-${salesFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportSalesExcel() {
     if (!salesReport) return;
     try {
       csvDownload(
-        `Starlink-Sales-${matFrom || "all"}.csv`,
+        `Starlink-Sales-${salesFrom || "all"}.csv`,
         ["Order #", "Client", "Type", "Status", "Date", "Billed", "Received", "Outstanding"],
         salesReport.orders.map(o => [
           o.orderNumber, clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status,
@@ -645,38 +680,6 @@ export function ReportsPage() {
         }
       </div>
 
-      {/* ── Financial reports — one shared date range drives all three ── */}
-      {canSeeAll && (
-        <div className="card-luxe p-4 sm:p-5">
-          <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Reports</p>
-              <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Financial reports — pick a date range</h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">This range drives the Purchase, Payments &amp; Sales reports below · {matPeriodLabel}</p>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {([["this","This month"],["last","Last month"],["year","This year"],["all","All time"]] as const).map(([k, lbl]) => {
-              const active = (k === "all" && !matFrom && !matTo);
-              return (
-                <button key={k} onClick={() => setMatPreset(k)}
-                  className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
-                  {lbl}
-                </button>
-              );
-            })}
-            <div className="flex items-center gap-1.5 sm:ml-auto">
-              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <input type="date" value={matFrom} onChange={e => setMatFrom(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-              <span className="text-muted-foreground text-xs">→</span>
-              <input type="date" value={matTo} onChange={e => setMatTo(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-            </div>
-          </div>
-        </div>
-      )}
-
       {/* ── Material Purchase Report (admin / employee) ── */}
       {canSeeAll && materialReport && (
         <div className="card-luxe p-4 sm:p-5 space-y-4">
@@ -701,6 +704,8 @@ export function ReportsPage() {
               </button>
             </div>
           </div>
+
+          <PeriodBar from={matFrom} to={matTo} setFrom={setMatFrom} setTo={setMatTo} />
 
           {/* Category cards */}
           <div className="grid gap-3 sm:grid-cols-3">
@@ -836,7 +841,7 @@ export function ReportsPage() {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money Out</p>
                 <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Payments Made Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Paid to suppliers &amp; factories · {matPeriodLabel}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Paid to suppliers &amp; factories · {payPeriodLabel}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -844,6 +849,8 @@ export function ReportsPage() {
               <button onClick={exportPaymentsPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
             </div>
           </div>
+
+          <PeriodBar from={payFrom} to={payTo} setFrom={setPayFrom} setTo={setPayTo} />
 
           <div className="grid gap-3 grid-cols-3">
             <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
@@ -896,7 +903,7 @@ export function ReportsPage() {
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money In</p>
                 <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Sales / Billing Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Orders placed in period · {matPeriodLabel}</p>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Orders placed in period · {salesPeriodLabel}</p>
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
@@ -904,6 +911,8 @@ export function ReportsPage() {
               <button onClick={exportSalesPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
             </div>
           </div>
+
+          <PeriodBar from={salesFrom} to={salesTo} setFrom={setSalesFrom} setTo={setSalesTo} />
 
           <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
             <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
