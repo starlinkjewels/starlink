@@ -95,7 +95,9 @@ export function SharedGalleryPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#F7F9FC]">
+    // The app shell locks html/body/#root to height:100% overflow:hidden, so this
+    // public page must be its OWN full-viewport scroll container or it can't scroll.
+    <div className="fixed inset-0 overflow-y-auto overscroll-contain bg-[#F7F9FC]">
       {/* Branded header */}
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-border/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
