@@ -132,6 +132,12 @@ service cloud.firestore {
     match /productPhotoFolders/{id} { allow read: if isActive(); allow write: if isStaff(); }
     match /productPhotoItems/{id}   { allow read: if isActive(); allow write: if isStaff(); }
 
+    // Public share links — the ONE publicly-readable collection. Each doc is a
+    // self-contained snapshot of one shared folder (media URLs only, which are
+    // already public tokenized Storage URLs). Anyone with the unguessable link
+    // can read it (no login); only staff can create/update/delete shares.
+    match /shares/{id} { allow read: if true; allow write: if isStaff(); }
+
     // App settings / branding — readable by any active user; edited by staff.
     match /meta/{doc} {
       allow read:  if isActive();

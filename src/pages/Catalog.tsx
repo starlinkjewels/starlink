@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
+import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
@@ -1275,6 +1276,13 @@ export function CatalogPage() {
                   {uploading ? "Uploading…" : "Upload"}
                 </button>
               </>
+            )}
+            {currentFolderId && (
+              <ShareFolderButton
+                kind="catalog"
+                folderId={currentFolderId}
+                folderName={folders.find((f) => f.id === currentFolderId)?.name ?? "Folder"}
+              />
             )}
             <button
               onClick={() => {

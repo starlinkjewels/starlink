@@ -340,6 +340,29 @@ export interface ProductPhotoItem {
   createdAt: string;
 }
 
+// A public, no-login share of one Catalog / Product-Photos folder. A SNAPSHOT:
+// the folder's media (name + Storage URL) is copied in at share time, so the
+// share doc is fully self-contained and exposes nothing but the shared media
+// (Storage download URLs are already public/tokenized). Read by anyone via the
+// /s/:id route (see firestore.rules — shares are the one public-read collection).
+export interface ShareItem {
+  type: CatalogItemType; // "image" | "video"
+  url: string;
+  name: string;
+  folder?: string; // originating sub-folder name, for grouping/labels
+}
+export interface Share {
+  id: string;
+  kind: "catalog" | "productPhotos";
+  sourceFolderId: string; // the folder this snapshot was taken from (to find/refresh)
+  title: string; // folder name shown to the public viewer
+  items: ShareItem[];
+  count: number;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Settings {
   companyName: string;
   currency: string;
@@ -697,6 +720,7 @@ export interface DB {
   catalogFavorites: CatalogFavorite[];
   productPhotoFolders: CatalogFolder[];
   productPhotoItems: ProductPhotoItem[];
+  shares: Share[];
   lockers: Locker[];
   lockerTransactions: LockerTransaction[];
   suppliers: Supplier[];
@@ -747,6 +771,7 @@ function emptyDb(): DB {
     catalogFavorites: [],
     productPhotoFolders: [],
     productPhotoItems: [],
+    shares: [],
     lockers: [],
     lockerTransactions: [],
     suppliers: [],
@@ -952,6 +977,7 @@ type ArrayCol =
   | "catalogFavorites"
   | "productPhotoFolders"
   | "productPhotoItems"
+  | "shares"
   | "lockers"
   | "lockerTransactions"
   | "suppliers"
@@ -976,6 +1002,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "catalogFavorites",
   "productPhotoFolders",
   "productPhotoItems",
+  "shares",
   "lockers",
   "lockerTransactions",
   "suppliers",

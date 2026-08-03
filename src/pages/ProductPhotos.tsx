@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { updateDb, uid, type CatalogFolder, type ProductPhotoItem } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
+import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
 import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, ImagePlus, Trash2, Pencil, Loader2, Check } from "lucide-react";
 
@@ -337,6 +338,9 @@ export function ProductPhotosPage() {
                   {videoUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />} {videoUploading ? "Uploading…" : "Add Video"}
                 </button>
               </>
+            )}
+            {!atRoot && currentFolderId && (
+              <ShareFolderButton kind="productPhotos" folderId={currentFolderId} folderName={path[path.length - 1]?.name ?? "Folder"} compact />
             )}
           </div>
         )}

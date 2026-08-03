@@ -1,4 +1,4 @@
-import { useEffect, lazy } from "react";
+import { useEffect, lazy, Suspense } from "react";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "./lib/auth";
@@ -33,6 +33,7 @@ const ExpensesPage = lazy(() => import("./pages/Expenses").then(m => ({ default:
 const IncomePage = lazy(() => import("./pages/Income").then(m => ({ default: m.IncomePage })));
 const CatalogPage = lazy(() => import("./pages/Catalog").then(m => ({ default: m.CatalogPage })));
 const ProductPhotosPage = lazy(() => import("./pages/ProductPhotos").then(m => ({ default: m.ProductPhotosPage })));
+const SharedGalleryPage = lazy(() => import("./pages/SharedGallery").then(m => ({ default: m.SharedGalleryPage })));
 const StarlinkAiPage = lazy(() => import("./pages/StarlinkAi").then(m => ({ default: m.StarlinkAiPage })));
 const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.LockerPage })));
 const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
@@ -78,6 +79,8 @@ export function App() {
     <>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        {/* Public, no-login shared folder gallery */}
+        <Route path="/s/:id" element={<Suspense fallback={<div className="min-h-screen grid place-items-center bg-[#F7F9FC] text-muted-foreground">Loading…</div>}><SharedGalleryPage /></Suspense>} />
         <Route element={<Protected><AppLayout /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersPage />} />
