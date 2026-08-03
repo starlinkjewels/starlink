@@ -1,17 +1,36 @@
 import { useState, useMemo } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS } from "@/lib/db";
-import type { Order } from "@/lib/db";
+import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
+import { fmtMoneyInr } from "@/lib/manufacturing";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
 import {
   Download, Package, Truck, CheckCircle2, DollarSign,
   Clock, TrendingUp, Users, X, BarChart3, Filter,
+  Coins, Gem, Award, Boxes, ShoppingCart, CalendarDays,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+/* Local YYYY-MM-DD key (matches how the rest of the app displays dates) so a
+   purchase near midnight IST lands on the calendar day staff expect. */
+function ymd(iso: string): string {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/** Which report bucket a purchase belongs to. Diamonds without an explicit
+ *  kind are treated as loose (matches the DiamondPurchaseDetail contract). */
+function purchaseCategory(p: Purchase): "gold" | "diamond" | "cert" {
+  if (p.material === "gold") return "gold";
+  return p.diamond?.kind === "certified" ? "cert" : "diamond";
+}
+function purchaseQty(p: Purchase): number {
+  return p.material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+}
 
 /* ── helpers ── */
 function dispatchDays(o: Order): number | null {
@@ -69,6 +88,125 @@ export function ReportsPage() {
     setClientFilter("all"); setDateFrom(""); setDateTo("");
   };
   const hasFilters = clientFilter !== "all" || !!dateFrom || !!dateTo;
+
+  /* ── Material purchase report — its own period selector so staff can do a
+     clean monthly analysis ("this month I bought X gold, Y diamonds") ── */
+  const [matFrom, setMatFrom] = useState("");
+  const [matTo,   setMatTo]   = useState("");
+  const setMatPreset = (which: "this" | "last" | "year" | "all") => {
+    if (which === "all") { setMatFrom(""); setMatTo(""); return; }
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    if (which === "year") { setMatFrom(`${now.getFullYear()}-01-01`); setMatTo(ymd(now.toISOString())); return; }
+    const base = which === "this" ? now : new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const y = base.getFullYear(), m = base.getMonth();
+    const last = new Date(y, m + 1, 0);
+    setMatFrom(`${y}-${pad(m + 1)}-01`);
+    setMatTo(`${y}-${pad(m + 1)}-${pad(last.getDate())}`);
+  };
+
+  const materialReport = useMemo(() => {
+    if (!canSeeAll) return null;
+    const inRange = (iso: string) => {
+      const k = ymd(iso);
+      if (matFrom && k < matFrom) return false;
+      if (matTo && k > matTo) return false;
+      return true;
+    };
+    // Purchase date = supplier invoice date when recorded, else when it was entered.
+    const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt));
+    const mk = () => ({ qty: 0, amount: 0, count: 0, stockQty: 0, stockAmt: 0, orderQty: 0, orderAmt: 0 });
+    const g = mk(), dl = mk(), dc = mk();
+    const byPurity = new Map<string, { qty: number; amount: number }>();
+    const byShape  = new Map<string, { qty: number; amount: number }>();
+    for (const p of rows) {
+      const c = purchaseCategory(p);
+      const bucket = c === "gold" ? g : c === "cert" ? dc : dl;
+      const qty = purchaseQty(p);
+      bucket.qty += qty; bucket.amount += p.totalInr; bucket.count++;
+      if (p.purpose === "stock") { bucket.stockQty += qty; bucket.stockAmt += p.totalInr; }
+      else { bucket.orderQty += qty; bucket.orderAmt += p.totalInr; }
+      if (c === "gold") {
+        const key = p.gold?.purity || "—";
+        const e = byPurity.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byPurity.set(key, e);
+      } else {
+        const key = p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—");
+        const e = byShape.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byShape.set(key, e);
+      }
+    }
+    const grand = g.amount + dl.amount + dc.amount;
+    return {
+      rows: [...rows].sort((a, b) => +new Date(b.invoiceDate || b.createdAt) - +new Date(a.invoiceDate || a.createdAt)),
+      g, dl, dc, grand,
+      byPurity: [...byPurity.entries()].sort((a, b) => b[1].amount - a[1].amount),
+      byShape:  [...byShape.entries()].sort((a, b) => b[1].amount - a[1].amount),
+    };
+  }, [db.purchases, matFrom, matTo, canSeeAll]);
+
+  const matPeriodLabel = matFrom || matTo ? `${matFrom || "start"} → ${matTo || "today"}` : "All time";
+
+  /* ── Material report — PDF ── */
+  function exportMaterialPdf() {
+    if (!materialReport) return;
+    try {
+      const r = materialReport;
+      const doc = new jsPDF();
+      const money = (n: number) => "Rs " + Math.round(n).toLocaleString("en-IN");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+      doc.text("Starlink Jewels — Material Purchase Report", 20, 22);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
+      let y = 44;
+      const section = (title: string, unit: string, b: typeof r.g) => {
+        doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text(title, 20, y); y += 7;
+        doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+        const avg = b.qty > 0 ? b.amount / b.qty : 0;
+        [
+          [`Total quantity`, `${b.qty.toLocaleString()} ${unit}`],
+          [`Avg rate`, `${money(avg)} / ${unit}`],
+          [`Total value`, money(b.amount)],
+          [`Purchases`, `${b.count}  (stock ${money(b.stockAmt)} · order ${money(b.orderAmt)})`],
+        ].forEach(([k, v]) => { doc.text(`${k}:`, 25, y); doc.text(String(v), 90, y); y += 6; });
+        y += 3;
+      };
+      section("Metal (Gold)", "g", r.g);
+      section("Diamond (Loose)", "ct", r.dl);
+      section("Certified Diamond", "ct", r.dc);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+      doc.text(`Grand Total Purchases: ${money(r.grand)}`, 20, y + 2);
+      doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
+    } catch { toast.error("Couldn't generate the PDF file."); }
+  }
+
+  /* ── Material report — Excel (CSV) ── */
+  function exportMaterialExcel() {
+    if (!materialReport) return;
+    try {
+      const suppliers = db.suppliers ?? [];
+      const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+      const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Total (Rs)","Invoice #"];
+      const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond" };
+      const rows = materialReport.rows.map(p => {
+        const c = purchaseCategory(p);
+        const qty = purchaseQty(p);
+        const unit = c === "gold" ? "g" : "ct";
+        const detail = c === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
+        const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
+        return [
+          fmtDate(p.invoiceDate || p.createdAt),
+          suppliers.find(s => s.id === p.supplierId)?.name ?? "",
+          catLabel[c], p.purpose, detail, qty, unit, rate, Math.round(p.totalInr), p.invoiceNumber ?? "",
+        ];
+      });
+      const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
+      const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url; a.download = `Starlink-Material-Purchase-${matFrom || "all"}.csv`;
+      document.body.appendChild(a); a.click(); a.remove();
+      URL.revokeObjectURL(url);
+    } catch { toast.error("Couldn't generate the Excel file."); }
+  }
 
   /* ── filtered data ── */
   const filtered = useMemo(() => {
@@ -363,6 +501,177 @@ export function ReportsPage() {
           : <SummaryCard icon={TrendingUp}  label="In Production" value={inProd.length}    color="rose" />
         }
       </div>
+
+      {/* ── Material Purchase Report (admin / employee) ── */}
+      {canSeeAll && materialReport && (
+        <div className="card-luxe p-4 sm:p-5 space-y-4">
+          {/* Header + export */}
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-amber-500/10 grid place-items-center shrink-0"><Coins className="h-5 w-5 text-amber-600" /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Purchases</p>
+                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Material Purchase Report</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Gold · diamond · certified — stock + order buys · {matPeriodLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={exportMaterialExcel}
+                className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark">
+                <Download className="h-3.5 w-3.5" /> Excel
+              </button>
+              <button onClick={exportMaterialPdf}
+                className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium">
+                <Download className="h-3.5 w-3.5" /> PDF
+              </button>
+            </div>
+          </div>
+
+          {/* Period presets + custom range */}
+          <div className="flex flex-wrap items-center gap-2">
+            {([["this","This month"],["last","Last month"],["year","This year"],["all","All time"]] as const).map(([k, lbl]) => {
+              const active = (k === "all" && !matFrom && !matTo);
+              return (
+                <button key={k} onClick={() => setMatPreset(k)}
+                  className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
+                  {lbl}
+                </button>
+              );
+            })}
+            <div className="flex items-center gap-1.5 sm:ml-auto">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <input type="date" value={matFrom} onChange={e => setMatFrom(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <span className="text-muted-foreground text-xs">→</span>
+              <input type="date" value={matTo} onChange={e => setMatTo(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+          </div>
+
+          {/* Category cards */}
+          <div className="grid gap-3 sm:grid-cols-3">
+            {([
+              { label: "Metal (Gold)", unit: "g", icon: Coins, ring: "bg-amber-500/10 text-amber-600", b: materialReport.g },
+              { label: "Diamond (Loose)", unit: "ct", icon: Gem, ring: "bg-blue-500/10 text-blue-600", b: materialReport.dl },
+              { label: "Certified Diamond", unit: "ct", icon: Award, ring: "bg-primary/10 text-primary", b: materialReport.dc },
+            ]).map(c => {
+              const avg = c.b.qty > 0 ? c.b.amount / c.b.qty : 0;
+              return (
+                <div key={c.label} className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+                  <div className="flex items-center gap-2 mb-3">
+                    <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${c.ring}`}><c.icon className="h-4 w-4" /></div>
+                    <p className="text-xs font-semibold text-brand-dark">{c.label}</p>
+                  </div>
+                  <p className="font-display text-2xl text-brand-dark leading-none">{c.b.qty.toLocaleString(undefined, { maximumFractionDigits: 3 })}<span className="text-sm text-muted-foreground font-sans ml-1">{c.unit}</span></p>
+                  <p className="text-xs text-muted-foreground mt-1">{c.b.count} purchase{c.b.count !== 1 ? "s" : ""} · avg {c.b.qty > 0 ? `${fmtMoneyInr(avg)}/${c.unit}` : "—"}</p>
+                  <div className="mt-3 pt-3 border-t border-border/50">
+                    <p className="text-lg font-semibold text-brand-dark">{fmtMoneyInr(c.b.amount)}</p>
+                    <div className="flex items-center gap-3 mt-1.5 text-[11px]">
+                      <span className="inline-flex items-center gap-1 text-muted-foreground"><Boxes className="h-3 w-3" /> Stock {fmtMoneyInr(c.b.stockAmt)}</span>
+                      <span className="inline-flex items-center gap-1 text-muted-foreground"><ShoppingCart className="h-3 w-3" /> Order {fmtMoneyInr(c.b.orderAmt)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Grand total */}
+          <div className="rounded-2xl bg-gradient-to-br from-primary/8 to-brand-light/10 border border-primary/15 p-4 flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-primary/80">Grand Total Purchases</p>
+              <p className="text-[11px] text-muted-foreground">Metal + diamond + certified · {materialReport.rows.length} purchase{materialReport.rows.length !== 1 ? "s" : ""}</p>
+            </div>
+            <p className="font-display text-3xl text-primary leading-none">{fmtMoneyInr(materialReport.grand)}</p>
+          </div>
+
+          {/* Breakdown tables — gold by purity, diamond by shape/quality */}
+          {(materialReport.byPurity.length > 0 || materialReport.byShape.length > 0) && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              {materialReport.byPurity.length > 0 && (
+                <div className="rounded-xl border border-border/60 overflow-hidden">
+                  <div className="px-3 py-2 bg-secondary/60 text-xs font-semibold text-brand-dark">Gold by purity</div>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-border/40">
+                      {materialReport.byPurity.map(([k, v]) => (
+                        <tr key={k}>
+                          <td className="px-3 py-2 font-medium text-brand-dark">{k}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">{v.qty.toLocaleString(undefined, { maximumFractionDigits: 3 })} g</td>
+                          <td className="px-3 py-2 text-right font-semibold text-brand-dark">{fmtMoneyInr(v.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {materialReport.byShape.length > 0 && (
+                <div className="rounded-xl border border-border/60 overflow-hidden">
+                  <div className="px-3 py-2 bg-secondary/60 text-xs font-semibold text-brand-dark">Diamond by shape / quality</div>
+                  <table className="w-full text-xs">
+                    <tbody className="divide-y divide-border/40">
+                      {materialReport.byShape.map(([k, v]) => (
+                        <tr key={k}>
+                          <td className="px-3 py-2 font-medium text-brand-dark">{k}</td>
+                          <td className="px-3 py-2 text-right text-muted-foreground">{v.qty.toLocaleString(undefined, { maximumFractionDigits: 3 })} ct</td>
+                          <td className="px-3 py-2 text-right font-semibold text-brand-dark">{fmtMoneyInr(v.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Detail table */}
+          {materialReport.rows.length > 0 ? (
+            <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-xl border border-border/60">
+              <table className="table-luxe w-full text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="border-b border-border/60">
+                    {["Date","Supplier","Category","Purpose","Detail","Qty","Rate","Total"].map(h => (
+                      <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {materialReport.rows.map(p => {
+                    const c = purchaseCategory(p);
+                    const qty = purchaseQty(p);
+                    const unit = c === "gold" ? "g" : "ct";
+                    const detail = c === "gold" ? (p.gold?.purity || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—"));
+                    const label = c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : "Diamond";
+                    const supplier = (db.suppliers ?? []).find(s => s.id === p.supplierId);
+                    return (
+                      <tr key={p.id} className="hover:bg-secondary/30 transition-colors">
+                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDate(p.invoiceDate || p.createdAt)}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">{supplier?.name ?? "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${c === "gold" ? "bg-amber-500/10 text-amber-700" : c === "cert" ? "bg-primary/10 text-primary" : "bg-blue-500/10 text-blue-700"}`}>{label}</span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">
+                          <span className={`inline-flex items-center gap-1 text-[11px] ${p.purpose === "stock" ? "text-muted-foreground" : "text-brand-dark"}`}>
+                            {p.purpose === "stock" ? <Boxes className="h-3 w-3" /> : <ShoppingCart className="h-3 w-3" />}{p.purpose}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 whitespace-nowrap">{detail}</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-medium">{qty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit}</td>
+                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{qty > 0 ? `${fmtMoneyInr(p.totalInr / qty)}/${unit}` : "—"}</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoneyInr(p.totalInr)}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground">
+              <Coins className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />
+              No material purchases in this period.
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ── Dispatch Speed Card ── */}
       <div className="card-luxe p-4 sm:p-5">
