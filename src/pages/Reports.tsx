@@ -208,6 +208,149 @@ export function ReportsPage() {
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
+  const inMatRange = (iso: string) => {
+    const k = ymd(iso);
+    if (matFrom && k < matFrom) return false;
+    if (matTo && k > matTo) return false;
+    return true;
+  };
+  const rupees = (n: number) => "Rs " + Math.round(n).toLocaleString("en-IN");
+  const csvDownload = (name: string, headers: string[], rows: (string | number)[][]) => {
+    const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
+    const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  /* ── Payments made (money out) — supplier + factory payments in the period ── */
+  const paymentsReport = useMemo(() => {
+    if (!canSeeAll) return null;
+    const suppliers = db.suppliers ?? [];
+    const factories = db.factories ?? [];
+    type Row = { date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number };
+    const rows: Row[] = [];
+    for (const p of db.purchases ?? [])
+      for (const pay of p.payments ?? [])
+        if (inMatRange(pay.createdAt))
+          rows.push({ date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr });
+    for (const i of db.materialIssuances ?? [])
+      for (const pay of i.makingCharges?.payments ?? [])
+        if (inMatRange(pay.createdAt))
+          rows.push({ date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr });
+    const supTotal = rows.filter(r => r.kind === "Supplier").reduce((s, r) => s + r.amount, 0);
+    const facTotal = rows.filter(r => r.kind === "Factory").reduce((s, r) => s + r.amount, 0);
+    rows.sort((a, b) => +new Date(b.date) - +new Date(a.date));
+    return { rows, supTotal, facTotal, grand: supTotal + facTotal };
+  }, [db.purchases, db.materialIssuances, db.suppliers, db.factories, matFrom, matTo, canSeeAll]);
+
+  /* ── Sales / client billing — orders placed in the period ── */
+  const salesReport = useMemo(() => {
+    if (!canSeeAll) return null;
+    const orders = (db.orders ?? []).filter(o => o.status !== "Rejected" && inMatRange(o.createdAt));
+    const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
+    const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
+    const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
+    const map = new Map<string, { name: string; count: number; billed: number; received: number; outstanding: number }>();
+    for (const o of orders) {
+      const name = clients.find(c => c.id === o.clientId)?.companyName ?? "Unknown";
+      const e = map.get(o.clientId) ?? { name, count: 0, billed: 0, received: 0, outstanding: 0 };
+      e.count++; e.billed += orderTotal(o); e.received += totalAdvance(o); e.outstanding += balanceDue(o);
+      map.set(o.clientId, e);
+    }
+    return {
+      orders: [...orders].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
+      billed, received, outstanding,
+      byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
+    };
+  }, [db.orders, clients, matFrom, matTo, canSeeAll]);
+
+  /* ── Payments report exports ── */
+  function exportPaymentsPdf() {
+    if (!paymentsReport) return;
+    try {
+      const r = paymentsReport;
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+      doc.text("Starlink Jewels — Payments Made Report", 20, 22);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
+      doc.setFontSize(11);
+      doc.text(`Supplier payments: ${rupees(r.supTotal)}`, 20, 44);
+      doc.text(`Factory payments:  ${rupees(r.facTotal)}`, 20, 52);
+      doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+      doc.text(`Total paid out: ${rupees(r.grand)}`, 20, 64);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      let y = 78;
+      doc.text("Date", 20, y); doc.text("Party", 55, y); doc.text("Type", 120, y); doc.text("Amount", 160, y); y += 5;
+      r.rows.forEach(row => {
+        doc.text(fmtDate(row.date), 20, y);
+        doc.text(String(row.party).slice(0, 32), 55, y);
+        doc.text(row.kind, 120, y);
+        doc.text(rupees(row.amount), 160, y);
+        y += 5;
+        if (y > 280) { doc.addPage(); y = 20; }
+      });
+      doc.save(`Starlink-Payments-${matFrom || "all"}.pdf`);
+    } catch { toast.error("Couldn't generate the PDF file."); }
+  }
+  function exportPaymentsExcel() {
+    if (!paymentsReport) return;
+    try {
+      csvDownload(
+        `Starlink-Payments-${matFrom || "all"}.csv`,
+        ["Date", "Party", "Type", "Reference", "Amount (Rs)"],
+        paymentsReport.rows.map(r => [fmtDate(r.date), r.party, r.kind, r.ref, Math.round(r.amount)]),
+      );
+    } catch { toast.error("Couldn't generate the Excel file."); }
+  }
+
+  /* ── Sales report exports ── */
+  function exportSalesPdf() {
+    if (!salesReport) return;
+    try {
+      const r = salesReport;
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold"); doc.setFontSize(18);
+      doc.text("Starlink Jewels — Sales / Billing Report", 20, 22);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
+      doc.setFontSize(11);
+      doc.text(`Orders: ${r.orders.length}`, 20, 44);
+      doc.text(`Billed: ${fmtMoney(r.billed)}`, 20, 52);
+      doc.text(`Received: ${fmtMoney(r.received)}`, 20, 60);
+      doc.text(`Outstanding: ${fmtMoney(r.outstanding)}`, 20, 68);
+      let y = 82;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("By client", 20, y); y += 8;
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      r.byClient.forEach(c => {
+        doc.text(String(c.name).slice(0, 34), 20, y);
+        doc.text(`${c.count} ord`, 95, y);
+        doc.text(fmtMoney(c.billed), 120, y);
+        doc.text(`out ${fmtMoney(c.outstanding)}`, 155, y);
+        y += 6;
+        if (y > 280) { doc.addPage(); y = 20; }
+      });
+      doc.save(`Starlink-Sales-${matFrom || "all"}.pdf`);
+    } catch { toast.error("Couldn't generate the PDF file."); }
+  }
+  function exportSalesExcel() {
+    if (!salesReport) return;
+    try {
+      csvDownload(
+        `Starlink-Sales-${matFrom || "all"}.csv`,
+        ["Order #", "Client", "Type", "Status", "Date", "Billed", "Received", "Outstanding"],
+        salesReport.orders.map(o => [
+          o.orderNumber, clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status,
+          fmtDate(o.createdAt), orderTotal(o), totalAdvance(o), balanceDue(o),
+        ]),
+      );
+    } catch { toast.error("Couldn't generate the Excel file."); }
+  }
+
   /* ── filtered data ── */
   const filtered = useMemo(() => {
     let list = [...myOrders];
@@ -502,6 +645,38 @@ export function ReportsPage() {
         }
       </div>
 
+      {/* ── Financial reports — one shared date range drives all three ── */}
+      {canSeeAll && (
+        <div className="card-luxe p-4 sm:p-5">
+          <div className="flex items-start justify-between gap-3 flex-wrap mb-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Reports</p>
+              <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Financial reports — pick a date range</h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">This range drives the Purchase, Payments &amp; Sales reports below · {matPeriodLabel}</p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {([["this","This month"],["last","Last month"],["year","This year"],["all","All time"]] as const).map(([k, lbl]) => {
+              const active = (k === "all" && !matFrom && !matTo);
+              return (
+                <button key={k} onClick={() => setMatPreset(k)}
+                  className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
+                  {lbl}
+                </button>
+              );
+            })}
+            <div className="flex items-center gap-1.5 sm:ml-auto">
+              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+              <input type="date" value={matFrom} onChange={e => setMatFrom(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <span className="text-muted-foreground text-xs">→</span>
+              <input type="date" value={matTo} onChange={e => setMatTo(e.target.value)}
+                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* ── Material Purchase Report (admin / employee) ── */}
       {canSeeAll && materialReport && (
         <div className="card-luxe p-4 sm:p-5 space-y-4">
@@ -524,27 +699,6 @@ export function ReportsPage() {
                 className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium">
                 <Download className="h-3.5 w-3.5" /> PDF
               </button>
-            </div>
-          </div>
-
-          {/* Period presets + custom range */}
-          <div className="flex flex-wrap items-center gap-2">
-            {([["this","This month"],["last","Last month"],["year","This year"],["all","All time"]] as const).map(([k, lbl]) => {
-              const active = (k === "all" && !matFrom && !matTo);
-              return (
-                <button key={k} onClick={() => setMatPreset(k)}
-                  className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
-                  {lbl}
-                </button>
-              );
-            })}
-            <div className="flex items-center gap-1.5 sm:ml-auto">
-              <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <input type="date" value={matFrom} onChange={e => setMatFrom(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-              <span className="text-muted-foreground text-xs">→</span>
-              <input type="date" value={matTo} onChange={e => setMatTo(e.target.value)}
-                className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
             </div>
           </div>
 
@@ -669,6 +823,130 @@ export function ReportsPage() {
               <Coins className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />
               No material purchases in this period.
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Payments Made Report (admin / employee) ── */}
+      {canSeeAll && paymentsReport && (
+        <div className="card-luxe p-4 sm:p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-rose-500/10 grid place-items-center shrink-0"><DollarSign className="h-5 w-5 text-rose-600" /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money Out</p>
+                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Payments Made Report</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Paid to suppliers &amp; factories · {matPeriodLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={exportPaymentsExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
+              <button onClick={exportPaymentsPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 grid-cols-3">
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Suppliers</p>
+              <p className="font-display text-lg sm:text-xl text-brand-dark mt-1">{fmtMoneyInr(paymentsReport.supTotal)}</p>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5"><Coins className="h-3.5 w-3.5" /> Factories</p>
+              <p className="font-display text-lg sm:text-xl text-brand-dark mt-1">{fmtMoneyInr(paymentsReport.facTotal)}</p>
+            </div>
+            <div className="rounded-2xl bg-gradient-to-br from-rose-500/8 to-rose-400/10 border border-rose-500/15 p-4">
+              <p className="text-[11px] text-rose-700/80 font-semibold uppercase tracking-wider">Total paid</p>
+              <p className="font-display text-lg sm:text-xl text-rose-600 mt-1">{fmtMoneyInr(paymentsReport.grand)}</p>
+            </div>
+          </div>
+
+          {paymentsReport.rows.length > 0 ? (
+            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-border/60">
+              <table className="table-luxe w-full text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="border-b border-border/60">
+                    {["Date","Party","Type","Reference","Amount"].map(h => <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {paymentsReport.rows.map((r, i) => (
+                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">{r.party}</td>
+                      <td className="px-3 py-2 whitespace-nowrap"><span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${r.kind === "Supplier" ? "bg-amber-500/10 text-amber-700" : "bg-orange-500/10 text-orange-700"}`}>{r.kind}</span></td>
+                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.ref}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoneyInr(r.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground"><DollarSign className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No payments in this period.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── Sales / Billing Report (admin / employee) ── */}
+      {canSeeAll && salesReport && (
+        <div className="card-luxe p-4 sm:p-5 space-y-4">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-success/10 grid place-items-center shrink-0"><TrendingUp className="h-5 w-5 text-success" /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money In</p>
+                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Sales / Billing Report</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Orders placed in period · {matPeriodLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 shrink-0">
+              <button onClick={exportSalesExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
+              <button onClick={exportSalesPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
+            </div>
+          </div>
+
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground">Orders</p>
+              <p className="font-display text-xl text-brand-dark mt-1">{salesReport.orders.length}</p>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground">Billed</p>
+              <p className="font-display text-xl text-brand-dark mt-1">{fmtMoney(salesReport.billed)}</p>
+            </div>
+            <div className="rounded-2xl border border-success/20 bg-success/5 p-4">
+              <p className="text-[11px] text-muted-foreground">Received</p>
+              <p className="font-display text-xl text-success mt-1">{fmtMoney(salesReport.received)}</p>
+            </div>
+            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4">
+              <p className="text-[11px] text-muted-foreground">Outstanding</p>
+              <p className="font-display text-xl text-destructive mt-1">{fmtMoney(salesReport.outstanding)}</p>
+            </div>
+          </div>
+
+          {salesReport.byClient.length > 0 ? (
+            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-border/60">
+              <table className="table-luxe w-full text-xs sm:text-sm">
+                <thead className="sticky top-0 bg-white z-10">
+                  <tr className="border-b border-border/60">
+                    {["Client","Orders","Billed","Received","Outstanding"].map(h => <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {salesReport.byClient.map((c, i) => (
+                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
+                      <td className="px-3 py-2 font-medium text-brand-dark whitespace-nowrap">{c.name}</td>
+                      <td className="px-3 py-2">{c.count}</td>
+                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoney(c.billed)}</td>
+                      <td className="px-3 py-2 whitespace-nowrap text-success">{fmtMoney(c.received)}</td>
+                      <td className={`px-3 py-2 whitespace-nowrap font-semibold ${c.outstanding > 0 ? "text-destructive" : "text-success"}`}>{c.outstanding > 0 ? fmtMoney(c.outstanding) : "✓"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground"><TrendingUp className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No orders placed in this period.</div>
           )}
         </div>
       )}
