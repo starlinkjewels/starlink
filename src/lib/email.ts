@@ -2,8 +2,8 @@
 // Fire-and-forget: an email failure must NEVER block or fail the order action,
 // so every call is wrapped and returns a boolean instead of throwing.
 
-const ENDPOINT = "https://emailmarketing-iota.vercel.app/send-mail";
-export const MARKETING_EMAIL = "marketing.starlinkjewels@gmail.com";
+const ENDPOINT = "https://flenixjewelsbackend-7ehw.vercel.app/api/send-mail";
+export const MARKETING_EMAIL = "flenixjewels@gmail.com";
 
 export async function sendMail(to: string, subject: string, html: string): Promise<boolean> {
   if (!to || !to.includes("@")) return false;
