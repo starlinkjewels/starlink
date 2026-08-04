@@ -46,18 +46,18 @@ registerRoute(
 
 // ── Firebase Cloud Messaging — background push (tab/app not focused) ──
 const firebaseConfig = {
-  apiKey: "AIzaSyBse5vfsARbl8k6ub9Mir6qs-CsPdaNuGU",
-  authDomain: "starlinkjewels109.firebaseapp.com",
-  projectId: "starlinkjewels109",
-  storageBucket: "starlinkjewels109.firebasestorage.app",
-  messagingSenderId: "192385163202",
-  appId: "1:192385163202:web:6499e21aa7c34cd9e7c05b",
+  apiKey: "AIzaSyCOkXybrDQX9TLbHs9fyLvrKLt5XWAIgwI",
+  authDomain: "flenix-jewels.firebaseapp.com",
+  projectId: "flenix-jewels",
+  storageBucket: "flenix-jewels.firebasestorage.app",
+  messagingSenderId: "758181914278",
+  appId: "1:758181914278:web:cb951281b928920a2cf667",
 };
 const firebaseApp = initializeApp(firebaseConfig);
 const messaging = getMessaging(firebaseApp);
 
 onBackgroundMessage(messaging, payload => {
-  const title = payload.notification?.title || "Starlink Jewels";
+  const title = payload.notification?.title || "Flenix Jewels";
   const body = payload.notification?.body;
   self.registration.showNotification(title, {
     body,

@@ -80,7 +80,7 @@ export function SettingsPage() {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "starlink-backup.json";
+    a.download = "flenix-backup.json";
     a.click();
   };
   const imp = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -408,7 +408,7 @@ export function SettingsPage() {
                 onChange={(e) =>
                   setDb({ ...db, settings: { ...db.settings, invoiceEmail: e.target.value } })
                 }
-                placeholder="Starlinkjewels@gmail.com"
+                placeholder="flenixjewels@gmail.com"
                 className="rounded-xl"
               />
             </div>

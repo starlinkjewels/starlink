@@ -27,7 +27,7 @@ const NAV: NavItem[] = [
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
-  { to: "/ai", label: "Starlink AI", icon: Sparkles },
+  { to: "/ai", label: "Flenix AI", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reports", label: "Reports", icon: BarChart3 },
@@ -63,7 +63,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Workspace", items: [
     { to: "/messages", label: "Messages", icon: MessageSquare },
     { to: "/notifications", label: "Alerts", icon: Bell },
-    { to: "/ai", label: "Starlink AI", icon: Sparkles },
+    { to: "/ai", label: "Flenix AI", icon: Sparkles },
     { to: "/reports", label: "Reports", icon: BarChart3 },
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
@@ -84,7 +84,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/catalog",  label: "Catalog",  icon: FolderOpen },
   { to: "/product-photos", label: "Product Photos", icon: Camera },
   { to: "/income",   label: "Passbook", icon: BookOpen },
-  { to: "/ai",       label: "Starlink AI", icon: Sparkles },
+  { to: "/ai",       label: "Flenix AI", icon: Sparkles },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
@@ -112,7 +112,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/income":   "Passbook",
   "/catalog":  "Catalog",
   "/product-photos": "Product Photos",
-  "/ai":       "Starlink AI",
+  "/ai":       "Flenix AI",
   "/expenses": "Expenses",
   "/messages": "Messages",
   "/notifications": "Notifications",
@@ -237,7 +237,7 @@ export function AppLayout() {
       {/* ── Sidebar (desktop) ── */}
       <aside className="hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen" style={{ width: '16rem', minWidth: '16rem' }}>
         <div className="px-5 py-5 flex items-center">
-          <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-auto object-contain" />
+          <img src="/starlink-logo.png" alt="Flenix Jewels" className="h-10 w-auto object-contain" />
         </div>
         <nav className="flex-1 px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
@@ -312,7 +312,7 @@ export function AppLayout() {
 
           {/* Mobile logo */}
           <div className="md:hidden flex items-center shrink-0">
-            <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-8 w-auto object-contain" />
+            <img src="/starlink-logo.png" alt="Flenix Jewels" className="h-8 w-auto object-contain" />
           </div>
 
           {/* Page title (desktop) */}

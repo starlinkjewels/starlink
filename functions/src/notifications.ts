@@ -14,7 +14,7 @@ import { db } from "./lib/firestoreAdmin";
 export const sendNotificationPush = onDocumentCreated(
   {
     document: "notifications/{notifId}",
-    database: "diamondflow",
+    database: "diamondflowdemo",
     region: "us-central1",
     memory: "256MiB",
     minInstances: 0,

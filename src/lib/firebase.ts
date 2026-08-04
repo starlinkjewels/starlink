@@ -1,6 +1,6 @@
-// Firebase initialisation for Starlink Jewels / Diamond Flow.
+// Firebase initialisation for Flenix Jewels / Diamond Flow.
 //
-// Uses the "diamondflow" named Firestore database (created in the Firebase
+// Uses the "diamondflowdemo" named Firestore database (created in the Firebase
 // console) rather than the project's "(default)" database — see getFirestore
 // below. The web API key/config below is public by design (client SDK config);
 // access is governed by Firestore/Storage security rules, not by hiding this.
@@ -15,17 +15,17 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBse5vfsARbl8k6ub9Mir6qs-CsPdaNuGU",
-  authDomain: "starlinkjewels109.firebaseapp.com",
-  projectId: "starlinkjewels109",
-  storageBucket: "starlinkjewels109.firebasestorage.app",
-  messagingSenderId: "192385163202",
-  appId: "1:192385163202:web:6499e21aa7c34cd9e7c05b",
-  measurementId: "G-FFTQZDHDDM",
+  apiKey: "AIzaSyCOkXybrDQX9TLbHs9fyLvrKLt5XWAIgwI",
+  authDomain: "flenix-jewels.firebaseapp.com",
+  projectId: "flenix-jewels",
+  storageBucket: "flenix-jewels.firebasestorage.app",
+  messagingSenderId: "758181914278",
+  appId: "1:758181914278:web:cb951281b928920a2cf667",
+  measurementId: "G-4CN8M7YR2P",
 };
 
 /** The Firestore named database id this app reads/writes. */
-export const DATABASE_ID = "diamondflow";
+export const DATABASE_ID = "diamondflowdemo";
 
 /**
  * Admin accounts, identified by their Firebase Auth email. Anyone signing in
@@ -58,9 +58,11 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  * Left empty, App Check stays OFF and nothing changes.
  */
 // reCAPTCHA v3 SITE key (public — safe to commit). Overridable via env var.
+// Demo (flenix-jewels): App Check is OFF unless a reCAPTCHA key for THIS project
+// is provided via VITE_RECAPTCHA_SITE_KEY (the old key was bound to another project).
 const RECAPTCHA_SITE_KEY =
   (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined)
-  || "6Le2pFwtAAAAALa3qinV6qPapcFGgYiSgp1VeP1Z";
+  || "";
 if (RECAPTCHA_SITE_KEY) {
   try {
     initializeAppCheck(app, {
@@ -80,7 +82,7 @@ export const storage: FirebaseStorage = getStorage(app);
 // Firebase Authentication — every user (admin, employee, client) signs in here.
 export const auth: Auth = getAuth(app);
 
-// Cloud Functions callables (e.g. Starlink AI) — region must match where the
+// Cloud Functions callables (e.g. Flenix AI) — region must match where the
 // functions are deployed (see functions/src/index.ts).
 export const functions: Functions = getFunctions(app, "us-central1");
 

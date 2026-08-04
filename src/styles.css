@@ -60,19 +60,20 @@
 
 :root {
   --radius: 1rem;
-  --background: oklch(0.984 0.006 240);
-  --foreground: oklch(0.18 0.04 260);
+  /* Flenix Jewels — rose-gold / copper brand palette (was blue/indigo). */
+  --background: oklch(0.986 0.004 60);
+  --foreground: oklch(0.22 0.02 50);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.04 260);
+  --card-foreground: oklch(0.22 0.02 50);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.04 260);
-  --primary: oklch(0.475 0.13 264);
+  --popover-foreground: oklch(0.22 0.02 50);
+  --primary: oklch(0.585 0.115 48);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.015 250);
-  --secondary-foreground: oklch(0.28 0.08 262);
-  --muted: oklch(0.955 0.012 250);
-  --muted-foreground: oklch(0.5 0.03 260);
-  --accent: oklch(0.68 0.11 262);
+  --secondary: oklch(0.955 0.014 60);
+  --secondary-foreground: oklch(0.34 0.07 48);
+  --muted: oklch(0.955 0.012 60);
+  --muted-foreground: oklch(0.52 0.028 52);
+  --accent: oklch(0.72 0.09 50);
   --accent-foreground: oklch(0.99 0 0);
   --destructive: oklch(0.63 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
@@ -80,25 +81,25 @@
   --success-foreground: oklch(0.99 0 0);
   --warning: oklch(0.78 0.16 70);
   --warning-foreground: oklch(0.2 0.02 60);
-  --brand: oklch(0.475 0.13 264);
-  --brand-dark: oklch(0.34 0.12 265);
-  --brand-light: oklch(0.68 0.11 262);
-  --border: oklch(0.92 0.012 250);
-  --input: oklch(0.92 0.012 250);
-  --ring: oklch(0.6 0.11 262);
+  --brand: oklch(0.585 0.115 48);
+  --brand-dark: oklch(0.40 0.085 45);
+  --brand-light: oklch(0.72 0.09 50);
+  --border: oklch(0.92 0.01 60);
+  --input: oklch(0.92 0.01 60);
+  --ring: oklch(0.65 0.10 50);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.99 0.005 250);
-  --sidebar-foreground: oklch(0.18 0.04 260);
-  --sidebar-primary: oklch(0.475 0.13 264);
+  --sidebar: oklch(0.99 0.005 60);
+  --sidebar-foreground: oklch(0.22 0.02 50);
+  --sidebar-primary: oklch(0.585 0.115 48);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.015 250);
-  --sidebar-accent-foreground: oklch(0.28 0.08 262);
-  --sidebar-border: oklch(0.92 0.012 250);
-  --sidebar-ring: oklch(0.6 0.11 262);
+  --sidebar-accent: oklch(0.955 0.014 60);
+  --sidebar-accent-foreground: oklch(0.34 0.07 48);
+  --sidebar-border: oklch(0.92 0.01 60);
+  --sidebar-ring: oklch(0.65 0.10 50);
 }
 
 .dark {
@@ -108,7 +109,7 @@
   --card-foreground: oklch(0.984 0.003 247.858);
   --popover: oklch(0.208 0.042 265.755);
   --popover-foreground: oklch(0.984 0.003 247.858);
-  --primary: oklch(0.929 0.013 255.508);
+  --primary: oklch(0.72 0.10 50);
   --primary-foreground: oklch(0.208 0.042 265.755);
   --secondary: oklch(0.279 0.041 260.031);
   --secondary-foreground: oklch(0.984 0.003 247.858);
@@ -122,12 +123,12 @@
   --success-foreground: oklch(0.99 0 0);
   --warning: oklch(0.78 0.16 70);
   --warning-foreground: oklch(0.2 0.02 60);
-  --brand: oklch(0.6 0.13 264);
-  --brand-dark: oklch(0.34 0.12 265);
-  --brand-light: oklch(0.72 0.11 262);
+  --brand: oklch(0.66 0.11 50);
+  --brand-dark: oklch(0.46 0.09 46);
+  --brand-light: oklch(0.76 0.08 52);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.551 0.027 264.364);
+  --ring: oklch(0.60 0.09 50);
   --chart-1: oklch(0.488 0.243 264.376);
   --chart-2: oklch(0.696 0.17 162.48);
   --chart-3: oklch(0.769 0.188 70.08);

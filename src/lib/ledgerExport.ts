@@ -65,11 +65,11 @@ export function downloadLedgerPdf(opts: {
   const anchorX = (i: number) => (alignOf(i) === "right" ? (i < cols.length - 1 ? cols[i + 1].x - 3 : R) : cols[i].x);
   const cell = (text: string, i: number, y: number) => doc.text(text, anchorX(i), y, { align: alignOf(i) });
 
-  const brand = () => { doc.setFillColor(47, 93, 170); doc.rect(0, 0, PAGE_W, 26, "F"); };
+  const brand = () => { doc.setFillColor(176, 117, 92); doc.rect(0, 0, PAGE_W, 26, "F"); };
   const pageHeader = () => {
     brand();
     doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text("STARLINK JEWELS", L, 12);
+    doc.text("FLENIX JEWELS", L, 12);
     doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.text(opts.title, L, 20);
     doc.setTextColor(30);

@@ -77,7 +77,7 @@ export function Dashboard() {
   const statusData = [
     { name: "Waiting",       color: "oklch(0.78 0.16 70)" },
     { name: "Approved",      color: "oklch(0.62 0.13 264)" },
-    { name: "In Production", color: "oklch(0.475 0.13 264)" },
+    { name: "In Production", color: "oklch(0.585 0.115 48)" },
     { name: "Ready",         color: "oklch(0.68 0.11 262)" },
     { name: "Dispatched",    color: "oklch(0.60 0.11 232)" },
     { name: "Delivered",     color: "oklch(0.72 0.17 148)" },
@@ -390,7 +390,7 @@ export function Dashboard() {
                 <XAxis dataKey="name" tickLine={false} axisLine={false} className="text-xs" />
                 <YAxis tickLine={false} axisLine={false} className="text-xs" />
                 <Tooltip cursor={{ fill: "oklch(0.955 0.015 250 / 0.5)" }} contentStyle={{ borderRadius: 12, border: "1px solid oklch(0.92 0.012 250)" }} />
-                <Bar dataKey="orders" fill="oklch(0.475 0.13 264)" radius={[8, 8, 0, 0]} />
+                <Bar dataKey="orders" fill="oklch(0.585 0.115 48)" radius={[8, 8, 0, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>
@@ -415,7 +415,7 @@ export function Dashboard() {
                 <XAxis dataKey="name" tickLine={false} axisLine={false} className="text-xs" />
                 <YAxis tickLine={false} axisLine={false} className="text-xs" tickFormatter={v => `$${v/1000}k`} />
                 <Tooltip formatter={(v: number) => fmtMoney(v)} contentStyle={{ borderRadius: 12 }} />
-                <Line type="monotone" dataKey="revenue" stroke="oklch(0.475 0.13 264)" strokeWidth={3} dot={{ r: 4 }} />
+                <Line type="monotone" dataKey="revenue" stroke="oklch(0.585 0.115 48)" strokeWidth={3} dot={{ r: 4 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

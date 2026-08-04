@@ -102,8 +102,8 @@ export function SharedGalleryPage() {
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-border/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-7 w-auto object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-            <span className="font-display text-brand-dark text-lg truncate">Starlink Jewels</span>
+            <img src="/starlink-logo.png" alt="Flenix Jewels" className="h-7 w-auto object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+            <span className="font-display text-brand-dark text-lg truncate">Flenix Jewels</span>
           </div>
           {status === "ok" && items.length > 0 && (
             <button onClick={downloadAll} disabled={downloading}
@@ -123,7 +123,7 @@ export function SharedGalleryPage() {
           <div className="py-24 text-center text-muted-foreground max-w-md mx-auto">
             <Camera className="h-12 w-12 mx-auto mb-3 opacity-20" />
             <p className="font-semibold text-brand-dark">Link not available</p>
-            <p className="text-sm mt-1">This shared link has expired or was removed. Please ask Starlink for a new one.</p>
+            <p className="text-sm mt-1">This shared link has expired or was removed. Please ask Flenix for a new one.</p>
           </div>
         )}
 
@@ -131,7 +131,7 @@ export function SharedGalleryPage() {
           <>
             <div className="mb-5">
               <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{share.title}</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">{items.length} item{items.length !== 1 ? "s" : ""} · shared by Starlink Jewels</p>
+              <p className="text-sm text-muted-foreground mt-0.5">{items.length} item{items.length !== 1 ? "s" : ""} · shared by Flenix Jewels</p>
             </div>
 
             {items.length === 0 ? (

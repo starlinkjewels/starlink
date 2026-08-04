@@ -9,7 +9,10 @@ import { toast } from "sonner";
 import { getMessagingIfSupported } from "./firebase";
 import { updateDb } from "./db";
 
-const VAPID_KEY = import.meta.env.VITE_FCM_VAPID_KEY as string | undefined;
+// FCM web-push VAPID public key (safe to expose — it's the PUBLIC key). Falls
+// back to the flenix-jewels demo key; override per-environment with VITE_FCM_VAPID_KEY.
+const VAPID_KEY = (import.meta.env.VITE_FCM_VAPID_KEY as string | undefined)
+  || "BFHOjUUdEiOqWZl7mFb6tLttzlvjmtMWVmvac56HMX3-KE7pT2IcxCv-_rkCgDC2FIvk7EBzblxWv6_8kor64ws";
 
 export type PushPermissionResult = "granted" | "denied" | "unsupported";
 

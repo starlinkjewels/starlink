@@ -295,7 +295,7 @@ function buildInvoiceDoc(opts: {
 
   <!-- Header -->
   <div class="hdr">
-    <img src="/starlink-logo.png" alt="Starlink Jewels" class="logo" />
+    <img src="/starlink-logo.png" alt="Flenix Jewels" class="logo" />
     <div class="addr">
       ${settings.invoiceAddress1 || "55 JOHN ST"}<br/>
       ${settings.invoiceAddress2 || "EAST RUTHERFORD"}<br/>
@@ -374,7 +374,7 @@ function buildInvoiceDoc(opts: {
     </div>
 
     <div class="f-right">
-      <div class="for-co">${(settings.companyName || "STARLINK JEWELS").toUpperCase()} INC</div>
+      <div class="for-co">${(settings.companyName || "FLENIX JEWELS").toUpperCase()} INC</div>
       ${stampHtml}
       <div class="auth">Chop &amp; Authorized Signature</div>
     </div>

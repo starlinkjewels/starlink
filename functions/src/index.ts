@@ -52,7 +52,7 @@ export const starlinkAiChat = onCall<ChatRequestData>(
 
     const settingsSnap = await db.collection("meta").doc("settings").get();
     if (settingsSnap.exists && settingsSnap.get("aiEnabled") === false) {
-      throw new HttpsError("failed-precondition", "Starlink AI is temporarily unavailable.");
+      throw new HttpsError("failed-precondition", "Flenix AI is temporarily unavailable.");
     }
 
     const caller = await resolveCaller(request.auth.uid);
@@ -107,12 +107,12 @@ async function callProvider(apiKey: string, messages: ChatMessage[], tools: Tool
     return await chatCompletion(apiKey, messages, tools, { toolChoice, maxTokens: 700 });
   } catch (err) {
     console.error("[starlinkAiChat] provider call failed:", err);
-    throw new HttpsError("internal", "Starlink AI is having trouble responding right now. Please try again.");
+    throw new HttpsError("internal", "Flenix AI is having trouble responding right now. Please try again.");
   }
 }
 
 function sanitize(text: string): string {
-  return text.replace(VENDOR_NAME_FILTER, "Starlink AI");
+  return text.replace(VENDOR_NAME_FILTER, "Flenix AI");
 }
 
 async function enforceDailyCap(appId: string): Promise<void> {
@@ -122,7 +122,7 @@ async function enforceDailyCap(appId: string): Promise<void> {
     const snap = await tx.get(ref);
     const count = snap.exists ? ((snap.get("count") as number) ?? 0) : 0;
     if (count >= DAILY_MESSAGE_CAP) {
-      throw new HttpsError("resource-exhausted", "You've reached today's limit for Starlink AI — please try again tomorrow.");
+      throw new HttpsError("resource-exhausted", "You've reached today's limit for Flenix AI — please try again tomorrow.");
     }
     tx.set(ref, { count: count + 1, updatedAt: new Date().toISOString() }, { merge: true });
   });

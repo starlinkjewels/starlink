@@ -1,4 +1,4 @@
-// Firebase-backed database for Starlink Jewels / Diamond Flow.
+// Firebase-backed database for Flenix Jewels / Diamond Flow.
 //
 // The whole app is written against a synchronous store (loadDb / saveDb /
 // updateDb) plus a "starlink-db-updated" DOM event that triggers re-renders.
@@ -739,7 +739,7 @@ const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated
 
 function defaultSettings(): Settings {
   return {
-    companyName: "Starlink Jewels",
+    companyName: "Flenix Jewels",
     currency: "USD",
     language: "English",
     notifications: true,
@@ -751,7 +751,7 @@ function defaultSettings(): Settings {
     invoiceAddress3: "NEW JERSEY 07073",
     invoiceTel: "+91 83472 78188",
     invoicePrimary: "+1 201 554 4824",
-    invoiceEmail: "Starlinkjewels@gmail.com",
+    invoiceEmail: "flenixjewels@gmail.com",
     invoiceTerms: "COD",
   };
 }

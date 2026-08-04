@@ -193,7 +193,7 @@ export function ReportsPage() {
       const doc = new jsPDF();
       const money = (n: number) => "Rs " + Math.round(n).toLocaleString("en-IN");
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Material Purchase Report", 20, 22);
+      doc.text("Flenix Jewels — Material Purchase Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
       let y = 44;
@@ -239,7 +239,7 @@ export function ReportsPage() {
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
       doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${money(r.grand)}`, 152, y + 3);
-      doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
+      doc.save(`Flenix-Material-Purchase-${matFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
@@ -271,7 +271,7 @@ export function ReportsPage() {
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `Starlink-Material-Purchase-${matFrom || "all"}.csv`;
+      a.href = url; a.download = `Flenix-Material-Purchase-${matFrom || "all"}.csv`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch { toast.error("Couldn't generate the Excel file."); }
@@ -340,7 +340,7 @@ export function ReportsPage() {
       const r = paymentsReport;
       const doc = new jsPDF();
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Payments Made Report", 20, 22);
+      doc.text("Flenix Jewels — Payments Made Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${payPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
       doc.setFontSize(11);
@@ -359,14 +359,14 @@ export function ReportsPage() {
         y += 5;
         if (y > 280) { doc.addPage(); y = 20; }
       });
-      doc.save(`Starlink-Payments-${payFrom || "all"}.pdf`);
+      doc.save(`Flenix-Payments-${payFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportPaymentsExcel() {
     if (!paymentsReport) return;
     try {
       csvDownload(
-        `Starlink-Payments-${payFrom || "all"}.csv`,
+        `Flenix-Payments-${payFrom || "all"}.csv`,
         ["Date", "Party", "Type", "Reference", "Amount (Rs)"],
         paymentsReport.rows.map(r => [fmtDate(r.date), r.party, r.kind, r.ref, Math.round(r.amount)]),
       );
@@ -380,7 +380,7 @@ export function ReportsPage() {
       const r = salesReport;
       const doc = new jsPDF();
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Sales / Billing Report", 20, 22);
+      doc.text("Flenix Jewels — Sales / Billing Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${salesPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 20, 30);
       doc.setFontSize(11);
@@ -417,14 +417,14 @@ export function ReportsPage() {
         doc.text(fmtMoney(balanceDue(o)), 176, y);
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
-      doc.save(`Starlink-Sales-${salesFrom || "all"}.pdf`);
+      doc.save(`Flenix-Sales-${salesFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportSalesExcel() {
     if (!salesReport) return;
     try {
       csvDownload(
-        `Starlink-Sales-${salesFrom || "all"}.csv`,
+        `Flenix-Sales-${salesFrom || "all"}.csv`,
         ["Order #", "Client", "Type", "Status", "Date", "Billed", "Received", "Outstanding"],
         salesReport.orders.map(o => [
           o.orderNumber, clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status,
@@ -477,7 +477,7 @@ export function ReportsPage() {
       if (cat === "gold" || cat === "diamond") {
         const led = movementLedger(cat);
         csvDownload(
-          `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
+          `Flenix-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
           ["Date", "Particulars", m.detail, `In (${m.unit})`, `Out (${m.unit})`, `Balance (${m.unit})`, "Rate (Rs)", "Amount (Rs)"],
           led.map(r => [
             fmtDate(r.createdAt), r.link.label, r.purityOrQuality,
@@ -522,7 +522,7 @@ export function ReportsPage() {
           pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
           p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];
       });
-      csvDownload(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
+      csvDownload(`Flenix-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
@@ -563,7 +563,7 @@ export function ReportsPage() {
             r.amountInr ? rs(r.amountInr) : "—",
           ]),
           totalsRow: ["", "", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rs(totalAmt)],
-          filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+          filename: `Flenix-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
         });
         return;
       }
@@ -615,7 +615,7 @@ export function ReportsPage() {
         align: ["left", "left", "left", "left", "left", "right", "right", "right"],
         rows: dataRows,
         totalsRow: ["", "", "", "", "", "", "Total", rs(b.amount)],
-        filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+        filename: `Flenix-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
       });
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
@@ -723,7 +723,7 @@ export function ReportsPage() {
    try {
     const doc = new jsPDF();
     doc.setFont("helvetica","bold"); doc.setFontSize(18);
-    doc.text("Starlink Jewels — Business Report", 20, 22);
+    doc.text("Flenix Jewels — Business Report", 20, 22);
     doc.setFont("helvetica","normal"); doc.setFontSize(9);
     doc.text(`Generated: ${new Date().toLocaleString()}`, 20, 30);
     if (hasFilters) {
@@ -758,7 +758,7 @@ export function ReportsPage() {
         if (y > 270) { doc.addPage(); y = 20; }
       });
     }
-    doc.save("Starlink-Report.pdf");
+    doc.save("Flenix-Report.pdf");
    } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
@@ -789,7 +789,7 @@ export function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `Flenix-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1308,7 +1308,7 @@ export function ReportsPage() {
                 formatter={(v: number, _: string, p: any) => [v, p.payload.fullName]}
                 contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", fontSize: 12 }}
               />
-              <Bar dataKey="count" name="Orders" fill="oklch(0.475 0.13 264)" radius={[6,6,0,0]} />
+              <Bar dataKey="count" name="Orders" fill="oklch(0.585 0.115 48)" radius={[6,6,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

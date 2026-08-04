@@ -21,7 +21,7 @@ export async function sendMail(to: string, subject: string, html: string): Promi
 
 /* ───────────────────────── Branded template shell ───────────────────────── */
 
-const BRAND = "#2F5DAA";
+const BRAND = "#B0755C";
 const GOLD = "#C8A24B";
 const INK = "#1B2A4A";
 const MUTED = "#6b7280";
@@ -55,8 +55,8 @@ function shell(opts: { preheader: string; accent?: string; heading: string; intr
           </td></tr>
           <!-- Footer -->
           <tr><td style="padding:20px 28px;border-top:1px solid #eef1f6;">
-            <p style="margin:0;font-size:12px;line-height:1.6;color:#9aa3b2;">This is an automated message from Starlink Jewels. Please do not reply directly to this email.</p>
-            <p style="margin:6px 0 0;font-size:12px;color:#9aa3b2;">© ${brandYear()} Starlink Jewels · Fine Diamond Jewelry</p>
+            <p style="margin:0;font-size:12px;line-height:1.6;color:#9aa3b2;">This is an automated message from Flenix Jewels. Please do not reply directly to this email.</p>
+            <p style="margin:6px 0 0;font-size:12px;color:#9aa3b2;">© ${brandYear()} Flenix Jewels · Fine Diamond Jewelry</p>
           </td></tr>
         </table>
       </td></tr>
@@ -158,7 +158,7 @@ export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; ht
     html: shell({
       preheader: `${o.companyName} just logged into the portal`,
       heading: "Client Logged In",
-      intro: `${esc(o.companyName)} just signed into the Starlink Jewels portal.`,
+      intro: `${esc(o.companyName)} just signed into the Flenix Jewels portal.`,
       body: detailRows([
         ["Client", esc(o.companyName)],
         ["Login Email", esc(o.email)],
@@ -173,7 +173,7 @@ export function orderDispatchedEmail(o: DispatchEmailInfo): { subject: string; h
   return {
     subject: `Your Order ${o.orderNumber} has been Dispatched`,
     html: shell({
-      accent: "#2F5DAA",
+      accent: "#B0755C",
       preheader: `Order ${o.orderNumber} is on its way`,
       heading: "Your Order is on its Way 🚚",
       intro: `Dear ${esc(o.clientName)},<br/>Your order has been <b>dispatched</b> and is on its way to you. Use the details below to track your shipment.`,

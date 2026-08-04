@@ -32,7 +32,7 @@ export function InstallPrompt() {
           className="fixed bottom-24 md:bottom-6 left-4 right-4 md:left-auto md:right-6 md:w-96 z-50 card-luxe p-4 flex items-center gap-3">
           <img src="/logo.png" alt="" className="h-10 w-10 rounded-xl" />
           <div className="flex-1 min-w-0">
-            <p className="font-semibold text-sm">Install Starlink Jewels</p>
+            <p className="font-semibold text-sm">Install Flenix Jewels</p>
             <p className="text-xs text-muted-foreground">Add to home screen for the full app experience.</p>
           </div>
           <Button size="sm" onClick={install} className="btn-hero"><Download className="h-4 w-4 mr-1" />Install</Button>

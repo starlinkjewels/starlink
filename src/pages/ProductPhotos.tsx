@@ -395,7 +395,7 @@ export function ProductPhotosPage() {
           <div className="card-luxe p-10 text-center text-muted-foreground">
             <Camera className="h-10 w-10 mx-auto mb-3 opacity-30" />
             <p className="font-medium text-foreground">Product Photos isn't available for your account yet</p>
-            <p className="text-sm mt-1">Contact Starlink to get access.</p>
+            <p className="text-sm mt-1">Contact Flenix to get access.</p>
           </div>
         </div>
       );

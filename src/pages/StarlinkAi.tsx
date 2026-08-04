@@ -125,8 +125,8 @@ export function StarlinkAiPage() {
       const fe = err as FunctionsError;
       const msg =
         fe.code === "functions/resource-exhausted" ? fe.message :
-        fe.code === "functions/failed-precondition" ? "Starlink AI is temporarily unavailable." :
-        "Starlink AI couldn't answer that — please try again.";
+        fe.code === "functions/failed-precondition" ? "Flenix AI is temporarily unavailable." :
+        "Flenix AI couldn't answer that — please try again.";
       toast.error(msg);
       setMessages(m => [...m, { role: "assistant", content: msg }]);
     } finally {
@@ -143,7 +143,7 @@ export function StarlinkAiPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-lg text-brand-dark">Starlink AI</p>
+            <p className="font-display text-lg text-brand-dark">Flenix AI</p>
             <p className="text-xs text-muted-foreground truncate">{copy.subtitle}</p>
           </div>
         </div>
@@ -159,7 +159,7 @@ export function StarlinkAiPage() {
                 <Sparkles className="h-7 w-7 text-primary" />
               </div>
               <div>
-                <p className="font-display text-xl text-brand-dark">Ask Starlink AI</p>
+                <p className="font-display text-xl text-brand-dark">Ask Flenix AI</p>
                 <p className="text-sm text-muted-foreground mt-1">{copy.empty}</p>
               </div>
               <div className="flex flex-col gap-2 w-full max-w-sm">

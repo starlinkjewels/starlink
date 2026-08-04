@@ -238,7 +238,7 @@ export function ClientHistoryPage() {
   const downloadClientReport = () => {
     const doc = new jsPDF();
     doc.setFont("helvetica", "bold"); doc.setFontSize(20);
-    doc.text("STARLINK JEWELS", 20, 20);
+    doc.text("FLENIX JEWELS", 20, 20);
     doc.setFontSize(11); doc.setFont("helvetica", "normal");
     doc.text("Client Order History Report", 20, 28);
     doc.setLineWidth(0.4); doc.line(20, 33, 190, 33);
