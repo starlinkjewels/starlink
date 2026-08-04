@@ -1,42 +1,47 @@
-import { useEffect, useState } from "react";
-import { Loader2, Check, CloudOff } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Loader2, CloudOff } from "lucide-react";
 import { pendingWrites } from "@/lib/db";
 
 /**
- * Global Firebase write indicator. Because writes are optimistic (the UI updates
- * instantly, the commit runs in the background), this pill tells the user when a
- * change is actually being saved to Firebase, when it's saved, and if it failed.
- * Mounted once inside the authenticated app shell so it covers every action.
+ * Global Firebase write indicator. Writes are optimistic (the UI updates
+ * instantly, the commit runs in the background), so on a normal fast save NOTHING
+ * is shown — no "Saved" pill flashing on every change. It only surfaces when a
+ * save is genuinely slow (still pending after ~1s, e.g. a weak connection) or
+ * when a save actually FAILS. Mounted once inside the authenticated app shell.
  */
-type State = "idle" | "saving" | "saved" | "error";
+type State = "idle" | "saving" | "error";
 
 export function SyncStatus() {
   const [state, setState] = useState<State>("idle");
+  const showTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
-    let hideTimer: ReturnType<typeof setTimeout> | undefined;
-
     const onPending = (e: Event) => {
       const count = (e as CustomEvent<number>).detail ?? pendingWrites();
-      clearTimeout(hideTimer);
+      clearTimeout(showTimer.current);
+      clearTimeout(hideTimer.current);
       if (count > 0) {
-        setState("saving");
+        // Only reveal "Saving…" if the write is actually taking a moment — a quick
+        // save that drains before this fires shows nothing at all.
+        showTimer.current = setTimeout(() => setState(prev => (prev === "error" ? "error" : "saving")), 1000);
       } else {
-        // Drained — briefly confirm, then hide (unless an error just fired).
-        setState(prev => (prev === "error" ? "error" : "saved"));
-        hideTimer = setTimeout(() => setState(prev => (prev === "saved" ? "idle" : prev)), 1500);
+        // Drained — hide immediately. No "Saved" confirmation.
+        setState(prev => (prev === "error" ? "error" : "idle"));
       }
     };
     const onError = () => {
-      clearTimeout(hideTimer);
+      clearTimeout(showTimer.current);
+      clearTimeout(hideTimer.current);
       setState("error");
-      hideTimer = setTimeout(() => setState(prev => (prev === "error" ? "idle" : prev)), 4000);
+      hideTimer.current = setTimeout(() => setState(prev => (prev === "error" ? "idle" : prev)), 4000);
     };
 
     window.addEventListener("starlink-db-pending", onPending);
     window.addEventListener("starlink-db-error", onError);
     return () => {
-      clearTimeout(hideTimer);
+      clearTimeout(showTimer.current);
+      clearTimeout(hideTimer.current);
       window.removeEventListener("starlink-db-pending", onPending);
       window.removeEventListener("starlink-db-error", onError);
     };
@@ -46,7 +51,6 @@ export function SyncStatus() {
 
   const cfg = {
     saving: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "Saving…", cls: "bg-foreground/85 text-background" },
-    saved:  { icon: <Check className="h-3.5 w-3.5" />,                text: "Saved",    cls: "bg-emerald-600 text-white" },
     error:  { icon: <CloudOff className="h-3.5 w-3.5" />,             text: "Save failed — check your connection", cls: "bg-destructive text-white" },
   }[state];
 
