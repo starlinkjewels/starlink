@@ -44,44 +44,84 @@ export function downloadLedgerPdf(opts: {
   columns: PdfColumn[];
   rows: string[][];
   filename: string;
+  /** Per-column text alignment (defaults to all "left"). Right-align money/qty. */
+  align?: ("left" | "right")[];
+  /** Optional bold totals row rendered under a rule at the bottom of the table. */
+  totalsRow?: string[];
 }): void {
   const doc = new jsPDF();
-  doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-  doc.text("STARLINK JEWELS", 20, 20);
-  doc.setFont("helvetica", "normal"); doc.setFontSize(11);
-  doc.text(opts.title, 20, 28);
-  doc.setLineWidth(0.4); doc.line(20, 33, 190, 33);
+  const PAGE_W = 210, L = 14, R = 196;
+  const cols = opts.columns;
 
-  let y = 42;
-  doc.setFontSize(10);
-  for (const line of opts.subjectLines) { doc.text(line, 20, y); y += 6; }
+  // For right-aligned columns, anchor text at the column's right edge (just
+  // before the next column starts, or the page margin for the last one).
+  const alignOf = (i: number): "left" | "right" => (opts.align?.[i] === "right" ? "right" : "left");
+  const anchorX = (i: number) => (alignOf(i) === "right" ? (i < cols.length - 1 ? cols[i + 1].x - 3 : R) : cols[i].x);
+  const cell = (text: string, i: number, y: number) => doc.text(text, anchorX(i), y, { align: alignOf(i) });
+
+  const brand = () => { doc.setFillColor(47, 93, 170); doc.rect(0, 0, PAGE_W, 26, "F"); };
+  const pageHeader = () => {
+    brand();
+    doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+    doc.text("STARLINK JEWELS", L, 12);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.text(opts.title, L, 20);
+    doc.setTextColor(30);
+  };
+
+  const tableHead = (y: number) => {
+    doc.setFillColor(234, 238, 246);
+    doc.rect(L - 2, y - 4.6, R - L + 4, 7, "F");
+    doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(35, 55, 95);
+    cols.forEach((c, i) => cell(c.header, i, y));
+    doc.setTextColor(45);
+    return y + 6.5;
+  };
+
+  pageHeader();
+  let y = 34;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95);
+  for (const line of opts.subjectLines) { doc.text(line, L, y); y += 5; }
+  doc.setTextColor(30);
 
   if (opts.summary.length) {
-    y += 3;
-    doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-    doc.text("Summary", 20, y); y += 7;
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    for (const s of opts.summary) { doc.text(`${s.label}: ${s.value}`, 20, y); y += 6; }
+    y += 2;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("Summary", L, y); y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+    for (const s of opts.summary) { doc.text(`${s.label}:`, L, y); doc.setFont("helvetica", "bold"); doc.text(s.value, L + 42, y); doc.setFont("helvetica", "normal"); y += 5.5; }
+    y += 2;
   }
-  y += 4;
-  doc.line(20, y, 190, y);
-  y += 8;
 
-  doc.setFont("helvetica", "bold"); doc.setFontSize(9);
-  for (const c of opts.columns) doc.text(c.header, c.x, y);
-  y += 3;
-  doc.line(20, y, 190, y);
-  y += 6;
+  y = tableHead(y);
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+  let zebra = false;
   for (const row of opts.rows) {
-    if (y > 275) { doc.addPage(); y = 20; }
-    row.forEach((cell, i) => doc.text(cell, opts.columns[i].x, y));
-    y += 7;
+    if (y > 280) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
+    if (zebra) { doc.setFillColor(247, 249, 252); doc.rect(L - 2, y - 4.3, R - L + 4, 6.4, "F"); }
+    zebra = !zebra;
+    doc.setTextColor(50);
+    row.forEach((c, i) => cell(String(c ?? ""), i, y));
+    y += 6.4;
   }
-  if (opts.rows.length === 0) { doc.text("No records.", 20, y); }
+  if (opts.rows.length === 0) { doc.setTextColor(120); doc.text("No records.", L, y + 2); doc.setTextColor(50); }
 
-  doc.text(`Generated: ${new Date().toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`, 20, 289);
+  if (opts.totalsRow) {
+    doc.setDrawColor(150); doc.setLineWidth(0.3); doc.line(L - 2, y - 1.5, R + 2, y - 1.5);
+    y += 3.5;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(20);
+    opts.totalsRow.forEach((c, i) => { if (c !== "") cell(String(c), i, y); });
+  }
+
+  // Footer with page numbers on every page.
+  const pages = doc.getNumberOfPages();
+  const stamp = `Generated: ${new Date().toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(stamp, L, 291);
+    doc.text(`Page ${p} of ${pages}`, R, 291, { align: "right" });
+  }
 
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
 }

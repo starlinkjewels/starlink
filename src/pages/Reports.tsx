@@ -3,6 +3,7 @@ import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue,
 import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr, purchasePaid, purchasePending } from "@/lib/manufacturing";
+import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
@@ -508,34 +509,51 @@ export function ReportsPage() {
     if (!materialReport) return;
     try {
       const m = CAT_META[cat]; const b = catBucket(cat); const rows = catRows(cat); const suppliers = db.suppliers ?? [];
-      const doc = new jsPDF();
-      doc.setFont("helvetica", "bold"); doc.setFontSize(17);
-      doc.text(`Starlink Jewels — ${m.label} Purchase Ledger`, 14, 20);
-      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 14, 28);
       const avg = b.qty > 0 ? b.amount / b.qty : 0;
-      doc.setFontSize(10);
-      doc.text(`Total ${b.qty.toLocaleString()} ${m.unit}  ·  Avg ${rupees(avg)}/${m.unit}  ·  ${rupees(b.amount)}  ·  ${b.count} purchase${b.count !== 1 ? "s" : ""}  (stock ${rupees(b.stockAmt)} · order ${rupees(b.orderAmt)})`, 14, 37);
-      let y = 48;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(8);
-      ([["Date", 14], ["Supplier", 40], ["Inv#", 76], ["Purpose", 94], [m.detail, 114], ["Qty", 138], ["Rate", 156], ["Amount", 174]] as [string, number][]).forEach(([h, x]) => doc.text(h, x, y));
-      y += 4; doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
-      doc.setFont("helvetica", "normal");
       let running = 0;
-      for (const p of rows) {
-        const qty = purchaseQty(p); running += p.totalInr;
-        doc.text(fmtDate(p.invoiceDate || p.createdAt), 14, y);
-        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 20), 40, y);
-        doc.text(String(p.invoiceNumber ?? "").slice(0, 9), 76, y);
-        doc.text(p.purpose, 94, y);
-        doc.text(String(catDetail(p, cat)).slice(0, 12), 114, y);
-        doc.text(`${qty}${m.unit}`, 138, y);
-        doc.text(qty > 0 ? rupees(p.totalInr / qty) : "-", 156, y);
-        doc.text(rupees(p.totalInr), 174, y);
-        y += 5; if (y > 286) { doc.addPage(); y = 20; }
-      }
-      doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${rupees(running)}`, 138, y + 3);
-      doc.save(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.pdf`);
+      const dataRows = rows.map(p => {
+        const qty = purchaseQty(p);
+        running += p.totalInr;
+        // Fill the reference: supplier invoice # if there is one, otherwise the
+        // linked order's number for order-purpose buys (so it's never blank).
+        const ref = p.invoiceNumber
+          || (p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "")
+          || "—";
+        return [
+          fmtDate(p.invoiceDate || p.createdAt),
+          (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 22),
+          String(ref).slice(0, 12),
+          p.purpose,
+          String(catDetail(p, cat)).slice(0, 14),
+          `${qty}${m.unit}`,
+          qty > 0 ? rupees(p.totalInr / qty) : "—",
+          rupees(p.totalInr),
+        ];
+      });
+      downloadLedgerPdf({
+        title: `${m.label} — Purchase Ledger`,
+        subjectLines: [`Period: ${matPeriodLabel}`],
+        summary: [
+          { label: "Total quantity", value: `${b.qty.toLocaleString()} ${m.unit}` },
+          { label: "Average rate", value: `${rupees(avg)} / ${m.unit}` },
+          { label: "Total value", value: rupees(b.amount) },
+          { label: "Purchases", value: `${b.count}  (stock ${rupees(b.stockAmt)} · order ${rupees(b.orderAmt)})` },
+        ],
+        columns: [
+          { header: "Date", x: 14 },
+          { header: "Supplier", x: 38 },
+          { header: "Inv / Order", x: 74 },
+          { header: "Purpose", x: 96 },
+          { header: m.detail, x: 116 },
+          { header: "Qty", x: 140 },
+          { header: "Rate", x: 160 },
+          { header: "Amount", x: 182 },
+        ],
+        align: ["left", "left", "left", "left", "left", "right", "right", "right"],
+        rows: dataRows,
+        totalsRow: ["", "", "", "", "", "", "Grand Total", rupees(b.amount)],
+        filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+      });
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
