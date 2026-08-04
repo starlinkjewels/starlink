@@ -48,9 +48,15 @@ export function downloadLedgerPdf(opts: {
   align?: ("left" | "right")[];
   /** Optional bold totals row rendered under a rule at the bottom of the table. */
   totalsRow?: string[];
+  /** Landscape A4 for wide tables (more room, no truncated particulars). */
+  landscape?: boolean;
 }): void {
-  const doc = new jsPDF();
-  const PAGE_W = 210, L = 14, R = 196;
+  const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
+  const PAGE_W = opts.landscape ? 297 : 210;
+  const PAGE_H = opts.landscape ? 210 : 297;
+  const L = 14, R = PAGE_W - 14;
+  const yBreak = PAGE_H - 17;   // start a new page below this
+  const yFooter = PAGE_H - 6;   // footer baseline
   const cols = opts.columns;
 
   // For right-aligned columns, anchor text at the column's right edge (just
@@ -97,7 +103,7 @@ export function downloadLedgerPdf(opts: {
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
   let zebra = false;
   for (const row of opts.rows) {
-    if (y > 280) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
+    if (y > yBreak) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
     if (zebra) { doc.setFillColor(247, 249, 252); doc.rect(L - 2, y - 4.3, R - L + 4, 6.4, "F"); }
     zebra = !zebra;
     doc.setTextColor(50);
@@ -119,8 +125,8 @@ export function downloadLedgerPdf(opts: {
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140);
-    doc.text(stamp, L, 291);
-    doc.text(`Page ${p} of ${pages}`, R, 291, { align: "right" });
+    doc.text(stamp, L, yFooter);
+    doc.text(`Page ${p} of ${pages}`, R, yFooter, { align: "right" });
   }
 
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);

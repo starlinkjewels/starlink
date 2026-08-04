@@ -534,8 +534,9 @@ export function ReportsPage() {
       // Gold & Loose Diamond → full movement ledger PDF (in/out/balance).
       if (cat === "gold" || cat === "diamond") {
         const led = movementLedger(cat);
-        const totalIn = led.reduce((s, r) => s + r.inQty, 0);
-        const totalOut = led.reduce((s, r) => s + r.outQty, 0);
+        const r3 = (n: number) => Math.round(n * 1000) / 1000; // kill float noise (24.58999… → 24.59)
+        const totalIn = r3(led.reduce((s, r) => s + r.inQty, 0));
+        const totalOut = r3(led.reduce((s, r) => s + r.outQty, 0));
         const totalAmt = led.reduce((s, r) => s + (r.amountInr || 0), 0);
         const closing = led[0]?.balance ?? 0; // newest-first → first row is the latest balance
         const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
@@ -546,14 +547,15 @@ export function ReportsPage() {
             { label: "Purchased", value: `${b.qty.toLocaleString()} ${m.unit}  ·  ${rupees(b.amount)}` },
             { label: "Current balance", value: `${closing.toLocaleString()} ${m.unit}` },
           ],
+          landscape: true,
           columns: [
-            { header: "Date", x: 14 }, { header: cat === "gold" ? "Purity" : "Shape", x: 34 }, { header: "Particulars", x: 54 },
-            { header: "In", x: 106 }, { header: "Out", x: 122 }, { header: "Balance", x: 140 },
-            { header: "Rate", x: 164 }, { header: "Amount", x: 184 },
+            { header: "Date", x: 14 }, { header: cat === "gold" ? "Purity" : "Shape", x: 42 }, { header: "Particulars", x: 68 },
+            { header: "In", x: 194 }, { header: "Out", x: 216 }, { header: "Balance", x: 240 },
+            { header: "Rate", x: 262 }, { header: "Amount", x: 283 },
           ],
           align: ["left", "left", "left", "right", "right", "right", "right", "right"],
           rows: led.map(r => [
-            fmtDate(r.createdAt), String(r.purityOrQuality).slice(0, 10), String(r.link.label).slice(0, 26),
+            fmtDate(r.createdAt), String(r.purityOrQuality), String(r.link.label),
             r.inQty ? `${r.inQty}${m.unit}` : "—",
             r.outQty ? `${r.outQty}${m.unit}` : "—",
             `${r.balance}${m.unit}`,
@@ -581,10 +583,10 @@ export function ReportsPage() {
         const cert = p.diamond?.certificateNumber || pk?.certificateNumber || "—";
         return [
           fmtDate(p.invoiceDate || p.createdAt),
-          (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 18),
-          String(ref).slice(0, 12),
-          String(p.diamond?.shape || pk?.shape || "—").slice(0, 10),
-          String(cert).slice(0, 18),
+          (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 26),
+          String(ref).slice(0, 16),
+          String(p.diamond?.shape || pk?.shape || "—"),
+          String(cert).slice(0, 24),
           `${qty}${m.unit}`,
           qty > 0 ? rs(p.totalInr / qty) : "—",
           rs(p.totalInr),
@@ -599,15 +601,16 @@ export function ReportsPage() {
           { label: "Total value", value: rupees(b.amount) },
           { label: "Purchases", value: `${b.count}  (stock ${rupees(b.stockAmt)} · order ${rupees(b.orderAmt)})` },
         ],
+        landscape: true,
         columns: [
           { header: "Date", x: 14 },
-          { header: "Supplier", x: 36 },
-          { header: "Inv / Order", x: 64 },
-          { header: "Shape", x: 86 },
-          { header: "Certificate", x: 104 },
-          { header: "Qty", x: 140 },
-          { header: "Rate", x: 160 },
-          { header: "Amount", x: 184 },
+          { header: "Supplier", x: 42 },
+          { header: "Inv / Order", x: 96 },
+          { header: "Shape", x: 132 },
+          { header: "Certificate", x: 158 },
+          { header: "Qty", x: 224 },
+          { header: "Rate", x: 252 },
+          { header: "Amount", x: 283 },
         ],
         align: ["left", "left", "left", "left", "left", "right", "right", "right"],
         rows: dataRows,
