@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { fmtDate, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
+import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
+import { recomputeStockFromHistory } from "@/lib/stock";
+import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -77,6 +79,47 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
 
   const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
   const bucketLabel = material === "gold" ? "Purity" : "Shape"; // purityOrQuality = shape for diamonds
+
+  // ── One-time cleanup: older order-bought loose diamonds were filed by quality
+  // grade ("EF VVS") or "unspecified" instead of shape. Each is part of a
+  // net-zero direct-use pair, so re-labelling to the real shape (from the linked
+  // purchase) changes NO balance — it just fixes the Shape column. Admin only. ──
+  const { user } = useAuth();
+  const SHAPE_SET = new Set(DIAMOND_SHAPES.map(s => s.toLowerCase()));
+  const isBadShape = (v: string) => v !== "Certified" && !SHAPE_SET.has(String(v).toLowerCase());
+  const badShapeCount = material === "diamond"
+    ? db.stockMovements.filter(m => m.material === "diamond" && isBadShape(m.purityOrQuality)).length
+    : 0;
+
+  const fixDiamondShapes = async () => {
+    const d0 = loadDb();
+    const purchaseShape = new Map<string, string>();
+    for (const p of d0.purchases) if (p.material === "diamond" && p.diamond?.kind !== "certified" && p.diamond?.shape) purchaseShape.set(p.id, p.diamond.shape);
+    const purchaseIns = d0.stockMovements.filter(m => m.material === "diamond" && m.type === "purchase_in" && m.refType === "purchase" && !!m.refId);
+    const newShape = new Map<string, string>();
+    for (const m of d0.stockMovements) {
+      if (m.material !== "diamond" || !isBadShape(m.purityOrQuality)) continue;
+      let shape: string | undefined;
+      if (m.type === "purchase_in" && m.refId) shape = purchaseShape.get(m.refId);
+      else { // order_direct_use — match its paired purchase_in (same time, qty, old bucket)
+        const pair = purchaseIns.find(pi => pi.createdAt === m.createdAt && pi.quantity === m.quantity && pi.purityOrQuality === m.purityOrQuality);
+        shape = pair?.refId ? purchaseShape.get(pair.refId) : undefined;
+      }
+      if (shape) newShape.set(m.id, shape);
+    }
+    if (newShape.size === 0) { toast.error("Couldn't resolve shapes from the linked purchases."); return; }
+    updateDb(d => {
+      for (const m of d.stockMovements) { const ns = newShape.get(m.id); if (ns) m.purityOrQuality = ns; }
+      for (const mi of d.materialIssuances) {
+        if (mi.material === "diamond" && mi.source === "purchase" && mi.sourcePurchaseId && isBadShape(mi.purityOrQuality)) {
+          const shape = purchaseShape.get(mi.sourcePurchaseId);
+          if (shape) mi.purityOrQuality = shape;
+        }
+      }
+    });
+    try { await recomputeStockFromHistory(loadDb().stockMovements); } catch { /* self-heals on next view */ }
+    toast.success(`Re-filed ${newShape.size} movement${newShape.size !== 1 ? "s" : ""} under their shape`);
+  };
 
   // For a purchase movement, resolve the effective INR rate (₹/unit) and this
   // movement's cost from the linked Purchase — so the history shows where it was
@@ -168,6 +211,13 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
           <p className="text-sm text-muted-foreground">{material === "gold" ? "By purity" : "Pooled by shape"} · full movement history</p>
         </div>
       </div>
+
+      {user?.role === "admin" && material === "diamond" && badShapeCount > 0 && (
+        <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
+          <span>{badShapeCount} diamond movement{badShapeCount !== 1 ? "s are" : " is"} filed by quality / "unspecified" instead of shape (bought before the shape fix). Re-file them under their real shape — balances are unaffected.</span>
+          <AsyncButton onClick={fixDiamondShapes} className="btn-hero rounded-xl shrink-0">Fix shapes</AsyncButton>
+        </div>
+      )}
 
       <div className="card-luxe p-5">
         <div className="flex items-center justify-between gap-2 mb-3">
