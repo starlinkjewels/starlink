@@ -58,15 +58,39 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
 
   const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
 
+  // For a purchase movement, resolve the effective INR rate (₹/unit) and this
+  // movement's cost from the linked Purchase — so the history shows where it was
+  // bought AND at what price, like the Certified section. Out-movements have none.
+  const inrRateAmount = (m: (typeof rows)[number]): { rate: number; amount: number } | null => {
+    if (m.type !== "purchase_in" || m.refType !== "purchase" || !m.refId) return null;
+    const p = db.purchases.find(x => x.id === m.refId);
+    if (!p) return null;
+    const pQty = material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+    const rate = pQty > 0 ? p.totalInr / pQty : 0;
+    return { rate, amount: rate * m.quantity };
+  };
+
+  const particulars = (m: (typeof rows)[number]) =>
+    m.link.orderId ? <Link to={`/orders/${m.link.orderId}`} className="text-primary hover:underline">{m.link.label}</Link>
+    : m.link.factoryId ? <Link to={`/factories/${m.link.factoryId}`} className="text-primary hover:underline">{m.link.label}</Link>
+    : m.link.supplierId ? <Link to={`/suppliers/${m.link.supplierId}`} className="text-primary hover:underline">{m.link.label}</Link>
+    : m.link.clientId ? <Link to={`/clients/${m.link.clientId}`} className="text-primary hover:underline">{m.link.label}</Link>
+    : <span>{m.link.label}</span>;
+
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
-      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`],
-      rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => [
-        fmtDate(m.createdAt), m.link.label,
-        m.type === "purchase_in" ? m.quantity : "",
-        m.type === "purchase_in" ? "" : m.quantity,
-      ]),
+      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`, "Rate (Rs)", "Amount (Rs)"],
+      rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => {
+        const ra = inrRateAmount(m);
+        return [
+          fmtDate(m.createdAt), m.link.label,
+          m.type === "purchase_in" ? m.quantity : "",
+          m.type === "purchase_in" ? "" : m.quantity,
+          ra ? Math.round(ra.rate) : "",
+          ra ? Math.round(ra.amount) : "",
+        ];
+      }),
     );
   };
 
@@ -80,16 +104,23 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       ],
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       columns: [
-        { header: "Date", x: 20 },
-        { header: "Particulars", x: 50 },
-        { header: "In", x: 150 },
-        { header: "Out", x: 170 },
+        { header: "Date", x: 14 },
+        { header: "Particulars", x: 40 },
+        { header: "In", x: 116 },
+        { header: "Out", x: 134 },
+        { header: "Rate", x: 152 },
+        { header: "Amount", x: 176 },
       ],
-      rows: filtered.map(m => [
-        fmtDate(m.createdAt), m.link.label.slice(0, 40),
-        m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
-        m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
-      ]),
+      rows: filtered.map(m => {
+        const ra = inrRateAmount(m);
+        return [
+          fmtDate(m.createdAt), m.link.label.slice(0, 32),
+          m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
+          m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
+          ra ? fmtMoneyInr(ra.rate) : "—",
+          ra ? fmtMoneyInr(ra.amount) : "—",
+        ];
+      }),
       filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
     });
   };
@@ -160,39 +191,67 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
             </button>
           )}
         </div>
-        <div className="divide-y divide-border/40">
-          {paged.map(m => (
-            <div key={m.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${m.type === "purchase_in" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-                {m.type === "purchase_in" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">
-                  {m.link.orderId ? (
-                    <Link to={`/orders/${m.link.orderId}`} className="hover:underline">{m.link.label}</Link>
-                  ) : m.link.factoryId ? (
-                    <Link to={`/factories/${m.link.factoryId}`} className="hover:underline">{m.link.label}</Link>
-                  ) : m.link.supplierId ? (
-                    <Link to={`/suppliers/${m.link.supplierId}`} className="hover:underline">{m.link.label}</Link>
-                  ) : m.link.clientId ? (
-                    <Link to={`/clients/${m.link.clientId}`} className="hover:underline">{m.link.label}</Link>
-                  ) : (
-                    m.link.label
-                  )}
-                </p>
-                <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)}{m.note ? ` · ${m.note}` : ""}</p>
-              </div>
-              <p className={`text-sm font-semibold shrink-0 ${m.type === "purchase_in" ? "text-success" : "text-destructive"}`}>
-                {m.type === "purchase_in" ? "+" : "−"}{m.quantity} {unit}
-              </p>
+        {filteredRows.length === 0 ? (
+          <div className="px-5 py-12 text-center text-muted-foreground">
+            {rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
+          </div>
+        ) : (
+          <>
+            {/* Desktop table — where bought / where went, rate & amount */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
+                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Date</th>
+                    <th className="px-5 py-2.5 font-semibold">Particulars</th>
+                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">In ({unit})</th>
+                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Out ({unit})</th>
+                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Rate</th>
+                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Amount</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {paged.map(m => {
+                    const ra = inrRateAmount(m);
+                    const isIn = m.type === "purchase_in";
+                    return (
+                      <tr key={m.id} className="hover:bg-secondary/30">
+                        <td className="px-5 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(m.createdAt)}</td>
+                        <td className="px-5 py-2.5">{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</td>
+                        <td className="px-5 py-2.5 text-right font-semibold text-success whitespace-nowrap">{isIn ? m.quantity.toLocaleString() : "—"}</td>
+                        <td className="px-5 py-2.5 text-right font-semibold text-destructive whitespace-nowrap">{isIn ? "—" : m.quantity.toLocaleString()}</td>
+                        <td className="px-5 py-2.5 text-right whitespace-nowrap">{ra ? `${fmtMoneyInr(ra.rate)}/${unit}` : "—"}</td>
+                        <td className="px-5 py-2.5 text-right font-medium whitespace-nowrap">{ra ? fmtMoneyInr(ra.amount) : "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          ))}
-          {filteredRows.length === 0 && (
-            <div className="px-5 py-12 text-center text-muted-foreground">
-              {rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border/40">
+              {paged.map(m => {
+                const ra = inrRateAmount(m);
+                return (
+                  <div key={m.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${m.type === "purchase_in" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                      {m.type === "purchase_in" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{particulars(m)}</p>
+                      <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)}{ra ? ` · ${fmtMoneyInr(ra.rate)}/${unit}` : ""}{m.note ? ` · ${m.note}` : ""}</p>
+                    </div>
+                    <div className="text-right shrink-0">
+                      <p className={`text-sm font-semibold ${m.type === "purchase_in" ? "text-success" : "text-destructive"}`}>{m.type === "purchase_in" ? "+" : "−"}{m.quantity} {unit}</p>
+                      {ra && <p className="text-[11px] text-muted-foreground">{fmtMoneyInr(ra.amount)}</p>}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          )}
-        </div>
+          </>
+        )}
         {totalPages > 1 && (
           <div className="px-5 border-t border-border/60">
             <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${filteredRows.length}`} />
