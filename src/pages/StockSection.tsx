@@ -44,22 +44,29 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
   const unit = material === "gold" ? "g" : "ct";
 
-  const rows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
+  const rawRows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
     diamondSales: db.diamondSales, clients: db.clients,
   });
 
-  // Running balance (of the selected bucket, or all buckets) after each movement —
-  // computed oldest-first, shown against the newest-first table for a proper ledger.
+  // Deterministic chronological order so the running balance is stable AND its
+  // newest row always equals the Balances total. A direct-order purchase writes
+  // an IN + OUT pair with the SAME timestamp (see logOrderDirectPurchase); apply
+  // the IN before the OUT at a tie, then break further ties by id, so the ledger
+  // never depends on unstable sort order.
+  const inRank = (m: typeof rawRows[number]) => (m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0) ? 0 : 1);
+  const chronoAsc = [...rawRows].sort((a, b) =>
+    (+new Date(a.createdAt) - +new Date(b.createdAt)) || (inRank(a) - inRank(b)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const balanceById = new Map<string, number>();
   {
     let bal = 0;
-    for (const m of [...rows].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))) {
+    for (const m of chronoAsc) {
       const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
       bal = Math.round((bal + sign * Math.abs(m.quantity)) * 1000) / 1000;
       balanceById.set(m.id, bal);
     }
   }
+  const rows = [...chronoAsc].reverse(); // newest-first for display, same total order
 
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;

@@ -448,18 +448,23 @@ export function materialLedger(
   material: "gold" | "diamond",
   ctx: StockLinkContext,
 ): MaterialLedgerRow[] {
-  const hist = stockBucketHistory(movements, material, null, ctx); // newest-first, links resolved
-  // Running balance is computed oldest-first, then attached to each row so the
-  // newest-first table still shows the true stock level after each movement.
+  const hist = stockBucketHistory(movements, material, null, ctx); // links resolved
+  // Deterministic chronological order: a direct-order purchase writes an IN + OUT
+  // pair with the SAME timestamp (logOrderDirectPurchase), so apply IN before OUT
+  // at a tie (then by id) — the running balance is stable and its newest row
+  // always matches deriveStockBalances (the Balances card).
+  const inRank = (m: StockMovement) => (m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0) ? 0 : 1);
+  const chronoAsc = [...hist].sort((a, b) =>
+    (+new Date(a.createdAt) - +new Date(b.createdAt)) || (inRank(a) - inRank(b)) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   const balById = new Map<string, number>();
   let bal = 0;
-  for (const m of [...hist].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))) {
+  for (const m of chronoAsc) {
     const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
     bal = Math.round((bal + sign * Math.abs(m.quantity)) * 1000) / 1000;
     balById.set(m.id, bal);
   }
   const purchaseById = new Map(ctx.purchases.map(p => [p.id, p]));
-  return hist.map(m => {
+  return [...chronoAsc].reverse().map(m => {
     let rateInr: number | null = null, amountInr: number | null = null;
     if (m.type === "purchase_in" && m.refType === "purchase" && m.refId) {
       const p = purchaseById.get(m.refId);
