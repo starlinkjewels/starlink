@@ -569,19 +569,22 @@ export function ReportsPage() {
       const rows = catRows(cat); const suppliers = db.suppliers ?? [];
       const avg = b.qty > 0 ? b.amount / b.qty : 0;
       const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
+      const packets = db.diamondPackets ?? [];
       const dataRows = rows.map(p => {
         const qty = purchaseQty(p);
+        const pk = packets.find(x => x.purchaseId === p.id); // certificate details live on the packet
         // Fill the reference: supplier invoice # if there is one, otherwise the
         // linked order's number for order-purpose buys (so it's never blank).
         const ref = p.invoiceNumber
           || (p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "")
           || "—";
+        const cert = p.diamond?.certificateNumber || pk?.certificateNumber || "—";
         return [
           fmtDate(p.invoiceDate || p.createdAt),
-          (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 22),
+          (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 18),
           String(ref).slice(0, 12),
-          p.purpose,
-          String(catDetail(p, cat)).slice(0, 14),
+          String(p.diamond?.shape || pk?.shape || "—").slice(0, 10),
+          String(cert).slice(0, 18),
           `${qty}${m.unit}`,
           qty > 0 ? rs(p.totalInr / qty) : "—",
           rs(p.totalInr),
@@ -598,11 +601,11 @@ export function ReportsPage() {
         ],
         columns: [
           { header: "Date", x: 14 },
-          { header: "Supplier", x: 38 },
-          { header: "Inv / Order", x: 72 },
-          { header: "Purpose", x: 94 },
-          { header: m.detail, x: 112 },
-          { header: "Qty", x: 138 },
+          { header: "Supplier", x: 36 },
+          { header: "Inv / Order", x: 64 },
+          { header: "Shape", x: 86 },
+          { header: "Certificate", x: 104 },
+          { header: "Qty", x: 140 },
           { header: "Rate", x: 160 },
           { header: "Amount", x: 184 },
         ],
