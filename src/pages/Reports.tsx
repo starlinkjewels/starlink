@@ -218,11 +218,12 @@ export function ReportsPage() {
       // Full purchase history (every line) so the downloaded PDF is complete, not just a summary.
       const suppliers = db.suppliers ?? [];
       y += 12;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase ledger", 20, y); y += 7;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase ledger", 20, y);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(120); doc.text("(Rate, Amount & Balance in Rs)", 62, y); doc.setTextColor(30); y += 7;
       doc.setFontSize(8);
       // Right-aligned money columns with plain grouped numbers (jsPDF can't render ₹).
       const plain = (n: number) => Math.round(n).toLocaleString("en-IN");
-      const cols: [string, number, boolean][] = [["Date", 14, false], ["Supplier", 36, false], ["Item", 82, false], ["Qty", 108, true], ["Rate (Rs)", 132, true], ["Amount (Rs)", 160, true], ["Bal (Rs)", 194, true]];
+      const cols: [string, number, boolean][] = [["Date", 14, false], ["Supplier", 36, false], ["Item", 82, false], ["Qty", 108, true], ["Rate", 132, true], ["Amount", 160, true], ["Balance", 194, true]];
       const colR = (i: number) => (i < cols.length - 1 ? cols[i + 1][1] - 3 : 194);
       cols.forEach(([h, x, right], i) => doc.text(h, right ? colR(i) : x, y, right ? { align: "right" } : undefined)); y += 4;
       doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
@@ -540,15 +541,15 @@ export function ReportsPage() {
         const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
         downloadLedgerPdf({
           title: `${m.label} — Stock Ledger`,
-          subjectLines: [`Period: ${matPeriodLabel}`],
+          subjectLines: [`Period: ${matPeriodLabel}`, "Rate & Amount in Rs (INR)"],
           summary: [
             { label: "Purchased", value: `${b.qty.toLocaleString()} ${m.unit}  ·  ${rupees(b.amount)}` },
             { label: "Current balance", value: `${closing.toLocaleString()} ${m.unit}` },
           ],
           columns: [
             { header: "Date", x: 14 }, { header: "Particulars", x: 34 },
-            { header: "In", x: 104 }, { header: "Out", x: 120 }, { header: "Balance", x: 138 },
-            { header: "Rate (Rs)", x: 160 }, { header: "Amount (Rs)", x: 182 },
+            { header: "In", x: 104 }, { header: "Out", x: 120 }, { header: "Balance", x: 140 },
+            { header: "Rate", x: 164 }, { header: "Amount", x: 184 },
           ],
           align: ["left", "left", "right", "right", "right", "right", "right"],
           rows: led.map(r => [
@@ -588,7 +589,7 @@ export function ReportsPage() {
       });
       downloadLedgerPdf({
         title: `${m.label} — Purchase Ledger`,
-        subjectLines: [`Period: ${matPeriodLabel}`],
+        subjectLines: [`Period: ${matPeriodLabel}`, "Rate & Amount in Rs (INR)"],
         summary: [
           { label: "Total quantity", value: `${b.qty.toLocaleString()} ${m.unit}` },
           { label: "Average rate", value: `${rupees(avg)} / ${m.unit}` },
@@ -600,10 +601,10 @@ export function ReportsPage() {
           { header: "Supplier", x: 38 },
           { header: "Inv / Order", x: 72 },
           { header: "Purpose", x: 94 },
-          { header: m.detail, x: 114 },
+          { header: m.detail, x: 112 },
           { header: "Qty", x: 138 },
-          { header: "Rate (Rs)", x: 158 },
-          { header: "Amount (Rs)", x: 182 },
+          { header: "Rate", x: 160 },
+          { header: "Amount", x: 184 },
         ],
         align: ["left", "left", "left", "left", "left", "right", "right", "right"],
         rows: dataRows,

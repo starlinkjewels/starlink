@@ -113,6 +113,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       title: `${materialLabel} — Movement History`,
       subjectLines: [
         selectedBucket ? `Bucket: ${selectedBucket}` : "All purities/shapes",
+        "Rate & Amount in Rs (INR)",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
@@ -121,9 +122,9 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
         { header: "Particulars", x: 34 },
         { header: "In", x: 104 },
         { header: "Out", x: 120 },
-        { header: "Balance", x: 138 },
-        { header: "Rate (Rs)", x: 160 },
-        { header: "Amount (Rs)", x: 182 },
+        { header: "Balance", x: 140 },
+        { header: "Rate", x: 164 },
+        { header: "Amount", x: 184 },
       ],
       align: ["left", "left", "right", "right", "right", "right", "right"],
       rows: filtered.map(m => {
@@ -331,6 +332,7 @@ function CertifiedSection() {
       title: "Certified Diamonds — Full History",
       subjectLines: [
         `${filtered.length} packet${filtered.length !== 1 ? "s" : ""}${from || to ? " (filtered)" : " (all time)"}`,
+        "Rate/ct in Rs (INR)",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
@@ -340,7 +342,7 @@ function CertifiedSection() {
       ],
       columns: [
         { header: "Bought", x: 14 }, { header: "Shape/ct", x: 40 }, { header: "Cert", x: 72 },
-        { header: "Supplier", x: 100 }, { header: "Rate/ct (Rs)", x: 138 }, { header: "Status", x: 166 },
+        { header: "Supplier", x: 100 }, { header: "Rate/ct", x: 140 }, { header: "Status", x: 164 },
       ],
       align: ["left", "left", "left", "left", "right", "left"],
       rows: filtered.map(p => [
