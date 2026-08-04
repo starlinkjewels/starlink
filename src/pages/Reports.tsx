@@ -217,23 +217,28 @@ export function ReportsPage() {
       // Full purchase history (every line) so the downloaded PDF is complete, not just a summary.
       const suppliers = db.suppliers ?? [];
       y += 12;
-      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase history", 20, y); y += 7;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase ledger", 20, y); y += 7;
       doc.setFontSize(8);
-      const cols: [string, number][] = [["Date", 14], ["Supplier", 40], ["Item", 92], ["Qty", 128], ["Rate", 150], ["Total", 174]];
+      const cols: [string, number][] = [["Date", 14], ["Supplier", 38], ["Item", 84], ["Qty", 110], ["Rate", 130], ["Amount", 152], ["Balance", 176]];
       cols.forEach(([h, x]) => doc.text(h, x, y)); y += 4;
       doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
       doc.setFont("helvetica", "normal");
-      for (const p of r.rows) {
+      let running = 0;
+      const ordered = [...r.rows].sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
+      for (const p of ordered) {
         const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = c === "gold" ? "g" : "ct";
         const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : "Diamond";
+        running += p.totalInr;
         doc.text(fmtDate(p.invoiceDate || p.createdAt), 14, y);
-        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 26), 40, y);
-        doc.text(label, 92, y);
-        doc.text(`${qty}${unit}`, 128, y);
-        doc.text(qty > 0 ? money(p.totalInr / qty) : "-", 150, y);
-        doc.text(money(p.totalInr), 174, y);
+        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 22), 38, y);
+        doc.text(label, 84, y);
+        doc.text(`${qty}${unit}`, 110, y);
+        doc.text(qty > 0 ? money(p.totalInr / qty) : "-", 130, y);
+        doc.text(money(p.totalInr), 152, y);
+        doc.text(money(running), 176, y);
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
+      doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${money(r.grand)}`, 152, y + 3);
       doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
@@ -244,20 +249,24 @@ export function ReportsPage() {
     try {
       const suppliers = db.suppliers ?? [];
       const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-      const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Total (Rs)","Invoice #"];
+      const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Amount (Rs)","Running Total (Rs)","Invoice #"];
       const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond" };
-      const rows = materialReport.rows.map(p => {
-        const c = purchaseCategory(p);
-        const qty = purchaseQty(p);
-        const unit = c === "gold" ? "g" : "ct";
-        const detail = c === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
-        const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
-        return [
-          fmtDate(p.invoiceDate || p.createdAt),
-          suppliers.find(s => s.id === p.supplierId)?.name ?? "",
-          catLabel[c], p.purpose, detail, qty, unit, rate, Math.round(p.totalInr), p.invoiceNumber ?? "",
-        ];
-      });
+      let running = 0;
+      const rows = [...materialReport.rows]
+        .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt))
+        .map(p => {
+          const c = purchaseCategory(p);
+          const qty = purchaseQty(p);
+          const unit = c === "gold" ? "g" : "ct";
+          const detail = c === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
+          const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
+          running += p.totalInr;
+          return [
+            fmtDate(p.invoiceDate || p.createdAt),
+            suppliers.find(s => s.id === p.supplierId)?.name ?? "",
+            catLabel[c], p.purpose, detail, qty, unit, rate, Math.round(p.totalInr), Math.round(running), p.invoiceNumber ?? "",
+          ];
+        });
       const csv = [headers, ...rows].map(r => r.map(esc).join(",")).join("\r\n");
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
