@@ -76,6 +76,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const { paged, page, setPage, totalPages, start, end } = usePagination(filteredRows, PAGE_SIZE);
 
   const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
+  const bucketLabel = material === "gold" ? "Purity" : "Shape"; // purityOrQuality = shape for diamonds
 
   // For a purchase movement, resolve the effective INR rate (₹/unit) and this
   // movement's cost from the linked Purchase — so the history shows where it was
@@ -99,11 +100,11 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
-      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"],
+      ["Date", bucketLabel, "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"],
       rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => {
         const ra = inrRateAmount(m);
         return [
-          fmtDate(m.createdAt), m.link.label,
+          fmtDate(m.createdAt), m.purityOrQuality, m.link.label,
           m.type === "purchase_in" ? m.quantity : "",
           m.type === "purchase_in" ? "" : m.quantity,
           balanceById.get(m.id) ?? 0,
@@ -126,19 +127,20 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       columns: [
         { header: "Date", x: 14 },
-        { header: "Particulars", x: 34 },
-        { header: "In", x: 104 },
-        { header: "Out", x: 120 },
+        { header: bucketLabel, x: 34 },
+        { header: "Particulars", x: 54 },
+        { header: "In", x: 106 },
+        { header: "Out", x: 122 },
         { header: "Balance", x: 140 },
         { header: "Rate", x: 164 },
         { header: "Amount", x: 184 },
       ],
-      align: ["left", "left", "right", "right", "right", "right", "right"],
+      align: ["left", "left", "left", "right", "right", "right", "right", "right"],
       rows: filtered.map(m => {
         const ra = inrRateAmount(m);
         const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
         return [
-          fmtDate(m.createdAt), m.link.label.slice(0, 30),
+          fmtDate(m.createdAt), String(m.purityOrQuality).slice(0, 10), m.link.label.slice(0, 26),
           m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
           m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
           `${(balanceById.get(m.id) ?? 0).toLocaleString()}${unit}`,
@@ -228,6 +230,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                 <thead>
                   <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
                     <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Date</th>
+                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">{bucketLabel}</th>
                     <th className="px-5 py-2.5 font-semibold">Particulars</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">In ({unit})</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Out ({unit})</th>
@@ -243,6 +246,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                     return (
                       <tr key={m.id} className="hover:bg-secondary/30">
                         <td className="px-5 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(m.createdAt)}</td>
+                        <td className="px-5 py-2.5 whitespace-nowrap"><span className="inline-block px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 text-xs font-medium">{m.purityOrQuality}</span></td>
                         <td className="px-5 py-2.5">{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</td>
                         <td className="px-5 py-2.5 text-right font-semibold text-success whitespace-nowrap">{isIn ? m.quantity.toLocaleString() : "—"}</td>
                         <td className="px-5 py-2.5 text-right font-semibold text-destructive whitespace-nowrap">{isIn ? "—" : m.quantity.toLocaleString()}</td>
@@ -266,7 +270,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                       {m.type === "purchase_in" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{particulars(m)}</p>
+                      <p className="text-sm font-medium truncate"><span className="text-cyan-700 font-semibold">{m.purityOrQuality}</span> · {particulars(m)}</p>
                       <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)} · bal {(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}{ra ? ` · ${fmtMoneyInr(ra.rate)}/${unit}` : ""}</p>
                     </div>
                     <div className="text-right shrink-0">

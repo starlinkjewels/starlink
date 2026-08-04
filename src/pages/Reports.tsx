@@ -547,20 +547,20 @@ export function ReportsPage() {
             { label: "Current balance", value: `${closing.toLocaleString()} ${m.unit}` },
           ],
           columns: [
-            { header: "Date", x: 14 }, { header: "Particulars", x: 34 },
-            { header: "In", x: 104 }, { header: "Out", x: 120 }, { header: "Balance", x: 140 },
+            { header: "Date", x: 14 }, { header: cat === "gold" ? "Purity" : "Shape", x: 34 }, { header: "Particulars", x: 54 },
+            { header: "In", x: 106 }, { header: "Out", x: 122 }, { header: "Balance", x: 140 },
             { header: "Rate", x: 164 }, { header: "Amount", x: 184 },
           ],
-          align: ["left", "left", "right", "right", "right", "right", "right"],
+          align: ["left", "left", "left", "right", "right", "right", "right", "right"],
           rows: led.map(r => [
-            fmtDate(r.createdAt), String(r.link.label).slice(0, 30),
+            fmtDate(r.createdAt), String(r.purityOrQuality).slice(0, 10), String(r.link.label).slice(0, 26),
             r.inQty ? `${r.inQty}${m.unit}` : "—",
             r.outQty ? `${r.outQty}${m.unit}` : "—",
             `${r.balance}${m.unit}`,
             r.rateInr ? rs(r.rateInr) : "—",
             r.amountInr ? rs(r.amountInr) : "—",
           ]),
-          totalsRow: ["", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rs(totalAmt)],
+          totalsRow: ["", "", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rs(totalAmt)],
           filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
         });
         return;
