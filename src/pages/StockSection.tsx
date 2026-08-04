@@ -172,12 +172,12 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       columns: [
         { header: "Date", x: 14 },
         { header: bucketLabel, x: 42 },
-        { header: "Particulars", x: 68 },
-        { header: "In", x: 194 },
-        { header: "Out", x: 216 },
-        { header: "Balance", x: 240 },
-        { header: "Rate", x: 262 },
-        { header: "Amount", x: 283 },
+        { header: "Particulars", x: 70 },
+        { header: "In", x: 172 },
+        { header: "Out", x: 196 },
+        { header: "Balance", x: 220 },
+        { header: "Rate", x: 242 },
+        { header: "Amount", x: 262 },
       ],
       align: ["left", "left", "left", "right", "right", "right", "right", "right"],
       rows: filtered.map(m => {
