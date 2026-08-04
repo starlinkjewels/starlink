@@ -213,6 +213,27 @@ export function ReportsPage() {
       section("Certified Diamond", "ct", r.dc);
       doc.setFont("helvetica", "bold"); doc.setFontSize(13);
       doc.text(`Grand Total Purchases: ${money(r.grand)}`, 20, y + 2);
+
+      // Full purchase history (every line) so the downloaded PDF is complete, not just a summary.
+      const suppliers = db.suppliers ?? [];
+      y += 12;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase history", 20, y); y += 7;
+      doc.setFontSize(8);
+      const cols: [string, number][] = [["Date", 14], ["Supplier", 40], ["Item", 92], ["Qty", 128], ["Rate", 150], ["Total", 174]];
+      cols.forEach(([h, x]) => doc.text(h, x, y)); y += 4;
+      doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
+      doc.setFont("helvetica", "normal");
+      for (const p of r.rows) {
+        const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = c === "gold" ? "g" : "ct";
+        const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : "Diamond";
+        doc.text(fmtDate(p.invoiceDate || p.createdAt), 14, y);
+        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 26), 40, y);
+        doc.text(label, 92, y);
+        doc.text(`${qty}${unit}`, 128, y);
+        doc.text(qty > 0 ? money(p.totalInr / qty) : "-", 150, y);
+        doc.text(money(p.totalInr), 174, y);
+        y += 5; if (y > 285) { doc.addPage(); y = 20; }
+      }
       doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
@@ -369,6 +390,24 @@ export function ReportsPage() {
         y += 6;
         if (y > 280) { doc.addPage(); y = 20; }
       });
+
+      // Full order-by-order history so the PDF is complete, not just a summary.
+      y += 8; if (y > 260) { doc.addPage(); y = 20; }
+      doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full order history", 20, y); y += 7;
+      doc.setFontSize(8);
+      ([["Order #", 14], ["Client", 40], ["Date", 92], ["Billed", 122], ["Received", 150], ["Balance", 176]] as [string, number][])
+        .forEach(([h, x]) => doc.text(h, x, y)); y += 4;
+      doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
+      doc.setFont("helvetica", "normal");
+      for (const o of r.orders) {
+        doc.text(String(o.orderNumber), 14, y);
+        doc.text((clients.find(c => c.id === o.clientId)?.companyName ?? "").slice(0, 24), 40, y);
+        doc.text(fmtDate(o.createdAt), 92, y);
+        doc.text(fmtMoney(orderTotal(o)), 122, y);
+        doc.text(fmtMoney(totalAdvance(o)), 150, y);
+        doc.text(fmtMoney(balanceDue(o)), 176, y);
+        y += 5; if (y > 285) { doc.addPage(); y = 20; }
+      }
       doc.save(`Starlink-Sales-${salesFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }

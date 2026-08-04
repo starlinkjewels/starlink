@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmtDate, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { stockBucketHistory, deriveStockBalances } from "@/lib/manufacturing";
+import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -211,8 +211,68 @@ function CertifiedSection() {
   const db = useDb();
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
   const [search, setSearch] = useState("");
+  const [histFrom, setHistFrom] = useState("");
+  const [histTo, setHistTo] = useState("");
+  const [showExport, setShowExport] = useState(false);
 
   const allInStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+
+  // ── Full certified-diamond history — every packet ever bought: from which
+  // supplier, at what rate, and where it went (still in stock / issued / used
+  // in an order / sold). This is what "where to buy / which supplier" needs. ──
+  const supplierName = (id?: string) => (id ? db.suppliers.find(s => s.id === id)?.name : undefined);
+  const purchaseOf = (id?: string) => (id ? db.purchases.find(p => p.id === id) : undefined);
+  const orderNoOf = (id?: string) => (id ? db.orders.find(o => o.id === id)?.orderNumber : undefined);
+  const boughtDate = (p: DiamondPacket) => purchaseOf(p.purchaseId)?.invoiceDate || purchaseOf(p.purchaseId)?.createdAt || p.createdAt;
+  const STATUS_LABEL: Record<DiamondPacket["status"], string> = { in_stock: "In stock", issued: "Issued", used: "Used in order", sold: "Sold" };
+  const STATUS_CLASS: Record<DiamondPacket["status"], string> = {
+    in_stock: "bg-success/10 text-success", issued: "bg-blue-500/10 text-blue-700",
+    used: "bg-secondary text-muted-foreground", sold: "bg-violet-500/10 text-violet-700",
+  };
+
+  const allPackets = [...(db.diamondPackets ?? [])].sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
+  const histFromDate = histFrom ? new Date(histFrom + "T00:00:00") : null;
+  const histToDate = histTo ? new Date(histTo + "T23:59:59.999") : null;
+  const histActive = !!histFrom || !!histTo;
+  const histRows = allPackets.filter(p => inDateRange(boughtDate(p), histFromDate, histToDate));
+
+  const exportCertCsv = (from: Date | null, to: Date | null) => {
+    downloadCsv(
+      "Stock-Certified_Diamonds-History",
+      ["Bought", "Stock #", "Shape", "Carat", "Certificate", "Lab", "Supplier", "Rate/ct (INR)", "Cost (INR)", "Status", "Order"],
+      allPackets.filter(p => inDateRange(boughtDate(p), from, to)).map(p => [
+        fmtDate(boughtDate(p)), p.stockNumber ?? "", p.shape, p.carat, p.certificateNumber, p.certificateLab ?? "",
+        supplierName(p.supplierId) ?? "", p.ratePerCaratInr ?? "",
+        p.ratePerCaratInr ? Math.round(p.ratePerCaratInr * p.carat) : "", STATUS_LABEL[p.status], orderNoOf(p.orderId) ?? "",
+      ]),
+    );
+  };
+  const exportCertPdf = (from: Date | null, to: Date | null) => {
+    const filtered = allPackets.filter(p => inDateRange(boughtDate(p), from, to));
+    downloadLedgerPdf({
+      title: "Certified Diamonds — Full History",
+      subjectLines: [
+        `${filtered.length} packet${filtered.length !== 1 ? "s" : ""}${from || to ? " (filtered)" : " (all time)"}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ],
+      summary: [
+        { label: "In stock", value: String(filtered.filter(p => p.status === "in_stock").length) },
+        { label: "Issued / used", value: String(filtered.filter(p => p.status === "issued" || p.status === "used").length) },
+        { label: "Sold", value: String(filtered.filter(p => p.status === "sold").length) },
+      ],
+      columns: [
+        { header: "Bought", x: 14 }, { header: "Shape/ct", x: 40 }, { header: "Cert", x: 74 },
+        { header: "Supplier", x: 104 }, { header: "Rate/ct", x: 150 }, { header: "Status", x: 174 },
+      ],
+      rows: filtered.map(p => [
+        fmtDate(boughtDate(p)), `${p.shape} ${p.carat}ct`, String(p.certificateNumber).slice(0, 14),
+        (supplierName(p.supplierId) ?? "—").slice(0, 22),
+        p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr) : "—",
+        STATUS_LABEL[p.status] + (p.orderId ? ` (${orderNoOf(p.orderId) ?? ""})` : ""),
+      ]),
+      filename: "Stock-Certified_Diamonds-History",
+    });
+  };
   const inStockPackets = allInStockPackets.filter(p => {
     const q = search.trim().toLowerCase();
     if (!q) return true;
@@ -318,6 +378,22 @@ function CertifiedSection() {
                   {grade && <p className="text-xs text-foreground/70 mt-0.5 truncate">{grade}</p>}
                   {p.measurement && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.measurement}</p>}
                   <p className="text-[11px] text-muted-foreground mt-0.5 truncate">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
+                  {(() => {
+                    const sup = p.supplierId ? db.suppliers.find(s => s.id === p.supplierId) : undefined;
+                    const pur = p.purchaseId ? db.purchases.find(x => x.id === p.purchaseId) : undefined;
+                    const bought = pur?.invoiceDate || pur?.createdAt || p.createdAt;
+                    return (
+                      <p className="text-[11px] mt-1 pt-1 border-t border-border/30 truncate">
+                        {sup
+                          ? <Link to={`/suppliers/${sup.id}`} className="text-primary hover:underline font-medium">{sup.name}</Link>
+                          : <span className="text-muted-foreground">Supplier —</span>}
+                        <span className="text-muted-foreground">
+                          {p.ratePerCaratInr ? ` · ${fmtMoneyInr(p.ratePerCaratInr)}/ct` : ""}
+                          {bought ? ` · ${fmtDate(bought)}` : ""}
+                        </span>
+                      </p>
+                    );
+                  })()}
                   {user?.role === "admin" && (
                     <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
                       <button onClick={() => setEditPacket({ ...p })} className="text-[11px] text-primary inline-flex items-center gap-1 hover:underline">
@@ -332,6 +408,84 @@ function CertifiedSection() {
               );
             })}
           </div>
+        )}
+      </div>
+
+      {/* Full history — every certified diamond bought: supplier, rate & where it went */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
+          <div>
+            <h2 className="font-display text-xl text-brand-dark">Purchase &amp; Movement History</h2>
+            <p className="text-xs text-muted-foreground mt-0.5">{histRows.length} packet{histRows.length !== 1 ? "s" : ""} · bought from which supplier &amp; where each went</p>
+          </div>
+          <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+          <ExportDialog open={showExport} onClose={() => setShowExport(false)} title="Certified Diamonds — History" options={[
+            { label: "Full History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportCertPdf },
+            { label: "Full History — Excel", sublabel: "Supplier, rate, cost, status, order", kind: "excel", run: exportCertCsv },
+          ]} />
+        </div>
+        <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
+          <Input type="date" value={histFrom} onChange={e => setHistFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+          <span className="text-xs text-muted-foreground">to</span>
+          <Input type="date" value={histTo} onChange={e => setHistTo(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+          {histActive && <button onClick={() => { setHistFrom(""); setHistTo(""); }} className="text-xs text-primary hover:underline">Reset</button>}
+        </div>
+
+        {histRows.length === 0 ? (
+          <div className="px-5 py-12 text-center text-muted-foreground">{allPackets.length === 0 ? "No certified diamonds purchased yet." : "None match this date range."}</div>
+        ) : (
+          <>
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
+                    {["Bought", "Stock #", "Diamond", "Certificate", "Supplier", "Rate/ct", "Cost", "Status / Order"].map(h => <th key={h} className="px-5 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-border/40">
+                  {histRows.map(p => (
+                    <tr key={p.id} className="hover:bg-secondary/30">
+                      <td className="px-5 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(boughtDate(p))}</td>
+                      <td className="px-5 py-2.5 font-mono text-xs text-primary whitespace-nowrap">{p.stockNumber ?? "—"}</td>
+                      <td className="px-5 py-2.5 whitespace-nowrap">{p.shape} · <span className="font-semibold text-cyan-700">{p.carat} ct</span></td>
+                      <td className="px-5 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</td>
+                      <td className="px-5 py-2.5 whitespace-nowrap">
+                        {p.supplierId ? <Link to={`/suppliers/${p.supplierId}`} className="text-primary hover:underline">{supplierName(p.supplierId)}</Link> : <span className="text-muted-foreground">—</span>}
+                      </td>
+                      <td className="px-5 py-2.5 whitespace-nowrap">{p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr) : "—"}</td>
+                      <td className="px-5 py-2.5 font-medium whitespace-nowrap">{p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr * p.carat) : "—"}</td>
+                      <td className="px-5 py-2.5 whitespace-nowrap">
+                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
+                        {p.orderId && <Link to={`/orders/${p.orderId}`} className="ml-1.5 text-xs text-primary hover:underline">{orderNoOf(p.orderId)}</Link>}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards */}
+            <div className="md:hidden divide-y divide-border/40">
+              {histRows.map(p => (
+                <div key={p.id} className="px-5 py-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-sm font-semibold">{p.stockNumber && <span className="font-mono text-xs text-primary mr-1.5">{p.stockNumber}</span>}{p.shape} · {p.carat} ct</span>
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
+                  <div className="flex items-center justify-between gap-2 mt-1 text-xs">
+                    <span>
+                      {p.supplierId ? <Link to={`/suppliers/${p.supplierId}`} className="text-primary hover:underline font-medium">{supplierName(p.supplierId)}</Link> : <span className="text-muted-foreground">Supplier —</span>}
+                      <span className="text-muted-foreground"> · {fmtDate(boughtDate(p))}</span>
+                    </span>
+                    {p.ratePerCaratInr && <span className="font-medium shrink-0">{fmtMoneyInr(p.ratePerCaratInr * p.carat)}</span>}
+                  </div>
+                  {p.orderId && <p className="text-[11px] mt-0.5">→ <Link to={`/orders/${p.orderId}`} className="text-primary hover:underline">Order {orderNoOf(p.orderId)}</Link></p>}
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
