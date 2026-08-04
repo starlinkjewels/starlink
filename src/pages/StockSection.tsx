@@ -118,23 +118,24 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       columns: [
         { header: "Date", x: 14 },
-        { header: "Particulars", x: 38 },
-        { header: "In", x: 108 },
-        { header: "Out", x: 124 },
-        { header: "Balance", x: 142 },
-        { header: "Rate", x: 166 },
-        { header: "Amount", x: 184 },
+        { header: "Particulars", x: 34 },
+        { header: "In", x: 104 },
+        { header: "Out", x: 120 },
+        { header: "Balance", x: 138 },
+        { header: "Rate (Rs)", x: 160 },
+        { header: "Amount (Rs)", x: 182 },
       ],
       align: ["left", "left", "right", "right", "right", "right", "right"],
       rows: filtered.map(m => {
         const ra = inrRateAmount(m);
+        const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
         return [
           fmtDate(m.createdAt), m.link.label.slice(0, 30),
           m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
           m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
           `${(balanceById.get(m.id) ?? 0).toLocaleString()}${unit}`,
-          ra ? fmtMoneyInr(ra.rate) : "—",
-          ra ? fmtMoneyInr(ra.amount) : "—",
+          ra ? rs(ra.rate) : "—",
+          ra ? rs(ra.amount) : "—",
         ];
       }),
       filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
@@ -338,13 +339,14 @@ function CertifiedSection() {
         { label: "Sold", value: String(filtered.filter(p => p.status === "sold").length) },
       ],
       columns: [
-        { header: "Bought", x: 14 }, { header: "Shape/ct", x: 40 }, { header: "Cert", x: 74 },
-        { header: "Supplier", x: 104 }, { header: "Rate/ct", x: 150 }, { header: "Status", x: 174 },
+        { header: "Bought", x: 14 }, { header: "Shape/ct", x: 40 }, { header: "Cert", x: 72 },
+        { header: "Supplier", x: 100 }, { header: "Rate/ct (Rs)", x: 138 }, { header: "Status", x: 166 },
       ],
+      align: ["left", "left", "left", "left", "right", "left"],
       rows: filtered.map(p => [
-        fmtDate(boughtDate(p)), `${p.shape} ${p.carat}ct`, String(p.certificateNumber).slice(0, 14),
-        (supplierName(p.supplierId) ?? "—").slice(0, 22),
-        p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr) : "—",
+        fmtDate(boughtDate(p)), `${p.shape} ${p.carat}ct`, String(p.certificateNumber).slice(0, 12),
+        (supplierName(p.supplierId) ?? "—").slice(0, 18),
+        p.ratePerCaratInr ? Math.round(p.ratePerCaratInr).toLocaleString("en-IN") : "—",
         STATUS_LABEL[p.status] + (p.orderId ? ` (${orderNoOf(p.orderId) ?? ""})` : ""),
       ]),
       filename: "Stock-Certified_Diamonds-History",

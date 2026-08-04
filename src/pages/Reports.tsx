@@ -220,8 +220,11 @@ export function ReportsPage() {
       y += 12;
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("Full purchase ledger", 20, y); y += 7;
       doc.setFontSize(8);
-      const cols: [string, number][] = [["Date", 14], ["Supplier", 38], ["Item", 84], ["Qty", 110], ["Rate", 130], ["Amount", 152], ["Balance", 176]];
-      cols.forEach(([h, x]) => doc.text(h, x, y)); y += 4;
+      // Right-aligned money columns with plain grouped numbers (jsPDF can't render ₹).
+      const plain = (n: number) => Math.round(n).toLocaleString("en-IN");
+      const cols: [string, number, boolean][] = [["Date", 14, false], ["Supplier", 36, false], ["Item", 82, false], ["Qty", 108, true], ["Rate (Rs)", 132, true], ["Amount (Rs)", 160, true], ["Bal (Rs)", 194, true]];
+      const colR = (i: number) => (i < cols.length - 1 ? cols[i + 1][1] - 3 : 194);
+      cols.forEach(([h, x, right], i) => doc.text(h, right ? colR(i) : x, y, right ? { align: "right" } : undefined)); y += 4;
       doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
       doc.setFont("helvetica", "normal");
       let running = 0;
@@ -230,13 +233,8 @@ export function ReportsPage() {
         const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = c === "gold" ? "g" : "ct";
         const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : "Diamond";
         running += p.totalInr;
-        doc.text(fmtDate(p.invoiceDate || p.createdAt), 14, y);
-        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 22), 38, y);
-        doc.text(label, 84, y);
-        doc.text(`${qty}${unit}`, 110, y);
-        doc.text(qty > 0 ? money(p.totalInr / qty) : "-", 130, y);
-        doc.text(money(p.totalInr), 152, y);
-        doc.text(money(running), 176, y);
+        const cells = [fmtDate(p.invoiceDate || p.createdAt), (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 20), label, `${qty}${unit}`, qty > 0 ? plain(p.totalInr / qty) : "-", plain(p.totalInr), plain(running)];
+        cells.forEach((cval, i) => doc.text(cval, cols[i][2] ? colR(i) : cols[i][1], y, cols[i][2] ? { align: "right" } : undefined));
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
       doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${money(r.grand)}`, 152, y + 3);
@@ -539,6 +537,7 @@ export function ReportsPage() {
         const totalOut = led.reduce((s, r) => s + r.outQty, 0);
         const totalAmt = led.reduce((s, r) => s + (r.amountInr || 0), 0);
         const closing = led[0]?.balance ?? 0; // newest-first → first row is the latest balance
+        const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
         downloadLedgerPdf({
           title: `${m.label} — Stock Ledger`,
           subjectLines: [`Period: ${matPeriodLabel}`],
@@ -547,9 +546,9 @@ export function ReportsPage() {
             { label: "Current balance", value: `${closing.toLocaleString()} ${m.unit}` },
           ],
           columns: [
-            { header: "Date", x: 14 }, { header: "Particulars", x: 38 },
-            { header: `In`, x: 108 }, { header: `Out`, x: 126 }, { header: "Balance", x: 146 },
-            { header: "Rate", x: 168 }, { header: "Amount", x: 186 },
+            { header: "Date", x: 14 }, { header: "Particulars", x: 34 },
+            { header: "In", x: 104 }, { header: "Out", x: 120 }, { header: "Balance", x: 138 },
+            { header: "Rate (Rs)", x: 160 }, { header: "Amount (Rs)", x: 182 },
           ],
           align: ["left", "left", "right", "right", "right", "right", "right"],
           rows: led.map(r => [
@@ -557,10 +556,10 @@ export function ReportsPage() {
             r.inQty ? `${r.inQty}${m.unit}` : "—",
             r.outQty ? `${r.outQty}${m.unit}` : "—",
             `${r.balance}${m.unit}`,
-            r.rateInr ? rupees(r.rateInr) : "—",
-            r.amountInr ? rupees(r.amountInr) : "—",
+            r.rateInr ? rs(r.rateInr) : "—",
+            r.amountInr ? rs(r.amountInr) : "—",
           ]),
-          totalsRow: ["", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rupees(totalAmt)],
+          totalsRow: ["", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rs(totalAmt)],
           filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
         });
         return;
@@ -568,10 +567,9 @@ export function ReportsPage() {
 
       const rows = catRows(cat); const suppliers = db.suppliers ?? [];
       const avg = b.qty > 0 ? b.amount / b.qty : 0;
-      let running = 0;
+      const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
       const dataRows = rows.map(p => {
         const qty = purchaseQty(p);
-        running += p.totalInr;
         // Fill the reference: supplier invoice # if there is one, otherwise the
         // linked order's number for order-purpose buys (so it's never blank).
         const ref = p.invoiceNumber
@@ -584,8 +582,8 @@ export function ReportsPage() {
           p.purpose,
           String(catDetail(p, cat)).slice(0, 14),
           `${qty}${m.unit}`,
-          qty > 0 ? rupees(p.totalInr / qty) : "—",
-          rupees(p.totalInr),
+          qty > 0 ? rs(p.totalInr / qty) : "—",
+          rs(p.totalInr),
         ];
       });
       downloadLedgerPdf({
@@ -600,16 +598,16 @@ export function ReportsPage() {
         columns: [
           { header: "Date", x: 14 },
           { header: "Supplier", x: 38 },
-          { header: "Inv / Order", x: 74 },
-          { header: "Purpose", x: 96 },
-          { header: m.detail, x: 116 },
-          { header: "Qty", x: 140 },
-          { header: "Rate", x: 160 },
-          { header: "Amount", x: 182 },
+          { header: "Inv / Order", x: 72 },
+          { header: "Purpose", x: 94 },
+          { header: m.detail, x: 114 },
+          { header: "Qty", x: 138 },
+          { header: "Rate (Rs)", x: 158 },
+          { header: "Amount (Rs)", x: 182 },
         ],
         align: ["left", "left", "left", "left", "left", "right", "right", "right"],
         rows: dataRows,
-        totalsRow: ["", "", "", "", "", "", "Grand Total", rupees(b.amount)],
+        totalsRow: ["", "", "", "", "", "", "Total", rs(b.amount)],
         filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
       });
     } catch { toast.error("Couldn't generate the PDF file."); }
