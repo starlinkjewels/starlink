@@ -5,7 +5,7 @@
 // FCM's background handler has to live in the same file as the PWA caching
 // logic rather than in its own firebase-messaging-sw.js.
 /// <reference lib="webworker" />
-import { precacheAndRoute, createHandlerBoundToURL } from "workbox-precaching";
+import { precacheAndRoute, createHandlerBoundToURL, cleanupOutdatedCaches } from "workbox-precaching";
 import { registerRoute, NavigationRoute } from "workbox-routing";
 import { CacheFirst } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
@@ -15,9 +15,14 @@ import { getMessaging, onBackgroundMessage } from "firebase/messaging/sw";
 
 declare let self: ServiceWorkerGlobalScope;
 
+// A new deploy's worker activates immediately and takes control of open tabs,
+// and old precaches are dropped — so after the vite:preloadError refresh in
+// main.tsx, requests resolve against the fresh chunk hashes, not stale ones.
 self.skipWaiting();
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 // ── Precache (replaces generateSW's auto-precache of the build output) ──
+cleanupOutdatedCaches();
 precacheAndRoute(self.__WB_MANIFEST);
 
 // ── SPA navigation fallback (replaces generateSW's navigateFallback) ──
