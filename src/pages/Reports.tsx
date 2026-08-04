@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, purchasePaid, purchasePending } from "@/lib/manufacturing";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
@@ -450,19 +450,57 @@ export function ReportsPage() {
     .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
   const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : materialReport!.dl;
 
+  // Comprehensive per-material ledger (Excel) — EVERY field on each purchase:
+  // invoice, supplier, purpose/order, full grading, currency/FX, paid/pending,
+  // running balance & notes.
   function exportCategoryExcel(cat: MatCat) {
     if (!materialReport) return;
     try {
-      const m = CAT_META[cat]; const suppliers = db.suppliers ?? [];
+      const m = CAT_META[cat];
+      const suppliers = db.suppliers ?? [];
+      const packets = db.diamondPackets ?? [];
+      const rows = catRows(cat);
       let running = 0;
-      csvDownload(
-        `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
-        ["Date", "Supplier", "Invoice #", "Purpose", m.detail, `Qty (${m.unit})`, "Rate (Rs)", "Amount (Rs)", "Running Total (Rs)"],
-        catRows(cat).map(p => {
-          const qty = purchaseQty(p); running += p.totalInr;
-          return [fmtDate(p.invoiceDate || p.createdAt), suppliers.find(s => s.id === p.supplierId)?.name ?? "", p.invoiceNumber ?? "", p.purpose, catDetail(p, cat), qty, qty > 0 ? Math.round(p.totalInr / qty) : "", Math.round(p.totalInr), Math.round(running)];
-        }),
-      );
+      const base = (p: Purchase) => {
+        running += p.totalInr;
+        return {
+          date: fmtDate(p.invoiceDate || p.createdAt),
+          inv: p.invoiceNumber ?? "",
+          supplier: suppliers.find(s => s.id === p.supplierId)?.name ?? "",
+          purpose: p.purpose,
+          order: p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "",
+          currency: p.currency,
+          usd: p.currency === "USD" ? (p.totalUsd ?? "") : "",
+          fx: p.currency === "USD" ? (p.exchangeRate ?? "") : "",
+          amount: Math.round(p.totalInr),
+          paid: Math.round(purchasePaid(p)),
+          pending: Math.round(purchasePending(p)),
+          running: Math.round(running),
+          notes: p.notes ?? "",
+        };
+      };
+
+      let headers: string[];
+      let data: (string | number)[][];
+      if (cat === "gold") {
+        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Purity", "Weight (g)", "Rate/g", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
+        data = rows.map(p => { const c = base(p); return [c.date, c.inv, c.supplier, c.purpose, c.order, p.gold?.purity ?? "", p.gold?.weightGrams ?? "", p.gold?.ratePerGram ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes]; });
+      } else if (cat === "diamond") {
+        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Kind", "Shape", "Quality", "Carat", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
+        data = rows.map(p => { const c = base(p); return [c.date, c.inv, c.supplier, c.purpose, c.order, p.diamond?.kind ?? "loose", p.diamond?.shape ?? "", p.diamond?.quality ?? "", p.diamond?.carat ?? "", p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes]; });
+      } else {
+        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Shape", "Carat", "Quality", "Certificate #", "Lab", "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Measurement", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
+        data = rows.map(p => {
+          const c = base(p);
+          const pk = packets.find(x => x.purchaseId === p.id); // full grading lives on the packet
+          return [c.date, c.inv, c.supplier, c.purpose, c.order,
+            p.diamond?.shape ?? pk?.shape ?? "", p.diamond?.carat ?? pk?.carat ?? "", p.diamond?.quality ?? pk?.quality ?? "",
+            p.diamond?.certificateNumber ?? pk?.certificateNumber ?? "", p.diamond?.certificateLab ?? pk?.certificateLab ?? "",
+            pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
+            p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];
+        });
+      }
+      csvDownload(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
