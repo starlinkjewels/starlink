@@ -2,7 +2,7 @@ import { useState, useMemo } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
-import { fmtMoneyInr, purchasePaid, purchasePending } from "@/lib/manufacturing";
+import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -451,6 +451,22 @@ export function ReportsPage() {
     .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
   const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : materialReport!.dl;
 
+  // Full stock-movement ledger (purchases IN + factory issues / order use / sales
+  // OUT + returns) with running balance, for Gold & Loose Diamond — the "proper
+  // ledger" the Stock page shows, filtered to the report's date range.
+  const movementLedger = (material: "gold" | "diamond") => {
+    const all = materialLedger(db.stockMovements ?? [], material, {
+      purchases: db.purchases ?? [], issuances: db.materialIssuances ?? [], orders: db.orders ?? [],
+      factories: db.factories ?? [], suppliers: db.suppliers ?? [], diamondSales: db.diamondSales ?? [], clients: db.clients ?? [],
+    });
+    return all.filter(r => {
+      const k = ymd(r.createdAt);
+      if (matFrom && k < matFrom) return false;
+      if (matTo && k > matTo) return false;
+      return true;
+    });
+  };
+
   // Comprehensive per-material ledger (Excel) — EVERY field on each purchase:
   // invoice, supplier, purpose/order, full grading, currency/FX, paid/pending,
   // running balance & notes.
@@ -458,6 +474,20 @@ export function ReportsPage() {
     if (!materialReport) return;
     try {
       const m = CAT_META[cat];
+      // Gold & Loose Diamond → full movement ledger (in/out/balance), not just purchases.
+      if (cat === "gold" || cat === "diamond") {
+        const led = movementLedger(cat);
+        csvDownload(
+          `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
+          ["Date", "Particulars", m.detail, `In (${m.unit})`, `Out (${m.unit})`, `Balance (${m.unit})`, "Rate (Rs)", "Amount (Rs)"],
+          led.map(r => [
+            fmtDate(r.createdAt), r.link.label, r.purityOrQuality,
+            r.inQty || "", r.outQty || "", r.balance,
+            r.rateInr ? Math.round(r.rateInr) : "", r.amountInr ? Math.round(r.amountInr) : "",
+          ]),
+        );
+        return;
+      }
       const suppliers = db.suppliers ?? [];
       const packets = db.diamondPackets ?? [];
       const rows = catRows(cat);
@@ -481,26 +511,18 @@ export function ReportsPage() {
         };
       };
 
-      let headers: string[];
-      let data: (string | number)[][];
-      if (cat === "gold") {
-        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Purity", "Weight (g)", "Rate/g", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
-        data = rows.map(p => { const c = base(p); return [c.date, c.inv, c.supplier, c.purpose, c.order, p.gold?.purity ?? "", p.gold?.weightGrams ?? "", p.gold?.ratePerGram ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes]; });
-      } else if (cat === "diamond") {
-        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Kind", "Shape", "Quality", "Carat", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
-        data = rows.map(p => { const c = base(p); return [c.date, c.inv, c.supplier, c.purpose, c.order, p.diamond?.kind ?? "loose", p.diamond?.shape ?? "", p.diamond?.quality ?? "", p.diamond?.carat ?? "", p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes]; });
-      } else {
-        headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Shape", "Carat", "Quality", "Certificate #", "Lab", "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Measurement", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
-        data = rows.map(p => {
-          const c = base(p);
-          const pk = packets.find(x => x.purchaseId === p.id); // full grading lives on the packet
-          return [c.date, c.inv, c.supplier, c.purpose, c.order,
-            p.diamond?.shape ?? pk?.shape ?? "", p.diamond?.carat ?? pk?.carat ?? "", p.diamond?.quality ?? pk?.quality ?? "",
-            p.diamond?.certificateNumber ?? pk?.certificateNumber ?? "", p.diamond?.certificateLab ?? pk?.certificateLab ?? "",
-            pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
-            p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];
-        });
-      }
+      // Certified diamonds aren't pooled in stock movements — export the full
+      // purchase detail (with certificate grading from the linked packet).
+      const headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Shape", "Carat", "Quality", "Certificate #", "Lab", "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Measurement", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
+      const data = rows.map(p => {
+        const c = base(p);
+        const pk = packets.find(x => x.purchaseId === p.id); // full grading lives on the packet
+        return [c.date, c.inv, c.supplier, c.purpose, c.order,
+          p.diamond?.shape ?? pk?.shape ?? "", p.diamond?.carat ?? pk?.carat ?? "", p.diamond?.quality ?? pk?.quality ?? "",
+          p.diamond?.certificateNumber ?? pk?.certificateNumber ?? "", p.diamond?.certificateLab ?? pk?.certificateLab ?? "",
+          pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
+          p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];
+      });
       csvDownload(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
@@ -508,7 +530,43 @@ export function ReportsPage() {
   function exportCategoryPdf(cat: MatCat) {
     if (!materialReport) return;
     try {
-      const m = CAT_META[cat]; const b = catBucket(cat); const rows = catRows(cat); const suppliers = db.suppliers ?? [];
+      const m = CAT_META[cat]; const b = catBucket(cat);
+
+      // Gold & Loose Diamond → full movement ledger PDF (in/out/balance).
+      if (cat === "gold" || cat === "diamond") {
+        const led = movementLedger(cat);
+        const totalIn = led.reduce((s, r) => s + r.inQty, 0);
+        const totalOut = led.reduce((s, r) => s + r.outQty, 0);
+        const totalAmt = led.reduce((s, r) => s + (r.amountInr || 0), 0);
+        const closing = led[0]?.balance ?? 0; // newest-first → first row is the latest balance
+        downloadLedgerPdf({
+          title: `${m.label} — Stock Ledger`,
+          subjectLines: [`Period: ${matPeriodLabel}`],
+          summary: [
+            { label: "Purchased", value: `${b.qty.toLocaleString()} ${m.unit}  ·  ${rupees(b.amount)}` },
+            { label: "Current balance", value: `${closing.toLocaleString()} ${m.unit}` },
+          ],
+          columns: [
+            { header: "Date", x: 14 }, { header: "Particulars", x: 38 },
+            { header: `In`, x: 108 }, { header: `Out`, x: 126 }, { header: "Balance", x: 146 },
+            { header: "Rate", x: 168 }, { header: "Amount", x: 186 },
+          ],
+          align: ["left", "left", "right", "right", "right", "right", "right"],
+          rows: led.map(r => [
+            fmtDate(r.createdAt), String(r.link.label).slice(0, 30),
+            r.inQty ? `${r.inQty}${m.unit}` : "—",
+            r.outQty ? `${r.outQty}${m.unit}` : "—",
+            `${r.balance}${m.unit}`,
+            r.rateInr ? rupees(r.rateInr) : "—",
+            r.amountInr ? rupees(r.amountInr) : "—",
+          ]),
+          totalsRow: ["", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rupees(totalAmt)],
+          filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+        });
+        return;
+      }
+
+      const rows = catRows(cat); const suppliers = db.suppliers ?? [];
       const avg = b.qty > 0 ? b.amount / b.qty : 0;
       let running = 0;
       const dataRows = rows.map(p => {

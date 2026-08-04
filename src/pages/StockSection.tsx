@@ -49,6 +49,18 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
     diamondSales: db.diamondSales, clients: db.clients,
   });
 
+  // Running balance (of the selected bucket, or all buckets) after each movement —
+  // computed oldest-first, shown against the newest-first table for a proper ledger.
+  const balanceById = new Map<string, number>();
+  {
+    let bal = 0;
+    for (const m of [...rows].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))) {
+      const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
+      bal = Math.round((bal + sign * Math.abs(m.quantity)) * 1000) / 1000;
+      balanceById.set(m.id, bal);
+    }
+  }
+
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
   const filtersActive = !!filterFrom || !!filterTo;
@@ -80,13 +92,14 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
-      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`, "Rate (Rs)", "Amount (Rs)"],
+      ["Date", "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"],
       rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => {
         const ra = inrRateAmount(m);
         return [
           fmtDate(m.createdAt), m.link.label,
           m.type === "purchase_in" ? m.quantity : "",
           m.type === "purchase_in" ? "" : m.quantity,
+          balanceById.get(m.id) ?? 0,
           ra ? Math.round(ra.rate) : "",
           ra ? Math.round(ra.amount) : "",
         ];
@@ -105,18 +118,21 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       columns: [
         { header: "Date", x: 14 },
-        { header: "Particulars", x: 40 },
-        { header: "In", x: 116 },
-        { header: "Out", x: 134 },
-        { header: "Rate", x: 152 },
-        { header: "Amount", x: 176 },
+        { header: "Particulars", x: 38 },
+        { header: "In", x: 108 },
+        { header: "Out", x: 124 },
+        { header: "Balance", x: 142 },
+        { header: "Rate", x: 166 },
+        { header: "Amount", x: 184 },
       ],
+      align: ["left", "left", "right", "right", "right", "right", "right"],
       rows: filtered.map(m => {
         const ra = inrRateAmount(m);
         return [
-          fmtDate(m.createdAt), m.link.label.slice(0, 32),
+          fmtDate(m.createdAt), m.link.label.slice(0, 30),
           m.type === "purchase_in" ? `${m.quantity}${unit}` : "—",
           m.type === "purchase_in" ? "—" : `${m.quantity}${unit}`,
+          `${(balanceById.get(m.id) ?? 0).toLocaleString()}${unit}`,
           ra ? fmtMoneyInr(ra.rate) : "—",
           ra ? fmtMoneyInr(ra.amount) : "—",
         ];
@@ -206,6 +222,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                     <th className="px-5 py-2.5 font-semibold">Particulars</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">In ({unit})</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Out ({unit})</th>
+                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Balance</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Rate</th>
                     <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Amount</th>
                   </tr>
@@ -220,6 +237,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                         <td className="px-5 py-2.5">{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</td>
                         <td className="px-5 py-2.5 text-right font-semibold text-success whitespace-nowrap">{isIn ? m.quantity.toLocaleString() : "—"}</td>
                         <td className="px-5 py-2.5 text-right font-semibold text-destructive whitespace-nowrap">{isIn ? "—" : m.quantity.toLocaleString()}</td>
+                        <td className="px-5 py-2.5 text-right font-medium text-brand-dark whitespace-nowrap">{(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}</td>
                         <td className="px-5 py-2.5 text-right whitespace-nowrap">{ra ? `${fmtMoneyInr(ra.rate)}/${unit}` : "—"}</td>
                         <td className="px-5 py-2.5 text-right font-medium whitespace-nowrap">{ra ? fmtMoneyInr(ra.amount) : "—"}</td>
                       </tr>
@@ -240,7 +258,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
                     </div>
                     <div className="flex-1 min-w-0">
                       <p className="text-sm font-medium truncate">{particulars(m)}</p>
-                      <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)}{ra ? ` · ${fmtMoneyInr(ra.rate)}/${unit}` : ""}{m.note ? ` · ${m.note}` : ""}</p>
+                      <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)} · bal {(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}{ra ? ` · ${fmtMoneyInr(ra.rate)}/${unit}` : ""}</p>
                     </div>
                     <div className="text-right shrink-0">
                       <p className={`text-sm font-semibold ${m.type === "purchase_in" ? "text-success" : "text-destructive"}`}>{m.type === "purchase_in" ? "+" : "−"}{m.quantity} {unit}</p>

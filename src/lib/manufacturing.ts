@@ -425,6 +425,61 @@ export function stockBucketHistory(
     .map(m => ({ ...m, link: resolveStockMovementLink(m, ctx) }));
 }
 
+export interface MaterialLedgerRow {
+  id: string;
+  createdAt: string;
+  type: StockMovement["type"];
+  purityOrQuality: string;
+  note?: string;
+  link: StockMovementLink;
+  inQty: number;   // grams (gold) / carats (diamond) coming IN (purchase / return)
+  outQty: number;  // going OUT (issued to factory / used on order / sold)
+  rateInr: number | null;   // ₹/unit — only for purchases (linked Purchase)
+  amountInr: number | null; // ₹ for this movement — only for purchases
+  balance: number; // running stock level of this material AFTER this movement
+}
+
+/** A full material ledger (gold or loose diamond): every movement — purchases IN,
+ *  factory issues / order use / sales OUT, returns IN — newest first, each with a
+ *  running stock balance and (for purchases) the rate & amount. This is the proper
+ *  ledger shown on the Stock page and downloadable in Reports. */
+export function materialLedger(
+  movements: StockMovement[],
+  material: "gold" | "diamond",
+  ctx: StockLinkContext,
+): MaterialLedgerRow[] {
+  const hist = stockBucketHistory(movements, material, null, ctx); // newest-first, links resolved
+  // Running balance is computed oldest-first, then attached to each row so the
+  // newest-first table still shows the true stock level after each movement.
+  const balById = new Map<string, number>();
+  let bal = 0;
+  for (const m of [...hist].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt))) {
+    const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
+    bal = Math.round((bal + sign * Math.abs(m.quantity)) * 1000) / 1000;
+    balById.set(m.id, bal);
+  }
+  const purchaseById = new Map(ctx.purchases.map(p => [p.id, p]));
+  return hist.map(m => {
+    let rateInr: number | null = null, amountInr: number | null = null;
+    if (m.type === "purchase_in" && m.refType === "purchase" && m.refId) {
+      const p = purchaseById.get(m.refId);
+      if (p) {
+        const pQty = material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+        rateInr = pQty > 0 ? p.totalInr / pQty : 0;
+        amountInr = rateInr * m.quantity;
+      }
+    }
+    const isIn = m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0);
+    return {
+      id: m.id, createdAt: m.createdAt, type: m.type, purityOrQuality: m.purityOrQuality, note: m.note, link: m.link,
+      inQty: isIn ? Math.abs(m.quantity) : 0,
+      outQty: isIn ? 0 : Math.abs(m.quantity),
+      rateInr, amountInr,
+      balance: balById.get(m.id) ?? 0,
+    };
+  });
+}
+
 // ── Lockers (bank/cash accounts) ───────────────────────────────────────────
 
 /** Running balance for one Locker — opening balance + income − expenses, netted with transfers. */
