@@ -439,7 +439,7 @@ export function ReportsPage() {
   type MatCat = "gold" | "diamond" | "cert";
   const CAT_META: Record<MatCat, { label: string; unit: string; detail: string }> = {
     gold:    { label: "Gold",             unit: "g",  detail: "Purity" },
-    diamond: { label: "Loose Diamond",    unit: "ct", detail: "Shape/Quality" },
+    diamond: { label: "Loose Diamond",    unit: "ct", detail: "Shape" },
     cert:    { label: "Certified Diamond", unit: "ct", detail: "Shape/Cert" },
   };
   const catDetail = (p: Purchase, cat: MatCat) =>

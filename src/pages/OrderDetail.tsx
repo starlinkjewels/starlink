@@ -286,8 +286,11 @@ export function OrderDetailPage() {
       const line = buyLines[i];
       const isCertified = purchase.material === "diamond" && line.diaKind === "certified";
       const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
+      // Loose diamonds are pooled by SHAPE (Round/Oval/…), same as the Supplier
+      // and Buy & Assign flows — NOT by quality grade — so the Stock ledger and
+      // balances stay consistent across every purchase path.
       const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
-        : isCertified ? "Certified" : (purchase.diamond!.quality || "unspecified");
+        : isCertified ? "Certified" : (purchase.diamond!.shape || "unspecified");
       return { isCertified, qty, purityOrQuality };
     });
 
