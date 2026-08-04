@@ -35,8 +35,7 @@ export const DATABASE_ID = "diamondflowdemo";
  *    must list the same email(s), or the admin will be blocked by the rules.
  */
 export const ADMIN_EMAILS = [
-  "marketing.starlinkjewels@gmail.com",
-  "admin@starlinkjewels.com",
+  "flenixjewels@gmail.com",
 ].map(e => e.toLowerCase());
 
 export function isAdminEmail(email?: string | null): boolean {
