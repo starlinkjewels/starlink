@@ -425,6 +425,73 @@ export function ReportsPage() {
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
+  /* ── Per-material ledgers — separate Gold / Loose Diamond / Certified Diamond
+     reports, each a full ledger (every purchase + running total) ── */
+  type MatCat = "gold" | "diamond" | "cert";
+  const CAT_META: Record<MatCat, { label: string; unit: string; detail: string }> = {
+    gold:    { label: "Gold",             unit: "g",  detail: "Purity" },
+    diamond: { label: "Loose Diamond",    unit: "ct", detail: "Shape/Quality" },
+    cert:    { label: "Certified Diamond", unit: "ct", detail: "Shape/Cert" },
+  };
+  const catDetail = (p: Purchase, cat: MatCat) =>
+    cat === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (cat === "cert" ? "Certified" : ""));
+  // Oldest-first for a running-balance ledger.
+  const catRows = (cat: MatCat) => (materialReport?.rows ?? [])
+    .filter(p => purchaseCategory(p) === cat)
+    .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
+  const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : materialReport!.dl;
+
+  function exportCategoryExcel(cat: MatCat) {
+    if (!materialReport) return;
+    try {
+      const m = CAT_META[cat]; const suppliers = db.suppliers ?? [];
+      let running = 0;
+      csvDownload(
+        `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
+        ["Date", "Supplier", "Invoice #", "Purpose", m.detail, `Qty (${m.unit})`, "Rate (Rs)", "Amount (Rs)", "Running Total (Rs)"],
+        catRows(cat).map(p => {
+          const qty = purchaseQty(p); running += p.totalInr;
+          return [fmtDate(p.invoiceDate || p.createdAt), suppliers.find(s => s.id === p.supplierId)?.name ?? "", p.invoiceNumber ?? "", p.purpose, catDetail(p, cat), qty, qty > 0 ? Math.round(p.totalInr / qty) : "", Math.round(p.totalInr), Math.round(running)];
+        }),
+      );
+    } catch { toast.error("Couldn't generate the Excel file."); }
+  }
+
+  function exportCategoryPdf(cat: MatCat) {
+    if (!materialReport) return;
+    try {
+      const m = CAT_META[cat]; const b = catBucket(cat); const rows = catRows(cat); const suppliers = db.suppliers ?? [];
+      const doc = new jsPDF();
+      doc.setFont("helvetica", "bold"); doc.setFontSize(17);
+      doc.text(`Starlink Jewels — ${m.label} Purchase Ledger`, 14, 20);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(9);
+      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString()}`, 14, 28);
+      const avg = b.qty > 0 ? b.amount / b.qty : 0;
+      doc.setFontSize(10);
+      doc.text(`Total ${b.qty.toLocaleString()} ${m.unit}  ·  Avg ${rupees(avg)}/${m.unit}  ·  ${rupees(b.amount)}  ·  ${b.count} purchase${b.count !== 1 ? "s" : ""}  (stock ${rupees(b.stockAmt)} · order ${rupees(b.orderAmt)})`, 14, 37);
+      let y = 48;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8);
+      ([["Date", 14], ["Supplier", 40], ["Inv#", 76], ["Purpose", 94], [m.detail, 114], ["Qty", 138], ["Rate", 156], ["Amount", 174]] as [string, number][]).forEach(([h, x]) => doc.text(h, x, y));
+      y += 4; doc.setDrawColor(200); doc.line(14, y - 2, 196, y - 2);
+      doc.setFont("helvetica", "normal");
+      let running = 0;
+      for (const p of rows) {
+        const qty = purchaseQty(p); running += p.totalInr;
+        doc.text(fmtDate(p.invoiceDate || p.createdAt), 14, y);
+        doc.text((suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 20), 40, y);
+        doc.text(String(p.invoiceNumber ?? "").slice(0, 9), 76, y);
+        doc.text(p.purpose, 94, y);
+        doc.text(String(catDetail(p, cat)).slice(0, 12), 114, y);
+        doc.text(`${qty}${m.unit}`, 138, y);
+        doc.text(qty > 0 ? rupees(p.totalInr / qty) : "-", 156, y);
+        doc.text(rupees(p.totalInr), 174, y);
+        y += 5; if (y > 286) { doc.addPage(); y = 20; }
+      }
+      doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${rupees(running)}`, 138, y + 3);
+      doc.save(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.pdf`);
+    } catch { toast.error("Couldn't generate the PDF file."); }
+  }
+
   /* ── filtered data ── */
   const filtered = useMemo(() => {
     let list = [...myOrders];
@@ -749,9 +816,9 @@ export function ReportsPage() {
           {/* Category cards */}
           <div className="grid gap-3 sm:grid-cols-3">
             {([
-              { label: "Metal (Gold)", unit: "g", icon: Coins, ring: "bg-amber-500/10 text-amber-600", b: materialReport.g },
-              { label: "Diamond (Loose)", unit: "ct", icon: Gem, ring: "bg-blue-500/10 text-blue-600", b: materialReport.dl },
-              { label: "Certified Diamond", unit: "ct", icon: Award, ring: "bg-primary/10 text-primary", b: materialReport.dc },
+              { label: "Metal (Gold)", cat: "gold" as MatCat, unit: "g", icon: Coins, ring: "bg-amber-500/10 text-amber-600", b: materialReport.g },
+              { label: "Diamond (Loose)", cat: "diamond" as MatCat, unit: "ct", icon: Gem, ring: "bg-blue-500/10 text-blue-600", b: materialReport.dl },
+              { label: "Certified Diamond", cat: "cert" as MatCat, unit: "ct", icon: Award, ring: "bg-primary/10 text-primary", b: materialReport.dc },
             ]).map(c => {
               const avg = c.b.qty > 0 ? c.b.amount / c.b.qty : 0;
               return (
@@ -768,6 +835,17 @@ export function ReportsPage() {
                       <span className="inline-flex items-center gap-1 text-muted-foreground"><Boxes className="h-3 w-3" /> Stock {fmtMoneyInr(c.b.stockAmt)}</span>
                       <span className="inline-flex items-center gap-1 text-muted-foreground"><ShoppingCart className="h-3 w-3" /> Order {fmtMoneyInr(c.b.orderAmt)}</span>
                     </div>
+                  </div>
+                  {/* Separate full-ledger download for THIS material only */}
+                  <div className="flex items-center gap-2 mt-3">
+                    <button onClick={() => exportCategoryExcel(c.cat)} disabled={c.b.count === 0}
+                      className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border bg-white hover:bg-secondary text-[11px] font-medium text-brand-dark disabled:opacity-40">
+                      <Download className="h-3 w-3" /> Excel
+                    </button>
+                    <button onClick={() => exportCategoryPdf(c.cat)} disabled={c.b.count === 0}
+                      className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg btn-hero text-[11px] font-medium disabled:opacity-40">
+                      <Download className="h-3 w-3" /> PDF
+                    </button>
                   </div>
                 </div>
               );
