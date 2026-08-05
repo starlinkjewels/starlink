@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -182,6 +182,11 @@ export function OrdersPage() {
           const isActive = !["Delivered","Rejected"].includes(o.status);
           const hasShipping = o.status === "Dispatched" || o.status === "Delivered";
           const rowImg = o.cadImage || o.images?.[0];
+          // Manufacturing summary (staff only) — which factory, how much gold/diamond issued.
+          const orderIssuances = user!.role !== "client" ? db.materialIssuances.filter(i => i.orderId === o.id) : [];
+          const factoryNames = [...new Set(orderIssuances.map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
+          const goldIssued = orderIssuances.filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0);
+          const diaIssued = orderIssuances.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
 
           return (
             <Link
@@ -210,6 +215,27 @@ export function OrdersPage() {
                   )}
                 </div>
               </div>
+
+              {/* ── Manufacturing chips: factory · gold used · diamond used (staff only) ── */}
+              {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
+                <div className="mt-2 ml-[52px] flex flex-wrap items-center gap-1.5">
+                  {factoryNames.map(n => (
+                    <span key={n} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">
+                      <FactoryIcon className="h-2.5 w-2.5" />{n}
+                    </span>
+                  ))}
+                  {goldIssued > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">
+                      <Coins className="h-2.5 w-2.5" />{goldIssued.toLocaleString()} g gold
+                    </span>
+                  )}
+                  {diaIssued > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700">
+                      <Gem className="h-2.5 w-2.5" />{diaIssued.toLocaleString()} ct dia
+                    </span>
+                  )}
+                </div>
+              )}
 
               {/* ── Progress bar ── */}
               <div className="mt-3 ml-[52px]">
