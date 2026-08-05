@@ -197,6 +197,19 @@ export function OrderDetailPage() {
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueChargeAmount, setIssueChargeAmount] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
+  // Rework / alteration — a delivered piece comes back, gold/diamond +/- and a
+  // rework charge at a factory. Reflected in stock, factory balance & ledgers.
+  const [showRework, setShowRework] = useState(false);
+  const [rwFactoryId, setRwFactoryId] = useState("");
+  const [rwGoldDir, setRwGoldDir] = useState<"none" | "add" | "remove">("none");
+  const [rwGoldG, setRwGoldG] = useState("");
+  const [rwGoldKarat, setRwGoldKarat] = useState("22K");
+  const [rwDiaDir, setRwDiaDir] = useState<"none" | "add" | "remove">("none");
+  const [rwDiaCt, setRwDiaCt] = useState("");
+  const [rwDiaShape, setRwDiaShape] = useState("Round");
+  const [rwCharge, setRwCharge] = useState("");
+  const [rwNote, setRwNote] = useState("");
+  const [rwSaving, setRwSaving] = useState(false);
   const [issueDiaKind, setIssueDiaKind] = useState<"loose" | "certified">("loose");
   const [issueCertPacketIds, setIssueCertPacketIds] = useState<string[]>([]);
   const [issueCertSearch, setIssueCertSearch] = useState("");
@@ -400,6 +413,104 @@ export function OrderDetailPage() {
     setIssueFactoryId("");
     setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
     setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch("");
+  };
+
+  // ── Rework / alteration ──────────────────────────────────────────────────
+  // A finished/delivered piece comes back for changes. We ADD a fresh set of
+  // MaterialIssuance records (never touching the original finish record), and
+  // move stock, so factory balances + all ledgers (which are derived) update on
+  // their own. Gold/diamond ADDED is drawn from stock and passes through the
+  // factory net-zero (issued-in + used-in-piece); REMOVED material goes back to
+  // stock; the rework labour becomes a factory making charge.
+  const recordRework = async () => {
+    const factoryId = rwFactoryId || order.assignedFactoryId || "";
+    if (!factoryId) { toast.error("Choose a factory for the rework"); return; }
+    const factory = db.factories.find(f => f.id === factoryId);
+    const goldG = rwGoldDir !== "none" ? Number(rwGoldG) || 0 : 0;
+    const diaCt = rwDiaDir !== "none" ? Number(rwDiaCt) || 0 : 0;
+    const charge = Number(rwCharge) || 0;
+    if (goldG <= 0 && diaCt <= 0 && charge <= 0) { toast.error("Enter a gold/diamond change or a rework charge"); return; }
+    setRwSaving(true);
+    const now = new Date().toISOString();
+    const noteBase = `Rework — ${order.orderNumber}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`;
+    try {
+      // Stock first — an insufficient-stock error aborts before any record is written.
+      if (goldG > 0 && rwGoldDir === "add") {
+        await decreaseStockSelfHealing({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${goldG}g ${rwGoldKarat} gold for ${order.orderNumber}` }, db.stockMovements);
+      } else if (goldG > 0 && rwGoldDir === "remove") {
+        await increaseStock({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, refType: "manual", createdBy: user!.id, note: `Rework −${goldG}g ${rwGoldKarat} gold from ${order.orderNumber} → stock` });
+      }
+      if (diaCt > 0 && rwDiaDir === "add") {
+        await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: rwDiaShape, quantity: diaCt, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${diaCt}ct ${rwDiaShape} for ${order.orderNumber}` }, db.stockMovements);
+      } else if (diaCt > 0 && rwDiaDir === "remove") {
+        await increaseStock({ material: "diamond", purityOrQuality: rwDiaShape, quantity: diaCt, refType: "manual", createdBy: user!.id, note: `Rework −${diaCt}ct ${rwDiaShape} from ${order.orderNumber} → stock` });
+      }
+
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
+        if (!o.manufacturingLog) o.manufacturingLog = [];
+        let chargeAttached = false;
+        // Gold ADD → factory-neutral leg (issued-in via source "stock" + finished-out).
+        if (goldG > 0 && rwGoldDir === "add") {
+          const kn = parseInt(rwGoldKarat, 10);
+          const purMille = KARAT_PURITY[kn] ? Math.round(KARAT_PURITY[kn] * 1000) : undefined;
+          const iid = uid("mi_");
+          d.materialIssuances.unshift({
+            id: iid, factoryId, orderId: o.id, material: "gold", purityOrQuality: rwGoldKarat,
+            quantityIssued: goldG, source: "stock",
+            finishedNetWeight: goldG, finishedKarat: rwGoldKarat, finishedPurity: purMille,
+            finishedPieces: [{ id: uid("fp_"), quantityUsed: goldG, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+            issuedAt: now, issuedBy: user!.id, status: "closed",
+            makingCharges: { amountInr: charge, payments: [] },
+            notes: `${noteBase} (added ${goldG}g ${rwGoldKarat} gold)`,
+          } as MaterialIssuance);
+          o.materialIssuanceIds.push(iid);
+          chargeAttached = charge > 0;
+        }
+        // Diamond ADD → factory-neutral leg (issued-in + used-in-piece).
+        if (diaCt > 0 && rwDiaDir === "add") {
+          const iid = uid("mi_");
+          d.materialIssuances.unshift({
+            id: iid, factoryId, orderId: o.id, material: "diamond", purityOrQuality: rwDiaShape,
+            quantityIssued: diaCt, source: "stock", diamondKind: "loose", finishReturnedCt: 0,
+            finishedPieces: [{ id: uid("fp_"), quantityUsed: diaCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
+            issuedAt: now, issuedBy: user!.id, status: "closed",
+            makingCharges: { amountInr: chargeAttached ? 0 : charge, payments: [] },
+            notes: `${noteBase} (added ${diaCt}ct ${rwDiaShape})`,
+          } as MaterialIssuance);
+          o.materialIssuanceIds.push(iid);
+          if (charge > 0) chargeAttached = true;
+        }
+        // Charge with no material added (only removals / labour-only) → carry it on
+        // a charge-only issuance so it still lands on the factory account statement.
+        if (charge > 0 && !chargeAttached) {
+          const iid = uid("mi_");
+          d.materialIssuances.unshift({
+            id: iid, factoryId, orderId: o.id, material: "gold", purityOrQuality: "—",
+            quantityIssued: 0, source: "factoryPool",
+            finishedPieces: [], issuedAt: now, issuedBy: user!.id, status: "closed",
+            makingCharges: { amountInr: charge, payments: [] },
+            notes: `${noteBase} (rework labour)`,
+          } as MaterialIssuance);
+          o.materialIssuanceIds.push(iid);
+        }
+        const parts: string[] = [];
+        if (goldG > 0) parts.push(`${rwGoldDir === "add" ? "+" : "−"}${goldG}g ${rwGoldKarat} gold`);
+        if (diaCt > 0) parts.push(`${rwDiaDir === "add" ? "+" : "−"}${diaCt}ct ${rwDiaShape}`);
+        if (charge > 0) parts.push(`labour ${fmtMoneyInr(charge)}`);
+        o.manufacturingLog.push({
+          id: uid("mlog_"), type: "making_charge_added", at: now, employeeId: user!.id, factoryId,
+          material: goldG > 0 ? "gold" : "diamond", amountInr: charge || undefined,
+          remarks: `Rework at ${factory?.name || "factory"} — ${parts.join(", ")}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`,
+        });
+      });
+      toast.success("Rework recorded — stock, factory & ledger updated");
+      setShowRework(false);
+      setRwGoldDir("none"); setRwGoldG(""); setRwDiaDir("none"); setRwDiaCt(""); setRwCharge(""); setRwNote("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Rework failed");
+    } finally { setRwSaving(false); }
   };
 
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
@@ -2610,6 +2721,70 @@ export function OrderDetailPage() {
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Rework / Alteration — a delivered piece came back for changes */}
+          {canEditStage() && (
+            <div className="pt-3 border-t border-border/60">
+              {!showRework ? (
+                <button onClick={() => { setRwFactoryId(order.assignedFactoryId || ""); setShowRework(true); }}
+                  className="text-xs font-medium text-primary inline-flex items-center gap-1.5 hover:underline">
+                  <RotateCcw className="h-3.5 w-3.5" /> Rework / Alteration — piece came back for changes
+                </button>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <p className="text-sm font-semibold text-brand-dark">Rework / Alteration</p>
+                    <button onClick={() => setShowRework(false)} className="text-xs text-muted-foreground underline">cancel</button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">Add or remove gold/diamond and record the factory's rework charge. Added material is drawn from stock; removed material returns to stock — factory ledger &amp; stock update automatically.</p>
+                  <div>
+                    <Label className="text-xs">Factory</Label>
+                    <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={setRwFactoryId}>
+                      <SelectTrigger className="rounded-xl mt-1 h-10"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                      <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <div className="rounded-xl bg-secondary/40 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Coins className="h-4 w-4 text-amber-600" /><span className="text-xs font-semibold">Gold</span>
+                      <div className="ml-auto inline-flex rounded-lg bg-white border border-border p-0.5">
+                        {(["none", "add", "remove"] as const).map(dir => (
+                          <button key={dir} onClick={() => setRwGoldDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwGoldDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Remove"}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {rwGoldDir !== "none" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><Label className="text-xs">Grams to {rwGoldDir}</Label><Input type="number" step="0.001" min={0} value={rwGoldG} onChange={e => setRwGoldG(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 1.5" /></div>
+                        <div><Label className="text-xs">Karat</Label><Select value={rwGoldKarat} onValueChange={setRwGoldKarat}><SelectTrigger className="rounded-xl mt-1 h-9"><SelectValue /></SelectTrigger><SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="rounded-xl bg-secondary/40 p-3 space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Gem className="h-4 w-4 text-blue-500" /><span className="text-xs font-semibold">Diamond</span>
+                      <div className="ml-auto inline-flex rounded-lg bg-white border border-border p-0.5">
+                        {(["none", "add", "remove"] as const).map(dir => (
+                          <button key={dir} onClick={() => setRwDiaDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwDiaDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Remove"}</button>
+                        ))}
+                      </div>
+                    </div>
+                    {rwDiaDir !== "none" && (
+                      <div className="grid grid-cols-2 gap-2">
+                        <div><Label className="text-xs">Carats to {rwDiaDir}</Label><Input type="number" step="0.001" min={0} value={rwDiaCt} onChange={e => setRwDiaCt(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 0.5" /></div>
+                        <div><Label className="text-xs">Shape</Label><Select value={rwDiaShape} onValueChange={setRwDiaShape}><SelectTrigger className="rounded-xl mt-1 h-9"><SelectValue /></SelectTrigger><SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
+                      </div>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div><Label className="text-xs">Rework charge (₹)</Label><Input type="number" min={0} value={rwCharge} onChange={e => setRwCharge(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="factory labour" /></div>
+                    <div><Label className="text-xs">Note (optional)</Label><Input value={rwNote} onChange={e => setRwNote(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. resize, add stone" /></div>
+                  </div>
+                  <AsyncButton onClick={recordRework} disabled={rwSaving} className="btn-hero rounded-xl w-full h-10">{rwSaving ? "Saving…" : "Record rework"}</AsyncButton>
+                </div>
+              )}
             </div>
           )}
         </div>
