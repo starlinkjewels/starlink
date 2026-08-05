@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { factoryAccount, factoryPoolBuckets, fmtMoneyInr } from "@/lib/manufacturing";
+import { factoryAccount, factoryPoolBuckets, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -128,6 +128,7 @@ export function FactoriesPage() {
           {paged.map(fac => {
             const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
             const account = factoryAccount(issuances);
+            const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id);
             const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
             const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
             return (
@@ -135,12 +136,25 @@ export function FactoriesPage() {
                 <div className="h-9 w-9 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4 w-4" /></div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
-                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Coins className="h-3 w-3 text-amber-600" />{account.goldOutstanding.toLocaleString()} g gold · {account.diamondOutstanding.toLocaleString()} ct dia</p>
+                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Coins className="h-3 w-3 text-amber-600" />{fineGold.toLocaleString()} g fine gold (24KT) · {account.diamondOutstanding.toLocaleString()} ct dia</p>
                   {(goldPool > 0 || diaPool > 0) && (
                     <p className="text-[11px] text-orange-600 truncate flex items-center gap-1"><Package className="h-3 w-3" />Pool stock: {goldPool.toLocaleString()} g gold · {diaPool.toLocaleString()} ct dia</p>
                   )}
                 </div>
-                <div className="text-right shrink-0">
+                {/* Charges ledger — Charged / Paid / Balance (debit / credit / balance) */}
+                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Charged</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.chargesTotal)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                    {account.chargesPending > 0
+                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.chargesPending)}</p>
+                      : account.chargesOverpaid > 0
+                      ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(account.chargesOverpaid)}</p>
+                      : <p className="text-xs font-semibold text-success">✓</p>}
+                  </div>
+                </div>
+                {/* Mobile — balance only */}
+                <div className="sm:hidden text-right shrink-0">
                   {account.chargesPending > 0
                     ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.chargesPending)}</p><p className="text-[10px] text-muted-foreground">charges due</p></>
                     : account.chargesOverpaid > 0

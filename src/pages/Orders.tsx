@@ -181,6 +181,7 @@ export function OrdersPage() {
           const progress = Math.round(done / o.timeline.length * 100);
           const isActive = !["Delivered","Rejected"].includes(o.status);
           const hasShipping = o.status === "Dispatched" || o.status === "Delivered";
+          const rowImg = o.cadImage || o.images?.[0];
 
           return (
             <Link
@@ -188,10 +189,12 @@ export function OrdersPage() {
               to={`/orders/${o.id}`}
               className="card-luxe card-hover p-4 block"
             >
-              {/* ── Row 1: icon · order# · status ── */}
+              {/* ── Row 1: CAD photo · order# · status ── */}
               <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 mt-0.5">
-                  <Package className="h-5 w-5 text-primary" />
+                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 mt-0.5 overflow-hidden">
+                  {rowImg
+                    ? <img src={rowImg} alt={o.orderNumber} className="w-full h-full object-cover" />
+                    : <Package className="h-5 w-5 text-primary" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">

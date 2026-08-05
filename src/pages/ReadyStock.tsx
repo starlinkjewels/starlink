@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid } from "lucide-react";
 import { toast } from "sonner";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
@@ -72,6 +72,10 @@ export function ReadyStockPage() {
   const { user } = useAuth();
   const db = useDb();
   const [q, setQ] = useState("");
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("readystock-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  });
+  const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("readystock-view", v); } catch { /* ignore */ } };
 
   const items = db.readyStock
     .filter(i => i.name.toLowerCase().includes(q.toLowerCase()) || (i.sku || "").toLowerCase().includes(q.toLowerCase()))
@@ -299,11 +303,24 @@ export function ReadyStockPage() {
         </Dialog>
       </div>
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or SKU..." className="pl-9 h-11 rounded-xl" />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or SKU..." className="pl-9 h-11 rounded-xl" />
+        </div>
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
+        </div>
       </div>
 
+      {view === "grid" && (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {paged.map(item => (
           <div key={item.id} className="card-luxe card-hover overflow-hidden flex flex-col">
@@ -326,9 +343,16 @@ export function ReadyStockPage() {
               <p className="font-display text-lg text-brand-dark truncate leading-tight">{item.name}</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}
-                {item.diamondWeight ? ` · ${item.diamondWeight}ct diamond` : ""}
+                {item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
               </p>
-              {item.sku && <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">{item.sku}</p>}
+              {(item.grossWeight || item.netWeight) && (
+                <p className="text-[11px] text-muted-foreground mt-0.5">
+                  {item.grossWeight ? `Gross ${item.grossWeight}g` : ""}
+                  {item.grossWeight && item.netWeight ? " · " : ""}
+                  {item.netWeight ? `Net ${item.netWeight}g` : ""}
+                </p>
+              )}
+              {item.sku && <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">Design #{item.sku}</p>}
               {item.location && (
                 <span className="inline-flex items-center gap-1 mt-1 self-start text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                   <MapPin className="h-2.5 w-2.5" /> {item.location}
@@ -353,6 +377,53 @@ export function ReadyStockPage() {
         ))}
         {total === 0 && <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No ready stock items yet — add your first finished piece.</div>}
       </div>
+      )}
+
+      {view === "list" && (
+        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
+          {paged.map(item => (
+            <div key={item.id} className="flex items-center gap-3 px-3 sm:px-4 py-3 hover:bg-secondary/50 transition-colors">
+              <div className="h-16 w-16 rounded-xl bg-secondary overflow-hidden shrink-0 relative">
+                {item.images?.[0]
+                  ? <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
+                  : <div className="w-full h-full grid place-items-center text-muted-foreground/40"><Gem className="h-6 w-6" /></div>}
+                {item.quantity === 0 && <div className="absolute inset-0 bg-black/50 grid place-items-center"><span className="text-white font-semibold text-[9px] tracking-wide">SOLD</span></div>}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-medium text-brand-dark truncate leading-tight">{item.name}</p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}
+                  {item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {item.grossWeight ? `Gross ${item.grossWeight}g` : ""}
+                  {item.grossWeight && item.netWeight ? " · " : ""}
+                  {item.netWeight ? `Net ${item.netWeight}g` : ""}
+                  {item.sku ? `${(item.grossWeight || item.netWeight) ? " · " : ""}Design #${item.sku}` : ""}
+                </p>
+                {item.location && (
+                  <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
+                    <MapPin className="h-2.5 w-2.5" /> {item.location}
+                  </span>
+                )}
+              </div>
+              <div className="text-right shrink-0">
+                <p className="font-display text-lg font-bold text-brand-dark">{fmtMoney(item.price)}</p>
+                <div className="flex items-center gap-1.5 justify-end mt-1">
+                  <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
+                  <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
+                  <button onClick={() => adjustQty(item, 1)} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
+                </div>
+              </div>
+              <div className="flex flex-col gap-1 shrink-0">
+                <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
+                <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+              </div>
+            </div>
+          ))}
+          {total === 0 && <div className="p-12 text-center text-muted-foreground">No ready stock items yet — add your first finished piece.</div>}
+        </div>
+      )}
 
       <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} items` : undefined} />
     </div>

@@ -140,7 +140,20 @@ export function SuppliersPage() {
                   <p className="font-medium text-brand-dark truncate">{s.name}{s.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
                   <p className="text-xs text-muted-foreground truncate">{s.contactPerson || s.phone || s.email || "—"}</p>
                 </div>
-                <div className="text-right shrink-0">
+                {/* Purchased / Paid / Balance (debit / credit / balance) */}
+                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Purchased</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.totalPurchased)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid + account.received)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                    {account.net > 0
+                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.net)}</p>
+                      : account.net < 0
+                      ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(-account.net)}</p>
+                      : <p className="text-xs font-semibold text-success">✓</p>}
+                  </div>
+                </div>
+                {/* Mobile — balance only */}
+                <div className="sm:hidden text-right shrink-0">
                   {account.net > 0
                     ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.net)}</p><p className="text-[10px] text-muted-foreground">you owe</p></>
                     : account.net < 0

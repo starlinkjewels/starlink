@@ -410,7 +410,19 @@ export function ClientsPage() {
                     )}
                   </p>
                 </div>
-                <div className="text-right shrink-0">
+                {/* Billed / Received / Balance (debit / credit / balance) */}
+                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Billed</p><p className="text-xs font-medium tabular-nums text-brand-dark">{fmtMoney(acc.billed)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Received</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoney(acc.received)}</p></div>
+                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                    {acc.outstanding > 0
+                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoney(acc.outstanding)}</p>
+                      : <p className="text-xs font-semibold text-success">✓</p>}
+                    <p className="text-[9px] text-muted-foreground leading-tight">{orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}</p>
+                  </div>
+                </div>
+                {/* Mobile — billed + balance */}
+                <div className="sm:hidden text-right shrink-0">
                   <p className="text-sm font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
                   <p className="text-[10px]">
                     <span className="text-success font-medium">{fmtMoney(acc.received)} recv</span>
