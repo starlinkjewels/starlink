@@ -131,3 +131,100 @@ export function downloadLedgerPdf(opts: {
 
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
 }
+
+export interface PdfSection {
+  heading: string;
+  columns: PdfColumn[];
+  rows: string[][];
+  align?: ("left" | "right")[];
+  totalsRow?: string[];
+}
+
+/** Same styling as downloadLedgerPdf, but stacks SEVERAL tables (each with its
+ *  own columns) into ONE document — e.g. a factory's Account Statement + Gold
+ *  Ledger + Diamond Ledger in a single PDF. */
+export function downloadLedgerPdfMulti(opts: {
+  title: string;
+  subjectLines: string[];
+  summary: { label: string; value: string }[];
+  sections: PdfSection[];
+  filename: string;
+  landscape?: boolean;
+}): void {
+  const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
+  const PAGE_W = opts.landscape ? 297 : 210;
+  const PAGE_H = opts.landscape ? 210 : 297;
+  const L = 14, R = PAGE_W - 14;
+  const yBreak = PAGE_H - 17, yFooter = PAGE_H - 6;
+
+  const pageHeader = () => {
+    doc.setFillColor(47, 93, 170); doc.rect(0, 0, PAGE_W, 26, "F");
+    doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
+    doc.text("STARLINK JEWELS", L, 12);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
+    doc.text(opts.title, L, 20);
+    doc.setTextColor(30);
+  };
+
+  pageHeader();
+  let y = 34;
+  doc.setFont("helvetica", "normal"); doc.setFontSize(9); doc.setTextColor(95);
+  for (const line of opts.subjectLines) { doc.text(line, L, y); y += 5; }
+  doc.setTextColor(30);
+  if (opts.summary.length) {
+    y += 2;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("Summary", L, y); y += 6;
+    doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
+    for (const s of opts.summary) { doc.text(`${s.label}:`, L, y); doc.setFont("helvetica", "bold"); doc.text(s.value, L + 55, y); doc.setFont("helvetica", "normal"); y += 5.5; }
+    y += 2;
+  }
+
+  for (const sec of opts.sections) {
+    const cols = sec.columns;
+    const alignOf = (i: number): "left" | "right" => (sec.align?.[i] === "right" ? "right" : "left");
+    const anchorX = (i: number) => (alignOf(i) === "right" ? (i < cols.length - 1 ? cols[i + 1].x - 3 : R) : cols[i].x);
+    const cell = (text: string, i: number, yy: number) => doc.text(text, anchorX(i), yy, { align: alignOf(i) });
+    const tableHead = (yy: number) => {
+      doc.setFillColor(234, 238, 246);
+      doc.rect(L - 2, yy - 4.6, R - L + 4, 7, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(35, 55, 95);
+      cols.forEach((c, i) => cell(c.header, i, yy));
+      doc.setTextColor(45);
+      return yy + 6.5;
+    };
+
+    if (y > yBreak - 22) { doc.addPage(); pageHeader(); y = 34; }
+    y += 3;
+    doc.setFont("helvetica", "bold"); doc.setFontSize(11); doc.setTextColor(30); doc.text(sec.heading, L, y); y += 6;
+    y = tableHead(y);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
+    let zebra = false;
+    if (sec.rows.length === 0) { doc.setTextColor(120); doc.text("No records.", L, y + 1); y += 7; doc.setTextColor(45); }
+    for (const row of sec.rows) {
+      if (y > yBreak) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
+      if (zebra) { doc.setFillColor(247, 249, 252); doc.rect(L - 2, y - 4.3, R - L + 4, 6.4, "F"); }
+      zebra = !zebra;
+      doc.setTextColor(50);
+      row.forEach((c, i) => cell(String(c ?? ""), i, y));
+      y += 6.4;
+    }
+    if (sec.totalsRow) {
+      doc.setDrawColor(150); doc.setLineWidth(0.3); doc.line(L - 2, y - 1.5, R + 2, y - 1.5);
+      y += 3.5;
+      doc.setFont("helvetica", "bold"); doc.setFontSize(9); doc.setTextColor(20);
+      sec.totalsRow.forEach((c, i) => { if (c !== "") cell(String(c), i, y); });
+      y += 5;
+    }
+    y += 5;
+  }
+
+  const pages = doc.getNumberOfPages();
+  const stamp = `Generated: ${new Date().toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  for (let p = 1; p <= pages; p++) {
+    doc.setPage(p);
+    doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140);
+    doc.text(stamp, L, yFooter);
+    doc.text(`Page ${p} of ${pages}`, R, yFooter, { align: "right" });
+  }
+  doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
+}

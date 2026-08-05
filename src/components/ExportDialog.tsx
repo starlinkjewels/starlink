@@ -7,8 +7,10 @@ export interface ExportOption {
   label: string;
   sublabel?: string;
   kind?: "pdf" | "excel";
-  /** Runs the download for the chosen [from, to] range (null = open-ended). */
-  run: (from: Date | null, to: Date | null) => void;
+  /** Runs the download for the chosen [from, to] range (null = open-ended). The
+   *  optional 3rd arg is the extra free-text filter value (e.g. an order number),
+   *  present only when the dialog was given `extraFilter`. */
+  run: (from: Date | null, to: Date | null, extra?: string) => void;
 }
 
 /**
@@ -17,14 +19,18 @@ export interface ExportOption {
  * straight away, so any export can be filtered to a period (e.g. a month) for
  * analysis.
  */
-export function ExportDialog({ open, onClose, title, options }: {
+export function ExportDialog({ open, onClose, title, options, extraFilter }: {
   open: boolean;
   onClose: () => void;
   title?: string;
   options: ExportOption[];
+  /** Optional extra free-text filter (e.g. limit to one order number). Its value
+   *  is passed as the 3rd arg to each option's run(). */
+  extraFilter?: { label: string; placeholder?: string; hint?: string };
 }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
+  const [extra, setExtra] = useState("");
   if (!open) return null;
 
   const iso = (d: Date) => d.toISOString().slice(0, 10);
@@ -61,10 +67,18 @@ export function ExportDialog({ open, onClose, title, options }: {
         <p className="text-[11px] text-muted-foreground mb-4">{from || to ? `Showing ${from || "start"} → ${to || "today"}` : "All dates included."}</p>
         {invalid && <p className="text-xs text-destructive mb-2">The “From” date is after the “To” date.</p>}
 
+        {extraFilter && (
+          <div className="mb-4">
+            <Label className="text-xs">{extraFilter.label}</Label>
+            <Input value={extra} onChange={e => setExtra(e.target.value)} placeholder={extraFilter.placeholder} className="rounded-lg h-9 mt-1" />
+            <p className="text-[11px] text-muted-foreground mt-1">{extra.trim() ? `Only this ${extraFilter.label.toLowerCase()}.` : (extraFilter.hint || "Leave blank for all.")}</p>
+          </div>
+        )}
+
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Download</p>
         <div className="space-y-1.5">
           {options.map((o, i) => (
-            <button key={i} disabled={invalid} onClick={() => { o.run(fromDate, toDate); onClose(); }}
+            <button key={i} disabled={invalid} onClick={() => { o.run(fromDate, toDate, extra.trim() || undefined); onClose(); }}
               className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl border border-border hover:bg-secondary/60 text-left transition-colors disabled:opacity-50">
               {o.kind === "pdf" ? <FileText className="h-4 w-4 text-red-500 shrink-0" /> : o.kind === "excel" ? <FileSpreadsheet className="h-4 w-4 text-green-600 shrink-0" /> : <Download className="h-4 w-4 text-primary shrink-0" />}
               <span className="flex-1 min-w-0"><span className="block text-sm font-medium">{o.label}</span>{o.sublabel && <span className="block text-[11px] text-muted-foreground">{o.sublabel}</span>}</span>

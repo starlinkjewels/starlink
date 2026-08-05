@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -413,9 +413,9 @@ export function FactoryHistoryPage() {
   // Full account statement — making charges (owed) and payments (paid) across
   // all issuances, chronological, with a running balance — the money ledger,
   // separate from the material (gold/diamond quantity) tracking above.
-  const statement = (() => {
+  const buildStatement = (iss: MaterialIssuance[]) => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
-    for (const mi of issuances) {
+    for (const mi of iss) {
       const order = db.orders.find(o => o.id === mi.orderId);
       const unit = mi.material === "gold" ? "g" : "ct";
       if (mi.makingCharges.amountInr > 0) {
@@ -434,13 +434,14 @@ export function FactoryHistoryPage() {
       .sort((a, b) => +new Date(a.date) - +new Date(b.date))
       .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
     return withBalance.reverse();
-  })();
+  };
+  const statement = buildStatement(issuances);
 
   // ── Gold ledger (in fine 24KT grams, so the running balance matches the
   //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
-  const goldLedger = (() => {
+  const buildGoldLedger = (iss: MaterialIssuance[]) => {
     const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
-    for (const mi of issuances) {
+    for (const mi of iss) {
       if (mi.material !== "gold") continue;
       const order = db.orders.find(o => o.id === mi.orderId);
       if (mi.source !== "factoryPool") {
@@ -453,12 +454,13 @@ export function FactoryHistoryPage() {
     }
     let running = 0;
     return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
-  })();
+  };
+  const goldLedger = buildGoldLedger(issuances);
 
   // ── Diamond ledger (carats): issued in; once finished, used-in-piece + returned out. ──
-  const diamondLedger = (() => {
+  const buildDiamondLedger = (iss: MaterialIssuance[]) => {
     const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
-    for (const mi of issuances) {
+    for (const mi of iss) {
       if (mi.material !== "diamond") continue;
       const order = db.orders.find(o => o.id === mi.orderId);
       rows.push({ id: mi.id + "-in", date: mi.issuedAt, particulars: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}${order ? ` (${order.orderNumber})` : ""}`, inQ: mi.quantityIssued, outQ: 0 });
@@ -471,34 +473,45 @@ export function FactoryHistoryPage() {
     }
     let running = 0;
     return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
-  })();
+  };
+  const diamondLedger = buildDiamondLedger(issuances);
 
-  const exportGoldCsv = (from: Date | null, to: Date | null) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], goldLedger.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
-  const exportDiamondCsv = (from: Date | null, to: Date | null) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], diamondLedger.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  // Limit the export to a single order's issuances (matched on order number,
+  // forgiving of the SLJ-… prefix), or all of them when no order is given.
+  const issuancesForOrder = (orderNo?: string) => {
+    if (!orderNo) return issuances;
+    const q = orderNo.trim().toLowerCase();
+    return issuances.filter(mi => (db.orders.find(o => o.id === mi.orderId)?.orderNumber ?? "").toLowerCase().includes(q));
+  };
 
-  const exportCsv = (from: Date | null, to: Date | null) => {
+  const ordSuffix = (o?: string) => (o ? `-Order-${o.replace(/[^\w.-]+/g, "_")}` : "");
+  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportDiamondCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], buildDiamondLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+
+  const exportCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     downloadCsv(
-      `Factory-${factory.name.replace(/\s+/g, "_")}`,
+      `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
       ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      buildStatement(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
-  const exportPdf = (from: Date | null, to: Date | null) => {
+  const exportPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
+    const iss = issuancesForOrder(orderNo);
+    const acct = factoryAccount(iss);
     downloadLedgerPdf({
-      title: "Factory Account Statement",
+      title: `Factory Account Statement${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
         `Factory: ${factory.name}`,
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
+        orderNo ? `Filtered to order: ${orderNo}` : "",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        { label: "Fine Gold at Factory (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!).toLocaleString()} g` },
-        { label: "Diamond (net)", value: `${account.diamondOutstanding.toLocaleString()} ct` },
-        { label: "Charges Total", value: fmtInrPlain(account.chargesTotal) },
-        { label: "Charges Paid", value: fmtInrPlain(account.chargesPaid) },
-        { label: "Charges Pending", value: fmtInrPlain(account.chargesPending) },
-        { label: "Charges Overpaid", value: fmtInrPlain(account.chargesOverpaid) },
+        { label: "Charges Total", value: fmtInrPlain(acct.chargesTotal) },
+        { label: "Charges Paid", value: fmtInrPlain(acct.chargesPaid) },
+        { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
+        { label: "Charges Overpaid", value: fmtInrPlain(acct.chargesOverpaid) },
       ],
       columns: [
         { header: "Date", x: 20 },
@@ -507,14 +520,99 @@ export function FactoryHistoryPage() {
         { header: "Paid", x: 148 },
         { header: "Balance", x: 170 },
       ],
-      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
-        fmtDate(r.date), r.particulars.slice(0, 28),
-        r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
-        r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
-        fmtInrPlain(r.balance).replace("Rs. ", ""),
+      align: ["left", "left", "right", "right", "right"],
+      rows: buildStatement(iss).filter(r => inDateRange(r.date, from, to)).map(r => [
+        fmtDate(r.date), r.particulars.slice(0, 40),
+        r.debit ? rs(r.debit) : "—",
+        r.credit ? rs(r.credit) : "—",
+        rs(r.balance),
       ]),
-      filename: `Factory-${factory.name.replace(/\s+/g, "_")}`,
+      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
     });
+  };
+
+  // ── Combined: Account Statement + Gold Ledger + Diamond Ledger in ONE file,
+  //    optionally limited to a single order. ──
+  const rs = (n: number) => Math.round(n).toLocaleString("en-IN"); // plain INR (jsPDF can't render ₹)
+  const q3 = (n: number) => Math.round(n * 1000) / 1000;
+
+  const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
+    const iss = issuancesForOrder(orderNo);
+    const acct = factoryAccount(iss);
+    const st = buildStatement(iss).filter(r => inDateRange(r.date, from, to));
+    const gl = buildGoldLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const dl = buildDiamondLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const goldClose = buildGoldLedger(iss)[0]?.balance ?? 0;   // ledgers are newest-first
+    const diaClose = buildDiamondLedger(iss)[0]?.balance ?? 0;
+    downloadLedgerPdfMulti({
+      title: `Factory Full Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
+      subjectLines: [
+        factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
+        orderNo ? `Filtered to order: ${orderNo}` : "",
+        from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ].filter(Boolean),
+      summary: [
+        { label: "Fine Gold at Factory (24KT)", value: `${goldClose.toLocaleString()} g` },
+        { label: "Diamond (net)", value: `${diaClose.toLocaleString()} ct` },
+        { label: "Charges Total", value: fmtInrPlain(acct.chargesTotal) },
+        { label: "Charges Paid", value: fmtInrPlain(acct.chargesPaid) },
+        { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
+      ],
+      landscape: true,
+      sections: [
+        {
+          heading: "Account Statement (Rs)",
+          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "Charged", x: 198 }, { header: "Paid", x: 228 }, { header: "Balance", x: 258 }],
+          align: ["left", "left", "right", "right", "right"],
+          rows: st.map(r => [fmtDate(r.date), r.particulars, r.debit ? rs(r.debit) : "—", r.credit ? rs(r.credit) : "—", rs(r.balance)]),
+          totalsRow: ["", "Totals", rs(st.reduce((s, r) => s + r.debit, 0)), rs(st.reduce((s, r) => s + r.credit, 0)), `Pending ${rs(acct.chargesPending)}`],
+        },
+        {
+          heading: "Gold Ledger (fine 24KT g)",
+          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "In (g)", x: 198 }, { header: "Out (g)", x: 228 }, { header: "Balance (g)", x: 258 }],
+          align: ["left", "left", "right", "right", "right"],
+          rows: gl.map(r => [fmtDate(r.date), r.particulars, r.inQ ? String(q3(r.inQ)) : "—", r.outQ ? String(q3(r.outQ)) : "—", String(q3(r.balance))]),
+          totalsRow: ["", "Totals", String(q3(gl.reduce((s, r) => s + r.inQ, 0))), String(q3(gl.reduce((s, r) => s + r.outQ, 0))), String(q3(goldClose))],
+        },
+        {
+          heading: "Diamond Ledger (ct)",
+          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "In (ct)", x: 198 }, { header: "Out (ct)", x: 228 }, { header: "Balance (ct)", x: 258 }],
+          align: ["left", "left", "right", "right", "right"],
+          rows: dl.map(r => [fmtDate(r.date), r.particulars, r.inQ ? String(q3(r.inQ)) : "—", r.outQ ? String(q3(r.outQ)) : "—", String(q3(r.balance))]),
+          totalsRow: ["", "Totals", String(q3(dl.reduce((s, r) => s + r.inQ, 0))), String(q3(dl.reduce((s, r) => s + r.outQ, 0))), String(q3(diaClose))],
+        },
+      ],
+      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${orderNo ? `-Order-${orderNo.replace(/[^\w.-]+/g, "_")}` : ""}-Full-Ledger`,
+    });
+  };
+
+  const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
+    const iss = issuancesForOrder(orderNo);
+    const st = buildStatement(iss).filter(r => inDateRange(r.date, from, to));
+    const gl = buildGoldLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const dl = buildDiamondLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+    const line = (arr: (string | number)[]) => arr.map(esc).join(",");
+    const out: string[] = [];
+    out.push(line([`Factory Ledger`, `${factory.name}${orderNo ? ` — Order ${orderNo}` : ""}`]));
+    out.push("");
+    out.push(line(["ACCOUNT STATEMENT (Rs)"]));
+    out.push(line(["Date", "Particulars", "Charged (Rs)", "Paid (Rs)", "Balance (Rs)"]));
+    st.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", Math.round(r.balance)])));
+    out.push("");
+    out.push(line(["GOLD LEDGER (fine 24KT g)"]));
+    out.push(line(["Date", "Particulars", "In (g)", "Out (g)", "Balance (g)"]));
+    gl.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance])));
+    out.push("");
+    out.push(line(["DIAMOND LEDGER (ct)"]));
+    out.push(line(["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"]));
+    dl.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance])));
+    const blob = new Blob(["﻿" + out.join("\r\n")], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = `Factory-${factory.name.replace(/\s+/g, "_")}${orderNo ? `-Order-${orderNo.replace(/[^\w.-]+/g, "_")}` : ""}-Full-Ledger.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
   };
 
   return (
@@ -550,12 +648,16 @@ export function FactoryHistoryPage() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`} options={[
-              { label: "Account Statement — PDF", sublabel: "Making charges & payments", kind: "pdf", run: exportPdf },
-              { label: "Account Statement — Excel", sublabel: "Making charges & payments", kind: "excel", run: exportCsv },
-              { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },
-              { label: "Diamond Ledger — Excel", sublabel: "Carats in / out", kind: "excel", run: exportDiamondCsv },
-            ]} />
+            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
+              extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
+              options={[
+                { label: "Full Ledger — PDF", sublabel: "Account statement + gold + diamond, all in one", kind: "pdf", run: exportCombinedPdf },
+                { label: "Full Ledger — Excel", sublabel: "Account statement + gold + diamond, all in one", kind: "excel", run: exportCombinedCsv },
+                { label: "Account Statement — PDF", sublabel: "Making charges & payments only", kind: "pdf", run: exportPdf },
+                { label: "Account Statement — Excel", sublabel: "Making charges & payments only", kind: "excel", run: exportCsv },
+                { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },
+                { label: "Diamond Ledger — Excel", sublabel: "Carats in / out", kind: "excel", run: exportDiamondCsv },
+              ]} />
             {user?.role === "admin" && (
               <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Issue Material
