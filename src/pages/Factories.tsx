@@ -10,7 +10,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Coins, Package } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -129,17 +129,22 @@ export function FactoriesPage() {
             const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
             const account = factoryAccount(issuances);
             const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id);
-            const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
-            const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
             return (
               <Link key={fac.id} to={`/factories/${fac.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
                 <div className="h-9 w-9 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4 w-4" /></div>
-                <div className="flex-1 min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
-                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Coins className="h-3 w-3 text-amber-600" />{fineGold.toLocaleString()} g fine gold (24KT) · {account.diamondOutstanding.toLocaleString()} ct dia</p>
-                  {(goldPool > 0 || diaPool > 0) && (
-                    <p className="text-[11px] text-orange-600 truncate flex items-center gap-1"><Package className="h-3 w-3" />Pool stock: {goldPool.toLocaleString()} g gold · {diaPool.toLocaleString()} ct dia</p>
-                  )}
+                  {/* Two boxes — reserved Fine Gold (24KT) + Diamond, matching the details page */}
+                  <div className="flex gap-2 mt-1.5">
+                    <div className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                      <span className="block text-[8.5px] uppercase tracking-wide text-muted-foreground leading-none">Fine Gold 24KT</span>
+                      <span className="text-xs font-semibold text-amber-700 tabular-nums">{fineGold.toLocaleString()} g</span>
+                    </div>
+                    <div className="px-2.5 py-1 rounded-lg bg-secondary border border-border/60">
+                      <span className="block text-[8.5px] uppercase tracking-wide text-muted-foreground leading-none">Diamond</span>
+                      <span className={`text-xs font-semibold tabular-nums ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding.toLocaleString()} ct</span>
+                    </div>
+                  </div>
                 </div>
                 {/* Charges ledger — Charged / Paid / Balance (debit / credit / balance) */}
                 <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
