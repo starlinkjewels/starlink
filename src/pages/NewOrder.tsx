@@ -83,6 +83,7 @@ export function NewOrderPage() {
     deliveryTime: "",
     rhodium: "",
     stamping: "",
+    stampingNote: "",
     orderValue: 0,
     shippingCharge: defaultShipping,
     advanceAmount: 0,
@@ -189,6 +190,7 @@ export function NewOrderPage() {
     if (!isDiamondOnly && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
     if (!isDiamondOnly && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
     if (!isDiamondOnly && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
+    if (!isDiamondOnly && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
     if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
@@ -246,7 +248,7 @@ export function NewOrderPage() {
         productKarats: f.productKarats || undefined,
         deliveryTime: f.deliveryTime || undefined,
         rhodium: f.rhodium || undefined,
-        stamping: f.stamping || undefined,
+        stamping: f.stamping === "Special Stamp" && f.stampingNote.trim() ? `Special Stamp: ${f.stampingNote.trim()}` : (f.stamping || undefined),
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         materialSourcing: f.materialSourcing === "later" ? undefined : f.materialSourcing,
@@ -653,7 +655,7 @@ export function NewOrderPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Stamping *</p>
                 <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Other"].map(opt => (
+                  {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Special Stamp"].map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
                         ${f.stamping === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
@@ -662,6 +664,11 @@ export function NewOrderPage() {
                     </label>
                   ))}
                 </RadioGroup>
+                {f.stamping === "Special Stamp" && (
+                  <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)}
+                    placeholder="Describe the special stamp (e.g. custom logo, initials, text…)"
+                    className="rounded-xl mt-2" autoFocus />
+                )}
               </div>
             </>
           )}
