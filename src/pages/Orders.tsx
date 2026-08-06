@@ -180,136 +180,122 @@ export function OrdersPage() {
           const done   = o.timeline.filter(t => t.status === "done").length;
           const progress = Math.round(done / o.timeline.length * 100);
           const isActive = !["Delivered","Rejected"].includes(o.status);
-          const hasShipping = o.status === "Dispatched" || o.status === "Delivered";
           const rowImg = o.cadImage || o.images?.[0];
           // Manufacturing summary (staff only) — which factory, how much gold/diamond issued.
           const orderIssuances = user!.role !== "client" ? db.materialIssuances.filter(i => i.orderId === o.id) : [];
           const factoryNames = [...new Set(orderIssuances.map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
           const goldIssued = orderIssuances.filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0);
           const diaIssued = orderIssuances.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
-          // Weights — prefer actual (post-production) values, fall back to estimates.
+          // Weights — prefer actual (post-production), then estimate, then the
+          // finished-piece net weight recorded on the factory issuance.
+          const finishIss = orderIssuances.find(i => i.material === "gold" && i.finishedNetWeight != null);
           const grossWt = o.actualGrossWeight ?? o.estimatedGrossWeight;
-          const netWt = o.actualNetWeight ?? o.estimatedNetWeight;
+          const netWt = o.actualNetWeight ?? o.estimatedNetWeight ?? finishIss?.finishedNetWeight;
           const diaWt = o.actualDiamondWeight ?? o.diamondWeight;
 
           return (
             <Link
               key={o.id}
               to={`/orders/${o.id}`}
-              className="card-luxe card-hover p-4 block"
+              className="card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px]"
             >
-              {/* ── Row 1: CAD photo · order# · status ── */}
-              <div className="flex items-start gap-3">
-                <div className="h-16 w-16 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 overflow-hidden ring-1 ring-border/50">
-                  {rowImg
-                    ? <img src={rowImg} alt={o.orderNumber} className="w-full h-full object-cover" />
-                    : <Package className="h-6 w-6 text-primary" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-sm leading-tight">{o.orderNumber}</p>
-                    <StatusBadge status={o.status} />
+              {/* ── Left: full-height product / CAD photo ── */}
+              <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">
+                {rowImg
+                  ? <img src={rowImg} alt={o.orderNumber} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
+                  : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40"><Package className="h-9 w-9" /></div>}
+              </div>
+
+              {/* ── Right: order details ── */}
+              <div className="flex-1 min-w-0 p-4 flex flex-col gap-2">
+                {/* Header — order# + spec + status */}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      {o.jewelleryType} · {o.metal} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
+                      {o.designNumber ? ` · #${o.designNumber}` : ""}
+                    </p>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                    {o.jewelleryType} · {o.metal} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
-                    {o.designNumber ? ` · #${o.designNumber}` : ""}
-                  </p>
-                  {/* Weights — gross / net / diamond */}
-                  {(grossWt || netWt || diaWt) && (
-                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                      {grossWt ? `Gross ${grossWt}g` : ""}
-                      {grossWt && netWt ? " · " : ""}
-                      {netWt ? `Net ${netWt}g` : ""}
-                      {diaWt ? `${(grossWt || netWt) ? " · " : ""}Dia ${diaWt}ct` : ""}
-                    </p>
-                  )}
-                  {user!.role !== "client" && client && (
-                    <p className="text-xs font-medium text-muted-foreground truncate mt-0.5">{client.companyName}</p>
-                  )}
+                  <StatusBadge status={o.status} />
                 </div>
-              </div>
 
-              {/* ── Manufacturing chips: factory · gold used · diamond used (staff only) ── */}
-              {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
-                <div className="mt-2 ml-[76px] flex flex-wrap items-center gap-1.5">
-                  {factoryNames.map(n => (
-                    <span key={n} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">
-                      <FactoryIcon className="h-2.5 w-2.5" />{n}
-                    </span>
-                  ))}
-                  {goldIssued > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">
-                      <Coins className="h-2.5 w-2.5" />{goldIssued.toLocaleString()} g gold
-                    </span>
-                  )}
-                  {diaIssued > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700">
-                      <Gem className="h-2.5 w-2.5" />{diaIssued.toLocaleString()} ct dia
-                    </span>
-                  )}
+                {/* Weights — gross / net / diamond */}
+                {(grossWt || netWt || diaWt) && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {grossWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Gross {grossWt}g</span> : null}
+                    {netWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Net {netWt}g</span> : null}
+                    {diaWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Dia {diaWt}ct</span> : null}
+                  </div>
+                )}
+
+                {user!.role !== "client" && client && (
+                  <p className="text-xs font-medium text-muted-foreground truncate">{client.companyName}</p>
+                )}
+
+                {/* Manufacturing chips — factory · gold used · diamond used (staff only) */}
+                {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {factoryNames.map(n => (
+                      <span key={n} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">
+                        <FactoryIcon className="h-2.5 w-2.5" />{n}
+                      </span>
+                    ))}
+                    {goldIssued > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">
+                        <Coins className="h-2.5 w-2.5" />{goldIssued.toLocaleString()} g gold
+                      </span>
+                    )}
+                    {diaIssued > 0 && (
+                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700">
+                        <Gem className="h-2.5 w-2.5" />{diaIssued.toLocaleString()} ct dia
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Progress + due + amount — pinned to the bottom */}
+                <div className="mt-auto pt-1">
+                  <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                    <div className="h-full bg-gradient-to-r from-primary to-brand-light transition-all duration-500" style={{ width: `${progress}%` }} />
+                  </div>
+                  <div className="mt-1.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs text-muted-foreground">{progress}% · Due {fmtDate(o.expectedDelivery)}</p>
+                      {isActive && !o.courierName && (
+                        <p className="text-[11px] font-medium text-primary flex items-center gap-1 mt-0.5">
+                          <Truck className="h-3 w-3 shrink-0" /><span className="truncate">{lastTrackingStep(o)}</span>
+                        </p>
+                      )}
+                    </div>
+                    <span className="font-semibold text-sm shrink-0">{fmtMoney(o.amount)}</span>
+                  </div>
                 </div>
-              )}
 
-              {/* ── Progress bar ── */}
-              <div className="mt-3 ml-[76px]">
-                <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                  <div
-                    className="h-full bg-gradient-to-r from-primary to-brand-light transition-all duration-500"
-                    style={{ width: `${progress}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* ── Row 2: progress % · due date · current step ── */}
-              <div className="mt-2 ml-[76px] flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">
-                    {progress}% · Due {fmtDate(o.expectedDelivery)}
-                  </p>
-                  {isActive && !o.courierName && (
-                    <p className="text-[11px] font-medium text-primary flex items-center gap-1 mt-0.5">
-                      <Truck className="h-3 w-3 shrink-0" />
-                      <span className="truncate">{lastTrackingStep(o)}</span>
-                    </p>
-                  )}
-                </div>
-                <span className="font-semibold text-sm shrink-0">{fmtMoney(o.amount)}</span>
-              </div>
-
-              {/* ── Row 3: courier + tracking — shown whenever dispatch info exists ── */}
-              {o.courierName && (
-                <div className="mt-2 ml-[76px]">
+                {/* Courier + tracking */}
+                {o.courierName && (
                   <div className="flex items-center justify-between gap-3 rounded-xl bg-secondary/60 border border-border/60 px-3 py-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
                       <span className="text-xs font-semibold text-foreground capitalize">{o.courierName}</span>
-                      {o.trackingNumber && (
-                        <span className="text-xs font-mono text-muted-foreground truncate">{o.trackingNumber}</span>
-                      )}
+                      {o.trackingNumber && <span className="text-xs font-mono text-muted-foreground truncate">{o.trackingNumber}</span>}
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
                       {o.trackingLink ? (
-                        <a
-                          href={o.trackingLink}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors"
-                        >
+                        <a href={o.trackingLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors">
                           <ExternalLink className="h-3 w-3" /> Track
                         </a>
                       ) : (
-                        <button
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); setTrackingOrder(o); }}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors"
-                        >
+                        <button onClick={e => { e.preventDefault(); e.stopPropagation(); setTrackingOrder(o); }}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors">
                           <Truck className="h-3 w-3" /> Track
                         </button>
                       )}
                     </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
             </Link>
           );
         })}
