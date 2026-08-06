@@ -459,7 +459,7 @@ export function NewOrderPage() {
                 <Select value={f.metal} onValueChange={setMetal}>
                   <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["Gold","White Gold","Rose Gold","Platinum","Silver","Two Tone Casting","None (Diamond only)"].map(x =>
+                    {["Gold","White Gold","Rose Gold","Platinum","Silver","None (Diamond only)"].map(x =>
                       <SelectItem key={x} value={x}>{x}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -637,7 +637,7 @@ export function NewOrderPage() {
                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Rhodium *</p>
                 <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {["No Rhodium","Diamond Part White","Full White","Other"].map(opt => (
+                  {["No Rhodium","Diamond Part White","Full White","Two Tone Casting","Other"].map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
                         ${f.rhodium === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
