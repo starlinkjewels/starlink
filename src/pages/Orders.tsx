@@ -187,6 +187,10 @@ export function OrdersPage() {
           const factoryNames = [...new Set(orderIssuances.map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
           const goldIssued = orderIssuances.filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0);
           const diaIssued = orderIssuances.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
+          // Weights — prefer actual (post-production) values, fall back to estimates.
+          const grossWt = o.actualGrossWeight ?? o.estimatedGrossWeight;
+          const netWt = o.actualNetWeight ?? o.estimatedNetWeight;
+          const diaWt = o.actualDiamondWeight ?? o.diamondWeight;
 
           return (
             <Link
@@ -196,10 +200,10 @@ export function OrdersPage() {
             >
               {/* ── Row 1: CAD photo · order# · status ── */}
               <div className="flex items-start gap-3">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 mt-0.5 overflow-hidden">
+                <div className="h-16 w-16 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 overflow-hidden ring-1 ring-border/50">
                   {rowImg
                     ? <img src={rowImg} alt={o.orderNumber} className="w-full h-full object-cover" />
-                    : <Package className="h-5 w-5 text-primary" />}
+                    : <Package className="h-6 w-6 text-primary" />}
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-start justify-between gap-2">
@@ -210,6 +214,15 @@ export function OrdersPage() {
                     {o.jewelleryType} · {o.metal} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
                     {o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
+                  {/* Weights — gross / net / diamond */}
+                  {(grossWt || netWt || diaWt) && (
+                    <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                      {grossWt ? `Gross ${grossWt}g` : ""}
+                      {grossWt && netWt ? " · " : ""}
+                      {netWt ? `Net ${netWt}g` : ""}
+                      {diaWt ? `${(grossWt || netWt) ? " · " : ""}Dia ${diaWt}ct` : ""}
+                    </p>
+                  )}
                   {user!.role !== "client" && client && (
                     <p className="text-xs font-medium text-muted-foreground truncate mt-0.5">{client.companyName}</p>
                   )}
@@ -218,7 +231,7 @@ export function OrdersPage() {
 
               {/* ── Manufacturing chips: factory · gold used · diamond used (staff only) ── */}
               {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
-                <div className="mt-2 ml-[52px] flex flex-wrap items-center gap-1.5">
+                <div className="mt-2 ml-[76px] flex flex-wrap items-center gap-1.5">
                   {factoryNames.map(n => (
                     <span key={n} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">
                       <FactoryIcon className="h-2.5 w-2.5" />{n}
@@ -238,7 +251,7 @@ export function OrdersPage() {
               )}
 
               {/* ── Progress bar ── */}
-              <div className="mt-3 ml-[52px]">
+              <div className="mt-3 ml-[76px]">
                 <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
                   <div
                     className="h-full bg-gradient-to-r from-primary to-brand-light transition-all duration-500"
@@ -248,7 +261,7 @@ export function OrdersPage() {
               </div>
 
               {/* ── Row 2: progress % · due date · current step ── */}
-              <div className="mt-2 ml-[52px] flex items-center justify-between gap-3">
+              <div className="mt-2 ml-[76px] flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">
                     {progress}% · Due {fmtDate(o.expectedDelivery)}
@@ -265,7 +278,7 @@ export function OrdersPage() {
 
               {/* ── Row 3: courier + tracking — shown whenever dispatch info exists ── */}
               {o.courierName && (
-                <div className="mt-2 ml-[52px]">
+                <div className="mt-2 ml-[76px]">
                   <div className="flex items-center justify-between gap-3 rounded-xl bg-secondary/60 border border-border/60 px-3 py-2">
                     <div className="flex items-center gap-2 min-w-0">
                       <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
