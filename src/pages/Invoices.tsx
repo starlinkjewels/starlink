@@ -354,8 +354,9 @@ export function InvoicesPage() {
         )}
       </div>
 
-      {/* Advance Payment Ledger section */}
-      {ordersWithAdvanceBase.length > 0 && (
+      {/* Advance Payment Ledger section — staff only. Clients see ONLY the invoices
+          that were generated for them, never their un-invoiced orders. */}
+      {isStaff && ordersWithAdvanceBase.length > 0 && (
         <div className="card-luxe overflow-hidden">
           <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
             <div className="shrink-0">
