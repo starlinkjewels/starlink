@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, ensureInvoiceForOrder, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -278,7 +278,8 @@ export function NewOrderPage() {
       };
 
       d.orders.unshift(order);
-      ensureInvoiceForOrder(d, order.id); // auto invoice number if the order is priced
+      // Invoices are no longer auto-created per order — they're generated at
+      // dispatch time by selecting orders on the Invoices page.
       mailInfo = {
         orderNumber: order.orderNumber,
         clientName: d.clients.find(c => c.id === clientId)?.companyName ?? "Client",

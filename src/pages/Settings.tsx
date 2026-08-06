@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -158,14 +158,14 @@ export function SettingsPage() {
   // Orders that have been priced but never had an invoice number assigned —
   // lets admin backfill all of them at once instead of opening each order to print.
   const ordersNeedingInvoice = loadDb()
-    .orders.filter((o) => o.amount > 0 && !loadDb().invoices.some((i) => i.orderId === o.id))
+    .orders.filter((o) => o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(loadDb().invoices, o.id))
     .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
 
   const [generatingInvoices, setGeneratingInvoices] = useState(false);
   const generateInvoiceNumbers = () => {
     const fresh = loadDb();
     const missing = fresh.orders
-      .filter((o) => o.amount > 0 && !fresh.invoices.some((i) => i.orderId === o.id))
+      .filter((o) => o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(fresh.invoices, o.id))
       .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
     if (!missing.length) return;
     if (
@@ -182,6 +182,7 @@ export function SettingsPage() {
         d.invoices.push({
           id: uid("inv_"),
           orderId: o.id,
+          orderIds: [o.id],
           clientId: o.clientId,
           number: String(n).padStart(4, "0"),
           amount: orderTotal(o),

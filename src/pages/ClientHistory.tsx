@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, reconcileClientAccount, clientAccount } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -585,7 +585,7 @@ export function ClientHistoryPage() {
             </thead>
             <tbody>
               {paged.map((o, i) => {
-                const invoice = allInvoices.find(inv => inv.orderId === o.id);
+                const invoice = findInvoiceForOrder(allInvoices, o.id);
                 const progress = Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100);
                 const adv = totalAdvance(o);
                 const bal = balanceDue(o);
@@ -647,7 +647,7 @@ export function ClientHistoryPage() {
         {/* Mobile cards */}
         <div className="md:hidden divide-y divide-border/40">
           {paged.map(o => {
-            const invoice = allInvoices.find(inv => inv.orderId === o.id);
+            const invoice = findInvoiceForOrder(allInvoices, o.id);
             const progress = Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100);
             const adv = totalAdvance(o);
             const bal = balanceDue(o);

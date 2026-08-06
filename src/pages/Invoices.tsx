@@ -1,62 +1,62 @@
-import { useState, useEffect, useRef } from "react";
+import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, ensureInvoiceForOrder } from "@/lib/db";
-import type { Order } from "@/lib/db";
+import {
+  fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb,
+  invoiceOrderIds, orderInvoiced, createInvoiceFromOrders, recordOrderPayment,
+} from "@/lib/db";
+import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
-import { FileText, TrendingUp, CheckCircle2, AlertCircle, Clock, Search, Download, CalendarDays } from "lucide-react";
+import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { printBatchInvoice } from "@/lib/invoicePrint";
+import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
 
-// Timeline dates are stored as full ISO timestamps (UTC). The date filter below
-// must compare against the LOCAL calendar day — the same day every other date in
-// the app displays via fmtDate() — not the UTC day, or a dispatch marked complete
-// in the early-morning hours (IST) lands one day off from what the picker shows.
-function localDateKey(iso: string): string {
-  const d = new Date(iso);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+/** Whether an order has been dispatched, and when (local "Dispatch" step). */
+function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
+  const step = o.timeline.find(t => t.step === "Dispatch" && t.status === "done");
+  return { dispatched: !!step || o.status === "Dispatched" || o.status === "Delivered", date: step?.date };
 }
 
 export function InvoicesPage() {
   const { user } = useAuth();
   const db = useDb();
+  const isStaff = user!.role !== "client";
   const [q, setQ] = useState("");
   const [clientFilter, setClientFilter] = useState("all");
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
-  const [batchDate, setBatchDate] = useState("");
 
-  // Auto-assign invoice numbers to any priced orders that don't have one yet
-  // (e.g. legacy orders) — runs once, so it's fully automatic with no button.
-  const backfilled = useRef(false);
-  useEffect(() => {
-    if (backfilled.current || user!.role === "client") return;
-    const missing = db.orders.filter(o => o.amount > 0 && o.status !== "Rejected" && !db.invoices.some(i => i.orderId === o.id));
-    if (missing.length === 0) return;
-    backfilled.current = true;
-    updateDb(d => {
-      [...missing].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt)).forEach(o => ensureInvoiceForOrder(d, o.id));
-    });
-  }, [db.orders, db.invoices, user]);
+  // Create-invoice selection (staff): which of the client's un-invoiced orders to bill.
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // Invoice detail modal + inline per-order payment form.
+  const [detailInvId, setDetailInvId] = useState<string | null>(null);
+  const [payOrderId, setPayOrderId] = useState<string | null>(null);
+  const [payAmount, setPayAmount] = useState("");
+  const [payLockerId, setPayLockerId] = useState("");
+  const [payRate, setPayRate] = useState("");
+  const [payNote, setPayNote] = useState("");
 
+  // ── Invoice list (filtered) ──
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
-  if (user!.role !== "client" && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
+  if (isStaff && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
 
-  // Search by invoice #, linked order #, client name, or status.
   const ql = q.trim().toLowerCase();
   if (ql) {
     list = list.filter(inv => {
-      const o = db.orders.find(x => x.id === inv.orderId);
-      const client = o ? db.clients.find(c => c.id === o.clientId) : undefined;
+      const orders = invoiceOrderIds(inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
+      const client = db.clients.find(c => c.id === inv.clientId);
       const statusText = inv.paid ? "paid" : "pending";
       return inv.number.toLowerCase().includes(ql)
-        || (o?.orderNumber ?? "").toLowerCase().includes(ql)
+        || orders.some(o => o.orderNumber.toLowerCase().includes(ql))
         || (client?.companyName ?? "").toLowerCase().includes(ql)
         || statusText.includes(ql);
     });
@@ -67,33 +67,86 @@ export function InvoicesPage() {
     ? []
     : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
 
-  // Combined invoice: every order for the selected client dispatched on the chosen
-  // date, as one PDF with one line item per order (uses the Client filter above).
-  const downloadBatchInvoice = () => {
-    if (clientFilter === "all") { toast.error("Select a client first"); return; }
-    if (!batchDate) { toast.error("Select a date"); return; }
-    const batchClient = db.clients.find(c => c.id === clientFilter);
-    const dispatchedOrders = db.orders.filter(o => {
-      if (o.clientId !== clientFilter) return false;
-      const dispatchStep = o.timeline.find(t => t.step === "Dispatch" && t.status === "done");
-      return !!dispatchStep?.date && localDateKey(dispatchStep.date) === batchDate;
-    });
-    if (!dispatchedOrders.length) {
-      toast.error(`No orders dispatched for ${batchClient?.companyName ?? "this client"} on ${batchDate}`);
-      return;
-    }
-    const invoiceNumber = "C" + batchDate.replace(/-/g, "");
-    printBatchInvoice(dispatchedOrders, batchClient, db.settings, invoiceNumber, batchDate);
+  // Live figures for an invoice, summed across ALL its orders (never the stale snapshot).
+  const invLive = (inv: Invoice) => {
+    const orders = invoiceOrderIds(inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
+    const amount = orders.length ? orders.reduce((s, o) => s + orderTotal(o), 0) : inv.amount;
+    const adv = orders.reduce((s, o) => s + totalAdvance(o), 0);
+    const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
+    const paid = orders.length ? bal <= 0 : inv.paid;
+    return { orders, amount, adv, bal, paid };
   };
 
-  // Orders with advances (all roles see their own)
+  // ── Create invoice: this client's priced, non-rejected, not-yet-invoiced orders. ──
+  const eligible = clientFilter === "all" || !isStaff ? [] : db.orders
+    .filter(o => o.clientId === clientFilter && o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(db.invoices, o.id))
+    .map(o => ({ o, disp: dispatchInfo(o) }))
+    .sort((a, b) => {
+      if (a.disp.dispatched !== b.disp.dispatched) return a.disp.dispatched ? -1 : 1;
+      const ad = a.disp.date || a.o.createdAt, bd = b.disp.date || b.o.createdAt;
+      return +new Date(bd) - +new Date(ad);
+    });
+  const eligibleIds = eligible.map(e => e.o.id);
+  const selectedTotal = eligible.filter(e => selected.has(e.o.id)).reduce((s, e) => s + orderTotal(e.o), 0);
+
+  const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () => setSelected(prev => prev.size === eligibleIds.length ? new Set() : new Set(eligibleIds));
+
+  const generateInvoice = () => {
+    if (clientFilter === "all") { toast.error("Select a client first"); return; }
+    const ids = eligibleIds.filter(id => selected.has(id));
+    if (!ids.length) { toast.error("Select at least one order"); return; }
+    let created: Invoice | null = null;
+    updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString()); });
+    if (created) {
+      toast.success(`Invoice ${(created as Invoice).number} created — ${ids.length} order${ids.length > 1 ? "s" : ""}`);
+      setSelected(new Set());
+    } else {
+      toast.error("Those orders are already invoiced");
+    }
+  };
+
+  // ── Per-order payment (order-wise collection from the invoice detail). ──
+  const startPay = (orderId: string) => { setPayOrderId(orderId); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote(""); };
+  const payLocker = db.lockers.find(l => l.id === payLockerId);
+  const payNeedsRate = !!payLocker && (payLocker.currency || "INR") !== "USD";
+
+  const submitPayment = (orderId: string) => {
+    const o = db.orders.find(x => x.id === orderId);
+    if (!o) return;
+    const amt = parseFloat(payAmount);
+    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
+    const rate = Number(payRate);
+    if (payNeedsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate"); return; }
+    const depositAmt = payNeedsRate ? Math.round(amt * rate * 100) / 100 : amt;
+    updateDb(d => {
+      recordOrderPayment(d, orderId, {
+        amount: amt, recordedBy: user!.id, at: new Date().toISOString(),
+        note: payNote.trim() || undefined, lockerId: payLockerId, lockerAmount: depositAmt,
+        exchangeRate: payNeedsRate ? rate : undefined,
+      });
+      const inv = d.invoices.find(i => i.id === detailInvId);
+      if (inv) inv.paid = invoiceOrderIds(inv).every(oid => { const oo = d.orders.find(x => x.id === oid); return !oo || balanceDue(oo) <= 0; });
+    });
+    toast.success(`${fmtMoney(amt)} received for ${o.orderNumber}`);
+    setPayOrderId(null); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote("");
+  };
+
+  const printInv = (inv: Invoice) => {
+    const { orders } = invLive(inv);
+    const client = db.clients.find(c => c.id === inv.clientId);
+    if (orders.length <= 1 && orders[0]) printInvoice(orders[0], client, db.settings, inv.number);
+    else if (orders.length) printBatchInvoice(orders, client, db.settings, inv.number, inv.createdAt.slice(0, 10));
+    else toast.error("This invoice has no orders to print.");
+  };
+
+  // Orders with advances — the Advance Payment Ledger below.
   let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
   if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
   if (user!.role === "employee") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.assignedEmployeeId === user!.id);
-
   let ordersWithAdvance = ordersWithAdvanceBase;
-  if (user!.role !== "client" && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
-
+  if (isStaff && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
   const lq = ledgerQ.trim().toLowerCase();
   if (lq) {
     ordersWithAdvance = ordersWithAdvance.filter(o => {
@@ -102,11 +155,8 @@ export function InvoicesPage() {
     });
   }
 
-  // Summary from LIVE order data (not the invoice's stale amount/paid snapshot),
-  // so these tie exactly with the client Account Ledger: Billed = Received + Outstanding.
-  const invOrders = list
-    .map(inv => db.orders.find(o => o.id === inv.orderId))
-    .filter((o): o is Order => !!o);
+  // Summary — from live order data across all listed invoices.
+  const invOrders = list.flatMap(inv => invoiceOrderIds(inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o));
   const totalBilled      = invOrders.reduce((s, o) => s + orderTotal(o), 0);
   const totalReceived    = invOrders.reduce((s, o) => s + totalAdvance(o), 0);
   const totalOutstanding = invOrders.reduce((s, o) => s + balanceDue(o), 0);
@@ -114,6 +164,8 @@ export function InvoicesPage() {
   const PAGE_SIZE = 10;
   const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE);
   const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE);
+
+  const detailInv = detailInvId ? db.invoices.find(i => i.id === detailInvId) : undefined;
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -143,15 +195,10 @@ export function InvoicesPage() {
           <h2 className="font-semibold text-brand-dark shrink-0">All Invoices</h2>
           <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input
-              value={q}
-              onChange={e => setQ(e.target.value)}
-              placeholder="Search invoice, order, client…"
-              className="pl-9 h-9 rounded-xl text-sm"
-            />
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, order, client…" className="pl-9 h-9 rounded-xl text-sm" />
           </div>
-          {user!.role !== "client" && (
-            <Select value={clientFilter} onValueChange={setClientFilter}>
+          {isStaff && (
+            <Select value={clientFilter} onValueChange={v => { setClientFilter(v); setSelected(new Set()); }}>
               <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Clients</SelectItem>
@@ -162,29 +209,45 @@ export function InvoicesPage() {
           {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
         </div>
 
-        {/* Combined dispatch invoice — pick the client above + a date, download one PDF
-            covering every order for that client dispatched on that date */}
-        {user!.role !== "client" && (
-          <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
-            <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground shrink-0">Combined invoice for orders dispatched on</span>
-            <input
-              type="date"
-              value={batchDate}
-              onChange={e => setBatchDate(e.target.value)}
-              className="h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-            <Button
-              size="sm"
-              onClick={downloadBatchInvoice}
-              disabled={clientFilter === "all" || !batchDate}
-              className="btn-hero rounded-xl gap-2 h-9"
-            >
-              <Download className="h-3.5 w-3.5" />
-              Download Invoice
-            </Button>
-            {clientFilter === "all" && (
-              <span className="text-xs text-muted-foreground">select a client above first</span>
+        {/* ── Create invoice from dispatched orders (staff) ── */}
+        {isStaff && (
+          <div className="px-5 py-3 border-b border-border/60 bg-secondary/20">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Plus className="h-3.5 w-3.5 text-primary shrink-0" />
+              <span className="text-xs font-medium text-brand-dark">Create invoice from dispatched orders</span>
+              {clientFilter === "all" && <span className="text-xs text-muted-foreground">— pick a client above first</span>}
+            </div>
+
+            {clientFilter !== "all" && (
+              eligible.length === 0 ? (
+                <p className="text-xs text-muted-foreground mt-2">No un-invoiced orders for this client — every priced order is already on an invoice.</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer">
+                    <Checkbox checked={selected.size === eligibleIds.length && eligibleIds.length > 0} onCheckedChange={toggleAll} />
+                    Select all ({eligible.length})
+                  </label>
+                  <div className="grid gap-1.5 max-h-64 overflow-y-auto pr-1">
+                    {eligible.map(({ o, disp }) => (
+                      <label key={o.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors ${selected.has(o.id) ? "border-primary bg-primary/5" : "border-border/70 hover:bg-secondary/50"}`}>
+                        <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggle(o.id)} />
+                        <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
+                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.metal}</span>
+                        {disp.dispatched
+                          ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">Dispatched{disp.date ? ` ${fmtDate(disp.date)}` : ""}</span>
+                          : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{o.status}</span>}
+                        <span className="ml-auto font-semibold text-sm shrink-0">{fmtMoney(orderTotal(o))}</span>
+                      </label>
+                    ))}
+                  </div>
+                  <div className="flex items-center justify-between gap-3 pt-1">
+                    <span className="text-xs text-muted-foreground">{selected.size} selected · <span className="font-semibold text-foreground">{fmtMoney(selectedTotal)}</span></span>
+                    <Button size="sm" onClick={generateInvoice} disabled={selected.size === 0} className="btn-hero rounded-xl gap-2 h-9">
+                      <FileText className="h-3.5 w-3.5" /> Generate Invoice
+                    </Button>
+                  </div>
+                </div>
+              )
             )}
           </div>
         )}
@@ -196,24 +259,20 @@ export function InvoicesPage() {
               <tr>
                 <th className="text-left px-5 py-3">Invoice</th>
                 <th className="text-left px-4 py-3">Client</th>
-                <th className="text-left px-4 py-3">Order</th>
+                <th className="text-left px-4 py-3">Orders</th>
                 <th className="text-left px-4 py-3">Date</th>
                 <th className="text-center px-4 py-3">Amount</th>
-                <th className="text-center px-4 py-3">Advance</th>
+                <th className="text-center px-4 py-3">Received</th>
                 <th className="text-center px-4 py-3">Balance</th>
                 <th className="text-center px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody>
               {pagedInvoices.map(inv => {
-                const o = db.orders.find(o => o.id === inv.orderId);
+                const { orders, amount, adv, bal, paid } = invLive(inv);
                 const client = db.clients.find(c => c.id === inv.clientId);
-                const amount = o ? orderTotal(o) : inv.amount;
-                const adv = o ? totalAdvance(o) : 0;
-                const bal = o ? balanceDue(o) : inv.amount;
-                const paid = o ? bal <= 0 : inv.paid;
                 return (
-                  <tr key={inv.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
+                  <tr key={inv.id} onClick={() => { setDetailInvId(inv.id); setPayOrderId(null); }} className="border-t border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer">
                     <td className="px-5 py-3.5">
                       <div className="flex items-center gap-2">
                         <FileText className="h-4 w-4 text-primary shrink-0" />
@@ -222,20 +281,14 @@ export function InvoicesPage() {
                     </td>
                     <td className="px-4 py-3.5 font-medium max-w-[160px] truncate">{client?.companyName || "—"}</td>
                     <td className="px-4 py-3.5">
-                      {o && <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs">{o.orderNumber}</Link>}
+                      {orders.length === 1
+                        ? <Link to={`/orders/${orders[0].id}`} onClick={e => e.stopPropagation()} className="text-primary hover:underline font-mono text-xs">{orders[0].orderNumber}</Link>
+                        : <span className="text-xs text-muted-foreground">{orders.length} orders</span>}
                     </td>
                     <td className="px-4 py-3.5 text-muted-foreground text-xs">{fmtDate(inv.createdAt)}</td>
                     <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(amount)}</td>
-                    <td className="px-4 py-3.5 text-center">
-                      {adv > 0
-                        ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
-                        : <span className="text-muted-foreground text-xs">—</span>}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <span className={`text-xs font-medium ${bal > 0 ? "text-destructive" : "text-success"}`}>
-                        {bal > 0 ? fmtMoney(bal) : "Cleared"}
-                      </span>
-                    </td>
+                    <td className="px-4 py-3.5 text-center">{adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span> : <span className="text-muted-foreground text-xs">—</span>}</td>
+                    <td className="px-4 py-3.5 text-center"><span className={`text-xs font-medium ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "Cleared"}</span></td>
                     <td className="px-4 py-3.5 text-center">
                       {paid
                         ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
@@ -245,7 +298,7 @@ export function InvoicesPage() {
                 );
               })}
               {list.length === 0 && (
-                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</td></tr>
+                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet — select dispatched orders above to create one."}</td></tr>
               )}
             </tbody>
           </table>
@@ -254,50 +307,36 @@ export function InvoicesPage() {
         {/* Mobile cards */}
         <div className="md:hidden divide-y divide-border/40">
           {pagedInvoices.map(inv => {
-            const o = db.orders.find(o => o.id === inv.orderId);
+            const { orders, amount, adv, bal, paid } = invLive(inv);
             const client = db.clients.find(c => c.id === inv.clientId);
-            const amount = o ? orderTotal(o) : inv.amount;
-            const adv = o ? totalAdvance(o) : 0;
-            const bal = o ? balanceDue(o) : inv.amount;
-            const paid = o ? bal <= 0 : inv.paid;
             return (
-              <div key={inv.id} className="p-4 space-y-3">
-                {/* Row 1: Invoice # + Status */}
+              <div key={inv.id} onClick={() => { setDetailInvId(inv.id); setPayOrderId(null); }} className="p-4 space-y-3 cursor-pointer active:bg-secondary/30">
                 <div className="flex items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
                     <FileText className="h-4 w-4 text-primary shrink-0" />
                     <span className="font-semibold text-sm">{inv.number}</span>
+                    <span className="text-[11px] text-muted-foreground">· {orders.length} order{orders.length !== 1 ? "s" : ""}</span>
                   </div>
                   {paid
                     ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success bg-success/10 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-3 w-3" />Paid</span>
                     : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground bg-warning/10 px-2 py-0.5 rounded-full"><Clock className="h-3 w-3" />Pending</span>}
                 </div>
-                {/* Client name */}
-                <p className="text-sm font-medium truncate">{client?.companyName || "—"}</p>
-                {/* Row 2: Order link + Date */}
-                <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  {o
-                    ? <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono font-semibold">{o.orderNumber}</Link>
-                    : <span>—</span>}
-                  <span>{fmtDate(inv.createdAt)}</span>
+                <div className="flex items-center justify-between gap-2 text-xs">
+                  <p className="font-medium truncate">{client?.companyName || "—"}</p>
+                  <span className="text-muted-foreground">{fmtDate(inv.createdAt)}</span>
                 </div>
-                {/* Row 3: Amount / Advance / Balance */}
                 <div className="grid grid-cols-3 gap-2">
                   <div className="bg-secondary rounded-xl p-2.5 text-center">
                     <p className="text-[10px] text-muted-foreground mb-0.5">Amount</p>
                     <p className="text-xs font-semibold">{fmtMoney(amount)}</p>
                   </div>
                   <div className="bg-secondary rounded-xl p-2.5 text-center">
-                    <p className="text-[10px] text-muted-foreground mb-0.5">Advance</p>
-                    <p className={`text-xs font-semibold ${adv > 0 ? "text-success" : "text-muted-foreground"}`}>
-                      {adv > 0 ? fmtMoney(adv) : "—"}
-                    </p>
+                    <p className="text-[10px] text-muted-foreground mb-0.5">Received</p>
+                    <p className={`text-xs font-semibold ${adv > 0 ? "text-success" : "text-muted-foreground"}`}>{adv > 0 ? fmtMoney(adv) : "—"}</p>
                   </div>
                   <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}>
                     <p className="text-[10px] text-muted-foreground mb-0.5">Balance</p>
-                    <p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>
-                      {bal > 0 ? fmtMoney(bal) : "✓"}
-                    </p>
+                    <p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓"}</p>
                   </div>
                 </div>
               </div>
@@ -310,17 +349,12 @@ export function InvoicesPage() {
 
         {invTotalPages > 1 && (
           <div className="px-5 border-t border-border/60">
-            <PaginationBar
-              page={invPage}
-              totalPages={invTotalPages}
-              onPageChange={setInvPage}
-              label={`${invStart + 1}–${invEnd} of ${list.length} invoices`}
-            />
+            <PaginationBar page={invPage} totalPages={invTotalPages} onPageChange={setInvPage} label={`${invStart + 1}–${invEnd} of ${list.length} invoices`} />
           </div>
         )}
       </div>
 
-      {/* Advance Payments section */}
+      {/* Advance Payment Ledger section */}
       {ordersWithAdvanceBase.length > 0 && (
         <div className="card-luxe overflow-hidden">
           <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
@@ -330,14 +364,9 @@ export function InvoicesPage() {
             </div>
             <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input
-                value={ledgerQ}
-                onChange={e => setLedgerQ(e.target.value)}
-                placeholder="Search order, client…"
-                className="pl-9 h-9 rounded-xl text-sm"
-              />
+              <Input value={ledgerQ} onChange={e => setLedgerQ(e.target.value)} placeholder="Search order, client…" className="pl-9 h-9 rounded-xl text-sm" />
             </div>
-            {user!.role !== "client" && (
+            {isStaff && (
               <Select value={ledgerClientFilter} onValueChange={setLedgerClientFilter}>
                 <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -349,7 +378,6 @@ export function InvoicesPage() {
             {ordersWithAdvance.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {ledStart + 1}–{ledEnd} of {ordersWithAdvance.length}</p>}
           </div>
 
-          {/* Desktop table */}
           <div className="hidden md:block">
             <table className="table-luxe w-full text-sm">
               <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
@@ -368,19 +396,11 @@ export function InvoicesPage() {
                   const bal = balanceDue(o);
                   return (
                     <tr key={o.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
-                      <td className="px-5 py-3.5">
-                        <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold">{o.orderNumber}</Link>
-                      </td>
+                      <td className="px-5 py-3.5"><Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold">{o.orderNumber}</Link></td>
                       <td className="px-4 py-3.5 text-muted-foreground text-xs">{client?.companyName || "—"}</td>
                       <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(orderTotal(o))}</td>
-                      <td className="px-4 py-3.5 text-center">
-                        <span className="text-success font-semibold">{fmtMoney(adv)}</span>
-                      </td>
-                      <td className="px-4 py-3.5 text-center">
-                        <span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>
-                          {bal > 0 ? fmtMoney(bal) : "✓ Cleared"}
-                        </span>
-                      </td>
+                      <td className="px-4 py-3.5 text-center"><span className="text-success font-semibold">{fmtMoney(adv)}</span></td>
+                      <td className="px-4 py-3.5 text-center"><span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</span></td>
                     </tr>
                   );
                 })}
@@ -391,11 +411,8 @@ export function InvoicesPage() {
             </table>
           </div>
 
-          {/* Mobile cards */}
           <div className="md:hidden divide-y divide-border/40">
-            {ordersWithAdvance.length === 0 && (
-              <div className="p-12 text-center text-muted-foreground">No orders match your search.</div>
-            )}
+            {ordersWithAdvance.length === 0 && <div className="p-12 text-center text-muted-foreground">No orders match your search.</div>}
             {pagedLedger.map(o => {
               const client = db.clients.find(c => c.id === o.clientId);
               const adv = totalAdvance(o);
@@ -404,26 +421,13 @@ export function InvoicesPage() {
                 <div key={o.id} className="p-4 space-y-3">
                   <div className="flex items-center justify-between gap-2">
                     <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono font-semibold text-sm">{o.orderNumber}</Link>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${bal > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                      {bal > 0 ? "Outstanding" : "✓ Cleared"}
-                    </span>
+                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${bal > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{bal > 0 ? "Outstanding" : "✓ Cleared"}</span>
                   </div>
                   {client && <p className="text-xs text-muted-foreground">{client.companyName}</p>}
                   <div className="grid grid-cols-3 gap-2">
-                    <div className="bg-secondary rounded-xl p-2.5 text-center">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Total</p>
-                      <p className="text-xs font-semibold">{fmtMoney(orderTotal(o))}</p>
-                    </div>
-                    <div className="bg-success/10 rounded-xl p-2.5 text-center">
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Advance</p>
-                      <p className="text-xs font-semibold text-success">{fmtMoney(adv)}</p>
-                    </div>
-                    <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}>
-                      <p className="text-[10px] text-muted-foreground mb-0.5">Balance</p>
-                      <p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>
-                        {bal > 0 ? fmtMoney(bal) : "✓"}
-                      </p>
-                    </div>
+                    <div className="bg-secondary rounded-xl p-2.5 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Total</p><p className="text-xs font-semibold">{fmtMoney(orderTotal(o))}</p></div>
+                    <div className="bg-success/10 rounded-xl p-2.5 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Advance</p><p className="text-xs font-semibold text-success">{fmtMoney(adv)}</p></div>
+                    <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓"}</p></div>
                   </div>
                 </div>
               );
@@ -432,16 +436,106 @@ export function InvoicesPage() {
 
           {ledTotalPages > 1 && (
             <div className="px-5 border-t border-border/60">
-              <PaginationBar
-                page={ledPage}
-                totalPages={ledTotalPages}
-                onPageChange={setLedPage}
-                label={`${ledStart + 1}–${ledEnd} of ${ordersWithAdvance.length} entries`}
-              />
+              <PaginationBar page={ledPage} totalPages={ledTotalPages} onPageChange={setLedPage} label={`${ledStart + 1}–${ledEnd} of ${ordersWithAdvance.length} entries`} />
             </div>
           )}
         </div>
       )}
+
+      {/* ── Invoice detail modal — orders + order-wise payment ── */}
+      <Dialog open={!!detailInv} onOpenChange={o => { if (!o) { setDetailInvId(null); setPayOrderId(null); } }}>
+        <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          {detailInv && (() => {
+            const { orders, amount, adv, bal } = invLive(detailInv);
+            const client = db.clients.find(c => c.id === detailInv.clientId);
+            return (
+              <>
+                <DialogHeader>
+                  <DialogTitle className="font-display text-2xl flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-primary" /> Invoice {detailInv.number}
+                  </DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4 mt-1">
+                  <div className="flex items-center justify-between gap-3 text-sm flex-wrap">
+                    <div>
+                      <p className="font-medium">{client?.companyName || "—"}</p>
+                      <p className="text-xs text-muted-foreground">{fmtDate(detailInv.createdAt)} · {orders.length} order{orders.length !== 1 ? "s" : ""}</p>
+                    </div>
+                    <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <div className="bg-secondary rounded-xl p-3 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Amount</p><p className="text-sm font-semibold">{fmtMoney(amount)}</p></div>
+                    <div className="bg-success/10 rounded-xl p-3 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Received</p><p className="text-sm font-semibold text-success">{fmtMoney(adv)}</p></div>
+                    <div className={`rounded-xl p-3 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-sm font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</p></div>
+                  </div>
+
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Orders on this invoice</p>
+                    {orders.map(o => {
+                      const oBal = balanceDue(o);
+                      const oAdv = totalAdvance(o);
+                      return (
+                        <div key={o.id} className="rounded-xl border border-border/70 p-3">
+                          <div className="flex items-center justify-between gap-3 flex-wrap">
+                            <div className="min-w-0">
+                              <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-sm font-semibold">{o.orderNumber}</Link>
+                              <p className="text-[11px] text-muted-foreground">{o.jewelleryType} · {fmtMoney(orderTotal(o))} · paid {fmtMoney(oAdv)}</p>
+                            </div>
+                            <div className="flex items-center gap-2 shrink-0">
+                              <span className={`text-xs font-semibold ${oBal > 0 ? "text-destructive" : "text-success"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
+                              {isStaff && oBal > 0 && payOrderId !== o.id && (
+                                <Button size="sm" variant="outline" onClick={() => startPay(o.id)} className="rounded-lg h-8 gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Receive</Button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Inline per-order payment form */}
+                          {isStaff && payOrderId === o.id && (
+                            <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
+                              <div className="grid grid-cols-2 gap-2.5">
+                                <div>
+                                  <Label className="text-xs">Amount Received ($)</Label>
+                                  <div className="relative mt-1">
+                                    <DollarSign className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                                    <Input type="number" min={0} step="0.01" value={payAmount} onChange={e => setPayAmount(e.target.value)} className="pl-8 h-9 rounded-xl" placeholder={String(oBal)} />
+                                  </div>
+                                </div>
+                                <div>
+                                  <Label className="text-xs">Deposited to locker</Label>
+                                  <Select value={payLockerId} onValueChange={setPayLockerId}>
+                                    <SelectTrigger className="h-9 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+                                    <SelectContent>{db.lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+                                  </Select>
+                                </div>
+                              </div>
+                              {payNeedsRate && (
+                                <div>
+                                  <Label className="text-xs">Exchange rate ($1 → {payLocker?.currency})</Label>
+                                  <Input type="number" min={0} step="0.01" value={payRate} onChange={e => setPayRate(e.target.value)} className="h-9 rounded-xl mt-1" placeholder="e.g. 83.5" />
+                                  {payAmount && Number(payRate) > 0 && <p className="text-[11px] text-muted-foreground mt-1">Deposit: {(Number(payAmount) * Number(payRate)).toLocaleString("en-IN")} {payLocker?.currency}</p>}
+                                </div>
+                              )}
+                              <div>
+                                <Label className="text-xs">Note (optional)</Label>
+                                <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="h-9 rounded-xl mt-1" placeholder="e.g. Bank transfer" />
+                              </div>
+                              <div className="flex items-center gap-2 justify-end">
+                                <Button size="sm" variant="ghost" onClick={() => setPayOrderId(null)} className="rounded-lg h-8">Cancel</Button>
+                                <Button size="sm" onClick={() => submitPayment(o.id)} className="btn-hero rounded-lg h-8">Save Payment</Button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

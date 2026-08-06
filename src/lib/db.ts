@@ -278,12 +278,63 @@ export interface Notification {
 
 export interface Invoice {
   id: string;
+  // Legacy single-order link — kept for backward compatibility. New invoices set
+  // `orderIds` (one or many); for those, `orderId` mirrors orderIds[0]. Always
+  // read the orders via invoiceOrderIds() so both shapes work.
   orderId: string;
+  orderIds?: string[]; // all orders billed on this invoice (dispatch-batch invoicing)
   clientId: string;
   number: string;
-  amount: number;
+  amount: number; // snapshot at creation; the UI always recomputes live from the orders
   paid: boolean;
   createdAt: string;
+}
+
+/** All order ids on an invoice, tolerant of the legacy single-`orderId` shape. */
+export function invoiceOrderIds(inv: Invoice): string[] {
+  if (inv.orderIds && inv.orderIds.length) return inv.orderIds;
+  return inv.orderId ? [inv.orderId] : [];
+}
+
+/** The invoice (if any) that already bills a given order — matches either shape. */
+export function findInvoiceForOrder(invoices: Invoice[], orderId: string): Invoice | undefined {
+  return (invoices || []).find(i => invoiceOrderIds(i).includes(orderId));
+}
+
+/** True when an order is already on some invoice (so it drops out of selection). */
+export function orderInvoiced(invoices: Invoice[], orderId: string): boolean {
+  return !!findInvoiceForOrder(invoices, orderId);
+}
+
+/** Next sequential invoice number, zero-padded (e.g. "0046"). */
+export function nextInvoiceNumber(d: DB): string {
+  const max = (d.invoices || []).reduce((m, i) => Math.max(m, parseInt(i.number, 10) || 0), 0);
+  return String(max + 1).padStart(4, "0");
+}
+
+/**
+ * Create ONE invoice covering the given orders (dispatch-batch invoicing). Skips
+ * any order already invoiced, and any that isn't priced. Returns the new invoice,
+ * or null if nothing eligible. Call inside updateDb().
+ */
+export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: string[], at: string): Invoice | null {
+  if (!d.invoices) d.invoices = [];
+  const eligible = orderIds.filter(oid => {
+    const o = d.orders.find(x => x.id === oid);
+    return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(d.invoices, oid);
+  });
+  if (!eligible.length) return null;
+  const amount = eligible.reduce((s, oid) => {
+    const o = d.orders.find(x => x.id === oid)!;
+    return s + orderTotal(o);
+  }, 0);
+  const allCleared = eligible.every(oid => balanceDue(d.orders.find(x => x.id === oid)!) <= 0);
+  const inv: Invoice = {
+    id: uid("inv_"), orderId: eligible[0], orderIds: eligible, clientId,
+    number: nextInvoiceNumber(d), amount, paid: allCleared, createdAt: at,
+  };
+  d.invoices.push(inv);
+  return inv;
 }
 
 // Categories are user-managed from Settings (Settings.expenseCategories) —
@@ -919,6 +970,52 @@ export function reconcileClientAccount(
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
   return allocatePaymentFIFO(orders, pool, recordedBy, at, note);
+}
+
+/**
+ * Record a payment against ONE specific order (order-wise collection from the
+ * invoice screen). Caps at the order's balance and pushes the excess to client
+ * credit; optionally logs a Locker deposit (in the locker's own currency, via
+ * `lockerAmount`). Mirrors the OrderDetail advance flow. Call inside updateDb().
+ */
+export function recordOrderPayment(
+  d: DB,
+  orderId: string,
+  opts: { amount: number; recordedBy: string; at: string; note?: string; lockerId?: string; lockerAmount?: number; exchangeRate?: number },
+): { applied: number; toCredit: number; paidInFull: boolean } {
+  const o = d.orders.find(x => x.id === orderId);
+  if (!o) return { applied: 0, toCredit: 0, paidInFull: false };
+  if (!o.advances) o.advances = [];
+  const bal = balanceDue(o);
+  const applied = Math.min(opts.amount, bal);
+  const toCredit = Math.round((opts.amount - applied) * 100) / 100;
+  let paidInFull = false;
+  if (applied > 0) {
+    paidInFull = totalAdvance(o) + applied >= orderTotal(o);
+    const isFirst = o.advances.length === 0;
+    const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
+    o.advances.push({
+      id: uid("adv_"), amount: applied, note: opts.note || defaultNote, recordedBy: opts.recordedBy, createdAt: opts.at,
+      lockerId: opts.lockerId || undefined, lockerAmount: opts.lockerId ? opts.lockerAmount : undefined,
+    });
+    if (opts.lockerId) {
+      const locker = d.lockers.find(l => l.id === opts.lockerId);
+      if (locker) {
+        if (!d.lockerTransactions) d.lockerTransactions = [];
+        d.lockerTransactions.push({
+          id: uid("ltx_"), lockerId: opts.lockerId, type: "income", amountInr: Number(opts.lockerAmount || 0),
+          currency: locker.currency || "INR", category: `Client Payment — ${o.orderNumber}`,
+          refType: "clientPayment", refId: o.id, recordedBy: opts.recordedBy, createdAt: opts.at,
+          exchangeRate: opts.exchangeRate,
+        });
+      }
+    }
+  }
+  if (toCredit > 0) {
+    const c = d.clients.find(x => x.id === o.clientId);
+    if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + toCredit) * 100) / 100;
+  }
+  return { applied, toCredit, paidInFull };
 }
 
 /** Client account summary across all their orders (+ carried-forward credit). */

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, ensureInvoiceForOrder,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
-import { printInvoice } from "@/lib/invoicePrint";
+import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
@@ -959,7 +959,6 @@ export function OrderDetailPage() {
         // Client billing.
         if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
         if (faShipping.trim() !== "" && !isNaN(ship) && ship >= 0) o.shippingCharge = ship;
-        ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
         const back = capOrderAdvances(o);
         if (back > 0) { const c = d.clients.find(x => x.id === o.clientId); if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100; }
         if (!o.manufacturingLog) o.manufacturingLog = [];
@@ -1285,7 +1284,6 @@ export function OrderDetailPage() {
       if (makingEntered) o.actualMakingCharges = mk;
       if (has(val)) {
         o.amount = val;
-        ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
         const clientUser = d.users.find(u => u.clientId === o.clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id,
@@ -1366,7 +1364,6 @@ export function OrderDetailPage() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
       o.shippingCharge = ship;
-      ensureInvoiceForOrder(d, o.id); // auto invoice number now that it's priced
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Order Priced", body: `${o.orderNumber} order value set to ${fmtMoney(val)}${ship > 0 ? ` + ${fmtMoney(ship)} shipping` : ""}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
@@ -1388,26 +1385,30 @@ export function OrderDetailPage() {
   const showPhotographySection = canEditStage() || hasProductMedia;
 
   const handlePrintInvoice = () => {
-    const existing = db.invoices.find(i => i.orderId === order.id);
     const amount = orderTotal(order);
     const paid = balance <= 0;
-    let invNumber: string;
+    const existing = findInvoiceForOrder(db.invoices, order.id);
     if (existing) {
-      // Stable number, reused on every reprint — keep amount/paid status current.
-      invNumber = existing.number;
-      if (existing.amount !== amount || existing.paid !== paid) {
-        updateDb(d => {
-          const i = d.invoices.find(x => x.id === existing.id);
-          if (i) { i.amount = amount; i.paid = paid; }
-        });
+      const ids = invoiceOrderIds(existing);
+      // Part of a dispatch-batch invoice → print the whole invoice (all orders).
+      if (ids.length > 1) {
+        const orders = ids.map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
+        printBatchInvoice(orders, client, db.settings, existing.number, existing.createdAt.slice(0, 10));
+        return;
       }
-    } else {
-      // First time this order is billed — assign the next number in sequence.
-      invNumber = String(db.invoices.length + 1).padStart(4, "0");
-      updateDb(d => {
-        d.invoices.push({ id: uid("inv_"), orderId: order.id, clientId: order.clientId, number: invNumber, amount, paid, createdAt: new Date().toISOString() });
-      });
+      // Single-order invoice → keep its snapshot current, then print.
+      if (existing.amount !== amount || existing.paid !== paid) {
+        updateDb(d => { const i = d.invoices.find(x => x.id === existing.id); if (i) { i.amount = amount; i.paid = paid; } });
+      }
+      printInvoice(order, client, db.settings, existing.number);
+      return;
     }
+    // Not billed yet — create a single-order invoice on demand, then print.
+    let invNumber = "";
+    updateDb(d => {
+      invNumber = nextInvoiceNumber(d);
+      d.invoices.push({ id: uid("inv_"), orderId: order.id, orderIds: [order.id], clientId: order.clientId, number: invNumber, amount, paid, createdAt: new Date().toISOString() });
+    });
     printInvoice(order, client, db.settings, invNumber);
   };
 
