@@ -153,7 +153,7 @@ export function OrdersPage() {
                 <div className="p-3">
                   <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
-                    {o.jewelleryType} · {o.metal}{o.designNumber ? ` · #${o.designNumber}` : ""}
+                    {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
                   {user!.role !== "client" && client && (
                     <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>
@@ -213,7 +213,7 @@ export function OrdersPage() {
                   <div className="min-w-0">
                     <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      {o.jewelleryType} · {o.metal} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
+                      {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
                       {o.designNumber ? ` · #${o.designNumber}` : ""}
                     </p>
                   </div>
