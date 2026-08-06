@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
+import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -531,21 +531,64 @@ export function FactoryHistoryPage() {
     });
   };
 
-  // ── Combined: Account Statement + Gold Ledger + Diamond Ledger in ONE file,
-  //    optionally limited to a single order. ──
+  // ── Combined: ONE two-sided Debit | Credit ledger (Gold + Diamond + Amount on
+  //    each side, one row per transaction) — the format the client uses in their
+  //    accounting software. Optionally limited to a single order. ──
   const rs = (n: number) => Math.round(n).toLocaleString("en-IN"); // plain INR (jsPDF can't render ₹)
   const q3 = (n: number) => Math.round(n * 1000) / 1000;
+
+  type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drDia: number; drAmount: number; crGold: number; crDia: number; crAmount: number };
+  // Debit  = value we GAVE the factory (gold/diamond issued) + money we PAID them.
+  // Credit = value the factory RETURNED (finished gold, diamond used/returned) + charges they BILLED.
+  const buildUnifiedLedger = (iss: MaterialIssuance[]): UniRow[] => {
+    const rows: UniRow[] = [];
+    const zero = () => ({ drGold: 0, drDia: 0, drAmount: 0, crGold: 0, crDia: 0, crAmount: 0 });
+    for (const mi of iss) {
+      const order = db.orders.find(o => o.id === mi.orderId);
+      const ref = order?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
+      // Gold given to the factory (fine 24KT, matching the "Fine Gold at Factory" card).
+      if (mi.material === "gold" && mi.source !== "factoryPool") {
+        rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
+      }
+      // Finished piece returned by the factory (converted to fine 24KT).
+      if (mi.material === "gold" && mi.finishedNetWeight != null) {
+        const fine = mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity) : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
+        rows.push({ ...zero(), id: mi.id + "-gout", date: mi.issuedAt, ref, particular: `Finished piece — net ${mi.finishedNetWeight}g`, crGold: fine });
+      }
+      // Diamond issued in / used-in-piece + returned out.
+      if (mi.material === "diamond") {
+        rows.push({ ...zero(), id: mi.id + "-din", date: mi.issuedAt, ref, particular: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`, drDia: mi.quantityIssued });
+        if (mi.status === "closed") {
+          const returned = mi.diamondKind === "certified" ? (mi.finishDisposition === "returned" ? mi.quantityIssued : 0) : (mi.finishReturnedCt || 0);
+          const used = Math.round((mi.quantityIssued - returned) * 1000) / 1000;
+          if (used > 0) rows.push({ ...zero(), id: mi.id + "-dused", date: mi.issuedAt, ref, particular: `Diamond used in piece`, crDia: used });
+          if (returned > 0) rows.push({ ...zero(), id: mi.id + "-dret", date: mi.issuedAt, ref, particular: `Diamond returned to stock`, crDia: returned });
+        }
+      }
+      // Making charges billed (credit) and payments made (debit).
+      if (mi.makingCharges.amountInr > 0) {
+        const unit = mi.material === "gold" ? "g" : "ct";
+        rows.push({ ...zero(), id: mi.id + "-chg", date: mi.issuedAt, ref, particular: `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`, crAmount: mi.makingCharges.amountInr });
+      }
+      for (const pay of mi.makingCharges.payments || []) {
+        rows.push({ ...zero(), id: pay.id, date: pay.createdAt, ref, particular: `Payment${pay.note ? ` — ${pay.note}` : ""}`, drAmount: pay.amountInr });
+      }
+    }
+    return rows.sort((a, b) => +new Date(a.date) - +new Date(b.date)); // chronological (oldest first)
+  };
+
+  const uniTotals = (rows: UniRow[]) => rows.reduce(
+    (t, r) => ({ drGold: t.drGold + r.drGold, drDia: t.drDia + r.drDia, drAmount: t.drAmount + r.drAmount, crGold: t.crGold + r.crGold, crDia: t.crDia + r.crDia, crAmount: t.crAmount + r.crAmount }),
+    { drGold: 0, drDia: 0, drAmount: 0, crGold: 0, crDia: 0, crAmount: 0 },
+  );
 
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
     const acct = factoryAccount(iss);
-    const st = buildStatement(iss).filter(r => inDateRange(r.date, from, to));
-    const gl = buildGoldLedger(iss).filter(r => inDateRange(r.date, from, to));
-    const dl = buildDiamondLedger(iss).filter(r => inDateRange(r.date, from, to));
-    const goldClose = buildGoldLedger(iss)[0]?.balance ?? 0;   // ledgers are newest-first
-    const diaClose = buildDiamondLedger(iss)[0]?.balance ?? 0;
-    downloadLedgerPdfMulti({
-      title: `Factory Full Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
+    const rows = buildUnifiedLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const T = uniTotals(rows);
+    downloadLedgerPdf({
+      title: `Factory Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
         orderNo ? `Filtered to order: ${orderNo}` : "",
@@ -553,66 +596,50 @@ export function FactoryHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        { label: "Fine Gold at Factory (24KT)", value: `${goldClose.toLocaleString()} g` },
-        { label: "Diamond (net)", value: `${diaClose.toLocaleString()} ct` },
-        { label: "Charges Total", value: fmtInrPlain(acct.chargesTotal) },
-        { label: "Charges Paid", value: fmtInrPlain(acct.chargesPaid) },
+        { label: "Fine Gold at Factory (24KT)", value: `${q3(T.drGold - T.crGold)} g` },
+        { label: "Diamond (net)", value: `${q3(T.drDia - T.crDia)} ct` },
         { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
       ],
       landscape: true,
-      sections: [
-        {
-          heading: "Account Statement (Rs)",
-          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "Charged", x: 198 }, { header: "Paid", x: 228 }, { header: "Balance", x: 258 }],
-          align: ["left", "left", "right", "right", "right"],
-          rows: st.map(r => [fmtDate(r.date), r.particulars, r.debit ? rs(r.debit) : "—", r.credit ? rs(r.credit) : "—", rs(r.balance)]),
-          totalsRow: ["", "Totals", rs(st.reduce((s, r) => s + r.debit, 0)), rs(st.reduce((s, r) => s + r.credit, 0)), `Pending ${rs(acct.chargesPending)}`],
-        },
-        {
-          heading: "Gold Ledger (fine 24KT g)",
-          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "In (g)", x: 198 }, { header: "Out (g)", x: 228 }, { header: "Balance (g)", x: 258 }],
-          align: ["left", "left", "right", "right", "right"],
-          rows: gl.map(r => [fmtDate(r.date), r.particulars, r.inQ ? String(q3(r.inQ)) : "—", r.outQ ? String(q3(r.outQ)) : "—", String(q3(r.balance))]),
-          totalsRow: ["", "Totals", String(q3(gl.reduce((s, r) => s + r.inQ, 0))), String(q3(gl.reduce((s, r) => s + r.outQ, 0))), String(q3(goldClose))],
-        },
-        {
-          heading: "Diamond Ledger (ct)",
-          columns: [{ header: "Date", x: 14 }, { header: "Particulars", x: 46 }, { header: "In (ct)", x: 198 }, { header: "Out (ct)", x: 228 }, { header: "Balance (ct)", x: 258 }],
-          align: ["left", "left", "right", "right", "right"],
-          rows: dl.map(r => [fmtDate(r.date), r.particulars, r.inQ ? String(q3(r.inQ)) : "—", r.outQ ? String(q3(r.outQ)) : "—", String(q3(r.balance))]),
-          totalsRow: ["", "Totals", String(q3(dl.reduce((s, r) => s + r.inQ, 0))), String(q3(dl.reduce((s, r) => s + r.outQ, 0))), String(q3(diaClose))],
-        },
+      groupHeaders: [
+        { label: "DEBIT  (issued to factory / paid)", startX: 14, endX: 84 },
+        { label: "CREDIT  (returned / billed)", startX: 205, endX: 283 },
       ],
-      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${orderNo ? `-Order-${orderNo.replace(/[^\w.-]+/g, "_")}` : ""}-Full-Ledger`,
+      columns: [
+        { header: "Gold(g)", x: 16 }, { header: "Dia(ct)", x: 38 }, { header: "Amount", x: 60 },
+        { header: "Date", x: 88 }, { header: "Inv/Ref", x: 116 }, { header: "Particular", x: 140 },
+        { header: "Gold(g)", x: 210 }, { header: "Dia(ct)", x: 233 }, { header: "Amount", x: 256 },
+      ],
+      align: ["right", "right", "right", "left", "left", "left", "right", "right", "right"],
+      rows: rows.map(r => [
+        r.drGold ? String(q3(r.drGold)) : "", r.drDia ? String(q3(r.drDia)) : "", r.drAmount ? rs(r.drAmount) : "",
+        fmtDate(r.date), r.ref || "", r.particular.slice(0, 40),
+        r.crGold ? String(q3(r.crGold)) : "", r.crDia ? String(q3(r.crDia)) : "", r.crAmount ? rs(r.crAmount) : "",
+      ]),
+      totalsRow: [
+        String(q3(T.drGold)), String(q3(T.drDia)), rs(T.drAmount),
+        "", "", "Totals",
+        String(q3(T.crGold)), String(q3(T.crDia)), rs(T.crAmount),
+      ],
+      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
     });
   };
 
   const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const st = buildStatement(iss).filter(r => inDateRange(r.date, from, to));
-    const gl = buildGoldLedger(iss).filter(r => inDateRange(r.date, from, to));
-    const dl = buildDiamondLedger(iss).filter(r => inDateRange(r.date, from, to));
-    const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
-    const line = (arr: (string | number)[]) => arr.map(esc).join(",");
-    const out: string[] = [];
-    out.push(line([`Factory Ledger`, `${factory.name}${orderNo ? ` — Order ${orderNo}` : ""}`]));
-    out.push("");
-    out.push(line(["ACCOUNT STATEMENT (Rs)"]));
-    out.push(line(["Date", "Particulars", "Charged (Rs)", "Paid (Rs)", "Balance (Rs)"]));
-    st.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", Math.round(r.balance)])));
-    out.push("");
-    out.push(line(["GOLD LEDGER (fine 24KT g)"]));
-    out.push(line(["Date", "Particulars", "In (g)", "Out (g)", "Balance (g)"]));
-    gl.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance])));
-    out.push("");
-    out.push(line(["DIAMOND LEDGER (ct)"]));
-    out.push(line(["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"]));
-    dl.forEach(r => out.push(line([fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance])));
-    const blob = new Blob(["﻿" + out.join("\r\n")], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url; a.download = `Factory-${factory.name.replace(/\s+/g, "_")}${orderNo ? `-Order-${orderNo.replace(/[^\w.-]+/g, "_")}` : ""}-Full-Ledger.csv`;
-    document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+    const rows = buildUnifiedLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const T = uniTotals(rows);
+    downloadCsv(
+      `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
+      ["Date", "Inv/Ref", "Particular", "Debit Gold (g)", "Debit Diamond (ct)", "Debit Amount (Rs)", "Credit Gold (g)", "Credit Diamond (ct)", "Credit Amount (Rs)"],
+      [
+        ...rows.map(r => [fmtDate(r.date), r.ref, r.particular, r.drGold ? q3(r.drGold) : "", r.drDia ? q3(r.drDia) : "", r.drAmount ? Math.round(r.drAmount) : "", r.crGold ? q3(r.crGold) : "", r.crDia ? q3(r.crDia) : "", r.crAmount ? Math.round(r.crAmount) : ""] as (string | number)[]),
+        ["", "", "TOTALS", q3(T.drGold), q3(T.drDia), Math.round(T.drAmount), q3(T.crGold), q3(T.crDia), Math.round(T.crAmount)],
+        ["", "", "Fine Gold at Factory (24KT)", q3(T.drGold - T.crGold), "", "", "", "", ""],
+        ["", "", "Diamond net (ct)", q3(T.drDia - T.crDia), "", "", "", "", ""],
+        ["", "", "Charges Pending (Rs)", Math.round(T.crAmount - T.drAmount), "", "", "", "", ""],
+      ],
+    );
   };
 
   return (
@@ -651,8 +678,8 @@ export function FactoryHistoryPage() {
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
               extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
               options={[
-                { label: "Full Ledger — PDF", sublabel: "Account statement + gold + diamond, all in one", kind: "pdf", run: exportCombinedPdf },
-                { label: "Full Ledger — Excel", sublabel: "Account statement + gold + diamond, all in one", kind: "excel", run: exportCombinedCsv },
+                { label: "Full Ledger — PDF", sublabel: "One Debit / Credit table — gold, diamond & amount together", kind: "pdf", run: exportCombinedPdf },
+                { label: "Full Ledger — Excel", sublabel: "One Debit / Credit table — gold, diamond & amount together", kind: "excel", run: exportCombinedCsv },
                 { label: "Account Statement — PDF", sublabel: "Making charges & payments only", kind: "pdf", run: exportPdf },
                 { label: "Account Statement — Excel", sublabel: "Making charges & payments only", kind: "excel", run: exportCsv },
                 { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },

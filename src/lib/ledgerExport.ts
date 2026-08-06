@@ -50,6 +50,9 @@ export function downloadLedgerPdf(opts: {
   totalsRow?: string[];
   /** Landscape A4 for wide tables (more room, no truncated particulars). */
   landscape?: boolean;
+  /** Optional grouping band drawn ABOVE the column headers (e.g. DEBIT / CREDIT),
+   *  each label centred between startX and endX (in the same mm units as columns). */
+  groupHeaders?: { label: string; startX: number; endX: number }[];
 }): void {
   const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
   const PAGE_W = opts.landscape ? 297 : 210;
@@ -75,7 +78,15 @@ export function downloadLedgerPdf(opts: {
     doc.setTextColor(30);
   };
 
+  const groupHeaders = opts.groupHeaders;
   const tableHead = (y: number) => {
+    if (groupHeaders?.length) {
+      doc.setFillColor(214, 223, 240);
+      doc.rect(L - 2, y - 4.6, R - L + 4, 6.4, "F");
+      doc.setFont("helvetica", "bold"); doc.setFontSize(8); doc.setTextColor(35, 55, 95);
+      for (const g of groupHeaders) doc.text(g.label, (g.startX + g.endX) / 2, y, { align: "center" });
+      y += 6.6;
+    }
     doc.setFillColor(234, 238, 246);
     doc.rect(L - 2, y - 4.6, R - L + 4, 7, "F");
     doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(35, 55, 95);
