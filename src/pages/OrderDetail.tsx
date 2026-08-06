@@ -17,7 +17,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -114,9 +114,12 @@ async function compressImage(file: File): Promise<string> {
 
 /** Order status derived purely from how many timeline steps are done — so a
  *  reverted (undone) stage downgrades the status correctly, not just upgrades. */
-function statusFromTimeline(timeline: Order["timeline"]): Order["status"] {
+function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false): Order["status"] {
   const total = timeline.length;
   const done = timeline.filter(t => t.status === "done").length;
+  // In-house Ready-Stock builds have no client-approval/shipping stages: they just
+  // stay "In Production" until the final step, then "Ready" (piece ready for stock).
+  if (forReadyStock) return done >= total ? "Ready" : "In Production";
   const finalApprovalIdx = timeline.findIndex(x => x.step === "Final Approval");
   const dispatchIdx = timeline.findIndex(x => x.step === "Dispatch");
   if (done >= total) return "Delivered";
@@ -806,14 +809,7 @@ export function OrderDetailPage() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
-      const done = o.timeline.filter(t => t.status === "done").length;
-      const finalApprovalIdx = o.timeline.findIndex(x => x.step === "Final Approval");
-      const dispatchIdx      = o.timeline.findIndex(x => x.step === "Dispatch");
-      if (done >= 2 && o.status === "Waiting") o.status = "Approved";
-      if (done >= 3 && done < finalApprovalIdx + 1) o.status = "In Production";
-      if (done >= finalApprovalIdx + 1) o.status = "Ready";
-      if (done >= dispatchIdx + 1) o.status = "Dispatched";
-      if (done === o.timeline.length) o.status = "Delivered";
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock);
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
@@ -1412,6 +1408,45 @@ export function OrderDetailPage() {
     printInvoice(order, client, db.settings, invNumber);
   };
 
+  // In-house build → create a Ready Stock item pre-filled from this order. Admin
+  // sets the selling price & cost in Ready Stock (cost basis mixes INR labour with
+  // material, so it's entered there, not guessed here).
+  const addToReadyStock = () => {
+    if (order.readyStockCreatedId) { nav("/ready-stock"); return; }
+    const itemId = uid("rs_");
+    const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
+    const diaWt = order.actualDiamondWeight ?? (order.diamondWeight || undefined);
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      if (o.readyStockCreatedId) return;
+      if (!d.readyStock) d.readyStock = [];
+      d.readyStock.unshift({
+        id: itemId,
+        name: o.designNumber ? `${o.jewelleryType} #${o.designNumber}` : `${o.jewelleryType} — ${o.orderNumber}`,
+        jewelleryType: o.jewelleryType,
+        metal: o.metal,
+        productKarats: o.productKarats,
+        grossWeight: o.actualGrossWeight ?? o.estimatedGrossWeight,
+        netWeight: o.actualNetWeight ?? o.estimatedNetWeight,
+        diamondWeight: diaWt,
+        diamondType: diaWt ? o.diamondType : undefined,
+        price: 0, // admin sets the selling price in Ready Stock
+        quantity: 1,
+        images: imgs,
+        sku: o.designNumber || undefined,
+        notes: `Built in-house from order ${o.orderNumber}`,
+        createdBy: user!.id,
+        createdAt: new Date().toISOString(),
+      });
+      o.readyStockCreatedId = itemId;
+      const idx = o.timeline.findIndex(t => t.step === "Ready for Stock");
+      if (idx >= 0) { o.timeline[idx].status = "done"; o.timeline[idx].date = new Date().toISOString(); }
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock);
+    });
+    toast.success("Added to Ready Stock — set its selling price & cost there.");
+    nav("/ready-stock");
+  };
+
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-5">
@@ -1427,12 +1462,18 @@ export function OrderDetailPage() {
             <div>
               <p className="text-xs text-muted-foreground">{order.orderNumber}</p>
               <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{order.jewelleryType} in {order.metal}</h1>
-              <p className="text-sm text-muted-foreground mt-1">{client?.companyName} · {order.contactPerson}</p>
+              <p className="text-sm text-muted-foreground mt-1">{order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client?.companyName} · {order.contactPerson}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <StatusBadge status={order.status} />
-            <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>
+            {order.forReadyStock
+              ? (user!.role === "admin" && (
+                  order.readyStockCreatedId
+                    ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
+                    : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
+                ))
+              : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>}
             {user!.role === "admin" && order.status !== "Rejected" && (
               <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
                 Cancel Order

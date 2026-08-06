@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -53,6 +53,7 @@ export function NewOrderPage() {
   const isAdmin    = user?.role === "admin";
   const isEmployee = user?.role === "employee";
   const isClient   = user?.role === "client";
+  const READY_STOCK_CLIENT = "__readystock__"; // sentinel in the client dropdown = build for inventory, no client
 
   const initDb          = loadDb();
   const allClients      = isAdmin
@@ -127,6 +128,8 @@ export function NewOrderPage() {
   // A pure diamond sale, no jewellery piece at all — hides every field that
   // only makes sense for a manufactured piece (size, plating, factory, etc.).
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
+  // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
+  const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
 
   const setMetal = (v: string) => {
     setF(prev => ({
@@ -183,7 +186,7 @@ export function NewOrderPage() {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
     if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
-    if (!isClient && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
+    if (!isClient && !forReadyStock && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
     if (!isDiamondOnly && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
     if (!isDiamondOnly && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
     if (!isDiamondOnly && !f.productColor)        { toast.error("Color of Product is required."); return; }
@@ -202,7 +205,7 @@ export function NewOrderPage() {
     }
 
     setSaving(true);
-    const clientId = isClient ? user!.clientId! : f.clientId;
+    const clientId = isClient ? user!.clientId! : (forReadyStock ? "" : f.clientId);
     const orderId = uid("o_");
 
     // Upload reference images to Firebase Storage; store their URLs on the order.
@@ -231,6 +234,7 @@ export function NewOrderPage() {
         id: orderId,
         orderNumber: num,
         clientId,
+        forReadyStock: forReadyStock || undefined,
         assignedEmployeeId,
         contactPerson: user!.name,
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
@@ -257,8 +261,8 @@ export function NewOrderPage() {
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
         priority: f.priority as Order["priority"],
-        status: "Waiting",
-        amount: f.orderValue,
+        status: forReadyStock ? "In Production" : "Waiting",
+        amount: forReadyStock ? 0 : f.orderValue,
         shippingCharge: Number(f.shippingCharge) || 0,
         advances: advance > 0 ? [{
           id: uid("adv_"),
@@ -269,7 +273,7 @@ export function NewOrderPage() {
           lockerId: f.advanceLockerId || undefined,
           lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
-        timeline: buildTimelineSteps(f.certificate === "yes").map((s, i) => ({
+        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : buildTimelineSteps(f.certificate === "yes")).map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,
@@ -280,7 +284,8 @@ export function NewOrderPage() {
       d.orders.unshift(order);
       // Invoices are no longer auto-created per order — they're generated at
       // dispatch time by selecting orders on the Invoices page.
-      mailInfo = {
+      // In-house Ready-Stock builds have no client, so skip the marketing notice.
+      if (!forReadyStock) mailInfo = {
         orderNumber: order.orderNumber,
         clientName: d.clients.find(c => c.id === clientId)?.companyName ?? "Client",
         jewelleryType: order.jewelleryType,
@@ -325,7 +330,7 @@ export function NewOrderPage() {
         });
       }
 
-      if (isAdmin || isEmployee) {
+      if ((isAdmin || isEmployee) && !forReadyStock) {
         const clientUser = d.users.find(u => u.clientId === clientId && u.role === "client");
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id,
@@ -376,11 +381,15 @@ export function NewOrderPage() {
 
         {/* ══ 1. Client selector (admin / employee only) ══ */}
         {(isAdmin || isEmployee) && (
-          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Select the client this order belongs to">
+          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Select the client — or build a piece for your own Ready Stock">
             <Field label="Select Client *">
               <Select value={f.clientId} onValueChange={v => set("clientId", v)} required>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={READY_STOCK_CLIENT}>
+                    <span className="font-medium">🏭 Ready Stock — build for inventory</span>
+                    <span className="text-muted-foreground ml-2 text-xs">no client</span>
+                  </SelectItem>
                   {allClients.map(c => (
                     <SelectItem key={c.id} value={c.id}>
                       <span className="font-medium">{c.companyName}</span>
@@ -391,7 +400,14 @@ export function NewOrderPage() {
               </Select>
             </Field>
 
-            {f.clientId && (() => {
+            {forReadyStock && (
+              <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 text-sm mt-3">
+                <PackageCheck className="h-5 w-5 text-primary shrink-0" />
+                <p className="text-xs text-muted-foreground">In-house build — no client, no billing. Produce it, then add the finished piece to Ready Stock from the order page.</p>
+              </div>
+            )}
+
+            {f.clientId && !forReadyStock && (() => {
               const c = allClients.find(x => x.id === f.clientId);
               return c ? (
                 <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50 text-sm mt-3">
@@ -408,7 +424,8 @@ export function NewOrderPage() {
           </SectionCard>
         )}
 
-        {/* ══ 1b. Sell from Ready Stock (optional, all roles) ══ */}
+        {/* ══ 1b. Sell from Ready Stock (optional) — not for in-house stock builds ══ */}
+        {!forReadyStock && (
         <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional — pick an existing finished piece instead of a custom order">
           <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => selectReadyStock(v === READY_STOCK_NONE ? "" : v)}>
             <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="None — custom order" /></SelectTrigger>
@@ -440,6 +457,7 @@ export function NewOrderPage() {
             </div>
           )}
         </SectionCard>
+        )}
 
         {/* ══ 2. Order Details ══ */}
         <SectionCard title="Order Details">
@@ -796,8 +814,8 @@ export function NewOrderPage() {
           )}
         </SectionCard>
 
-        {/* ══ 6. Order Value / Shipping / Advance — staff only ══ */}
-        {!isClient && (
+        {/* ══ 6. Order Value / Shipping / Advance — staff only, not for in-house stock builds ══ */}
+        {!isClient && !forReadyStock && (
           <>
             {/* Order Value */}
             <SectionCard icon={<DollarSign className="h-4 w-4 text-brand-dark" />} title="Order Value" subtitle="Set the agreed order amount" iconBg="bg-brand-light/15">

@@ -126,6 +126,13 @@ export function buildTimelineSteps(hasCertificate: boolean): string[] {
   );
 }
 
+// A Ready-Stock (in-house) order has no client, so it skips the client-approval
+// and shipping stages — just design, produce, then add the finished piece to stock.
+export const READY_STOCK_TIMELINE_STEPS = ["Order Submitted", "CAD Designing", "In Production", "Ready for Stock"] as const;
+export function buildReadyStockTimelineSteps(): string[] {
+  return [...READY_STOCK_TIMELINE_STEPS];
+}
+
 export interface TimelineEntry {
   step: TimelineStep;
   status: "pending" | "in_progress" | "done";
@@ -170,7 +177,9 @@ export interface ManufacturingLogEntry {
 export interface Order {
   id: string;
   orderNumber: string;
-  clientId: string;
+  clientId: string; // empty string when forReadyStock (in-house build, no client)
+  forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
+  readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
   contactPerson: string;
   jewelleryType:
     "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom" | "Diamond Only";

@@ -155,9 +155,9 @@ export function OrdersPage() {
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                     {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
-                  {user!.role !== "client" && client && (
-                    <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>
-                  )}
+                  {user!.role !== "client" && (o.forReadyStock
+                    ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
+                    : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
                   <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
                   </div>
@@ -229,9 +229,9 @@ export function OrdersPage() {
                   </div>
                 )}
 
-                {user!.role !== "client" && client && (
-                  <p className="text-xs font-medium text-muted-foreground truncate">{client.companyName}</p>
-                )}
+                {user!.role !== "client" && (o.forReadyStock
+                  ? <p className="text-xs font-medium text-primary truncate">🏭 Ready Stock (in-house)</p>
+                  : client && <p className="text-xs font-medium text-muted-foreground truncate">{client.companyName}</p>)}
 
                 {/* Manufacturing chips — factory · gold used · diamond used (staff only) */}
                 {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
