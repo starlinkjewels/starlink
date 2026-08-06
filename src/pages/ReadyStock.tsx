@@ -56,6 +56,7 @@ type ItemForm = {
   diamondWeight: string;
   diamondType: "Natural" | "Lab Grown";
   price: string;
+  cost: string;
   quantity: string;
   sku: string;
   location: string;
@@ -65,11 +66,12 @@ type ItemForm = {
 const EMPTY_FORM: ItemForm = {
   name: "", jewelleryType: "Ring", metal: "Gold", productKarats: "22K",
   grossWeight: "", netWeight: "", diamondWeight: "", diamondType: "Natural",
-  price: "", quantity: "1", sku: "", location: "US", notes: "",
+  price: "", cost: "", quantity: "1", sku: "", location: "US", notes: "",
 };
 
 export function ReadyStockPage() {
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin"; // cost + profit/loss are admin-only
   const db = useDb();
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -100,7 +102,7 @@ export function ReadyStockPage() {
       netWeight: item.netWeight ? String(item.netWeight) : "",
       diamondWeight: item.diamondWeight ? String(item.diamondWeight) : "",
       diamondType: item.diamondType || "Natural",
-      price: String(item.price), quantity: String(item.quantity),
+      price: String(item.price), cost: item.cost != null ? String(item.cost) : "", quantity: String(item.quantity),
       sku: item.sku || "", location: item.location || "US", notes: item.notes || "",
     });
     setImages(item.images || []);
@@ -141,6 +143,8 @@ export function ReadyStockPage() {
           diamondWeight: Number(f.diamondWeight) || undefined,
           diamondType: Number(f.diamondWeight) > 0 ? f.diamondType : undefined,
           price, quantity,
+          // Cost is admin-only. A non-admin edit must never wipe an existing cost.
+          cost: isAdmin ? (Number(f.cost) > 0 ? Number(f.cost) : undefined) : (editingId ? d.readyStock.find(x => x.id === editingId)?.cost : undefined),
           images: imageUrls,
           sku: f.sku.trim() || undefined,
           location: f.location || undefined,
@@ -279,6 +283,19 @@ export function ReadyStockPage() {
                 </div>
               </div>
 
+              {/* Cost — admin only, drives profit/loss; never shown to employees or clients */}
+              {isAdmin && (
+                <div>
+                  <Label className="text-xs">Cost ($) — internal, admin only</Label>
+                  <Input type="number" min={0} value={f.cost} onChange={e => setF({ ...f, cost: e.target.value })} className="rounded-xl mt-1" placeholder="Your cost — for profit/loss" />
+                  {Number(f.cost) > 0 && Number(f.price) > 0 && (
+                    <p className={`text-[11px] mt-1 font-medium ${Number(f.price) - Number(f.cost) >= 0 ? "text-success" : "text-destructive"}`}>
+                      {Number(f.price) - Number(f.cost) >= 0 ? "Profit" : "Loss"} {fmtMoney(Math.abs(Number(f.price) - Number(f.cost)))} per piece
+                    </p>
+                  )}
+                </div>
+              )}
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">SKU / Design # (optional)</Label>
@@ -366,6 +383,15 @@ export function ReadyStockPage() {
                   <button onClick={() => adjustQty(item, 1)} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
                 </div>
               </div>
+              {isAdmin && item.cost != null && (
+                <p className="text-[11px] mt-1.5">
+                  <span className="text-muted-foreground">Cost {fmtMoney(item.cost)}</span>
+                  {" · "}
+                  <span className={`font-semibold ${item.price - item.cost >= 0 ? "text-success" : "text-destructive"}`}>
+                    {item.price - item.cost >= 0 ? "Profit" : "Loss"} {fmtMoney(Math.abs(item.price - item.cost))}
+                  </span>
+                </p>
+              )}
               <p className="text-[11px] text-muted-foreground mt-2">Added {fmtDate(item.createdAt)}</p>
               <div className="mt-3 pt-3 border-t border-border/50">
                 <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg w-full text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
@@ -409,6 +435,11 @@ export function ReadyStockPage() {
               </div>
               <div className="text-right shrink-0">
                 <p className="font-display text-lg font-bold text-brand-dark">{fmtMoney(item.price)}</p>
+                {isAdmin && item.cost != null && (
+                  <p className={`text-[10px] font-medium ${item.price - item.cost >= 0 ? "text-success" : "text-destructive"}`}>
+                    {item.price - item.cost >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - item.cost))} {item.price - item.cost >= 0 ? "profit" : "loss"}
+                  </p>
+                )}
                 <div className="flex items-center gap-1.5 justify-end mt-1">
                   <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
                   <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
