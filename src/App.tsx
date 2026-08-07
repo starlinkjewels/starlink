@@ -108,7 +108,7 @@ export function App() {
           <Route path="stock/:section" element={<Protected roles={["admin","employee"]}><StockSectionPage /></Protected>} />
           <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
-          <Route path="ready-stock" element={<Protected roles={["admin","employee"]}><ReadyStockPage /></Protected>} />
+          <Route path="ready-stock" element={<Protected roles={["admin","employee","client"]}><ReadyStockPage /></Protected>} />
           <Route path="payments" element={<Protected roles={["admin","employee"]}><PaymentsPage /></Protected>} />
           <Route path="buy-assign" element={<Protected roles={["admin","employee"]}><BuyAssignPage /></Protected>} />
           <Route path="profile" element={<ProfilePage />} />

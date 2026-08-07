@@ -72,6 +72,7 @@ const EMPTY_FORM: ItemForm = {
 export function ReadyStockPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin"; // cost + profit/loss are admin-only
+  const canManage = user?.role === "admin" || user?.role === "employee"; // clients get a read-only shop view
   const db = useDb();
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -184,8 +185,9 @@ export function ReadyStockPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Ready Stock</h1>
-          <p className="text-sm text-muted-foreground">Finished jewelry available to sell directly — {total} item{total !== 1 ? "s" : ""}</p>
+          <p className="text-sm text-muted-foreground">{canManage ? "Finished jewelry available to sell directly" : "Finished jewelry available to buy"} — {total} item{total !== 1 ? "s" : ""}</p>
         </div>
+        {canManage && (
         <Dialog open={open} onOpenChange={setOpen}>
           <DialogTrigger asChild>
             <Button onClick={openAdd} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />Add Item</Button>
@@ -318,6 +320,7 @@ export function ReadyStockPage() {
             </div>
           </DialogContent>
         </Dialog>
+        )}
       </div>
 
       <div className="flex items-center gap-2">
@@ -352,9 +355,11 @@ export function ReadyStockPage() {
                   <span className="text-white font-semibold text-sm tracking-wide">SOLD OUT</span>
                 </div>
               )}
-              <button onClick={() => openEdit(item)} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 hover:bg-white grid place-items-center text-muted-foreground hover:text-primary transition-colors shadow-sm">
-                <Pencil className="h-3.5 w-3.5" />
-              </button>
+              {canManage && (
+                <button onClick={() => openEdit(item)} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 hover:bg-white grid place-items-center text-muted-foreground hover:text-primary transition-colors shadow-sm">
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
             <div className="p-4 flex-1 flex flex-col">
               <p className="font-display text-lg text-brand-dark truncate leading-tight">{item.name}</p>
@@ -377,11 +382,17 @@ export function ReadyStockPage() {
               )}
               <div className="flex items-center justify-between mt-3">
                 <p className="font-display text-xl font-bold text-brand-dark">{fmtMoney(item.price)}</p>
-                <div className="flex items-center gap-1.5">
-                  <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
-                  <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
-                  <button onClick={() => adjustQty(item, 1)} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
-                </div>
+                {canManage ? (
+                  <div className="flex items-center gap-1.5">
+                    <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
+                    <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
+                    <button onClick={() => adjustQty(item, 1)} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
+                  </div>
+                ) : (
+                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${item.quantity > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                    {item.quantity > 0 ? "In stock" : "Sold out"}
+                  </span>
+                )}
               </div>
               {isAdmin && item.cost != null && (
                 <p className="text-[11px] mt-1.5">
@@ -393,11 +404,13 @@ export function ReadyStockPage() {
                 </p>
               )}
               <p className="text-[11px] text-muted-foreground mt-2">Added {fmtDate(item.createdAt)}</p>
-              <div className="mt-3 pt-3 border-t border-border/50">
-                <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg w-full text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </AsyncButton>
-              </div>
+              {canManage && (
+                <div className="mt-3 pt-3 border-t border-border/50">
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg w-full text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
+                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                  </AsyncButton>
+                </div>
+              )}
             </div>
           </div>
         ))}
@@ -440,16 +453,24 @@ export function ReadyStockPage() {
                     {item.price - item.cost >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - item.cost))} {item.price - item.cost >= 0 ? "profit" : "loss"}
                   </p>
                 )}
-                <div className="flex items-center gap-1.5 justify-end mt-1">
-                  <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
-                  <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
-                  <button onClick={() => adjustQty(item, 1)} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
+                {canManage ? (
+                  <div className="flex items-center gap-1.5 justify-end mt-1">
+                    <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
+                    <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
+                    <button onClick={() => adjustQty(item, 1)} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary transition-colors"><Plus className="h-3 w-3" /></button>
+                  </div>
+                ) : (
+                  <span className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full ${item.quantity > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+                    {item.quantity > 0 ? "In stock" : "Sold out"}
+                  </span>
+                )}
+              </div>
+              {canManage && (
+                <div className="flex flex-col gap-1 shrink-0">
+                  <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
-              </div>
-              <div className="flex flex-col gap-1 shrink-0">
-                <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
-                <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
-              </div>
+              )}
             </div>
           ))}
           {total === 0 && <div className="p-12 text-center text-muted-foreground">No ready stock items yet — add your first finished piece.</div>}

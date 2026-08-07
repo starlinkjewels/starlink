@@ -24,7 +24,7 @@ const NAV: NavItem[] = [
   { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin","employee"] },
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
-  { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee"] },
+  { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
   { to: "/ai", label: "Starlink AI", icon: Sparkles },
@@ -46,7 +46,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Clients & Billing", items: [
     { to: "/clients", label: "Clients", icon: Users, roles: ["admin", "employee"] },
     { to: "/invoices", label: "Invoices", icon: FileText },
-    { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee"] },
+    { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
   ] },
   { title: "Manufacturing", items: [
     { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin", "employee"] },
@@ -92,7 +92,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin","employee"] },
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
-  { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee"] },
+  { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
