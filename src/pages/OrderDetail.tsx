@@ -1018,9 +1018,44 @@ export function OrderDetailPage() {
     expectedDelivery: order.expectedDelivery,
   });
 
-  const approve = (yes: boolean) => {
-    if (!yes && !confirm("Reject this order? You can re-open it to Waiting later if this was a mistake.")) return;
+  // Return any gold/diamond issued for this order back to stock, release undrawn
+  // factory-pool draws, free certified packets, and close open issuances. Shared
+  // by both Reject and Cancel so a rejected order never strands material.
+  const returnIssuedMaterials = async () => {
+    const openIssuances = db.materialIssuances.filter(i => i.orderId === order.id && i.status === "open");
+    for (const mi of openIssuances) {
+      if (mi.source === "stock" && mi.diamondKind !== "certified") {
+        const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
+        const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
+        if (remaining > 0) {
+          await increaseStock({
+            material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining,
+            refType: "manual", createdBy: user!.id, note: `Returned from order ${order.orderNumber}`,
+          });
+        }
+      }
+    }
+    updateDb(d => {
+      for (const mi of d.materialIssuances) {
+        if (mi.orderId === order.id && mi.status === "open") {
+          if (mi.source === "factoryPool") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
+          mi.status = "closed";
+        }
+      }
+      for (const p of d.diamondPackets || []) {
+        if (p.orderId === order.id) { p.status = "in_stock"; p.orderId = undefined; }
+      }
+    });
+  };
+
+  const approve = async (yes: boolean) => {
+    if (!yes && !confirm("Reject this order? Any gold/diamond issued for it returns to stock. You can re-open it to Waiting later if this was a mistake.")) return;
     const now = new Date().toISOString();
+    // On reject, first return any material that was already issued for the order.
+    if (!yes) {
+      try { await returnIssuedMaterials(); }
+      catch (e) { toast.error(e instanceof Error ? e.message : "Failed to return issued material"); return; }
+    }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.status = yes ? "Approved" : "Rejected";
@@ -1042,7 +1077,7 @@ export function OrderDetailPage() {
       const m = orderApprovedEmail(orderEmailInfo());
       void sendMail(client.email, m.subject, m.html);
     }
-    toast.success(yes ? "Order approved" : "Order rejected");
+    toast.success(yes ? "Order approved" : "Order rejected — issued material returned to stock");
   };
 
   // Undo an accidental reject — put the order back to Waiting for a fresh decision.
@@ -1062,39 +1097,13 @@ export function OrderDetailPage() {
   // excluded from client totals). Re-openable afterwards.
   const cancelOrder = async () => {
     if (!confirm("Cancel this order? Any material/diamonds issued for it return to stock and it will no longer be billed. You can re-open it later.")) return;
-    const openIssuances = db.materialIssuances.filter(i => i.orderId === order.id && i.status === "open");
     setCancelling(true);
     try {
-      // Restore stock-sourced loose/gold remainders to the pool (transactional).
-      for (const mi of openIssuances) {
-        if (mi.source === "stock" && mi.diamondKind !== "certified") {
-          const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
-          const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
-          if (remaining > 0) {
-            await increaseStock({
-              material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining,
-              refType: "manual", createdBy: user!.id, note: `Returned on cancelling order ${order.orderNumber}`,
-            });
-          }
-        }
-      }
+      await returnIssuedMaterials(); // return gold/diamond, free packets, close issuances
       const now = new Date().toISOString();
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         o.status = "Rejected";
-        for (const mi of d.materialIssuances) {
-          if (mi.orderId === order.id && mi.status === "open") {
-            // A factoryPool draw has nothing to return to shared Stock —
-            // shrinking it to what was actually used releases the undrawn
-            // portion straight back to the factory's own pool.
-            if (mi.source === "factoryPool") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
-            mi.status = "closed";
-          }
-        }
-        // Free every certified packet tied to this order back into stock.
-        for (const p of d.diamondPackets || []) {
-          if (p.orderId === order.id) { p.status = "in_stock"; p.orderId = undefined; }
-        }
         const clientUser = d.users.find(u => u.clientId === o.clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id, title: "Order Cancelled",
