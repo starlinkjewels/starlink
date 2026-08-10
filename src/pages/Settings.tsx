@@ -27,6 +27,9 @@ import {
   Plus,
   Gift,
   DollarSign,
+  Building2,
+  Database,
+  SlidersHorizontal,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -47,6 +50,7 @@ export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
   const [lp, setLp] = useState({ name: "", style: "tag" as "tag" | "label", w: "", h: "" });
+  const [active, setActive] = useState("company");
 
   const qr1Ref = useRef<HTMLInputElement>(null);
   const qr2Ref = useRef<HTMLInputElement>(null);
@@ -65,6 +69,10 @@ export function SettingsPage() {
   const saveInvoice = () => {
     saveDb(db);
     toast.success("Invoice settings saved");
+  };
+  const saveBand = () => {
+    saveDb(db);
+    toast.success("Label & barcode settings saved");
   };
 
   // Expense categories — instant add/remove (like toggling a locker/factory
@@ -306,11 +314,47 @@ export function SettingsPage() {
     </div>
   );
 
+  const sections = [
+    { id: "company", label: "Company", icon: Building2, show: true },
+    { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true },
+    { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates },
+    { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
+    { id: "expenses", label: "Expense Categories", icon: SlidersHorizontal, show: isAdmin },
+    { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
+    { id: "data", label: "Data & Backup", icon: Database, show: true },
+  ].filter((s) => s.show);
+  const activeId = sections.some((s) => s.id === active) ? active : sections[0]?.id;
+
   return (
-    <div className="max-w-2xl mx-auto space-y-4">
+    <div className="space-y-5">
       <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Settings</h1>
 
+      <div className="grid lg:grid-cols-[230px_1fr] gap-5 items-start">
+        {/* Section nav — vertical rail on desktop, scrollable pills on mobile */}
+        <nav className="lg:sticky lg:top-4 flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible -mx-1 px-1 pb-1 lg:pb-0 lg:pr-0">
+          {sections.map((s) => {
+            const Icon = s.icon;
+            const on = activeId === s.id;
+            return (
+              <button
+                key={s.id}
+                onClick={() => setActive(s.id)}
+                className={`group flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-medium whitespace-nowrap shrink-0 transition-colors ${
+                  on ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"
+                }`}
+              >
+                <Icon className={`h-4 w-4 shrink-0 ${on ? "text-white" : "text-primary/70 group-hover:text-primary"}`} />
+                <span>{s.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Active section content */}
+        <div className="min-w-0 space-y-4">
+
       {/* Company */}
+      {activeId === "company" && (
       <div className="card-luxe p-6 space-y-4">
         <h3 className="font-semibold">Company</h3>
         <div>
@@ -336,8 +380,10 @@ export function SettingsPage() {
           Save Settings
         </AsyncButton>
       </div>
+      )}
 
       {/* ── Invoice Branding ── */}
+      {activeId === "invoice" && (
       <div className="card-luxe p-6 space-y-5">
         <div className="flex items-center gap-2">
           <FileText className="h-4 w-4 text-primary" />
@@ -484,9 +530,10 @@ export function SettingsPage() {
           Save Invoice Settings
         </AsyncButton>
       </div>
+      )}
 
       {/* Pricing Rates — admin & employee only */}
-      {canEditRates && (
+      {activeId === "pricing" && (
         <div className="card-luxe p-6 space-y-5">
           <div>
             <h3 className="font-semibold">Order Value Pricing Rates</h3>
@@ -647,6 +694,36 @@ export function SettingsPage() {
             </div>
           </div>
 
+          {/* Live preview */}
+          <div className="rounded-xl bg-secondary/50 border border-border/60 px-4 py-3 text-sm text-muted-foreground">
+            Example: 0.5 ct diamond + 3 g metal + shipping ={" "}
+            <span className="font-semibold text-foreground">
+              $
+              {(
+                (db.settings.diamondRate ?? 3500) * 0.5 +
+                (db.settings.metalRate ?? 65) * 3 +
+                (db.settings.defaultShippingCharge ?? 0)
+              ).toLocaleString()}
+            </span>
+          </div>
+
+          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">
+            Save Pricing Rates
+          </AsyncButton>
+        </div>
+      )}
+
+      {/* Labels & Barcode — admin & employee only */}
+      {activeId === "labels" && (
+        <div className="card-luxe p-6 space-y-5">
+          <div className="flex items-center gap-2">
+            <Tag className="h-4 w-4 text-primary" />
+            <div>
+              <h3 className="font-semibold">Labels &amp; Barcode</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">Jewellery band printing and label-printer profiles</p>
+            </div>
+          </div>
+
           {/* Barcode band (jewellery tag) toggles */}
           <div className="grid sm:grid-cols-2 gap-3">
             <button type="button"
@@ -733,27 +810,14 @@ export function SettingsPage() {
             );
           })()}
 
-          {/* Live preview */}
-          <div className="rounded-xl bg-secondary/50 border border-border/60 px-4 py-3 text-sm text-muted-foreground">
-            Example: 0.5 ct diamond + 3 g metal + shipping ={" "}
-            <span className="font-semibold text-foreground">
-              $
-              {(
-                (db.settings.diamondRate ?? 3500) * 0.5 +
-                (db.settings.metalRate ?? 65) * 3 +
-                (db.settings.defaultShippingCharge ?? 0)
-              ).toLocaleString()}
-            </span>
-          </div>
-
-          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">
-            Save Pricing Rates
+          <AsyncButton onClick={saveBand} className="btn-hero rounded-xl w-full">
+            Save Label &amp; Barcode Settings
           </AsyncButton>
         </div>
       )}
 
       {/* Expense Categories — admin only */}
-      {isAdmin && (
+      {activeId === "expenses" && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center gap-2">
             <Tag className="h-4 w-4 text-primary" />
@@ -787,7 +851,7 @@ export function SettingsPage() {
           (and back-filled on the Invoices page) — no manual step needed. */}
 
       {/* Sync logins — admin only, shown only when there is something to migrate */}
-      {isAdmin && pendingLogins.length > 0 && (
+      {activeId === "logins" && (
         <div className="card-luxe p-6 space-y-3">
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-4 w-4 text-primary" />
@@ -808,6 +872,7 @@ export function SettingsPage() {
       )}
 
       {/* Data */}
+      {activeId === "data" && (
       <div className="card-luxe p-6 space-y-3">
         <h3 className="font-semibold">Data</h3>
         <div className="grid grid-cols-2 gap-2">
@@ -828,6 +893,10 @@ export function SettingsPage() {
         >
           Clear Data &amp; Reset Seed
         </AsyncButton>
+      </div>
+      )}
+
+        </div>
       </div>
     </div>
   );
