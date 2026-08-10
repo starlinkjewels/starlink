@@ -49,6 +49,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/invoices", label: "Invoices", icon: FileText },
     { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
     { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
+    { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin", "employee"] },
   ] },
   { title: "Manufacturing", items: [
     { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin", "employee"] },
@@ -96,6 +97,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
+  { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin","employee"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
@@ -129,6 +131,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/factories": "Factories",
   "/ready-stock": "Ready Stock",
   "/giftcard": "Gift Card",
+  "/gift-cards": "Gift Cards",
   "/payments": "Payments",
 };
 
@@ -158,6 +161,7 @@ const ICON_COLORS: Record<string, string> = {
   "/factories":  "bg-orange-500/15 text-orange-600",
   "/ready-stock": "bg-pink-500/15 text-pink-600",
   "/giftcard": "bg-primary/15 text-primary",
+  "/gift-cards": "bg-primary/15 text-primary",
   "/payments": "bg-indigo-500/15 text-indigo-600",
 };
 

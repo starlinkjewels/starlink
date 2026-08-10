@@ -66,12 +66,19 @@ function bankImagesHtml(settings: Settings): string {
 /* Deposit/Balance rows only appear when they add information: a $0 balance or a
    deposit that equals the total is redundant with "Total Amount" above, so a
    fully-settled invoice just ends with Total Amount as the final line. */
-function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number): string {
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, gift = 0): string {
   const shippingRow = shipping > 0 ? `
     <tr class="tot-row">
       <td colspan="4" class="blank"></td>
       <td colspan="2" class="tot-lbl">Shipping Charges</td>
       <td class="tot-val">${usd(shipping)}</td>
+    </tr>` : "";
+
+  const giftRow = gift > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">Gift Card Redeemed</td>
+      <td class="tot-val">-${usd(gift)}</td>
     </tr>` : "";
 
   const depositRow = adv > 0 && bal > 0 ? `
@@ -90,6 +97,7 @@ function totalsRowsHtml(total: number, adv: number, bal: number, shipping: numbe
 
   return `
     ${shippingRow}
+    ${giftRow}
     <tr class="tot-row tot-bold">
       <td colspan="4" class="blank"></td>
       <td colspan="2" class="tot-lbl"><strong>Total Amount</strong></td>
@@ -414,6 +422,7 @@ export function printInvoice(
   const total = orderTotal(order);
   const bal = balanceDue(order);
   const shipping = order.shippingCharge || 0;
+  const gift = order.giftCardRedeemed || 0;
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
   const ITEM_ROWS = 10;
@@ -423,7 +432,7 @@ export function printInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDate(order.createdAt),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
   });
   openAndPrint(html);
 }
@@ -444,6 +453,7 @@ export function printBatchInvoice(
   const total = orders.reduce((s, o) => s + orderTotal(o), 0);
   const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
   const shipping = orders.reduce((s, o) => s + (o.shippingCharge || 0), 0);
+  const gift = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
 
   // Always keep a few blank rows after the real ones — the bank-detail images are
   // absolutely positioned over this space (see bankImagesHtml), so with too many
@@ -457,7 +467,7 @@ export function printBatchInvoice(
     client, settings, invoiceNumber,
     dateLabel: localDateStr(dateStr),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
   });
   openAndPrint(html);
 }

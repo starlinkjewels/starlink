@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
-import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem } from "lucide-react";
+import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tooltip, PieChart, Pie, Cell } from "recharts";
 import { StatCard } from "@/components/StatCard";
@@ -60,6 +60,7 @@ export function Dashboard() {
   // Revenue = money actually collected to date (sum of all payments/advances),
   // not just the value of delivered orders — so collected advances show up too.
   const revenue = orders.reduce((s, o) => s + totalAdvance(o), 0);
+  const gc = giftCardStats(db.giftCards ?? [], db.orders); // all-time gift-card totals (staff)
 
   const monthlyData = useMemo(() => {
     const months = Array.from({ length: 6 }, (_, i) => {
@@ -172,6 +173,28 @@ export function Dashboard() {
           </motion.div>
         ))}
       </div>
+
+      {/* Gift Cards — all-time totals (staff). Issued = Redeemed + Pending + Expired. */}
+      {user!.role !== "client" && gc.count > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="font-display text-lg text-brand-dark flex items-center gap-2"><Gift className="h-5 w-5 text-primary" /> Gift Cards</h2>
+            <Link to="/gift-cards" className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">View all <ArrowRight className="h-3 w-3" /></Link>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+            {([
+              ["Issued", fmtMoney(gc.issued), Gift, "text-primary"],
+              ["Redeemed", fmtMoney(gc.used), CheckCircle2, "text-success"],
+              ["Pending", fmtMoney(gc.pending), Clock, "text-warning"],
+              ["Expired", fmtMoney(gc.expired), AlertCircle, "text-muted-foreground"],
+            ] as [string, string, any, string][]).map(([label, val, Icon, color]) => (
+              <Link key={label} to="/gift-cards" className="block h-full rounded-2xl transition-all hover:-translate-y-0.5 hover:shadow-soft active:scale-[0.98]">
+                <StatCard label={label} value={val} icon={Icon} colorClass={color} />
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ── Employee: My Profit Panel ── */}
       {user!.role === "employee" && (

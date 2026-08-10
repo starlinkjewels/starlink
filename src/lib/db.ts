@@ -977,6 +977,30 @@ export function issueGiftCard(d: DB, args: {
   return card;
 }
 
+export type GiftCardStatus = "active" | "used" | "expired" | "cancelled";
+/** Lifecycle status of a card (remaining derived from orders). */
+export function giftCardStatus(card: GiftCard, orders: Order[]): GiftCardStatus {
+  if (card.revoked) return "cancelled";
+  if (giftCardRemaining(card, orders) <= 0.005) return "used";
+  if (giftCardExpired(card)) return "expired";
+  return "active";
+}
+
+export interface GiftCardStats { issued: number; used: number; pending: number; expired: number; count: number }
+/** Reconciling totals across a set of cards: issued = used + pending + expired.
+ *  pending = remaining on still-usable cards; expired = remaining that lapsed unused. */
+export function giftCardStats(cards: GiftCard[], orders: Order[]): GiftCardStats {
+  let issued = 0, used = 0, pending = 0, expired = 0;
+  for (const c of cards) {
+    const remaining = giftCardRemaining(c, orders);
+    issued = r2(issued + c.amount);
+    used = r2(used + (c.amount - remaining));
+    if (!c.revoked && !giftCardExpired(c)) pending = r2(pending + remaining);
+    else expired = r2(expired + remaining);
+  }
+  return { issued, used, pending, expired, count: cards.length };
+}
+
 /** Effective cashback % for a client (per-client override, else global setting). 0 when off. */
 export function cashbackPercentFor(d: DB, client: Client | undefined): number {
   if (!client?.giftCardEnabled) return 0;

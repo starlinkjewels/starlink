@@ -44,6 +44,7 @@ const FactoriesPage = lazy(() => import("./pages/Factories").then(m => ({ defaul
 const FactoryHistoryPage = lazy(() => import("./pages/FactoryHistory").then(m => ({ default: m.FactoryHistoryPage })));
 const ReadyStockPage = lazy(() => import("./pages/ReadyStock").then(m => ({ default: m.ReadyStockPage })));
 const GiftCardPage = lazy(() => import("./pages/GiftCard").then(m => ({ default: m.GiftCardPage })));
+const GiftCardsAdminPage = lazy(() => import("./pages/GiftCardsAdmin").then(m => ({ default: m.GiftCardsAdminPage })));
 const PaymentsPage = lazy(() => import("./pages/Payments").then(m => ({ default: m.PaymentsPage })));
 const BuyAssignPage = lazy(() => import("./pages/BuyAssign").then(m => ({ default: m.BuyAssignPage })));
 
@@ -111,6 +112,7 @@ export function App() {
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
           <Route path="ready-stock" element={<Protected roles={["admin","employee","client"]}><ReadyStockPage /></Protected>} />
           <Route path="giftcard" element={<Protected roles={["client"]}><GiftCardPage /></Protected>} />
+          <Route path="gift-cards" element={<Protected roles={["admin","employee"]}><GiftCardsAdminPage /></Protected>} />
           <Route path="payments" element={<Protected roles={["admin","employee"]}><PaymentsPage /></Protected>} />
           <Route path="buy-assign" element={<Protected roles={["admin","employee"]}><BuyAssignPage /></Protected>} />
           <Route path="profile" element={<ProfilePage />} />

@@ -7,7 +7,7 @@ import {
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link } from "react-router-dom";
-import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer } from "lucide-react";
+import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -73,8 +73,9 @@ export function InvoicesPage() {
     const amount = orders.length ? orders.reduce((s, o) => s + orderTotal(o), 0) : inv.amount;
     const adv = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
+    const gift = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
     const paid = orders.length ? bal <= 0 : inv.paid;
-    return { orders, amount, adv, bal, paid };
+    return { orders, amount, adv, bal, gift, paid };
   };
 
   // ── Create invoice: this client's priced, non-rejected, not-yet-invoiced orders. ──
@@ -447,7 +448,7 @@ export function InvoicesPage() {
       <Dialog open={!!detailInv} onOpenChange={o => { if (!o) { setDetailInvId(null); setPayOrderId(null); } }}>
         <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
           {detailInv && (() => {
-            const { orders, amount, adv, bal } = invLive(detailInv);
+            const { orders, amount, adv, bal, gift } = invLive(detailInv);
             const client = db.clients.find(c => c.id === detailInv.clientId);
             return (
               <>
@@ -471,6 +472,13 @@ export function InvoicesPage() {
                     <div className={`rounded-xl p-3 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-sm font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</p></div>
                   </div>
 
+                  {gift > 0 && (
+                    <div className="flex items-center justify-between rounded-xl bg-primary/5 border border-primary/20 px-3 py-2 text-sm">
+                      <span className="flex items-center gap-1.5 text-muted-foreground"><Gift className="h-3.5 w-3.5 text-primary" /> Gift card redeemed</span>
+                      <span className="font-semibold text-primary">−{fmtMoney(gift)}</span>
+                    </div>
+                  )}
+
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Orders on this invoice</p>
                     {orders.map(o => {
@@ -481,7 +489,7 @@ export function InvoicesPage() {
                           <div className="flex items-center justify-between gap-3 flex-wrap">
                             <div className="min-w-0">
                               <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-sm font-semibold">{o.orderNumber}</Link>
-                              <p className="text-[11px] text-muted-foreground">{o.jewelleryType} · {fmtMoney(orderTotal(o))} · paid {fmtMoney(oAdv)}</p>
+                              <p className="text-[11px] text-muted-foreground">{o.jewelleryType} · {fmtMoney(orderTotal(o))} · paid {fmtMoney(oAdv)}{o.giftCardRedeemed ? ` · gift −${fmtMoney(o.giftCardRedeemed)}` : ""}</p>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className={`text-xs font-semibold ${oBal > 0 ? "text-destructive" : "text-success"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
