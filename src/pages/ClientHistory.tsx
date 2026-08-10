@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
@@ -176,7 +176,12 @@ export function ClientHistoryPage() {
   const statement = (() => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
     for (const o of billableOrders) {
-      rows.push({ id: o.id, date: o.createdAt, particulars: `Order ${o.orderNumber} — ${o.jewelleryType}`, debit: orderTotal(o), credit: 0 });
+      // Bill the GROSS value, then show any gift-card redemption as its own
+      // discount line — so the ledger explains why the balance is lower.
+      rows.push({ id: o.id, date: o.createdAt, particulars: `Order ${o.orderNumber} — ${o.jewelleryType}`, debit: orderGrossTotal(o), credit: 0 });
+      if (o.giftCardRedeemed && o.giftCardRedeemed > 0) {
+        rows.push({ id: o.id + "-gift", date: o.createdAt, particulars: `Gift card redeemed (${o.orderNumber})`, debit: 0, credit: o.giftCardRedeemed });
+      }
       for (const adv of o.advances || []) {
         rows.push({ id: adv.id, date: adv.createdAt, particulars: `${adv.note || "Payment"} (${o.orderNumber})`, debit: 0, credit: adv.amount });
       }

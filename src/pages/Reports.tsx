@@ -319,6 +319,7 @@ export function ReportsPage() {
     const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
     const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
+    const giftRedeemed = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
     const map = new Map<string, { name: string; count: number; billed: number; received: number; outstanding: number }>();
     for (const o of orders) {
       const name = clients.find(c => c.id === o.clientId)?.companyName ?? "Unknown";
@@ -328,7 +329,7 @@ export function ReportsPage() {
     }
     return {
       orders: [...orders].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt)),
-      billed, received, outstanding,
+      billed, received, outstanding, giftRedeemed,
       byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
     };
   }, [db.orders, clients, salesFrom, salesTo, canSeeAll]);
@@ -388,7 +389,8 @@ export function ReportsPage() {
       doc.text(`Billed: ${fmtMoney(r.billed)}`, 20, 52);
       doc.text(`Received: ${fmtMoney(r.received)}`, 20, 60);
       doc.text(`Outstanding: ${fmtMoney(r.outstanding)}`, 20, 68);
-      let y = 82;
+      if (r.giftRedeemed > 0) doc.text(`Gift cards redeemed: ${fmtMoney(r.giftRedeemed)}  (already deducted from Billed)`, 20, 76);
+      let y = r.giftRedeemed > 0 ? 90 : 82;
       doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text("By client", 20, y); y += 8;
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       r.byClient.forEach(c => {
@@ -425,10 +427,10 @@ export function ReportsPage() {
     try {
       csvDownload(
         `Starlink-Sales-${salesFrom || "all"}.csv`,
-        ["Order #", "Client", "Type", "Status", "Date", "Billed", "Received", "Outstanding"],
+        ["Order #", "Client", "Type", "Status", "Date", "Billed", "Gift Card", "Received", "Outstanding"],
         salesReport.orders.map(o => [
           o.orderNumber, clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status,
-          fmtDate(o.createdAt), orderTotal(o), totalAdvance(o), balanceDue(o),
+          fmtDate(o.createdAt), orderTotal(o), o.giftCardRedeemed || 0, totalAdvance(o), balanceDue(o),
         ]),
       );
     } catch { toast.error("Couldn't generate the Excel file."); }
@@ -1176,6 +1178,13 @@ export function ReportsPage() {
               <p className="text-[11px] text-muted-foreground">Outstanding</p>
               <p className="font-display text-xl text-destructive mt-1">{fmtMoney(salesReport.outstanding)}</p>
             </div>
+            {salesReport.giftRedeemed > 0 && (
+              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
+                <p className="text-[11px] text-muted-foreground">Gift cards redeemed</p>
+                <p className="font-display text-xl text-primary mt-1">{fmtMoney(salesReport.giftRedeemed)}</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">already deducted from Billed</p>
+              </div>
+            )}
           </div>
 
           {salesReport.byClient.length > 0 ? (
