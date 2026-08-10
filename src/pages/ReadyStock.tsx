@@ -12,7 +12,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag } from "lucide-react";
+import { BandDialog } from "@/components/BandDialog";
+import { generateStockBand } from "@/lib/band";
 import { toast } from "sonner";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
@@ -76,6 +78,7 @@ export function ReadyStockPage() {
   const db = useDb();
   const [q, setQ] = useState("");
   const [avail, setAvail] = useState<"all" | "available" | "sold">("all"); // stock availability filter
+  const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
   const [view, setView] = useState<"list" | "grid">(() => {
     try { return (localStorage.getItem("readystock-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
   });
@@ -415,8 +418,13 @@ export function ReadyStockPage() {
               )}
               <p className="text-[11px] text-muted-foreground mt-2">Added {fmtDate(item.createdAt)}</p>
               {canManage && (
-                <div className="mt-3 pt-3 border-t border-border/50">
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg w-full text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
+                <div className="mt-3 pt-3 border-t border-border/50 flex gap-2">
+                  {db.settings.barcodeBandEnabled !== false && (
+                    <AsyncButton size="sm" variant="outline" onClick={() => setBandItem(item)} className="rounded-lg flex-1 gap-1.5">
+                      <Tag className="h-3.5 w-3.5" /> Band
+                    </AsyncButton>
+                  )}
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg flex-1 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
                     <Trash2 className="h-3.5 w-3.5" /> Delete
                   </AsyncButton>
                 </div>
@@ -477,8 +485,11 @@ export function ReadyStockPage() {
               </div>
               {canManage && (
                 <div className="flex flex-col gap-1 shrink-0">
-                  <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors"><Pencil className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors"><Trash2 className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+                  {db.settings.barcodeBandEnabled !== false && (
+                    <button onClick={() => setBandItem(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors" title="Print band"><Tag className="h-3.5 w-3.5" /></button>
+                  )}
+                  <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors" title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
                 </div>
               )}
             </div>
@@ -488,6 +499,14 @@ export function ReadyStockPage() {
       )}
 
       <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} items` : undefined} />
+
+      {/* Barcode band for a ready-stock piece (barcode = SKU) */}
+      <BandDialog
+        open={!!bandItem}
+        onOpenChange={o => { if (!o) setBandItem(null); }}
+        showPrice={db.settings.barcodeBandShowPrice !== false}
+        onGenerate={(style, mode, copies) => { if (bandItem) generateStockBand(bandItem, db.settings, { style, mode, copies }); }}
+      />
     </div>
   );
 }
