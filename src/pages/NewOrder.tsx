@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, allocatePaymentFIFO, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, GIFT_MAX_REDEEM_PCT, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Factory as FactoryIconLucide } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -130,6 +130,7 @@ export function NewOrderPage() {
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
   const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
+  const [redeemGift, setRedeemGift] = useState(true); // apply the client's gift card to this order
 
   const setMetal = (v: string) => {
     setF(prev => ({
@@ -263,6 +264,8 @@ export function NewOrderPage() {
         priority: f.priority as Order["priority"],
         status: forReadyStock ? "In Production" : "Waiting",
         amount: forReadyStock ? 0 : f.orderValue,
+        giftCardId: willRedeem ? giftCard!.id : undefined,
+        giftCardRedeemed: willRedeem ? giftMax : undefined,
         shippingCharge: Number(f.shippingCharge) || 0,
         advances: advance > 0 ? [{
           id: uid("adv_"),
@@ -365,6 +368,19 @@ export function NewOrderPage() {
   const grandTotal = Number(f.orderValue) + shipping + certFee;
   const balanceDue = Math.max(0, grandTotal - Number(f.advanceAmount));
   const autoValue  = Math.round(Number(f.estimatedNetWeight) * metalRate + Number(f.diamondWeight) * diamondRate);
+
+  // ── Gift card on this new order ──
+  const giftClientId = forReadyStock ? "" : (isClient ? (user?.clientId ?? "") : f.clientId);
+  const giftCards    = giftClientId ? activeGiftCardsFor(db, giftClientId) : [];
+  const giftCard     = giftCards[0];
+  const giftBalance  = giftClientId ? giftCardBalanceFor(db, giftClientId) : 0;
+  const giftRemaining = giftCard ? giftCardRemaining(giftCard, db.orders) : 0;
+  // Applies only once the order has a value (staff price / ready-stock sale). Clients'
+  // custom orders are priced later, so it's applied on the order then.
+  const giftMax = giftCard && grandTotal > 0
+    ? Math.round(Math.max(0, Math.min(giftRemaining, grandTotal * GIFT_MAX_REDEEM_PCT, grandTotal)) * 100) / 100
+    : 0;
+  const willRedeem = redeemGift && !!giftCard && giftMax > 0;
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
@@ -952,6 +968,28 @@ export function NewOrderPage() {
                 : "Pricing will be set by our team after reviewing your request — no payment details are needed from you right now."}
             </p>
           </div>
+        )}
+
+        {/* ── Gift Card ── */}
+        {!forReadyStock && giftClientId && giftCard && (
+          <SectionCard icon={<Gift className="h-4 w-4 text-primary" />} title="Gift Card" subtitle="Apply available gift-card credit to this order">
+            {giftMax > 0 ? (
+              <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${redeemGift ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"}`}>
+                <input type="checkbox" checked={redeemGift} onChange={e => setRedeemGift(e.target.checked)} className="mt-1 h-4 w-4 accent-current text-primary" />
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-brand-dark">Apply gift card — save up to ${giftMax.toLocaleString()}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Up to {Math.round(GIFT_MAX_REDEEM_PCT * 100)}% of the order · balance ${giftBalance.toLocaleString()} · expires {new Date(giftCard.expiresAt).toLocaleDateString()}
+                  </p>
+                  {willRedeem && <p className="text-xs font-medium text-success mt-1">New total after gift card: ${(grandTotal - giftMax).toLocaleString()}</p>}
+                </div>
+              </label>
+            ) : (
+              <p className="text-xs p-3 rounded-xl bg-primary/5 border border-primary/20 text-muted-foreground">
+                This client has <span className="font-semibold text-foreground">${giftBalance.toLocaleString()}</span> in gift-card credit. It will be applied to this order once it's priced — up to {Math.round(GIFT_MAX_REDEEM_PCT * 100)}% per order.
+              </p>
+            )}
+          </SectionCard>
         )}
 
         {/* ── Submit / Cancel ── */}
