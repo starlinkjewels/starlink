@@ -74,7 +74,8 @@ export function OrdersPage() {
 
       {/* ── Toolbar — one tidy row on desktop, wraps neatly on phone ── */}
       <div className="card-luxe p-2 flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[160px] sm:flex-none sm:w-72">
+        {/* Search grows to fill whatever space is left (own full row on mobile) */}
+        <div className="relative flex-1 basis-full sm:basis-0 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-9 h-10 rounded-lg text-sm" />
         </div>
@@ -104,7 +105,7 @@ export function OrdersPage() {
           </Select>
         )}
 
-        <div className="shrink-0 ml-auto inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
           <button onClick={() => saveView("list")} aria-label="List view"
             className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
             <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
