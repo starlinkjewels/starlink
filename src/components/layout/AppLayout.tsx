@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
@@ -7,6 +7,7 @@ import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { GiftCardPopup } from "@/components/GiftCardPopup";
+import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 
@@ -174,6 +175,7 @@ export function AppLayout() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [scanOpen, setScanOpen] = useState(false);
   const [pendingTasks, setPendingTasks] = useState(0);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -350,6 +352,15 @@ export function AppLayout() {
 
           {/* Spacer */}
           <div className="flex-1 hidden md:block" />
+
+          {/* Barcode scan — mobile only; opens the camera to scan a tag and jump
+              straight to that order / stock item. */}
+          <button
+            onClick={() => setScanOpen(true)}
+            aria-label="Scan barcode"
+            className="md:hidden relative h-9 w-9 rounded-xl hover:bg-secondary flex items-center justify-center transition-colors shrink-0">
+            <ScanLine className="h-[18px] w-[18px]" />
+          </button>
 
           {/* My Tasks (employee + admin) — in the top bar so it never overlaps
               page content like pagination. */}
@@ -618,6 +629,9 @@ export function AppLayout() {
 
       {/* Client gift-card announcements (new card + 24h expiry reminder) */}
       <GiftCardPopup />
+
+      {/* Mobile barcode scanner (camera → open the order) */}
+      <ScanModal open={scanOpen} onClose={() => setScanOpen(false)} />
     </div>
   );
 }
