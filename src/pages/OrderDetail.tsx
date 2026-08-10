@@ -1024,25 +1024,28 @@ export function OrderDetailPage() {
   const returnIssuedMaterials = async () => {
     const openIssuances = db.materialIssuances.filter(i => i.orderId === order.id && i.status === "open");
     for (const mi of openIssuances) {
-      if (mi.source === "stock" && mi.diamondKind !== "certified") {
+      if (mi.diamondKind === "certified") continue; // returned via its DiamondPacket below
+      if (mi.source === "stock") {
+        // Stock-sourced: return only the part not actually consumed into a piece.
         const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
         const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
-        if (remaining > 0) {
-          await increaseStock({
-            material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining,
-            refType: "manual", createdBy: user!.id, note: `Returned from order ${order.orderNumber}`,
-          });
-        }
+        if (remaining > 0) await increaseStock({ material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user!.id, note: `Returned from cancelled order ${order.orderNumber}` });
+      } else if (mi.source === "purchase") {
+        // Bought new for THIS order and sent to the factory (never entered the
+        // shared pool). On cancel the piece isn't being made, so the material
+        // comes back from the factory into general Stock, available for reuse.
+        // The supplier purchase itself stays — that money was really spent.
+        if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user!.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock` });
       }
     }
     updateDb(d => {
       for (const mi of d.materialIssuances) {
         if (mi.orderId === order.id && mi.status === "open") {
-          // Shrink to what was actually consumed so the factory's DERIVED balance
-          // drops the returned material — the remainder went back to Stock (source
-          // "stock", above) or to the factory's own pool ("factoryPool"). Without
-          // this the factory would still show gold/diamond that's now back in stock.
-          if (mi.source === "factoryPool" || mi.source === "stock") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
+          // Drop the returned material from the factory's DERIVED balance:
+          //  • stock/pool → keep only what was genuinely consumed (remainder went back);
+          //  • purchase → fully returned to Stock above, so zero it out.
+          if (mi.source === "purchase") { mi.quantityIssued = 0; mi.finishedPieces = []; }
+          else if (mi.source === "factoryPool" || mi.source === "stock") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
           mi.status = "closed";
         }
       }
