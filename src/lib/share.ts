@@ -8,6 +8,22 @@ import { fetchCatalogItemsPage } from "./catalogItems";
 // just a URL + short name ≈ 300 bytes, so 1500 ≈ ~0.5 MB).
 export const MAX_SHARE_ITEMS = 1500;
 
+// Where an EXPIRED public share link sends visitors (the company's main site).
+export const SHARE_MAIN_SITE = "https://starlinkjewels.com";
+
+/** True when a share has an expiry that is already in the past. */
+export function shareIsExpired(s: { expiresAt?: string } | null | undefined): boolean {
+  return !!s?.expiresAt && Date.now() > Date.parse(s.expiresAt);
+}
+
+/** Set (ISO string) or clear ("" / null) a share's expiry — cheap, no re-snapshot. */
+export function updateShareExpiry(id: string, expiresAt: string | null): void {
+  updateDb(d => {
+    const s = (d.shares ?? []).find(x => x.id === id);
+    if (s) { s.expiresAt = expiresAt || ""; s.updatedAt = new Date().toISOString(); }
+  });
+}
+
 function descendantFolderIds(folders: CatalogFolder[], rootId: string): string[] {
   const out = [rootId];
   const stack = [rootId];

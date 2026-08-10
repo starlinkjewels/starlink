@@ -421,6 +421,7 @@ export interface Share {
   createdBy: string;
   createdAt: string;
   updatedAt: string;
+  expiresAt?: string; // ISO; empty/absent = never expires. After this, the public link redirects to the main site.
 }
 
 export interface Settings {

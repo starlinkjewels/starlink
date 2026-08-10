@@ -2,10 +2,10 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { type Share } from "@/lib/db";
-import { buildCatalogItems, buildProductPhotoItems, saveShare, deleteShare, findShare, shareUrl, MAX_SHARE_ITEMS } from "@/lib/share";
+import { buildCatalogItems, buildProductPhotoItems, saveShare, deleteShare, findShare, shareUrl, updateShareExpiry, shareIsExpired, MAX_SHARE_ITEMS } from "@/lib/share";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Share2, Copy, Check, RefreshCw, Link2, Loader2, Trash2, ExternalLink } from "lucide-react";
+import { Share2, Copy, Check, RefreshCw, Link2, Loader2, Trash2, ExternalLink, Clock } from "lucide-react";
 import { toast } from "sonner";
 
 /** Shares an entire folder (all its images + videos, incl. sub-folders) as a
@@ -50,6 +50,21 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
     setOpen(false);
     toast.success("Sharing stopped");
   };
+
+  // ── Expiry: after this moment the public link redirects to the main website. ──
+  const EXPIRY_PRESETS: [string, number][] = [["24 hours", 24], ["7 days", 168], ["30 days", 720]];
+  const setExpiry = (iso: string | null) => {
+    if (!existing) return;
+    updateShareExpiry(existing.id, iso);
+    toast.success(iso ? "Expiry set" : "Expiry removed — link never expires");
+  };
+  const toLocalInput = (iso?: string) => {
+    if (!iso) return "";
+    const d = new Date(iso), p = (n: number) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  };
+  const expired = shareIsExpired(existing);
+  const expiresLocal = existing?.expiresAt ? new Date(existing.expiresAt) : null;
 
   return (
     <>
@@ -97,7 +112,31 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
               <Trash2 className="h-4 w-4" /> Stop sharing
             </button>
           </div>
-          {existing && <p className="text-[11px] text-muted-foreground">Last updated {new Date(existing.updatedAt).toLocaleString()}</p>}
+          {/* Expiry — link redirects to the website once this passes */}
+          {existing && (
+            <div className="mt-3 pt-3 border-t border-border/60">
+              <p className="text-xs font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-3.5 w-3.5 text-primary" /> Link expiry</p>
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {EXPIRY_PRESETS.map(([lbl, h]) => (
+                  <button key={lbl} onClick={() => setExpiry(new Date(Date.now() + h * 3600e3).toISOString())}
+                    className="h-8 px-2.5 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">{lbl}</button>
+                ))}
+                <button onClick={() => setExpiry(null)}
+                  className="h-8 px-2.5 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">No expiry</button>
+              </div>
+              <input type="datetime-local" value={toLocalInput(existing.expiresAt)}
+                onChange={e => setExpiry(e.target.value ? new Date(e.target.value).toISOString() : null)}
+                className="w-full h-9 rounded-xl border border-border bg-secondary/40 px-3 text-sm mt-2 focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <p className={`text-[11px] mt-1.5 ${expired ? "text-destructive font-medium" : "text-muted-foreground"}`}>
+                {expiresLocal
+                  ? (expired
+                      ? `Expired ${expiresLocal.toLocaleString()} — this link now redirects to the website.`
+                      : `Expires ${expiresLocal.toLocaleString()} — after that it redirects to the website.`)
+                  : "Never expires."}
+              </p>
+            </div>
+          )}
+          {existing && <p className="text-[11px] text-muted-foreground mt-2">Last updated {new Date(existing.updatedAt).toLocaleString()}</p>}
           {/* db referenced so the button reflects share create/delete immediately */}
           <span className="hidden">{db.shares?.length}</span>
         </DialogContent>

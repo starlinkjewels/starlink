@@ -3,8 +3,9 @@ import { useParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
 import type { Share, ShareItem } from "@/lib/db";
+import { SHARE_MAIN_SITE, shareIsExpired } from "@/lib/share";
 import { motion, AnimatePresence } from "framer-motion";
-import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera } from "lucide-react";
+import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock } from "lucide-react";
 
 async function downloadOne(fileUrl: string, filename: string) {
   try {
@@ -70,7 +71,7 @@ function Lightbox({ items, startIndex, onClose }: { items: ShareItem[]; startInd
 export function SharedGalleryPage() {
   const { id } = useParams();
   const [share, setShare] = useState<Share | null>(null);
-  const [status, setStatus] = useState<"loading" | "ok" | "missing">("loading");
+  const [status, setStatus] = useState<"loading" | "ok" | "missing" | "expired">("loading");
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
 
@@ -80,12 +81,22 @@ export function SharedGalleryPage() {
       try {
         const snap = await getDoc(doc(fsdb, "shares", id!));
         if (!alive) return;
-        if (snap.exists()) { setShare(snap.data() as Share); setStatus("ok"); }
-        else setStatus("missing");
+        if (snap.exists()) {
+          const s = snap.data() as Share;
+          setShare(s);
+          setStatus(shareIsExpired(s) ? "expired" : "ok");
+        } else setStatus("missing");
       } catch { if (alive) setStatus("missing"); }
     })();
     return () => { alive = false; };
   }, [id]);
+
+  // An expired link sends the visitor to the company's main website.
+  useEffect(() => {
+    if (status !== "expired") return;
+    const t = setTimeout(() => window.location.replace(SHARE_MAIN_SITE), 1400);
+    return () => clearTimeout(t);
+  }, [status]);
 
   const items = share?.items ?? [];
   const downloadAll = async () => {
@@ -124,6 +135,15 @@ export function SharedGalleryPage() {
             <Camera className="h-12 w-12 mx-auto mb-3 opacity-20" />
             <p className="font-semibold text-brand-dark">Link not available</p>
             <p className="text-sm mt-1">This shared link has expired or was removed. Please ask Starlink for a new one.</p>
+          </div>
+        )}
+
+        {status === "expired" && (
+          <div className="py-24 text-center text-muted-foreground max-w-md mx-auto">
+            <Clock className="h-12 w-12 mx-auto mb-3 opacity-25" />
+            <p className="font-semibold text-brand-dark">This link has expired</p>
+            <p className="text-sm mt-1">Taking you to our website…</p>
+            <a href={SHARE_MAIN_SITE} className="inline-block mt-4 h-9 px-4 rounded-xl bg-brand-dark text-white text-sm font-medium leading-9">Go to website</a>
           </div>
         )}
 
