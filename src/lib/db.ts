@@ -315,7 +315,7 @@ export interface GiftCard {
   id: string;
   clientId: string;
   amount: number;           // USD originally granted
-  source: "welcome" | "cashback";
+  source: "gift" | "cashback"; // "gift" = admin-issued any time; "cashback" = auto on delivery. (Legacy cards may say "welcome".)
   note?: string;
   issuedBy: string;         // admin userId, or "system" for cashback
   createdAt: string;

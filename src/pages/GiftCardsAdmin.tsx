@@ -24,6 +24,7 @@ export function GiftCardsAdminPage() {
   const [showExport, setShowExport] = useState(false);
 
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "—";
+  const sourceLabel = (s: GiftCard["source"] | string) => (s === "cashback" ? "Cashback" : "Gift");
   const ordersFor = (cardId: string) => db.orders.filter(o => o.giftCardId === cardId && (o.giftCardRedeemed || 0) > 0);
 
   const all = (db.giftCards ?? []).slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
@@ -75,7 +76,7 @@ export function GiftCardsAdminPage() {
       rows: rs.map(c => {
         const rem = giftCardRemaining(c, db.orders);
         return [
-          clientName(c.clientId).slice(0, 26), c.source, "$" + money0(c.amount), "$" + money0(c.amount - rem),
+          clientName(c.clientId).slice(0, 26), sourceLabel(c.source), "$" + money0(c.amount), "$" + money0(c.amount - rem),
           "$" + money0(rem), giftCardStatus(c, db.orders), fmtDate(c.createdAt), fmtDate(c.expiresAt),
           ordersFor(c.id).map(o => o.orderNumber).join(", ").slice(0, 22),
         ];
@@ -90,7 +91,7 @@ export function GiftCardsAdminPage() {
       ["Client", "Source", "Amount (USD)", "Used (USD)", "Remaining (USD)", "Status", "Issued", "Expires", "Orders redeemed", "Note"],
       rs.map(c => {
         const rem = giftCardRemaining(c, db.orders);
-        return [clientName(c.clientId), c.source, Math.round(c.amount), Math.round(c.amount - rem), Math.round(rem),
+        return [clientName(c.clientId), sourceLabel(c.source), Math.round(c.amount), Math.round(c.amount - rem), Math.round(rem),
           giftCardStatus(c, db.orders), fmtDate(c.createdAt), fmtDate(c.expiresAt),
           ordersFor(c.id).map(o => o.orderNumber).join(" "), c.note ?? ""];
       }),
@@ -167,7 +168,7 @@ export function GiftCardsAdminPage() {
                 return (
                   <tr key={c.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
                     <td className="px-5 py-3 font-medium max-w-[180px] truncate">{clientName(c.clientId)}</td>
-                    <td className="px-3 py-3 text-xs capitalize text-muted-foreground">{c.source}</td>
+                    <td className="px-3 py-3 text-xs text-muted-foreground">{sourceLabel(c.source)}</td>
                     <td className="px-3 py-3 text-right font-semibold tabular-nums">{fmtMoney(c.amount)}</td>
                     <td className="px-3 py-3 text-right tabular-nums text-success">{fmtMoney(c.amount - rem)}</td>
                     <td className="px-3 py-3 text-right tabular-nums">{fmtMoney(rem)}</td>

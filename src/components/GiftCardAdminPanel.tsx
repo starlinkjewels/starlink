@@ -40,7 +40,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
     updateDb(d => {
       const c = d.clients.find(x => x.id === clientId);
       if (c && !c.giftCardEnabled) c.giftCardEnabled = true; // issuing turns it on
-      issueGiftCard(d, { clientId, amount: amt, source: "welcome", issuedBy: user!.id, note: note.trim() || undefined, at: now });
+      issueGiftCard(d, { clientId, amount: amt, source: "gift", issuedBy: user!.id, note: note.trim() || undefined, at: now });
       const cu = d.users.find(u => u.clientId === clientId && u.role === "client");
       if (cu) d.notifications.unshift({
         id: uid("n_"), userId: cu.id, title: "You've received a Gift Card 🎁",
@@ -125,7 +125,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
                   <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium">
-                        {fmtMoney(c.amount)} <span className="text-[10px] uppercase tracking-wide text-muted-foreground">· {c.source}</span>
+                        {fmtMoney(c.amount)} <span className="text-[10px] uppercase tracking-wide text-muted-foreground">· {c.source === "cashback" ? "Cashback" : "Gift"}</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground">
                         {c.revoked ? "Cancelled" : expired ? "Expired" : `${fmtMoney(remaining)} left`} · expires {fmtDate(c.expiresAt)}
