@@ -13,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -389,7 +389,7 @@ export function ClientsPage() {
             const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
             const clientUser = db.users.find(u => u.clientId === c.id);
             return (
-              <Link key={c.id} to={`/clients/${c.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
+              <Link key={c.id} to={`/clients/${c.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
                 <div className="relative shrink-0">
                   <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center ring-1 ring-primary/10">
                     {(c.companyName || "?").charAt(0).toUpperCase()}
@@ -410,14 +410,14 @@ export function ClientsPage() {
                     )}
                   </p>
                 </div>
-                {/* Billed / Received / Balance (debit / credit / balance) */}
-                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Billed</p><p className="text-xs font-medium tabular-nums text-brand-dark">{fmtMoney(acc.billed)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Received</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoney(acc.received)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                {/* Billed / Received / Balance — segmented ledger panel */}
+                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
+                  <div className="px-3.5 py-1.5 min-w-[84px]"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Billed</p><p className="text-xs font-medium tabular-nums text-brand-dark">{fmtMoney(acc.billed)}</p></div>
+                  <div className="px-3.5 py-1.5 min-w-[84px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Received</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoney(acc.received)}</p></div>
+                  <div className="px-3.5 py-1.5 min-w-[92px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
                     {acc.outstanding > 0
                       ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoney(acc.outstanding)}</p>
-                      : <p className="text-xs font-semibold text-success">✓</p>}
+                      : <p className="text-xs font-semibold text-success">✓ Clear</p>}
                     <p className="text-[9px] text-muted-foreground leading-tight">{orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}</p>
                   </div>
                 </div>
@@ -432,6 +432,7 @@ export function ClientsPage() {
                     {orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}
                   </p>
                 </div>
+                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
               </Link>
             );
           })}

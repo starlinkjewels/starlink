@@ -10,7 +10,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -134,22 +134,29 @@ export function SuppliersPage() {
             const purchases = db.purchases.filter(p => p.supplierId === s.id);
             const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
             return (
-              <Link key={s.id} to={`/suppliers/${s.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
-                <div className="h-9 w-9 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4 w-4" /></div>
+              <Link key={s.id} to={`/suppliers/${s.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
+                <div className="h-10 w-10 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4.5 w-4.5" /></div>
                 <div className="flex-1 min-w-0">
                   <p className="font-medium text-brand-dark truncate">{s.name}{s.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
                   <p className="text-xs text-muted-foreground truncate">{s.contactPerson || s.phone || s.email || "—"}</p>
                 </div>
-                {/* Purchased / Paid / Balance (debit / credit / balance) */}
-                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Purchased</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.totalPurchased)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid + account.received)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                {/* Purchased / Paid / Balance — segmented ledger panel */}
+                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
+                  <div className="px-3.5 py-1.5 min-w-[92px]">
+                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Purchased</p>
+                    <p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.totalPurchased)}</p>
+                  </div>
+                  <div className="px-3.5 py-1.5 min-w-[80px] border-l border-border/50">
+                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p>
+                    <p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid + account.received)}</p>
+                  </div>
+                  <div className="px-3.5 py-1.5 min-w-[92px] border-l border-border/50">
+                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
                     {account.net > 0
                       ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.net)}</p>
                       : account.net < 0
                       ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(-account.net)}</p>
-                      : <p className="text-xs font-semibold text-success">✓</p>}
+                      : <p className="text-xs font-semibold text-success">✓ Settled</p>}
                   </div>
                 </div>
                 {/* Mobile — balance only */}
@@ -160,6 +167,7 @@ export function SuppliersPage() {
                     ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(-account.net)}</p><p className="text-[10px] text-muted-foreground">owes you</p></>
                     : <p className="text-sm font-semibold text-success">✓ Settled</p>}
                 </div>
+                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
               </Link>
             );
           })}

@@ -10,7 +10,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -130,8 +130,8 @@ export function FactoriesPage() {
             const account = factoryAccount(issuances);
             const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id);
             return (
-              <Link key={fac.id} to={`/factories/${fac.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-secondary/50 transition-colors">
-                <div className="h-9 w-9 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4 w-4" /></div>
+              <Link key={fac.id} to={`/factories/${fac.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
+                <div className="h-10 w-10 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4.5 w-4.5" /></div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
                   {/* Two boxes — reserved Fine Gold (24KT) + Diamond, matching the details page */}
@@ -146,16 +146,16 @@ export function FactoriesPage() {
                     </div>
                   </div>
                 </div>
-                {/* Charges ledger — Charged / Paid / Balance (debit / credit / balance) */}
-                <div className="hidden sm:grid grid-cols-3 gap-3 shrink-0 text-right">
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Charged</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.chargesTotal)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
-                  <div><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
+                {/* Charges ledger — Charged / Paid / Balance, segmented panel */}
+                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
+                  <div className="px-3.5 py-1.5 min-w-[84px]"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Charged</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.chargesTotal)}</p></div>
+                  <div className="px-3.5 py-1.5 min-w-[72px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
+                  <div className="px-3.5 py-1.5 min-w-[84px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
                     {account.chargesPending > 0
                       ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.chargesPending)}</p>
                       : account.chargesOverpaid > 0
                       ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(account.chargesOverpaid)}</p>
-                      : <p className="text-xs font-semibold text-success">✓</p>}
+                      : <p className="text-xs font-semibold text-success">✓ Cleared</p>}
                   </div>
                 </div>
                 {/* Mobile — balance only */}
@@ -166,6 +166,7 @@ export function FactoriesPage() {
                     ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(account.chargesOverpaid)}</p><p className="text-[10px] text-muted-foreground">advance paid</p></>
                     : <p className="text-sm font-semibold text-success">✓ Cleared</p>}
                 </div>
+                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
               </Link>
             );
           })}
