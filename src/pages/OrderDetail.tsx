@@ -22,7 +22,8 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
-import { printOrderBand } from "@/lib/band";
+import { generateBand, type BandStyle } from "@/lib/band";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
@@ -142,6 +143,11 @@ export function OrderDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const nav = useNavigate();
+
+  // Barcode band modal state
+  const [bandOpen, setBandOpen] = useState(false);
+  const [bandStyle, setBandStyle] = useState<BandStyle>("tag");
+  const [bandCopies, setBandCopies] = useState(1);
 
   // Advance form state
   const [showAdvForm, setShowAdvForm] = useState(false);
@@ -1553,7 +1559,7 @@ export function OrderDetailPage() {
                 ))
               : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>}
             {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && (
-              <Button variant="outline" onClick={() => printOrderBand(order, db.settings)} className="rounded-xl" title="Print / download the barcode jewellery band">
+              <Button variant="outline" onClick={() => setBandOpen(true)} className="rounded-xl" title="Print / download the barcode jewellery band">
                 <Tag className="h-4 w-4 mr-2" />Band
               </Button>
             )}
@@ -3186,6 +3192,46 @@ export function OrderDetailPage() {
         );
       })()}
     </AnimatePresence>
+
+    {/* ── Barcode band print/download modal ── */}
+    <Dialog open={bandOpen} onOpenChange={setBandOpen}>
+      <DialogContent className="max-w-md rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-xl flex items-center gap-2"><Tag className="h-5 w-5 text-primary" /> Jewellery Band</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground -mt-1">Pick a tag style, then print it on label stock or download the PDF.</p>
+
+        <div className="grid grid-cols-2 gap-2 mt-2">
+          {([
+            ["tag", "Jewellery tag", "Barcode strip · G/L/N weight"],
+            ["label", "Spec label", "Barcode + full details" + (db.settings.barcodeBandShowPrice !== false ? " + price" : "")],
+          ] as [BandStyle, string, string][]).map(([val, title, desc]) => (
+            <button key={val} type="button" onClick={() => setBandStyle(val)}
+              className={`text-left p-3 rounded-xl border transition-colors ${bandStyle === val ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"}`}>
+              <p className="text-sm font-semibold text-brand-dark">{title}</p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">{desc}</p>
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-2 mt-1">
+          <Label className="text-xs">Copies</Label>
+          <Input type="number" min={1} max={100} value={bandCopies}
+            onChange={e => setBandCopies(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+            className="h-9 w-20 rounded-lg" />
+          <span className="text-[11px] text-muted-foreground">one per piece if you like</span>
+        </div>
+
+        <div className="flex gap-2 mt-2">
+          <Button variant="outline" onClick={() => { generateBand(order, db.settings, { style: bandStyle, mode: "download", copies: bandCopies }); setBandOpen(false); }} className="flex-1 rounded-xl gap-2">
+            <Download className="h-4 w-4" /> Download
+          </Button>
+          <Button onClick={() => { generateBand(order, db.settings, { style: bandStyle, mode: "print", copies: bandCopies }); setBandOpen(false); }} className="btn-hero flex-1 rounded-xl gap-2">
+            <Printer className="h-4 w-4" /> Print
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
     </>
   );
 }
