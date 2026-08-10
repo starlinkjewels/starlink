@@ -9,7 +9,7 @@ import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, Minus,
+  TrendingUp, TrendingDown, Minus, CalendarDays,
 } from "lucide-react";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
@@ -46,6 +46,8 @@ export function ExpensesPage() {
   const [filterEmployee, setFilterEmployee] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [search, setSearch] = useState("");
+  const [dateFrom, setDateFrom] = useState(""); // YYYY-MM-DD
+  const [dateTo, setDateTo] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [expLockerId, setExpLockerId] = useState("");
   const [expLockerAmount, setExpLockerAmount] = useState("");
@@ -70,6 +72,15 @@ export function ExpensesPage() {
   const isAdmin = user?.role === "admin";
   const isEmployee = user?.role === "employee";
 
+  // Inclusive local-day range filter on an expense's date (blank = open-ended).
+  const inDateRange = (iso: string) => {
+    const t = +new Date(iso);
+    if (dateFrom && t < +new Date(`${dateFrom}T00:00:00`)) return false;
+    if (dateTo && t > +new Date(`${dateTo}T23:59:59`)) return false;
+    return true;
+  };
+  const clearDates = () => { setDateFrom(""); setDateTo(""); };
+
   // All admin + employee users for the passbook filter
   const staffUsers = useMemo(
     () => db.users.filter(u => u.role === "admin" || u.role === "employee"),
@@ -87,8 +98,10 @@ export function ExpensesPage() {
     } else {
       list = list.filter(e => e.employeeId === user?.id);
     }
+    list = list.filter(e => inDateRange(e.createdAt));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [db.expenses, user?.id, isAdmin, mineFilter, mineClientFilter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.expenses, user?.id, isAdmin, mineFilter, mineClientFilter, dateFrom, dateTo]);
 
   // Passbook (admin only) with filters applied
   const passbookExpenses = useMemo(() => {
@@ -101,8 +114,10 @@ export function ExpensesPage() {
         e => e.title.toLowerCase().includes(q) || (e.note ?? "").toLowerCase().includes(q)
       );
     }
+    list = list.filter(e => inDateRange(e.createdAt));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [db.expenses, filterEmployee, filterCategory, search]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.expenses, filterEmployee, filterCategory, search, dateFrom, dateTo]);
 
   const myTotal = myExpenses.reduce((s, e) => s + e.amount, 0);
   const passbookTotal = passbookExpenses.reduce((s, e) => s + e.amount, 0);
@@ -178,6 +193,22 @@ export function ExpensesPage() {
     setDb(fresh);
     toast.success("Expense deleted");
   }
+
+  // Reusable date-range control (from → to) used on both the My Expenses and
+  // Passbook filter bars.
+  const dateFilter = (
+    <div className="flex items-center gap-1.5 bg-white border border-border/80 rounded-xl px-2.5 h-9 text-sm">
+      <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+      <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date"
+        className="bg-transparent outline-none text-sm w-[115px] text-foreground" />
+      <span className="text-muted-foreground text-xs">→</span>
+      <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date"
+        className="bg-transparent outline-none text-sm w-[115px] text-foreground" />
+      {(dateFrom || dateTo) && (
+        <button onClick={clearDates} className="text-muted-foreground hover:text-foreground shrink-0" title="Clear dates"><X className="h-3.5 w-3.5" /></button>
+      )}
+    </div>
+  );
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
@@ -271,9 +302,11 @@ export function ExpensesPage() {
       {/* ── My Expenses list ── */}
       {(isEmployee || (isAdmin && tab === "mine")) && (
         <div className="space-y-3">
-          {/* Admin: employee + client filter row */}
-          {isAdmin && (
-            <div className="flex items-center gap-2 flex-wrap">
+          {/* Filter row — date range for everyone, employee/client pickers for admin */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {dateFilter}
+            {isAdmin && (
+              <>
               {/* Employee picker */}
               <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
                 <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
@@ -311,8 +344,9 @@ export function ExpensesPage() {
                   <X className="h-3 w-3" /> Reset
                 </button>
               )}
-            </div>
-          )}
+              </>
+            )}
+          </div>
 
           <ExpenseList
             expenses={myExpenses}
@@ -354,6 +388,7 @@ export function ExpensesPage() {
 
           {/* Filters bar */}
           <div className="flex flex-wrap gap-2">
+            {dateFilter}
             {/* Employee filter */}
             <div className="relative flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm min-w-[160px]">
               <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
