@@ -1051,11 +1051,22 @@ export function OrderDetailPage() {
         const item = d.readyStock?.find(x => x.id === order.readyStockItemId);
         if (item) item.quantity += 1;
       }
+      // Any advance already paid on this order becomes client credit — usable on
+      // their other orders, or refundable — never stranded on cancelled work.
+      if (order.status !== "Rejected") {
+        const o2 = d.orders.find(x => x.id === order.id);
+        const paid = (o2?.advances || []).reduce((s, a) => s + a.amount, 0);
+        if (o2 && paid > 0) {
+          const c = d.clients.find(x => x.id === o2.clientId);
+          if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + paid) * 100) / 100;
+          o2.advances = [];
+        }
+      }
     });
   };
 
   const approve = async (yes: boolean) => {
-    if (!yes && !confirm("Reject this order? Any gold/diamond issued for it returns to stock. You can re-open it to Waiting later if this was a mistake.")) return;
+    if (!yes && !confirm("Reject this order? Any issued gold/diamond returns to stock and any advance paid moves to the client's credit. You can re-open it later if this was a mistake.")) return;
     const now = new Date().toISOString();
     // On reject, first return any material that was already issued for the order.
     if (!yes) {
@@ -1083,7 +1094,7 @@ export function OrderDetailPage() {
       const m = orderApprovedEmail(orderEmailInfo());
       void sendMail(client.email, m.subject, m.html);
     }
-    toast.success(yes ? "Order approved" : "Order rejected — issued material returned to stock");
+    toast.success(yes ? "Order approved" : "Order rejected — material returned & any advance moved to client credit");
   };
 
   // Undo an accidental reject — put the order back to Waiting for a fresh decision.
@@ -1108,7 +1119,7 @@ export function OrderDetailPage() {
   // packets to stock, closes its issuances, and stops billing it (Rejected is
   // excluded from client totals). Re-openable afterwards.
   const cancelOrder = async () => {
-    if (!confirm("Cancel this order? Any material/diamonds issued for it return to stock and it will no longer be billed. You can re-open it later.")) return;
+    if (!confirm("Cancel this order? Any issued material/diamonds return to stock, any advance paid moves to the client's credit, and it will no longer be billed. You can re-open it later.")) return;
     setCancelling(true);
     try {
       await returnIssuedMaterials(); // return gold/diamond, free packets, close issuances
@@ -1122,7 +1133,7 @@ export function OrderDetailPage() {
           body: `${o.orderNumber} has been cancelled.`, type: "order", read: false, createdAt: now,
         });
       });
-      toast.success("Order cancelled — issued material returned to stock");
+      toast.success("Order cancelled — material returned & any advance moved to client credit");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to cancel order");
     } finally { setCancelling(false); }
