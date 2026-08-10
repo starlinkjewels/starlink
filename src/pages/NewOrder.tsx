@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -392,6 +392,9 @@ export function NewOrderPage() {
     <div className="max-w-3xl mx-auto space-y-4">
 
       {/* ── Page header ── */}
+      <button onClick={() => nav(-1)} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
+        <ArrowLeft className="h-4 w-4" /> Back
+      </button>
       <div className="pb-1">
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">New Order</h1>
         <p className="text-sm text-muted-foreground mt-0.5">
@@ -1024,14 +1027,16 @@ export function NewOrderPage() {
           </SectionCard>
         )}
 
-        {/* ── Submit / Cancel ── */}
-        <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5 pb-4">
-          <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 sm:w-auto w-full">
-            Cancel
-          </Button>
-          <Button type="submit" disabled={saving} className="btn-hero rounded-xl h-11 sm:px-8 w-full sm:w-auto">
-            {saving ? "Submitting…" : "Submit Order"}
-          </Button>
+        {/* ── Submit / Cancel — sticky so the action is always reachable on a long form ── */}
+        <div className="sticky bottom-0 z-20 -mx-4 sm:mx-0 px-4 sm:px-3 py-3 border-t border-border/60 bg-white/92 backdrop-blur sm:rounded-xl">
+          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
+            <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 w-full sm:w-auto">
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving} className="btn-hero rounded-xl h-11 sm:px-10 w-full sm:w-auto">
+              {saving ? "Submitting…" : "Submit Order"}
+            </Button>
+          </div>
         </div>
       </form>
     </div>
