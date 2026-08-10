@@ -1,11 +1,12 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2 } from "lucide-react";
+import { GiftCardPopup } from "@/components/GiftCardPopup";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 
@@ -47,6 +48,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/clients", label: "Clients", icon: Users, roles: ["admin", "employee"] },
     { to: "/invoices", label: "Invoices", icon: FileText },
     { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
+    { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
   ] },
   { title: "Manufacturing", items: [
     { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin", "employee"] },
@@ -93,6 +95,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
+  { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
@@ -125,6 +128,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/stock": "Stock",
   "/factories": "Factories",
   "/ready-stock": "Ready Stock",
+  "/giftcard": "Gift Card",
   "/payments": "Payments",
 };
 
@@ -153,6 +157,7 @@ const ICON_COLORS: Record<string, string> = {
   "/stock":      "bg-cyan-500/15 text-cyan-600",
   "/factories":  "bg-orange-500/15 text-orange-600",
   "/ready-stock": "bg-pink-500/15 text-pink-600",
+  "/giftcard": "bg-primary/15 text-primary",
   "/payments": "bg-indigo-500/15 text-indigo-600",
 };
 
@@ -196,8 +201,13 @@ export function AppLayout() {
   // Product Photos is opt-in per client — a client without the grant on their
   // own record never sees the nav entry at all (admin/employee always do).
   const canSeeProductPhotos = user!.role !== "client" || !!db.clients.find(c => c.id === user!.clientId)?.productPhotoAccess;
+  // Gift Card is opt-in per client — a client only sees it when an admin has
+  // turned it on for their record (staff never see this client-only entry).
+  const canSeeGiftCard = user!.role === "client" && !!db.clients.find(c => c.id === user!.clientId)?.giftCardEnabled;
   const navFilter = (n: NavItem) =>
-    (!n.roles || n.roles.includes(user!.role)) && (n.to !== "/product-photos" || canSeeProductPhotos);
+    (!n.roles || n.roles.includes(user!.role))
+    && (n.to !== "/product-photos" || canSeeProductPhotos)
+    && (n.to !== "/giftcard" || canSeeGiftCard);
 
   const nav = NAV.filter(navFilter);
   const moreNav = MORE_NAV.filter(navFilter);
@@ -601,6 +611,9 @@ export function AppLayout() {
           </>
         )}
       </AnimatePresence>
+
+      {/* Client gift-card announcements (new card + 24h expiry reminder) */}
+      <GiftCardPopup />
     </div>
   );
 }

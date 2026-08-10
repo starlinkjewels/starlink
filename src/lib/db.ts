@@ -74,6 +74,10 @@ export interface Client {
   // Explicit per-client grant for the Product Photos page — unset/false means
   // that client can't see it (avoids exposing other clients' designs by default).
   productPhotoAccess?: boolean;
+  // Gift Card & Cashback — OFF by default; turned on per client by an admin.
+  // Gates the client "Giftcard" sidebar/page, welcome-card issuing, and cashback earning.
+  giftCardEnabled?: boolean;
+  cashbackPercent?: number; // optional per-client override of Settings.cashbackPercent
 }
 
 // Streamlined production stages. "Certification" is only added for orders that
@@ -180,6 +184,11 @@ export interface Order {
   clientId: string; // empty string when forReadyStock (in-house build, no client)
   forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
+  // Gift card redeemed onto this order (a discount — reduces orderTotal). The card's
+  // remaining balance is DERIVED from all orders that reference it (never trusted from the card doc).
+  giftCardId?: string;
+  giftCardRedeemed?: number; // USD applied from the gift card to this order
+  cashbackIssued?: boolean; // guard so cashback is granted at most once (on delivery)
   contactPerson: string;
   jewelleryType:
     "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom" | "Diamond Only";
@@ -298,6 +307,25 @@ export interface Invoice {
   paid: boolean;
   createdAt: string;
 }
+
+/** A gift card / cashback credit granted to a client (USD). The remaining
+ *  balance is DERIVED from the orders that redeem it — never stored/trusted on
+ *  the card doc (clients can write their own orders but not gift-card docs). */
+export interface GiftCard {
+  id: string;
+  clientId: string;
+  amount: number;           // USD originally granted
+  source: "welcome" | "cashback";
+  note?: string;
+  issuedBy: string;         // admin userId, or "system" for cashback
+  createdAt: string;
+  expiresAt: string;        // ISO — 30 days from issue
+  revoked?: boolean;        // admin cancelled it
+  sourceOrderId?: string;   // for cashback: the order that earned it
+}
+
+export const GIFT_CARD_EXPIRY_DAYS = 30;
+export const GIFT_MAX_REDEEM_PCT = 0.25; // a card may cover at most 25% of one order
 
 /** All order ids on an invoice, tolerant of the legacy single-`orderId` shape. */
 export function invoiceOrderIds(inv: Invoice): string[] {
@@ -432,6 +460,7 @@ export interface Settings {
   diamondRate: number; // $ per carat
   metalRate: number; // $ per gram
   defaultShippingCharge: number; // $ flat default per order
+  cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area
@@ -775,6 +804,7 @@ export interface DB {
   messages: Message[];
   notifications: Notification[];
   invoices: Invoice[];
+  giftCards: GiftCard[];
   expenses: Expense[];
   settings: Settings;
   catalogFolders: CatalogFolder[];
@@ -827,6 +857,7 @@ function emptyDb(): DB {
     messages: [],
     notifications: [],
     invoices: [],
+    giftCards: [],
     expenses: [],
     catalogFolders: [],
     catalogItems: [],
@@ -879,14 +910,78 @@ export function totalAdvance(order: Order): number {
   return (order.advances || []).reduce((s, a) => s + a.amount, 0);
 }
 
-/** Jewellery value + shipping + certificate fee — the amount the client owes in full */
-export function orderTotal(order: Order): number {
+/** Jewellery value + shipping + certificate fee, BEFORE any gift-card discount. */
+export function orderGrossTotal(order: Order): number {
   return order.amount + (order.shippingCharge || 0) + (order.certificateFee || 0);
+}
+
+/** The amount the client owes in full — gross minus any redeemed gift card (a discount). */
+export function orderTotal(order: Order): number {
+  return Math.max(0, Math.round((orderGrossTotal(order) - (order.giftCardRedeemed || 0)) * 100) / 100);
 }
 
 export function balanceDue(order: Order): number {
   // Round to cents so a sub-cent floating residue never shows as a stray "$0" due.
   return Math.max(0, Math.round((orderTotal(order) - totalAdvance(order)) * 100) / 100);
+}
+
+// ── Gift cards (USD). remaining is DERIVED from orders, never stored on the card. ──
+const r2 = (n: number) => Math.round(n * 100) / 100;
+
+/** USD still available on a card = granted − everything redeemed across live orders. */
+export function giftCardRemaining(card: GiftCard, orders: Order[]): number {
+  const used = orders.reduce((s, o) =>
+    (o.giftCardId === card.id && o.status !== "Rejected") ? s + (o.giftCardRedeemed || 0) : s, 0);
+  return r2(Math.max(0, card.amount - used));
+}
+
+export function giftCardExpired(card: GiftCard): boolean {
+  return !!card.expiresAt && Date.now() > Date.parse(card.expiresAt);
+}
+
+/** Active = not revoked, not expired, and still has balance. */
+export function giftCardActive(card: GiftCard, orders: Order[]): boolean {
+  return !card.revoked && !giftCardExpired(card) && giftCardRemaining(card, orders) > 0.005;
+}
+
+/** A client's usable gift cards, soonest-to-expire first (so it's spent first). */
+export function activeGiftCardsFor(d: DB, clientId: string): GiftCard[] {
+  return (d.giftCards ?? [])
+    .filter(c => c.clientId === clientId && giftCardActive(c, d.orders))
+    .sort((a, b) => +new Date(a.expiresAt) - +new Date(b.expiresAt));
+}
+
+/** Total usable gift-card balance for a client (USD). */
+export function giftCardBalanceFor(d: DB, clientId: string): number {
+  return r2(activeGiftCardsFor(d, clientId).reduce((s, c) => s + giftCardRemaining(c, d.orders), 0));
+}
+
+/** Most a card can take off THIS order: min(card remaining, 25% of gross, gross). */
+export function maxGiftRedeem(order: Order, card: GiftCard, orders: Order[]): number {
+  const gross = orderGrossTotal(order);
+  return r2(Math.max(0, Math.min(giftCardRemaining(card, orders), gross * GIFT_MAX_REDEEM_PCT, gross)));
+}
+
+/** Issue a gift card to a client (call inside updateDb). Expiry = 30 days out. */
+export function issueGiftCard(d: DB, args: {
+  clientId: string; amount: number; source: GiftCard["source"]; issuedBy: string; note?: string; sourceOrderId?: string; at: string;
+}): GiftCard {
+  if (!d.giftCards) d.giftCards = [];
+  const expiresAt = new Date(Date.parse(args.at) + GIFT_CARD_EXPIRY_DAYS * 86400000).toISOString();
+  const card: GiftCard = {
+    id: uid("gc_"), clientId: args.clientId, amount: r2(args.amount), source: args.source,
+    note: args.note, issuedBy: args.issuedBy, createdAt: args.at, expiresAt,
+    ...(args.sourceOrderId ? { sourceOrderId: args.sourceOrderId } : {}),
+  };
+  d.giftCards.push(card);
+  return card;
+}
+
+/** Effective cashback % for a client (per-client override, else global setting). 0 when off. */
+export function cashbackPercentFor(d: DB, client: Client | undefined): number {
+  if (!client?.giftCardEnabled) return 0;
+  const pct = client.cashbackPercent ?? d.settings.cashbackPercent ?? 0;
+  return pct > 0 ? pct : 0;
 }
 
 /**
@@ -1080,6 +1175,7 @@ type ArrayCol =
   | "messages"
   | "notifications"
   | "invoices"
+  | "giftCards"
   | "expenses"
   | "catalogFolders"
   | "catalogFavorites"
@@ -1105,6 +1201,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "messages",
   "notifications",
   "invoices",
+  "giftCards",
   "expenses",
   "catalogFolders",
   "catalogFavorites",
@@ -1474,7 +1571,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         continue;
       if (col === "messages") continue; // handled specially (two-sided)
       const c = collection(fsdb, col);
-      if (col === "orders" || col === "invoices")
+      if (col === "orders" || col === "invoices" || col === "giftCards")
         specs.push({ col, q: query(c, where("clientId", "==", client.clientId)) });
       else if (col === "notifications")
         specs.push({ col, q: query(c, where("userId", "==", client.appId)) });

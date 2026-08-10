@@ -24,6 +24,7 @@ import {
   Loader2,
   Tag,
   Plus,
+  Gift,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -573,6 +574,36 @@ export function SettingsPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">
                 pre-filled on every new order — staff can override per order
+              </p>
+            </div>
+
+            {/* Cashback % (gift cards) */}
+            <div className="space-y-1.5 col-span-2">
+              <Label className="text-xs flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5 text-primary" />
+                Cashback % on delivered orders
+              </Label>
+              <div className="relative">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                <Input
+                  type="number"
+                  min={0}
+                  step={0.5}
+                  value={db.settings.cashbackPercent ?? 0}
+                  onChange={(e) =>
+                    setDb({
+                      ...db,
+                      settings: {
+                        ...db.settings,
+                        cashbackPercent: Math.max(0, Number(e.target.value)),
+                      },
+                    })
+                  }
+                  className="rounded-xl pr-7"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                default cashback for gift-card-enabled clients — this % of each delivered order becomes a gift card for their next order. Only applies to clients you turn on; override per client on their page. 0 = off.
               </p>
             </div>
           </div>

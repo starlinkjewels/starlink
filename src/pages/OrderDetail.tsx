@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber, activeGiftCardsFor, maxGiftRedeem, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -17,7 +17,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck, Gift,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -810,6 +810,20 @@ export function OrderDetailPage() {
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
       o.status = statusFromTimeline(o.timeline, o.forReadyStock);
+      // Cashback: on delivery of a real (client) order, grant a % gift card for
+      // the next order — only for gift-card-enabled clients, and only once.
+      if (o.status === "Delivered" && !o.forReadyStock && !o.cashbackIssued) {
+        const c = d.clients.find(x => x.id === o.clientId);
+        const pct = cashbackPercentFor(d, c);
+        const amt = Math.round(orderTotal(o) * pct) / 100; // pct is a percentage
+        if (c && pct > 0 && amt > 0) {
+          const now = new Date().toISOString();
+          issueGiftCard(d, { clientId: o.clientId, amount: amt, source: "cashback", issuedBy: "system", sourceOrderId: o.id, at: now });
+          o.cashbackIssued = true;
+          const cu = d.users.find(u => u.clientId === o.clientId && u.role === "client");
+          if (cu) d.notifications.unshift({ id: uid("n_"), userId: cu.id, title: "Cashback earned 🎁", body: `${fmtMoney(amt)} gift card for your next order (from ${o.orderNumber}). Valid 30 days.`, type: "info", read: false, createdAt: now });
+        }
+      }
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
@@ -1445,6 +1459,23 @@ export function OrderDetailPage() {
     });
     toast.success("Added to Ready Stock — set its selling price & cost there.");
     nav("/ready-stock");
+  };
+
+  // ── Gift card redemption (a discount on this order, ≤25% of order value). ──
+  const applyGiftRedeem = (cardId: string, amount: number) => {
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      o.giftCardId = cardId;
+      o.giftCardRedeemed = Math.round(amount * 100) / 100;
+      // If the discount now makes the order overpaid, return the excess to credit.
+      const back = capOrderAdvances(o);
+      if (back > 0) { const c = d.clients.find(x => x.id === o.clientId); if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100; }
+    });
+    toast.success(`Gift card applied — ${fmtMoney(amount)} off this order`);
+  };
+  const removeGiftRedeem = () => {
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.giftCardId = undefined; o.giftCardRedeemed = undefined; });
+    toast.success("Gift card removed");
   };
 
   return (
@@ -2183,6 +2214,28 @@ export function OrderDetailPage() {
                   {certFee > 0 && <span className="ml-1 text-amber-600">(incl. {fmtMoney(certFee)} certificate fee)</span>}
                 </div>
               )}
+            </div>
+          );
+        })()}
+
+        {/* Gift card — apply as a discount (≤25% of order value) */}
+        {!order.forReadyStock && orderGrossTotal(order) > 0 && !["Delivered", "Rejected"].includes(order.status) && (() => {
+          const cards = activeGiftCardsFor(db, order.clientId);
+          const applied = order.giftCardRedeemed || 0;
+          if (applied <= 0 && cards.length === 0) return null;
+          const card = order.giftCardId ? (db.giftCards ?? []).find(c => c.id === order.giftCardId) : cards[0];
+          const maxR = card ? maxGiftRedeem(order, card, db.orders) : 0;
+          return (
+            <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex items-center justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <Gift className="h-4 w-4 text-primary shrink-0" />
+                {applied > 0
+                  ? <p className="text-sm"><span className="font-semibold text-primary">{fmtMoney(applied)}</span> gift card applied to this order</p>
+                  : <p className="text-sm text-muted-foreground">Gift card available — apply up to <span className="font-semibold text-foreground">{fmtMoney(maxR)}</span> (25% of order)</p>}
+              </div>
+              {applied > 0
+                ? <button onClick={removeGiftRedeem} className="text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg px-2.5 py-1 shrink-0">Remove</button>
+                : (maxR > 0 && card && <Button size="sm" onClick={() => applyGiftRedeem(card.id, maxR)} className="btn-hero rounded-lg h-8 shrink-0">Apply {fmtMoney(maxR)}</Button>)}
             </div>
           );
         })()}

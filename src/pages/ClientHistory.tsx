@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
+import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -364,6 +365,9 @@ export function ClientHistoryPage() {
           </motion.div>
         ))}
       </div>
+
+      {/* ── Gift Card & Cashback (admin only) ── */}
+      <GiftCardAdminPanel clientId={id!} />
 
       {/* ── Account Ledger (payments apply oldest-bill-first) ── */}
       <div className="card-luxe p-5 space-y-4">

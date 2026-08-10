@@ -79,6 +79,14 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    // Gift cards — staff issue/revoke; a client may READ only their own. Clients
+    // never write these: a card's remaining balance is derived from orders (which
+    // a client may write for themselves), so the card doc itself stays trusted.
+    match /giftCards/{id} {
+      allow read:  if isStaff() || (isClientRole() && resource.data.clientId == myClientId());
+      allow write: if isStaff();
+    }
+
     // Notifications — read/modify only your own; any active user may create one
     // (e.g. a client's new order notifies the admin).
     match /notifications/{id} {
