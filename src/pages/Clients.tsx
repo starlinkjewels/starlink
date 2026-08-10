@@ -546,8 +546,10 @@ export function ClientsPage() {
                   </AsyncButton>
                   <AsyncButton
                     size="sm" variant="outline" onClick={() => togglePhotoAccess(c)}
-                    className={`rounded-lg w-9 px-0 ${c.productPhotoAccess ? "text-primary border-primary/40 bg-primary/5" : ""}`}
-                    title={c.productPhotoAccess ? "Revoke Product Photos access" : "Grant Product Photos access"}
+                    className={`rounded-lg w-9 px-0 ${c.productPhotoAccess
+                      ? "text-success border-success/40 bg-success/5 hover:text-success hover:bg-success/10"
+                      : "text-destructive border-destructive/40 bg-destructive/5 hover:text-destructive hover:bg-destructive/10"}`}
+                    title={c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant"}
                   >
                     <Camera className="h-3.5 w-3.5" />
                   </AsyncButton>
