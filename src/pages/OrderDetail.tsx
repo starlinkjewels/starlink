@@ -17,11 +17,12 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck, Gift,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck, Gift, Tag,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
+import { printOrderBand } from "@/lib/band";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
@@ -1551,6 +1552,11 @@ export function OrderDetailPage() {
                     : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                 ))
               : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>}
+            {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && (
+              <Button variant="outline" onClick={() => printOrderBand(order, db.settings)} className="rounded-xl" title="Print / download the barcode jewellery band">
+                <Tag className="h-4 w-4 mr-2" />Band
+              </Button>
+            )}
             {user!.role === "admin" && order.status !== "Rejected" && (
               <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
                 Cancel Order

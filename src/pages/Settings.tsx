@@ -25,6 +25,7 @@ import {
   Tag,
   Plus,
   Gift,
+  DollarSign,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -637,6 +638,39 @@ export function SettingsPage() {
                 default cap on how much of a single order a gift card can cover — the rest carries to the next order. Override per client on their page.
               </p>
             </div>
+          </div>
+
+          {/* Barcode band (jewellery tag) toggles */}
+          <div className="grid sm:grid-cols-2 gap-3">
+            <button type="button"
+              onClick={() => setDb({ ...db, settings: { ...db.settings, barcodeBandEnabled: !(db.settings.barcodeBandEnabled !== false) } })}
+              className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-white px-4 py-3 text-left hover:bg-secondary/40 transition-colors">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0"><Tag className="h-4 w-4" /></div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Barcode band on orders</p>
+                  <p className="text-[11px] text-muted-foreground">Show the “Band” print/download button</p>
+                </div>
+              </div>
+              <span className={`relative h-6 w-10 rounded-full shrink-0 transition-colors ${db.settings.barcodeBandEnabled !== false ? "bg-success" : "bg-secondary border border-border"}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${db.settings.barcodeBandEnabled !== false ? "left-[18px]" : "left-0.5"}`} />
+              </span>
+            </button>
+
+            <button type="button"
+              onClick={() => setDb({ ...db, settings: { ...db.settings, barcodeBandShowPrice: !(db.settings.barcodeBandShowPrice !== false) } })}
+              className="flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-white px-4 py-3 text-left hover:bg-secondary/40 transition-colors">
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div className="h-8 w-8 rounded-lg bg-amber-500/10 text-amber-600 grid place-items-center shrink-0"><DollarSign className="h-4 w-4" /></div>
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground">Show price on band</p>
+                  <p className="text-[11px] text-muted-foreground">Print the price on the tag</p>
+                </div>
+              </div>
+              <span className={`relative h-6 w-10 rounded-full shrink-0 transition-colors ${db.settings.barcodeBandShowPrice !== false ? "bg-success" : "bg-secondary border border-border"}`}>
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition-all ${db.settings.barcodeBandShowPrice !== false ? "left-[18px]" : "left-0.5"}`} />
+              </span>
+            </button>
           </div>
 
           {/* Live preview */}

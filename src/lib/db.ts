@@ -470,6 +470,8 @@ export interface Settings {
   defaultShippingCharge: number; // $ flat default per order
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
+  barcodeBandEnabled?: boolean; // show the "Print Band" (barcode jewellery tag) option on orders. undefined = on.
+  barcodeBandShowPrice?: boolean; // print the price on the band. undefined = on.
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area
