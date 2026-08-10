@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, GIFT_MAX_REDEEM_PCT, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -380,10 +380,11 @@ export function NewOrderPage() {
   const giftCard     = giftCards[0];
   const giftBalance  = giftClientId ? giftCardBalanceFor(db, giftClientId) : 0;
   const giftRemaining = giftCard ? giftCardRemaining(giftCard, db.orders) : 0;
+  const giftPct = giftMaxRedeemPctFor(db, giftClientId ? db.clients.find(c => c.id === giftClientId) : undefined);
   // Applies only once the order has a value (staff price / ready-stock sale). Clients'
   // custom orders are priced later, so it's applied on the order then.
   const giftMax = giftCard && grandTotal > 0
-    ? Math.round(Math.max(0, Math.min(giftRemaining, grandTotal * GIFT_MAX_REDEEM_PCT, grandTotal)) * 100) / 100
+    ? Math.round(Math.max(0, Math.min(giftRemaining, grandTotal * giftPct, grandTotal)) * 100) / 100
     : 0;
   const willRedeem = redeemGift && !!giftCard && giftMax > 0;
 
@@ -1010,14 +1011,14 @@ export function NewOrderPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-brand-dark">Apply gift card — save up to ${giftMax.toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Up to {Math.round(GIFT_MAX_REDEEM_PCT * 100)}% of the order · balance ${giftBalance.toLocaleString()} · expires {new Date(giftCard.expiresAt).toLocaleDateString()}
+                    Up to {Math.round(giftPct * 100)}% of the order · balance ${giftBalance.toLocaleString()} · expires {new Date(giftCard.expiresAt).toLocaleDateString()}
                   </p>
                   {willRedeem && <p className="text-xs font-medium text-success mt-1">New total after gift card: ${(grandTotal - giftMax).toLocaleString()}</p>}
                 </div>
               </label>
             ) : (
               <p className="text-xs p-3 rounded-xl bg-primary/5 border border-primary/20 text-muted-foreground">
-                This client has <span className="font-semibold text-foreground">${giftBalance.toLocaleString()}</span> in gift-card credit. It will be applied to this order once it's priced — up to {Math.round(GIFT_MAX_REDEEM_PCT * 100)}% per order.
+                This client has <span className="font-semibold text-foreground">${giftBalance.toLocaleString()}</span> in gift-card credit. It will be applied to this order once it's priced — up to {Math.round(giftPct * 100)}% per order.
               </p>
             )}
           </SectionCard>

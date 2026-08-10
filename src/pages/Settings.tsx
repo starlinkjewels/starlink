@@ -606,6 +606,37 @@ export function SettingsPage() {
                 default cashback for gift-card-enabled clients — this % of each delivered order becomes a gift card for their next order. Only applies to clients you turn on; override per client on their page. 0 = off.
               </p>
             </div>
+
+            {/* Gift card max redemption % (default) */}
+            <div className="space-y-1.5 col-span-2">
+              <Label className="text-xs flex items-center gap-1.5">
+                <Gift className="h-3.5 w-3.5 text-primary" />
+                Max gift-card use per order (%)
+              </Label>
+              <div className="relative">
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">%</span>
+                <Input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={db.settings.giftMaxRedeemPercent ?? 25}
+                  onChange={(e) =>
+                    setDb({
+                      ...db,
+                      settings: {
+                        ...db.settings,
+                        giftMaxRedeemPercent: Math.min(100, Math.max(0, Number(e.target.value))),
+                      },
+                    })
+                  }
+                  className="rounded-xl pr-7"
+                />
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                default cap on how much of a single order a gift card can cover — the rest carries to the next order. Override per client on their page.
+              </p>
+            </div>
           </div>
 
           {/* Live preview */}

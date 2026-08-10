@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber, activeGiftCardsFor, maxGiftRedeem, cashbackPercentFor, issueGiftCard,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -2270,14 +2270,15 @@ export function OrderDetailPage() {
           const applied = order.giftCardRedeemed || 0;
           if (applied <= 0 && cards.length === 0) return null;
           const card = order.giftCardId ? (db.giftCards ?? []).find(c => c.id === order.giftCardId) : cards[0];
-          const maxR = card ? maxGiftRedeem(order, card, db.orders) : 0;
+          const giftPct = giftMaxRedeemPctFor(db, client);
+          const maxR = card ? maxGiftRedeem(order, card, db.orders, giftPct) : 0;
           return (
             <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 flex items-center justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2 min-w-0">
                 <Gift className="h-4 w-4 text-primary shrink-0" />
                 {applied > 0
                   ? <p className="text-sm"><span className="font-semibold text-primary">{fmtMoney(applied)}</span> gift card applied to this order</p>
-                  : <p className="text-sm text-muted-foreground">Gift card available — apply up to <span className="font-semibold text-foreground">{fmtMoney(maxR)}</span> (25% of order)</p>}
+                  : <p className="text-sm text-muted-foreground">Gift card available — apply up to <span className="font-semibold text-foreground">{fmtMoney(maxR)}</span> ({Math.round(giftPct * 100)}% of order)</p>}
               </div>
               {applied > 0
                 ? <button onClick={removeGiftRedeem} className="text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg px-2.5 py-1 shrink-0">Remove</button>

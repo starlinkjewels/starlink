@@ -1,6 +1,6 @@
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { activeGiftCardsFor, giftCardRemaining, fmtMoney, fmtDate, GIFT_MAX_REDEEM_PCT } from "@/lib/db";
+import { activeGiftCardsFor, giftCardRemaining, giftMaxRedeemPctFor, fmtMoney, fmtDate } from "@/lib/db";
 import { Gift, Clock } from "lucide-react";
 
 function daysLeft(iso: string): number {
@@ -13,6 +13,7 @@ export function GiftCardPage() {
   const clientId = user?.clientId ?? undefined;
   const cards = clientId ? activeGiftCardsFor(db, clientId) : [];
   const total = cards.reduce((s, c) => s + giftCardRemaining(c, db.orders), 0);
+  const pct = Math.round(giftMaxRedeemPctFor(db, clientId ? db.clients.find(c => c.id === clientId) : undefined) * 100);
 
   return (
     <div className="max-w-3xl mx-auto space-y-5">
@@ -29,7 +30,7 @@ export function GiftCardPage() {
         <div className="absolute -right-6 -top-8 opacity-20"><Gift className="h-40 w-40" /></div>
         <p className="text-xs uppercase tracking-[0.18em] text-white/60">Available balance</p>
         <p className="font-display text-4xl mt-1">{fmtMoney(total)}</p>
-        <p className="text-xs text-white/70 mt-3">Use up to {Math.round(GIFT_MAX_REDEEM_PCT * 100)}% of an order · USD · shown on each order to redeem.</p>
+        <p className="text-xs text-white/70 mt-3">Use up to {pct}% of an order · USD · shown on each order to redeem.</p>
       </div>
 
       {cards.length === 0 ? (

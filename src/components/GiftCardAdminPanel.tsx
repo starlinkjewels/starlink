@@ -19,6 +19,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
   const [amount, setAmount] = useState("");
   const [note, setNote] = useState("");
   const [pct, setPct] = useState(client?.cashbackPercent != null ? String(client.cashbackPercent) : "");
+  const [maxPct, setMaxPct] = useState(client?.giftMaxRedeemPercent != null ? String(client.giftMaxRedeemPercent) : "");
 
   if (user?.role !== "admin" || !client) return null; // admin only — money-sensitive
 
@@ -26,12 +27,16 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
   const cards = (db.giftCards ?? []).filter(c => c.clientId === clientId)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const globalPct = db.settings.cashbackPercent ?? 0;
+  const globalMaxPct = db.settings.giftMaxRedeemPercent ?? 25;
 
   const setEnabled = (on: boolean) =>
     updateDb(d => { const c = d.clients.find(x => x.id === clientId); if (c) c.giftCardEnabled = on || undefined; });
 
   const savePct = () =>
     updateDb(d => { const c = d.clients.find(x => x.id === clientId); if (c) c.cashbackPercent = pct.trim() === "" ? undefined : Math.max(0, Number(pct) || 0); });
+
+  const saveMaxPct = () =>
+    updateDb(d => { const c = d.clients.find(x => x.id === clientId); if (c) c.giftMaxRedeemPercent = maxPct.trim() === "" ? undefined : Math.min(100, Math.max(0, Number(maxPct) || 0)); });
 
   const issue = async () => {
     const amt = Number(amount);
@@ -96,6 +101,19 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
               : "Set a % here or a global default in Settings to enable cashback."; })()}
           </p>
 
+          {/* Max redemption % per order — how much of an order a gift card can cover */}
+          <div className="flex items-end gap-2">
+            <div className="flex-1">
+              <Label className="text-xs">Max gift-card use per order (%)</Label>
+              <Input type="number" min={0} max={100} step="5" value={maxPct} onChange={e => setMaxPct(e.target.value)}
+                placeholder={`Default ${globalMaxPct}%`} className="rounded-xl mt-1 h-10" />
+            </div>
+            <Button variant="outline" onClick={saveMaxPct} className="rounded-xl h-10">Save %</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground -mt-2">
+            A gift card can cover up to <span className="font-medium text-foreground">{client.giftMaxRedeemPercent ?? globalMaxPct}%</span> of any one order for this client (rest carries forward). Blank = the {globalMaxPct}% default.
+          </p>
+
           {/* Issue a welcome card */}
           <div className="rounded-xl border border-border/70 p-3 bg-secondary/20">
             <p className="text-xs font-semibold text-brand-dark mb-2">Issue a gift card</p>
@@ -110,7 +128,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
               </div>
               <AsyncButton onClick={issue} className="btn-hero rounded-xl h-10">Issue</AsyncButton>
             </div>
-            <p className="text-[11px] text-muted-foreground mt-2">USD · valid 30 days · usable up to 25% of an order.</p>
+            <p className="text-[11px] text-muted-foreground mt-2">USD · valid 30 days · usable up to {client.giftMaxRedeemPercent ?? globalMaxPct}% of an order.</p>
           </div>
 
           {/* Existing cards */}

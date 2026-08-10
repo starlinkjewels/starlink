@@ -78,6 +78,7 @@ export interface Client {
   // Gates the client "Giftcard" sidebar/page, welcome-card issuing, and cashback earning.
   giftCardEnabled?: boolean;
   cashbackPercent?: number; // optional per-client override of Settings.cashbackPercent
+  giftMaxRedeemPercent?: number; // optional per-client override of the max % of an order a gift card may cover
 }
 
 // Streamlined production stages. "Certification" is only added for orders that
@@ -468,6 +469,7 @@ export interface Settings {
   metalRate: number; // $ per gram
   defaultShippingCharge: number; // $ flat default per order
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
+  giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area
@@ -963,10 +965,18 @@ export function giftCardBalanceFor(d: DB, clientId: string): number {
   return r2(activeGiftCardsFor(d, clientId).reduce((s, c) => s + giftCardRemaining(c, d.orders), 0));
 }
 
-/** Most a card can take off THIS order: min(card remaining, 25% of gross, gross). */
-export function maxGiftRedeem(order: Order, card: GiftCard, orders: Order[]): number {
+/** Most a card can take off THIS order: min(card remaining, pct of gross, gross).
+ *  `pct` is a fraction (0..1); defaults to the built-in 25% if not supplied. */
+export function maxGiftRedeem(order: Order, card: GiftCard, orders: Order[], pct: number = GIFT_MAX_REDEEM_PCT): number {
   const gross = orderGrossTotal(order);
-  return r2(Math.max(0, Math.min(giftCardRemaining(card, orders), gross * GIFT_MAX_REDEEM_PCT, gross)));
+  return r2(Math.max(0, Math.min(giftCardRemaining(card, orders), gross * pct, gross)));
+}
+
+/** Effective max-redeem FRACTION (0..1) for a client: per-client override, else
+ *  the global Settings default, else the built-in 25%. Admin-managed. */
+export function giftMaxRedeemPctFor(d: DB, client: Client | undefined): number {
+  const raw = client?.giftMaxRedeemPercent ?? d.settings.giftMaxRedeemPercent ?? GIFT_MAX_REDEEM_PCT * 100;
+  return Math.min(1, Math.max(0, raw / 100));
 }
 
 /** Issue a gift card to a client (call inside updateDb). Expiry = 30 days out. */
