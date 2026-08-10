@@ -114,12 +114,19 @@ async function compressImage(file: File): Promise<string> {
 
 /** Order status derived purely from how many timeline steps are done — so a
  *  reverted (undone) stage downgrades the status correctly, not just upgrades. */
-function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false): Order["status"] {
+function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false, readyStockSale = false): Order["status"] {
   const total = timeline.length;
   const done = timeline.filter(t => t.status === "done").length;
   // In-house Ready-Stock builds have no client-approval/shipping stages: they just
   // stay "In Production" until the final step, then "Ready" (piece ready for stock).
   if (forReadyStock) return done >= total ? "Ready" : "In Production";
+  const dispatchIdxA = timeline.findIndex(x => x.step === "Dispatch");
+  // Ready-Stock SALE of an existing piece: Confirmed → (Ready) → Dispatch → Delivered.
+  if (readyStockSale) {
+    if (done >= total) return "Delivered";
+    if (dispatchIdxA >= 0 && done >= dispatchIdxA + 1) return "Dispatched";
+    return "Ready";
+  }
   const finalApprovalIdx = timeline.findIndex(x => x.step === "Final Approval");
   const dispatchIdx = timeline.findIndex(x => x.step === "Dispatch");
   if (done >= total) return "Delivered";
@@ -809,7 +816,7 @@ export function OrderDetailPage() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
-      o.status = statusFromTimeline(o.timeline, o.forReadyStock);
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
       // Cashback: on delivery of a real (client) order, grant a % gift card for
       // the next order — only for gift-card-enabled clients, and only once.
       if (o.status === "Delivered" && !o.forReadyStock && !o.cashbackIssued) {
@@ -1493,7 +1500,7 @@ export function OrderDetailPage() {
             <div>
               <p className="text-xs text-muted-foreground">{order.orderNumber}</p>
               <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{order.jewelleryType} in {order.metal}</h1>
-              <p className="text-sm text-muted-foreground mt-1">{order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client?.companyName} · {order.contactPerson}</p>
+              <p className="text-sm text-muted-foreground mt-1">{order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client?.companyName}{order.materialSourcing === "readyStock" ? " · 💎 Sold from Ready Stock" : ""} · {order.contactPerson}</p>
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
@@ -2433,8 +2440,9 @@ export function OrderDetailPage() {
 
       {/* Manufacturing — buy material / issue to a factory for THIS order,
           without leaving the page or re-typing the order number (staff only —
-          internal sourcing cost, never shown to the client). */}
-      {user!.role !== "client" && (
+          internal sourcing cost, never shown to the client). Hidden for a
+          Ready-Stock sale — the piece already exists, nothing is manufactured. */}
+      {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
@@ -2442,7 +2450,6 @@ export function OrderDetailPage() {
               <p className="text-xs text-muted-foreground mt-0.5">
                 {order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
                   : order.materialSourcing === "purchase" ? "Sourcing plan: Buy New for this order"
-                  : order.materialSourcing === "readyStock" ? "Sold directly from Ready Stock"
                   : "No sourcing plan set at order creation"}
               </p>
             </div>
@@ -2556,9 +2563,7 @@ export function OrderDetailPage() {
 
           <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
             {readiness.ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            {order.materialSourcing === "readyStock"
-              ? "Sold from Ready Stock — no factory material issuance needed"
-              : readiness.ready
+            {readiness.ready
               ? "Ready for Final Approval — factory assigned and diamond sourced"
               : `Final Approval blocked — ${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && readiness.missing.includes("diamond") ? " and " : ""}${readiness.missing.includes("diamond") ? "add the diamond (from stock or buy)" : ""} first`}
           </div>

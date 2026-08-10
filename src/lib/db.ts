@@ -137,6 +137,13 @@ export function buildReadyStockTimelineSteps(): string[] {
   return [...READY_STOCK_TIMELINE_STEPS];
 }
 
+// Selling an EXISTING finished piece from Ready Stock — the piece is already made,
+// so there's no design/production: just confirm, dispatch, deliver.
+export const READY_STOCK_SALE_TIMELINE_STEPS = ["Order Confirmed", "Dispatch", "Delivered"] as const;
+export function buildReadyStockSaleTimelineSteps(): string[] {
+  return [...READY_STOCK_SALE_TIMELINE_STEPS];
+}
+
 export interface TimelineEntry {
   step: TimelineStep;
   status: "pending" | "in_progress" | "done";

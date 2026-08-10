@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, GIFT_MAX_REDEEM_PCT, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, GIFT_MAX_REDEEM_PCT, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -130,6 +130,9 @@ export function NewOrderPage() {
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
   const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
+  // Selling an EXISTING finished piece — specs come from the item, so the custom
+  // design/production fields and the manufacturing timeline don't apply.
+  const isReadyStockSale = f.materialSourcing === "readyStock";
   const [redeemGift, setRedeemGift] = useState(true); // apply the client's gift card to this order
 
   const setMetal = (v: string) => {
@@ -188,13 +191,15 @@ export function NewOrderPage() {
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
     if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
     if (!isClient && !forReadyStock && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
-    if (!isDiamondOnly && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
-    if (!isDiamondOnly && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
-    if (!isDiamondOnly && !f.productColor)        { toast.error("Color of Product is required."); return; }
-    if (!isDiamondOnly && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
-    if (!isDiamondOnly && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
-    if (!isDiamondOnly && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
-    if (!isDiamondOnly && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
+    // A Ready-Stock sale reuses the finished piece's specs — don't re-ask for them.
+    const needSpecs = !isDiamondOnly && !isReadyStockSale;
+    if (needSpecs && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
+    if (needSpecs && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
+    if (needSpecs && !f.productColor)        { toast.error("Color of Product is required."); return; }
+    if (needSpecs && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
+    if (needSpecs && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
+    if (needSpecs && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
+    if (needSpecs && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
     if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
@@ -262,7 +267,7 @@ export function NewOrderPage() {
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
         priority: f.priority as Order["priority"],
-        status: forReadyStock ? "In Production" : "Waiting",
+        status: forReadyStock ? "In Production" : isReadyStockSale ? "Ready" : "Waiting",
         amount: forReadyStock ? 0 : f.orderValue,
         giftCardId: willRedeem ? giftCard!.id : undefined,
         giftCardRedeemed: willRedeem ? giftMax : undefined,
@@ -276,7 +281,7 @@ export function NewOrderPage() {
           lockerId: f.advanceLockerId || undefined,
           lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
-        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : buildTimelineSteps(f.certificate === "yes")).map((s, i) => ({
+        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes")).map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,
@@ -472,10 +477,31 @@ export function NewOrderPage() {
               <p className="font-display text-lg font-bold text-brand-dark shrink-0">${selectedStockItem.price.toLocaleString()}</p>
             </div>
           )}
+
+          {/* A ready piece needs no design/production details — just quantity + a note. */}
+          {selectedStockItem && (
+            <div className="grid grid-cols-2 gap-3 mt-3">
+              <Field label="Quantity">
+                <Input type="number" min={1} value={f.quantity} onChange={e => set("quantity", +e.target.value)} className="rounded-xl h-11" />
+              </Field>
+              <Field label="Priority">
+                <Select value={f.priority} onValueChange={v => set("priority", v)}>
+                  <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
+                  <SelectContent>{["Normal","High Priority","Urgent"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+              <div className="col-span-2">
+                <Field label="Note (optional)">
+                  <Textarea value={f.instructions} onChange={e => set("instructions", e.target.value)} rows={2} className="rounded-xl resize-none" placeholder="Delivery notes, engraving, etc." />
+                </Field>
+              </div>
+            </div>
+          )}
         </SectionCard>
         )}
 
-        {/* ══ 2. Order Details ══ */}
+        {/* ══ 2. Order Details — replaced by a compact block for a Ready-Stock sale ══ */}
+        {!isReadyStockSale && (
         <SectionCard title="Order Details">
           {/* Type + Metal — 2 cols on all screens (both short) */}
           <div className="grid grid-cols-2 gap-3">
@@ -565,8 +591,10 @@ export function NewOrderPage() {
               placeholder="Design notes, stone preferences, reference details" />
           </Field>
         </SectionCard>
+        )}
 
-        {/* ══ 3. Reference Images ══ */}
+        {/* ══ 3. Reference Images — not for a Ready-Stock sale (the piece has its own photos) ══ */}
+        {!isReadyStockSale && (
         <SectionCard icon={<ImagePlus className="h-4 w-4 text-primary" />} title="Reference Images" subtitle="Upload up to 3 design or reference photos">
           <div className="grid grid-cols-3 gap-3">
             {images.map((src, i) => (
@@ -598,8 +626,10 @@ export function NewOrderPage() {
             onChange={e => handleImageFiles(e.target.files)} />
           <p className="text-xs text-muted-foreground">JPG, PNG, WEBP · Each image compressed to ≤ 800px</p>
         </SectionCard>
+        )}
 
-        {/* ══ 4. Product Specifications ══ */}
+        {/* ══ 4. Product Specifications — skipped for a Ready-Stock sale (specs come from the piece) ══ */}
+        {!isReadyStockSale && (
         <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond — no jewellery piece involved" : "Design details required for manufacturing"}>
 
           {!isDiamondOnly && (
@@ -708,6 +738,7 @@ export function NewOrderPage() {
             </>
           )}
         </SectionCard>
+        )}
 
         {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
         {!isClient && f.materialSourcing === "readyStock" ? (
@@ -761,7 +792,7 @@ export function NewOrderPage() {
             before any specific order exists, so this just notes who will
             make it. Independent of Material Sourcing above. Not applicable to
             a diamond-only sale — nothing is being manufactured. ══ */}
-        {!isClient && !isDiamondOnly && (
+        {!isClient && !isDiamondOnly && !isReadyStockSale && (
           <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional — which factory will make this piece">
             <Select value={f.assignedFactoryId || "__none"} onValueChange={v => set("assignedFactoryId", v === "__none" ? "" : v)}>
               <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
