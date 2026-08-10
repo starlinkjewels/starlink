@@ -14,7 +14,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag } from "lucide-react";
 import { BandDialog } from "@/components/BandDialog";
-import { generateStockBand } from "@/lib/band";
+import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
@@ -504,8 +504,9 @@ export function ReadyStockPage() {
       <BandDialog
         open={!!bandItem}
         onOpenChange={o => { if (!o) setBandItem(null); }}
+        presets={labelPresets(db.settings)}
         showPrice={db.settings.barcodeBandShowPrice !== false}
-        onGenerate={(style, mode, copies) => { if (bandItem) generateStockBand(bandItem, db.settings, { style, mode, copies }); }}
+        onGenerate={(preset, mode, copies) => { if (bandItem) generateStockBand(bandItem, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies }); }}
       />
     </div>
   );

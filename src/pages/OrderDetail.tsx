@@ -22,7 +22,7 @@ import {
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
-import { generateBand } from "@/lib/band";
+import { generateBand, labelPresets } from "@/lib/band";
 import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
@@ -3195,8 +3195,9 @@ export function OrderDetailPage() {
     <BandDialog
       open={bandOpen}
       onOpenChange={setBandOpen}
+      presets={labelPresets(db.settings)}
       showPrice={db.settings.barcodeBandShowPrice !== false}
-      onGenerate={(style, mode, copies) => generateBand(order, db.settings, { style, mode, copies })}
+      onGenerate={(preset, mode, copies) => generateBand(order, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies })}
     />
     </>
   );

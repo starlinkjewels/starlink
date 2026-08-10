@@ -9,6 +9,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   Diamond,
@@ -37,9 +38,15 @@ async function toBase64(file: File): Promise<string> {
   });
 }
 
+const DEFAULT_LABEL_PRESETS = [
+  { id: "tag-72x12", name: "Jewellery tag", style: "tag" as const, widthMm: 72, heightMm: 12 },
+  { id: "label-50x30", name: "Spec label", style: "label" as const, widthMm: 50, heightMm: 30 },
+];
+
 export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
+  const [lp, setLp] = useState({ name: "", style: "tag" as "tag" | "label", w: "", h: "" });
 
   const qr1Ref = useRef<HTMLInputElement>(null);
   const qr2Ref = useRef<HTMLInputElement>(null);
@@ -672,6 +679,59 @@ export function SettingsPage() {
               </span>
             </button>
           </div>
+
+          {/* Label printers & bands — define a size per label printer / roll */}
+          {(() => {
+            const rows = db.settings.labelPresets ?? DEFAULT_LABEL_PRESETS;
+            const remove = (id: string) => setDb({ ...db, settings: { ...db.settings, labelPresets: rows.filter(p => p.id !== id) } });
+            const add = () => {
+              const w = Number(lp.w), h = Number(lp.h);
+              if (!lp.name.trim() || !w || !h) { toast.error("Enter a name, width and height"); return; }
+              const preset = { id: uid("lp_"), name: lp.name.trim(), style: lp.style, widthMm: w, heightMm: h };
+              setDb({ ...db, settings: { ...db.settings, labelPresets: [...rows, preset] } });
+              setLp({ name: "", style: "tag", w: "", h: "" });
+            };
+            return (
+              <div className="rounded-xl border border-border/70 p-4">
+                <div className="flex items-center gap-2">
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary grid place-items-center"><Tag className="h-4 w-4" /></div>
+                  <div>
+                    <h3 className="font-semibold text-brand-dark text-sm">Label printers &amp; bands</h3>
+                    <p className="text-[11px] text-muted-foreground">A size for each label printer / roll — chosen when you print a band.</p>
+                  </div>
+                </div>
+
+                <div className="mt-3 space-y-1.5">
+                  {rows.map(p => (
+                    <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
+                        <p className="text-[11px] text-muted-foreground">{p.style === "tag" ? "Jewellery tag" : "Spec label"} · {p.widthMm}×{p.heightMm}mm</p>
+                      </div>
+                      <button onClick={() => remove(p.id)} className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 shrink-0" title="Remove"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-3 grid grid-cols-2 sm:grid-cols-6 gap-2 items-end">
+                  <div className="col-span-2 sm:col-span-2"><Label className="text-[11px]">Name</Label><Input value={lp.name} onChange={e => setLp({ ...lp, name: e.target.value })} placeholder="e.g. Godex 50x30" className="rounded-lg h-9 mt-1" /></div>
+                  <div><Label className="text-[11px]">Style</Label>
+                    <Select value={lp.style} onValueChange={v => setLp({ ...lp, style: v as "tag" | "label" })}>
+                      <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="tag">Tag</SelectItem><SelectItem value="label">Label</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div><Label className="text-[11px]">W (mm)</Label><Input type="number" min={5} value={lp.w} onChange={e => setLp({ ...lp, w: e.target.value })} className="rounded-lg h-9 mt-1" /></div>
+                  <div><Label className="text-[11px]">H (mm)</Label><Input type="number" min={5} value={lp.h} onChange={e => setLp({ ...lp, h: e.target.value })} className="rounded-lg h-9 mt-1" /></div>
+                  <Button onClick={add} className="btn-hero rounded-lg h-9 gap-1.5"><Plus className="h-4 w-4" /> Add</Button>
+                </div>
+
+                <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
+                  Printers connect through your device (USB · Bluetooth · Wi‑Fi) and appear in the print dialog — pick the printer there. Barcode scanners work automatically as keyboard input. Nothing else to set up.
+                </p>
+              </div>
+            );
+          })()}
 
           {/* Live preview */}
           <div className="rounded-xl bg-secondary/50 border border-border/60 px-4 py-3 text-sm text-muted-foreground">

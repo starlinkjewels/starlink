@@ -6,10 +6,22 @@
 // Order and a Ready Stock item via a normalised BandData shape.
 import { jsPDF } from "jspdf";
 import JsBarcode from "jsbarcode";
-import { orderTotal, fmtMoney, CARAT_TO_GRAM, type Order, type ReadyStockItem, type Settings } from "./db";
+import { orderTotal, fmtMoney, CARAT_TO_GRAM, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
 
 export type BandStyle = "tag" | "label";
 export type BandMode = "print" | "download";
+export interface BandOpts { style: BandStyle; mode: BandMode; copies?: number; width?: number; height?: number }
+
+/** Built-in label profiles used when the admin hasn't defined any in Settings. */
+export const BUILTIN_LABEL_PRESETS: LabelPreset[] = [
+  { id: "tag-72x12", name: "Jewellery tag", style: "tag", widthMm: 72, heightMm: 12 },
+  { id: "label-50x30", name: "Spec label", style: "label", widthMm: 50, heightMm: 30 },
+];
+
+/** The label profiles to offer — the admin's own, or the built-ins as a fallback. */
+export function labelPresets(settings: Settings): LabelPreset[] {
+  return settings.labelPresets && settings.labelPresets.length ? settings.labelPresets : BUILTIN_LABEL_PRESETS;
+}
 
 interface BandData {
   code: string;        // value encoded in the barcode (order no. / SKU)
@@ -65,9 +77,12 @@ function drawLabel(doc: jsPDF, d: BandData, settings: Settings, img: string) {
   }
 }
 
-function runBand(d: BandData, settings: Settings, opts: { style: BandStyle; mode: BandMode; copies?: number }) {
+function runBand(d: BandData, settings: Settings, opts: BandOpts) {
   const img = barcodeDataUrl(d.code);
-  const size: [number, number] = opts.style === "tag" ? [72, 12] : [50, 30];
+  const size: [number, number] = [
+    opts.width ?? (opts.style === "tag" ? 72 : 50),
+    opts.height ?? (opts.style === "tag" ? 12 : 30),
+  ];
   const doc = new jsPDF({ unit: "mm", format: size, orientation: "landscape" });
   const copies = Math.max(1, Math.min(100, opts.copies ?? 1));
   for (let i = 0; i < copies; i++) {
@@ -84,7 +99,7 @@ function runBand(d: BandData, settings: Settings, opts: { style: BandStyle; mode
 }
 
 /** Band for an order (barcode = order number). */
-export function generateBand(order: Order, settings: Settings, opts: { style: BandStyle; mode: BandMode; copies?: number }): void {
+export function generateBand(order: Order, settings: Settings, opts: BandOpts): void {
   const gross = order.actualGrossWeight ?? order.estimatedGrossWeight ?? 0;
   const net = order.actualNetWeight ?? order.estimatedNetWeight ?? 0;
   const diaCt = order.actualDiamondWeight ?? order.diamondWeight ?? 0;
@@ -99,7 +114,7 @@ export function generateBand(order: Order, settings: Settings, opts: { style: Ba
 }
 
 /** Band for a Ready Stock item (barcode = SKU, or the item id when no SKU). */
-export function generateStockBand(item: ReadyStockItem, settings: Settings, opts: { style: BandStyle; mode: BandMode; copies?: number }): void {
+export function generateStockBand(item: ReadyStockItem, settings: Settings, opts: BandOpts): void {
   const gross = item.grossWeight ?? 0, net = item.netWeight ?? 0, diaCt = item.diamondWeight ?? 0;
   runBand({
     code: item.sku || item.id,

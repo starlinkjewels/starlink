@@ -472,6 +472,7 @@ export interface Settings {
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
   barcodeBandEnabled?: boolean; // show the "Print Band" (barcode jewellery tag) option on orders. undefined = on.
   barcodeBandShowPrice?: boolean; // print the price on the band. undefined = on.
+  labelPresets?: LabelPreset[]; // admin-defined label sizes/styles for each label printer / stock
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area
@@ -494,6 +495,16 @@ export interface Settings {
   // Monotonic counter behind nextDiamondStockNumber() — never reused even if
   // a packet is later deleted, unset = no certified packet has been numbered yet.
   nextDiamondStockNo?: number;
+}
+
+/** A saved label profile — the size & layout to print a barcode band at, so it
+ *  matches a specific label printer / roll. Chosen when printing a band. */
+export interface LabelPreset {
+  id: string;
+  name: string;           // e.g. "Jewellery tag", "Godex 50x30"
+  style: "tag" | "label"; // which band layout to use
+  widthMm: number;
+  heightMm: number;
 }
 
 export interface CatalogFavorite {
