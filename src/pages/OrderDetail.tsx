@@ -2224,7 +2224,9 @@ export function OrderDetailPage() {
           const certFee  = order.certificateFee || 0;
           const total    = orderTotal(order);
           const extraCols = (shipping > 0 ? 1 : 0) + (certFee > 0 ? 1 : 0);
-          const totalCols = 2 + extraCols; // base 2 (advance + balance) + value col + extras
+          // Three base tiles (Order Value, Total Paid, Balance Due) + optional
+          // Shipping/Certificate — one tile per column so they sit on ONE row.
+          const totalCols = 3 + extraCols;
           const gridCols = totalCols <= 3 ? "sm:grid-cols-3" : totalCols === 4 ? "sm:grid-cols-4" : "sm:grid-cols-5";
           return (
             <div className={`grid gap-3 grid-cols-2 ${gridCols}`}>
