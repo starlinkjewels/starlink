@@ -1038,7 +1038,11 @@ export function OrderDetailPage() {
     updateDb(d => {
       for (const mi of d.materialIssuances) {
         if (mi.orderId === order.id && mi.status === "open") {
-          if (mi.source === "factoryPool") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
+          // Shrink to what was actually consumed so the factory's DERIVED balance
+          // drops the returned material — the remainder went back to Stock (source
+          // "stock", above) or to the factory's own pool ("factoryPool"). Without
+          // this the factory would still show gold/diamond that's now back in stock.
+          if (mi.source === "factoryPool" || mi.source === "stock") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
           mi.status = "closed";
         }
       }
