@@ -1045,6 +1045,12 @@ export function OrderDetailPage() {
       for (const p of d.diamondPackets || []) {
         if (p.orderId === order.id) { p.status = "in_stock"; p.orderId = undefined; }
       }
+      // A cancelled/rejected Ready-Stock SALE returns the finished piece to
+      // inventory (creation decremented it by one). Guarded so it restores once.
+      if (order.materialSourcing === "readyStock" && order.readyStockItemId && order.status !== "Rejected") {
+        const item = d.readyStock?.find(x => x.id === order.readyStockItemId);
+        if (item) item.quantity += 1;
+      }
     });
   };
 
@@ -1088,6 +1094,12 @@ export function OrderDetailPage() {
       o.status = "Waiting";
       o.timeline.forEach((t, i) => { if (i > 0) { t.status = "pending"; t.date = undefined; } });
       o.timeline[0].status = "done";
+      // Re-opening a Ready-Stock sale re-reserves the piece from inventory (it was
+      // returned on cancel/reject).
+      if (o.materialSourcing === "readyStock" && o.readyStockItemId) {
+        const item = d.readyStock?.find(x => x.id === o.readyStockItemId);
+        if (item) item.quantity = Math.max(0, item.quantity - 1);
+      }
     });
     toast.success("Order re-opened — now Waiting");
   };
