@@ -390,8 +390,8 @@ export function AppLayout() {
             )}
           </button>
 
-          {/* Profile dropdown */}
-          <div className="relative shrink-0" ref={profileRef}>
+          {/* Profile dropdown — desktop only; on mobile it lives in the More menu */}
+          <div className="relative shrink-0 hidden md:block" ref={profileRef}>
             <button
               onClick={() => setProfileOpen(v => !v)}
               className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-xl hover:bg-secondary transition-colors group">
