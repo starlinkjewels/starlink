@@ -417,7 +417,7 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
 
 // Categories are user-managed from Settings (Settings.expenseCategories) —
 // this is just the fallback list for a settings doc that predates that field.
-export const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
+export const DEFAULT_EXPENSE_CATEGORIES = ["Salary", "Travel", "Food", "Tools", "Office", "Communication", "Other"];
 export type ExpenseCategory = string;
 
 export interface Expense {
@@ -428,6 +428,10 @@ export interface Expense {
   note?: string;
   employeeId: string; // userId of admin or employee who added it
   clientId?: string; // optional: which client this expense relates to
+  // optional: the team member this expense PAID (salary / wages / advance /
+  // bonus). Drives the per-employee "salary paid to date" ledger. Distinct from
+  // `employeeId` (who recorded it).
+  paidToEmployeeId?: string;
   createdAt: string;
   lockerId?: string; // optional — which Locker this was actually paid from
 }
@@ -1245,6 +1249,26 @@ export function clientAccount(orders: Order[], creditBalance = 0, opening?: Open
   const allocated = Math.round((billed - outstanding) * 100) / 100; // money applied to bills
   const credit = Math.round(((creditBalance || 0) + overpaid + oCredit) * 100) / 100;
   return { billed, allocated, outstanding, credit, received: allocated + credit };
+}
+
+/** Salary / wages / advances paid TO an employee — expenses tagged with
+ *  `paidToEmployeeId`, newest first. Gives each employee a payment ledger. */
+export function employeePayments(expenses: Expense[], employeeId: string): Expense[] {
+  return expenses
+    .filter(e => e.paidToEmployeeId === employeeId)
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+}
+
+/** Totals for an employee's payment ledger — grand total paid + count, and the
+ *  amount paid in `year` (pass the current year in to keep this pure). */
+export function employeePaymentTotals(expenses: Expense[], employeeId: string, year?: number) {
+  const mine = expenses.filter(e => e.paidToEmployeeId === employeeId);
+  let total = 0, thisYear = 0;
+  for (const e of mine) {
+    total += e.amount;
+    if (year != null && new Date(e.createdAt).getFullYear() === year) thisYear += e.amount;
+  }
+  return { total: Math.round(total * 100) / 100, count: mine.length, thisYear: Math.round(thisYear * 100) / 100 };
 }
 
 /** Backward-compat: insert the "Diamond Purchase" step (added after "CAD Approved")

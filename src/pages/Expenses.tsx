@@ -33,7 +33,7 @@ const CATEGORY_BG: Record<ExpenseCategory, string> = {
   Other:         "bg-gray-500/10 text-gray-600",
 };
 
-const EMPTY_FORM = { title: "", amount: "", category: "Other" as ExpenseCategory, note: "", clientId: "" };
+const EMPTY_FORM = { title: "", amount: "", category: "Other" as ExpenseCategory, note: "", clientId: "", paidToEmployeeId: "" };
 
 export function ExpensesPage() {
   const { user } = useAuth();
@@ -160,6 +160,7 @@ export function ExpensesPage() {
       note: form.note.trim() || undefined,
       employeeId: user!.id,
       clientId: form.clientId || undefined,
+      paidToEmployeeId: form.paidToEmployeeId || undefined,
       createdAt: now,
       lockerId: expLockerId || undefined,
     };
@@ -553,6 +554,32 @@ export function ExpensesPage() {
                   </Select>
                 </div>
 
+                {/* Paid to team member — makes this a salary / wages / advance
+                    payment that shows on that employee's payment ledger. */}
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">
+                    Salary / Paid to Team Member <span className="text-muted-foreground font-normal">(optional)</span>
+                  </label>
+                  <Select
+                    value={form.paidToEmployeeId || "__none"}
+                    onValueChange={v => setForm(f => ({
+                      ...f,
+                      paidToEmployeeId: v === "__none" ? "" : v,
+                      // Picking a team member? Default the category to Salary (only if still on the default).
+                      category: v !== "__none" && f.category === "Other" ? "Salary" : f.category,
+                    }))}
+                  >
+                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none">Not a staff payment</SelectItem>
+                      {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  {form.paidToEmployeeId && (
+                    <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's payment ledger (Employees → their page).</p>
+                  )}
+                </div>
+
                 {/* Paid from locker — compulsory: every expense must be traceable to an account */}
                 <div>
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
@@ -666,6 +693,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
         {paged.map((exp, i) => {
           const addedBy = users.find(u => u.id === exp.employeeId);
           const relatedClient = exp.clientId ? clients.find(c => c.id === exp.clientId) : null;
+          const paidTo = exp.paidToEmployeeId ? users.find(u => u.id === exp.paidToEmployeeId) : null;
           const canDelete = exp.employeeId === currentUserId;
           return (
             <motion.div
@@ -699,6 +727,11 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
                   {relatedClient && (
                     <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 ring-1 ring-violet-200">
                       {relatedClient.companyName}
+                    </span>
+                  )}
+                  {paidTo && (
+                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
+                      Paid to {paidTo.name}
                     </span>
                   )}
                   <span className="text-[11px] text-muted-foreground">{fmtDate(exp.createdAt)}</span>

@@ -461,8 +461,10 @@ function PayExpense() {
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
   const [lockerAmount, setLockerAmount] = useState("");
+  const [paidToEmployeeId, setPaidToEmployeeId] = useState("");
   const [saving, setSaving] = useState(false);
 
+  const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
   const categories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
   const locker = db.lockers.find(l => l.id === lockerId);
   const isUsdLocker = (locker?.currency || "INR") === "USD";
@@ -480,7 +482,8 @@ function PayExpense() {
       const now = new Date().toISOString();
       const expense: Expense = {
         id: uid("exp_"), title: title.trim(), amount: amt, category,
-        note: note.trim() || undefined, employeeId: user!.id, createdAt: now, lockerId,
+        note: note.trim() || undefined, employeeId: user!.id,
+        paidToEmployeeId: paidToEmployeeId || undefined, createdAt: now, lockerId,
       };
       updateDb(d => {
         d.expenses.push(expense);
@@ -495,7 +498,7 @@ function PayExpense() {
         }
       });
       toast.success("Expense recorded");
-      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setLockerAmount("");
+      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setLockerAmount(""); setPaidToEmployeeId("");
     } finally { setSaving(false); }
   };
 
@@ -522,6 +525,20 @@ function PayExpense() {
         </div>
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+      <div>
+        <Label className="text-xs">Salary / Paid to Team Member (optional)</Label>
+        <Select value={paidToEmployeeId || "__none"} onValueChange={v => {
+          setPaidToEmployeeId(v === "__none" ? "" : v);
+          if (v !== "__none" && category === "Other") setCategory("Salary");
+        }}>
+          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none">Not a staff payment</SelectItem>
+            {staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {paidToEmployeeId && <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's payment ledger.</p>}
+      </div>
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Paid from Locker *</Label>

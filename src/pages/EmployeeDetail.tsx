@@ -1,13 +1,13 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue, employeePayments, employeePaymentTotals } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
   ArrowLeft, Mail, Phone, Building2, Users, Package,
-  CheckCircle2, Clock, ListTodo, ExternalLink, History,
+  CheckCircle2, Clock, ListTodo, ExternalLink, History, Wallet, Receipt,
 } from "lucide-react";
 import { motion } from "framer-motion";
 
@@ -40,6 +40,10 @@ export function EmployeeDetailPage() {
   const tasks = (db.tasks ?? []).filter(t => t.assignedTo === employee.id);
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const doneTasks = tasks.filter(t => t.completed).length;
+
+  // Salary / wages / advances paid to this employee (expenses tagged to them).
+  const salaryLedger = employeePayments(db.expenses, employee.id);
+  const salaryTotals = employeePaymentTotals(db.expenses, employee.id, new Date().getFullYear());
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -104,6 +108,55 @@ export function EmployeeDetailPage() {
             <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
           </motion.div>
         ))}
+      </div>
+
+      {/* Salary & Payments ledger — total paid to this team member */}
+      <div className="card-luxe overflow-hidden">
+        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 grid place-items-center shrink-0">
+              <Wallet className="h-5 w-5 text-emerald-600" />
+            </div>
+            <div>
+              <h2 className="font-display text-xl text-brand-dark">Salary &amp; Payments</h2>
+              <p className="text-xs text-muted-foreground mt-0.5">{salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""} recorded via Expenses</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <div className="text-right">
+              <p className="text-[11px] text-muted-foreground">This year</p>
+              <p className="font-semibold text-sm text-brand-dark">{fmtMoney(salaryTotals.thisYear)}</p>
+            </div>
+            <div className="text-right pl-3 border-l border-border/60">
+              <p className="text-[11px] text-muted-foreground">Total paid to date</p>
+              <p className="font-display text-lg font-bold text-emerald-600">{fmtMoney(salaryTotals.total)}</p>
+            </div>
+          </div>
+        </div>
+        {salaryLedger.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+            <Wallet className="h-10 w-10 mb-2 opacity-20" />
+            <p className="text-sm">No salary or payments recorded yet.</p>
+            <p className="text-xs mt-1">Record one from <span className="font-medium">Payments → Pay Expense</span> or the Expenses page, and tag it to this member.</p>
+          </div>
+        ) : (
+          <div className="divide-y divide-border/40">
+            {salaryLedger.map(exp => (
+              <div key={exp.id} className="flex items-center gap-3 px-5 py-3">
+                <div className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-600 grid place-items-center shrink-0">
+                  <Receipt className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{exp.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {exp.category}{exp.note ? ` · ${exp.note}` : ""} · {fmtDate(exp.createdAt)}
+                  </p>
+                </div>
+                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtMoney(exp.amount)}</p>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Task progress bar */}
