@@ -2534,7 +2534,7 @@ export function OrderDetailPage() {
               <div className="flex items-center gap-1.5 text-xs">
                 <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" />
                 <span className="text-muted-foreground">Reserved gold at this factory:</span>
-                <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, order.assignedFactoryId).toLocaleString()} g fine (24KT)</span>
+                <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, order.assignedFactoryId, db.factories.find(f => f.id === order.assignedFactoryId)?.openingFineGold).toLocaleString()} g fine (24KT)</span>
               </div>
             )}
 

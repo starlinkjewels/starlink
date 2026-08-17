@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, type MaterialIssuance } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
+import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -46,7 +47,32 @@ export function FactoryHistoryPage() {
   const issuances = db.materialIssuances
     .filter(i => i.factoryId === id)
     .sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
-  const account = factoryAccount(issuances);
+  const account = factoryAccount(issuances, factory);
+
+  // ── Opening balance (migration) ──
+  const [obOpen, setObOpen] = useState(false);
+  const [ob, setOb] = useState({
+    amount: factory.openingBalance != null ? String(factory.openingBalance) : "",
+    dir: (factory.openingDir || "credit") as LedgerDir,
+    date: factory.openingDate || "",
+    fineGold: factory.openingFineGold != null ? String(factory.openingFineGold) : "",
+    fineGoldDate: factory.openingFineGoldDate || "",
+  });
+  const saveOpening = () => {
+    const amt = ob.amount === "" ? 0 : Number(ob.amount);
+    const fg = ob.fineGold === "" ? 0 : Number(ob.fineGold);
+    updateDb(d => {
+      const fac = d.factories.find(x => x.id === id);
+      if (!fac) return;
+      fac.openingBalance = amt || undefined;
+      fac.openingDir = amt ? ob.dir : undefined;
+      fac.openingDate = amt ? (ob.date || undefined) : undefined;
+      fac.openingFineGold = fg || undefined;
+      fac.openingFineGoldDate = fg ? (ob.fineGoldDate || undefined) : undefined;
+    });
+    toast.success("Opening balance updated");
+    setObOpen(false);
+  };
 
   // ── Issue material ──
   // "bulkDelivery" = hand the factory raw material not tied to any order yet
@@ -413,8 +439,12 @@ export function FactoryHistoryPage() {
   // Full account statement — making charges (owed) and payments (paid) across
   // all issuances, chronological, with a running balance — the money ledger,
   // separate from the material (gold/diamond quantity) tracking above.
-  const buildStatement = (iss: MaterialIssuance[]) => {
+  const buildStatement = (iss: MaterialIssuance[], includeOpening = false) => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    // Opening making-charge balance (factory-wide) — debit here = we owe them.
+    if (includeOpening && hasOpeningBalance(factory)) {
+      rows.push({ id: "opening", date: factory.openingDate || factory.createdAt, particulars: "Opening Balance (brought forward)", debit: openingCreditAmt(factory), credit: openingDebitAmt(factory) });
+    }
     for (const mi of iss) {
       const order = db.orders.find(o => o.id === mi.orderId);
       const unit = mi.material === "gold" ? "g" : "ct";
@@ -431,16 +461,20 @@ export function FactoryHistoryPage() {
     }
     let running = 0;
     const withBalance = [...rows]
-      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
       .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
     return withBalance.reverse();
   };
-  const statement = buildStatement(issuances);
+  const statement = buildStatement(issuances, true);
 
   // ── Gold ledger (in fine 24KT grams, so the running balance matches the
   //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
-  const buildGoldLedger = (iss: MaterialIssuance[]) => {
+  const buildGoldLedger = (iss: MaterialIssuance[], includeOpening = false) => {
     const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
+    // Fine gold already at the factory at migration — the ledger's opening "in".
+    if (includeOpening && factory.openingFineGold) {
+      rows.push({ id: "opening", date: factory.openingFineGoldDate || factory.createdAt, particulars: "Opening gold stock (brought forward)", inQ: factory.openingFineGold, outQ: 0 });
+    }
     for (const mi of iss) {
       if (mi.material !== "gold") continue;
       const order = db.orders.find(o => o.id === mi.orderId);
@@ -453,9 +487,9 @@ export function FactoryHistoryPage() {
       }
     }
     let running = 0;
-    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
+    return [...rows].sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
   };
-  const goldLedger = buildGoldLedger(issuances);
+  const goldLedger = buildGoldLedger(issuances, true);
 
   // ── Diamond ledger (carats): issued in; once finished, used-in-piece + returned out. ──
   const buildDiamondLedger = (iss: MaterialIssuance[]) => {
@@ -485,20 +519,20 @@ export function FactoryHistoryPage() {
   };
 
   const ordSuffix = (o?: string) => (o ? `-Order-${o.replace(/[^\w.-]+/g, "_")}` : "");
-  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
   const exportDiamondCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], buildDiamondLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
 
   const exportCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
       ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      buildStatement(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
   const exportPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const acct = factoryAccount(iss);
+    const acct = factoryAccount(iss, orderNo ? undefined : factory);
     downloadLedgerPdf({
       title: `Factory Account Statement${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
@@ -521,7 +555,7 @@ export function FactoryHistoryPage() {
         { header: "Balance", x: 170 },
       ],
       align: ["left", "left", "right", "right", "right"],
-      rows: buildStatement(iss).filter(r => inDateRange(r.date, from, to)).map(r => [
+      rows: buildStatement(iss, !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [
         fmtDate(r.date), r.particulars.slice(0, 40),
         r.debit ? rs(r.debit) : "—",
         r.credit ? rs(r.credit) : "—",
@@ -540,9 +574,14 @@ export function FactoryHistoryPage() {
   type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drDia: number; drAmount: number; crGold: number; crDia: number; crAmount: number };
   // Debit  = value we GAVE the factory (gold/diamond issued) + money we PAID them.
   // Credit = value the factory RETURNED (finished gold, diamond used/returned) + charges they BILLED.
-  const buildUnifiedLedger = (iss: MaterialIssuance[]): UniRow[] => {
+  const buildUnifiedLedger = (iss: MaterialIssuance[], includeOpening = false): UniRow[] => {
     const rows: UniRow[] = [];
     const zero = () => ({ drGold: 0, drDia: 0, drAmount: 0, crGold: 0, crDia: 0, crAmount: 0 });
+    // Factory-wide opening balances brought forward: fine gold given (debit gold),
+    // charges we owe (credit amount) / factory owes us (debit amount).
+    if (includeOpening && (hasOpeningBalance(factory) || factory.openingFineGold)) {
+      rows.push({ ...zero(), id: "opening", date: factory.openingDate || factory.openingFineGoldDate || factory.createdAt, ref: "", particular: "Opening balance (brought forward)", drGold: factory.openingFineGold || 0, crAmount: openingCreditAmt(factory), drAmount: openingDebitAmt(factory) });
+    }
     for (const mi of iss) {
       const order = db.orders.find(o => o.id === mi.orderId);
       const ref = order?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
@@ -574,7 +613,7 @@ export function FactoryHistoryPage() {
         rows.push({ ...zero(), id: pay.id, date: pay.createdAt, ref, particular: `Payment${pay.note ? ` — ${pay.note}` : ""}`, drAmount: pay.amountInr });
       }
     }
-    return rows.sort((a, b) => +new Date(a.date) - +new Date(b.date)); // chronological (oldest first)
+    return rows.sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))); // chronological (oldest first), opening pinned
   };
 
   const uniTotals = (rows: UniRow[]) => rows.reduce(
@@ -584,8 +623,8 @@ export function FactoryHistoryPage() {
 
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const acct = factoryAccount(iss);
-    const rows = buildUnifiedLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const acct = factoryAccount(iss, orderNo ? undefined : factory);
+    const rows = buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to));
     const T = uniTotals(rows);
     downloadLedgerPdf({
       title: `Factory Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
@@ -627,7 +666,7 @@ export function FactoryHistoryPage() {
 
   const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const rows = buildUnifiedLedger(iss).filter(r => inDateRange(r.date, from, to));
+    const rows = buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to));
     const T = uniTotals(rows);
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
@@ -694,7 +733,7 @@ export function FactoryHistoryPage() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!).toLocaleString()} g</p></div>
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold).toLocaleString()} g</p></div>
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond (net ±)</p><p className={`font-semibold text-sm ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding > 0 ? "+" : ""}{account.diamondOutstanding.toLocaleString()} ct</p></div>
           <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
             <p className="text-xs text-muted-foreground mb-1">Charges Pending</p>
@@ -707,6 +746,58 @@ export function FactoryHistoryPage() {
           <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Paid</p><p className="font-semibold text-sm text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
           <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Overpaid</p><p className="font-semibold text-sm text-primary">{fmtMoneyInr(account.chargesOverpaid)}</p></div>
         </div>
+
+        {/* Opening balance (migration) — admin only */}
+        {user?.role === "admin" && (
+          <div className="pt-2 border-t border-border/60">
+            <button onClick={() => setObOpen(v => !v)} className="w-full flex items-center justify-between gap-3 text-left">
+              <div>
+                <p className="text-sm font-semibold text-brand-dark">Opening Balance</p>
+                <p className="text-xs text-muted-foreground">
+                  {hasOpeningBalance(factory) || factory.openingFineGold
+                    ? [
+                        hasOpeningBalance(factory) ? `${fmtMoneyInr(Math.abs(factory.openingBalance!))} ${factory.openingDir === "credit" ? "we owe" : "owed to us"}` : "",
+                        factory.openingFineGold ? `${factory.openingFineGold}g fine gold` : "",
+                      ].filter(Boolean).join(" · ")
+                    : "Not set — add balances carried in from your previous system"}
+                </p>
+              </div>
+              <span className="text-sm text-primary font-medium shrink-0">{obOpen ? "Close" : "Edit"}</span>
+            </button>
+            {obOpen && (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <OpeningBalanceFields
+                  amount={ob.amount}
+                  dir={ob.dir}
+                  date={ob.date}
+                  onAmount={v => setOb({ ...ob, amount: v })}
+                  onDir={v => setOb({ ...ob, dir: v })}
+                  onDate={v => setOb({ ...ob, date: v })}
+                  debitLabel="Factory owes us (Debit)"
+                  creditLabel="We owe factory (Credit)"
+                  title="Opening Making-Charge Balance"
+                  hint="Unpaid labour / making charges with this factory when you started using this app (₹)."
+                />
+                <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
+                  <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">Fine gold at factory (24KT grams)</label>
+                      <Input type="number" min={0} step="0.001" value={ob.fineGold} onChange={e => setOb({ ...ob, fineGold: e.target.value })} placeholder="0.000" className="rounded-lg mt-1 h-9" />
+                    </div>
+                    <div>
+                      <label className="text-[11px] text-muted-foreground">As of date</label>
+                      <Input type="date" value={ob.fineGoldDate} onChange={e => setOb({ ...ob, fineGoldDate: e.target.value })} className="rounded-lg mt-1 h-9" />
+                    </div>
+                  </div>
+                </div>
+                <div className="col-span-2">
+                  <AsyncButton onClick={saveOpening} className="btn-hero rounded-xl h-10">Save Opening Balance</AsyncButton>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
         {showIssueForm && (
           <div className="pt-2 border-t border-border/60 space-y-2.5">

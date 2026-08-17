@@ -230,7 +230,7 @@ function PaySupplier() {
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const purchases = db.purchases.filter(p => p.supplierId === supplierId);
-  const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId));
+  const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId), db.suppliers.find(s => s.id === supplierId));
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
   const submit = () => {
@@ -363,7 +363,7 @@ function PayFactory() {
 
   const factories = db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const issuances = db.materialIssuances.filter(i => i.factoryId === factoryId);
-  const account = factoryAccount(issuances);
+  const account = factoryAccount(issuances, db.factories.find(f => f.id === factoryId));
   const pendingIssuances = issuances.filter(i => issuancePending(i) > 0);
 
   const submit = () => {

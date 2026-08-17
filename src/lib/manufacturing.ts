@@ -12,6 +12,9 @@ import {
   fmtMoney,
   toPureGold,
   pureFromPurity,
+  openingDebitAmt,
+  openingCreditAmt,
+  type OpeningBalanceInfo,
   type Purchase,
   type SupplierReceipt,
   type MaterialIssuance,
@@ -88,7 +91,7 @@ export function purchasePending(p: Purchase): number {
 }
 
 /** Supplier account summary across all their purchases. */
-export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt[] = []) {
+export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt[] = [], opening?: OpeningBalanceInfo) {
   let totalPurchased = 0,
     totalPaid = 0,
     balanceOwed = 0,
@@ -100,8 +103,13 @@ export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt
     balanceOwed += Math.max(0, p.totalInr - paid);
     overpaid += Math.max(0, paid - p.totalInr);
   }
+  // Opening balance from migration: credit = we owe them (like an old unpaid
+  // bill), debit = they owe us (offsets, same side as a refund received).
+  const oCredit = openingCreditAmt(opening), oDebit = openingDebitAmt(opening);
+  totalPurchased += oCredit;
+  balanceOwed += oCredit;
   // Money received back from the supplier (refunds/returns) offsets what we owe.
-  const received = receipts.reduce((s, r) => s + r.amountInr, 0);
+  const received = receipts.reduce((s, r) => s + r.amountInr, 0) + oDebit;
   // Net position: > 0 we still owe them; < 0 they owe us (or we hold their credit).
   const net = Math.round((balanceOwed - received) * 100) / 100;
   return {
@@ -203,7 +211,7 @@ export function factoryPoolBalance(
  * physically in the factory's hands. Derived, never stored (same trust level as
  * factoryPoolBalance above).
  */
-export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string): number {
+export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0): number {
   let inFine = 0, outFine = 0;
   for (const i of issuances) {
     if (i.factoryId !== factoryId || i.material !== "gold") continue;
@@ -215,7 +223,8 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
         : i.finishedKarat ? toPureGold(i.finishedNetWeight, i.finishedKarat) : 0;
     }
   }
-  return Math.round((inFine - outFine) * 1000) / 1000;
+  // Fine gold physically at the factory at migration adds straight onto the balance.
+  return Math.round((inFine - outFine + (openingFineGold || 0)) * 1000) / 1000;
 }
 
 /** Compute the structured labour value (factory payable) from an issuance's
@@ -276,7 +285,7 @@ export function estimatedPureGoldNeeded(
  *  already counted when it was bulk-delivered) — only its actual consumption
  *  (finishedPieces) counts toward goldUsed/diamondUsed, or goldOutstanding
  *  would double-count the moment any order draws from a factory's pool. */
-export function factoryAccount(issuances: MaterialIssuance[]) {
+export function factoryAccount(issuances: MaterialIssuance[], opening?: OpeningBalanceInfo) {
   let goldIssued = 0,
     goldUsed = 0,
     diamondIssued = 0,
@@ -294,6 +303,17 @@ export function factoryAccount(issuances: MaterialIssuance[]) {
     chargesPaid += paid;
     chargesPending += issuancePending(i);
     chargesOverpaid += Math.max(0, paid - i.makingCharges.amountInr);
+  }
+  // Opening making-charge balance from migration: credit = we owe the factory
+  // (adds to what's due), debit = the factory owes us (offsets the pending, any
+  // remainder shows as overpaid/credit in our favour).
+  const oCredit = openingCreditAmt(opening), oDebit = openingDebitAmt(opening);
+  chargesTotal += oCredit;
+  chargesPending += oCredit;
+  if (oDebit) {
+    const applied = Math.min(oDebit, chargesPending);
+    chargesPending -= applied;
+    chargesOverpaid += oDebit - applied;
   }
   return {
     goldIssued,

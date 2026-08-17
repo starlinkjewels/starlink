@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, nextDiamondStockNumber, type Purchase, type PurchaseMaterial, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
+import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
@@ -97,7 +98,27 @@ export function SupplierHistoryPage() {
     .filter(p => p.supplierId === id)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const receipts = (db.supplierReceipts ?? []).filter(r => r.supplierId === id);
-  const account = supplierAccount(purchases, receipts);
+  const account = supplierAccount(purchases, receipts, supplier);
+
+  // ── Opening balance (migration) ──
+  const [obOpen, setObOpen] = useState(false);
+  const [ob, setOb] = useState({
+    amount: supplier.openingBalance != null ? String(supplier.openingBalance) : "",
+    dir: (supplier.openingDir || "credit") as LedgerDir,
+    date: supplier.openingDate || "",
+  });
+  const saveOpening = () => {
+    const amt = ob.amount === "" ? 0 : Number(ob.amount);
+    updateDb(d => {
+      const s = d.suppliers.find(x => x.id === id);
+      if (!s) return;
+      s.openingBalance = amt || undefined;
+      s.openingDir = amt ? ob.dir : undefined;
+      s.openingDate = amt ? (ob.date || undefined) : undefined;
+    });
+    toast.success("Opening balance updated");
+    setObOpen(false);
+  };
 
   // ── Record purchase ──
   const [showExport, setShowExport] = useState(false);
@@ -390,6 +411,10 @@ export function SupplierHistoryPage() {
   // "professional ledger" view, not just a purchase-by-purchase list.
   const statement = (() => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    // Opening balance carried in from a previous system — always the first line.
+    if (hasOpeningBalance(supplier)) {
+      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier) });
+    }
     for (const p of purchases) {
       rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}${p.invoiceNumber ? ` (Inv ${p.invoiceNumber})` : ""}`, debit: p.totalInr, credit: 0 });
       for (const pay of p.payments || []) {
@@ -402,7 +427,8 @@ export function SupplierHistoryPage() {
     }
     let running = 0;
     const withBalance = [...rows]
-      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      // Opening balance is pinned first regardless of its as-of date.
+      .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
       .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
     return withBalance.reverse(); // newest first, matching every other list on this page
   })();
@@ -677,6 +703,41 @@ export function SupplierHistoryPage() {
           </div>
         )}
       </div>
+
+      {/* Opening balance (migration) — admin only */}
+      {user?.role === "admin" && (
+        <div className="card-luxe p-5">
+          <button onClick={() => setObOpen(v => !v)} className="w-full flex items-center justify-between gap-3 text-left">
+            <div>
+              <h3 className="font-display text-lg text-brand-dark">Opening Balance</h3>
+              <p className="text-xs text-muted-foreground">
+                {hasOpeningBalance(supplier)
+                  ? `${fmtMoneyInr(Math.abs(supplier.openingBalance!))} · ${supplier.openingDir === "credit" ? "we owe supplier" : "supplier owes us"}${supplier.openingDate ? ` · as of ${fmtDate(supplier.openingDate)}` : ""}`
+                  : "Not set — add the balance carried in from your previous system"}
+              </p>
+            </div>
+            <span className="text-sm text-primary font-medium shrink-0">{obOpen ? "Close" : "Edit"}</span>
+          </button>
+          {obOpen && (
+            <div className="mt-3 grid grid-cols-2 gap-3">
+              <OpeningBalanceFields
+                amount={ob.amount}
+                dir={ob.dir}
+                date={ob.date}
+                onAmount={v => setOb({ ...ob, amount: v })}
+                onDir={v => setOb({ ...ob, dir: v })}
+                onDate={v => setOb({ ...ob, date: v })}
+                debitLabel="Supplier owes us (Debit)"
+                creditLabel="We owe supplier (Credit)"
+                hint="Amount outstanding with this supplier when you started using this app (₹)."
+              />
+              <div className="col-span-2">
+                <AsyncButton onClick={saveOpening} className="btn-hero rounded-xl h-10">Save Opening Balance</AsyncButton>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Account Statement — full chronological ledger with a running balance,
           purchases and payments interleaved, like a bank/vendor statement. */}

@@ -5,6 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
+import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -38,7 +39,7 @@ export function SuppliersPage() {
   // Grand totals across ALL suppliers (not just the search/current page):
   // net > 0 → we still owe them (payable); net < 0 → they owe us (receivable).
   const totals = db.suppliers.reduce((acc, s) => {
-    const a = supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
+    const a = supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s);
     if (a.net > 0) acc.payable += a.net; else acc.receivable += -a.net;
     return acc;
   }, { payable: 0, receivable: 0 });
@@ -95,6 +96,17 @@ export function SuppliersPage() {
                   />
                 </div>
               ))}
+              <OpeningBalanceFields
+                amount={f.openingBalance != null ? String(f.openingBalance) : ""}
+                dir={f.openingDir || "credit"}
+                date={f.openingDate || ""}
+                onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
+                onDir={v => setF({ ...f, openingDir: v })}
+                onDate={v => setF({ ...f, openingDate: v || undefined })}
+                debitLabel="Supplier owes us (Debit)"
+                creditLabel="We owe supplier (Credit)"
+                hint="Amount outstanding with this supplier when you started using this app (₹). Shown as the first line of their ledger."
+              />
             </div>
             <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Supplier"}</Button>
           </DialogContent>
@@ -132,7 +144,7 @@ export function SuppliersPage() {
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(s => {
             const purchases = db.purchases.filter(p => p.supplierId === s.id);
-            const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
+            const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s);
             return (
               <Link key={s.id} to={`/suppliers/${s.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
                 <div className="h-10 w-10 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4.5 w-4.5" /></div>

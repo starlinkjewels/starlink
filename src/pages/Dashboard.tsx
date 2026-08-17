@@ -32,8 +32,11 @@ export function Dashboard() {
   const ordersInProduction = db.orders.filter(o => o.status === "In Production").length;
   const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
-  const makingChargesPending = factoryAccount(db.materialIssuances).chargesPending;
-  const supplierPaymentsPending = supplierAccount(db.purchases).balanceOwed;
+  // Summed per-entity so each one's migration opening balance is included.
+  const makingChargesPending = db.factories.reduce(
+    (s, f) => s + factoryAccount(db.materialIssuances.filter(i => i.factoryId === f.id), f).chargesPending, 0);
+  const supplierPaymentsPending = db.suppliers.reduce(
+    (s, sup) => s + supplierAccount(db.purchases.filter(p => p.supplierId === sup.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id), sup).balanceOwed, 0);
 
   // Cash Position & Profit — every payment in/out (client payments, supplier/
   // factory payments, expenses) that was tagged to a Locker rolls up here.

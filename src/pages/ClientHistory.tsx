@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
@@ -77,7 +77,7 @@ export function ClientHistoryPage() {
   const [payLockerId, setPayLockerId] = useState("");
   const [payExchangeRate, setPayExchangeRate] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
-  const account = clientAccount(billableOrders, client?.creditBalance || 0);
+  const account = clientAccount(billableOrders, client?.creditBalance || 0, client);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
   const payLockerCurrency = payLocker?.currency || "INR";
   // A client always pays in USD (that's what the order is billed in) — only
@@ -175,6 +175,10 @@ export function ClientHistoryPage() {
   // separate from the Order History table below (which is order-by-order).
   const statement = (() => {
     const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    // Opening balance carried in from a previous system — always the first line.
+    if (hasOpeningBalance(client)) {
+      rows.push({ id: "opening", date: client.openingDate || client.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(client), credit: openingCreditAmt(client) });
+    }
     for (const o of billableOrders) {
       // Bill the GROSS value, then show any gift-card redemption as its own
       // discount line — so the ledger explains why the balance is lower.
@@ -188,7 +192,8 @@ export function ClientHistoryPage() {
     }
     let running = 0;
     const withBalance = [...rows]
-      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      // Opening balance is pinned first regardless of its as-of date.
+      .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
       .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
     return withBalance.reverse();
   })();
@@ -532,7 +537,7 @@ export function ClientHistoryPage() {
                 </p>
                 <p className="text-[11px] text-muted-foreground">Bal: {fmtMoney(r.balance)}</p>
               </div>
-              {r.credit > 0 && user?.role === "admin" && (
+              {r.credit > 0 && r.id !== "opening" && user?.role === "admin" && (
                 <button
                   onClick={() => reversePayment(r.date)}
                   title="Reverse this payment"

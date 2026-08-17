@@ -268,7 +268,7 @@ function AssignGold() {
           <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
         </Select>
         {factoryId && (
-          <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId)}g fine (24KT)</span></p>
+          <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold)}g fine (24KT)</span></p>
         )}
       </div>
       <div className="grid grid-cols-2 gap-2.5">

@@ -5,6 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { factoryAccount, factoryPoolBuckets, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
+import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -38,7 +39,7 @@ export function FactoriesPage() {
   // Grand totals across ALL factories: charges we still owe (payable) vs charges
   // we overpaid and the factory owes us back (receivable).
   const totals = db.factories.reduce((acc, fac) => {
-    const a = factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id));
+    const a = factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id), fac);
     acc.payable += a.chargesPending;
     acc.receivable += a.chargesOverpaid;
     return acc;
@@ -90,6 +91,36 @@ export function FactoriesPage() {
                   <Input value={(f as Record<string, string>)[k] || ""} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
                 </div>
               ))}
+              <OpeningBalanceFields
+                amount={f.openingBalance != null ? String(f.openingBalance) : ""}
+                dir={f.openingDir || "credit"}
+                date={f.openingDate || ""}
+                onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
+                onDir={v => setF({ ...f, openingDir: v })}
+                onDate={v => setF({ ...f, openingDate: v || undefined })}
+                debitLabel="Factory owes us (Debit)"
+                creditLabel="We owe factory (Credit)"
+                title="Opening Making-Charge Balance"
+                hint="Unpaid labour / making charges with this factory when you started using this app (₹)."
+              />
+              <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
+                <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <Label className="text-[11px]">Fine gold at factory (24KT grams)</Label>
+                    <Input type="number" min={0} step="0.001" value={f.openingFineGold != null ? String(f.openingFineGold) : ""}
+                      onChange={e => setF({ ...f, openingFineGold: e.target.value === "" ? undefined : Number(e.target.value) })}
+                      placeholder="0.000" className="rounded-lg mt-1 h-9" />
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">As of date</Label>
+                    <Input type="date" value={f.openingFineGoldDate || ""}
+                      onChange={e => setF({ ...f, openingFineGoldDate: e.target.value || undefined })}
+                      className="rounded-lg mt-1 h-9" />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground">Pure (24KT) gold already lying with this factory. Added onto their Fine Gold balance.</p>
+              </div>
             </div>
             <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Factory"}</Button>
           </DialogContent>
@@ -127,8 +158,8 @@ export function FactoriesPage() {
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(fac => {
             const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
-            const account = factoryAccount(issuances);
-            const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id);
+            const account = factoryAccount(issuances, fac);
+            const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id, fac.openingFineGold);
             return (
               <Link key={fac.id} to={`/factories/${fac.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
                 <div className="h-10 w-10 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4.5 w-4.5" /></div>

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, uid, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
 import { AccountSummary } from "@/components/AccountSummary";
+import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -148,6 +149,7 @@ export function ClientsPage() {
       companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
       country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address,
       accountManagerId: c.accountManagerId,
+      openingBalance: c.openingBalance, openingDir: c.openingDir, openingDate: c.openingDate,
     });
     setEditingId(c.id);
   };
@@ -165,6 +167,10 @@ export function ClientsPage() {
         c.zip = ef.zip?.trim() || undefined;
         c.gstVat = ef.gstVat?.trim() || "";
         c.address = ef.address?.trim() || "";
+        // Opening balance (migration) — clear direction/date when amount is blank/0.
+        c.openingBalance = ef.openingBalance || undefined;
+        c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
+        c.openingDate = ef.openingBalance ? (ef.openingDate || undefined) : undefined;
         if (user!.role === "admin") c.accountManagerId = ef.accountManagerId;
         const u = d.users.find(u => u.clientId === c.id);
         if (u) { u.name = c.ownerName || c.companyName; u.phone = c.phone; }
@@ -192,7 +198,7 @@ export function ClientsPage() {
   // clients owe us (receivable · ughrani); credit = advances we hold for them,
   // i.e. money we'd owe back (payable · chukavni). Rejected orders aren't billed.
   const totals = scoped.reduce((acc, c) => {
-    const a = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
+    const a = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
     acc.receivable += a.outstanding;
     acc.payable += a.credit;
     return acc;
@@ -290,6 +296,19 @@ export function ClientsPage() {
                   </div>
                 ))}
               </div>
+              <div className="mt-3">
+                <OpeningBalanceFields
+                  amount={f.openingBalance != null ? String(f.openingBalance) : ""}
+                  dir={f.openingDir || "debit"}
+                  date={f.openingDate || ""}
+                  onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
+                  onDir={v => setF({ ...f, openingDir: v })}
+                  onDate={v => setF({ ...f, openingDate: v || undefined })}
+                  debitLabel="Client owes us (Debit)"
+                  creditLabel="We owe client / advance (Credit)"
+                  hint="What this client already owed you (or prepaid) when you started using this app. Shown as the first line of their ledger."
+                />
+              </div>
               {user!.role === "admin" ? (
                 <div className="mt-3">
                   <Label className="text-xs">Assign Employee (optional)</Label>
@@ -335,6 +354,19 @@ export function ClientsPage() {
                 />
               </div>
             ))}
+          </div>
+          <div className="mt-3">
+            <OpeningBalanceFields
+              amount={ef.openingBalance != null ? String(ef.openingBalance) : ""}
+              dir={ef.openingDir || "debit"}
+              date={ef.openingDate || ""}
+              onAmount={v => setEf({ ...ef, openingBalance: v === "" ? undefined : Number(v) })}
+              onDir={v => setEf({ ...ef, openingDir: v })}
+              onDate={v => setEf({ ...ef, openingDate: v || undefined })}
+              debitLabel="Client owes us (Debit)"
+              creditLabel="We owe client / advance (Credit)"
+              hint="Adjust the balance carried in from your previous system. Shown as the first line of their ledger."
+            />
           </div>
           {user!.role === "admin" && (
             <div className="mt-3">
@@ -386,7 +418,7 @@ export function ClientsPage() {
           {paged.map(c => {
             const orderCount = db.orders.filter(o => o.clientId === c.id).length;
             const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
-            const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
+            const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
             const clientUser = db.users.find(u => u.clientId === c.id);
             return (
               <Link key={c.id} to={`/clients/${c.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
@@ -445,7 +477,7 @@ export function ClientsPage() {
         {paged.map(c => {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
-          const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0);
+          const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
           const manager = employees.find(e => e.id === c.accountManagerId);
           const clientUser = db.users.find(u => u.clientId === c.id);
           const online = isOnline(clientUser?.lastActiveAt);

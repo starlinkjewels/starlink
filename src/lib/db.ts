@@ -79,6 +79,39 @@ export interface Client {
   giftCardEnabled?: boolean;
   cashbackPercent?: number; // optional per-client override of Settings.cashbackPercent
   giftMaxRedeemPercent?: number; // optional per-client override of the max % of an order a gift card may cover
+  // Opening balance carried in from a previous system when this client was
+  // added to a running business — see OpeningBalanceInfo. `debit` = client owes
+  // us (adds to outstanding); `credit` = we owe them / they prepaid (adds to credit).
+  openingBalance?: number;
+  openingDir?: LedgerDir;
+  openingDate?: string; // ISO — the "as of" date shown on the opening ledger line
+}
+
+/** Debit/Credit direction for a migration opening balance, from OUR books:
+ *  "debit" = the counterparty owes us; "credit" = we owe them (their advance). */
+export type LedgerDir = "debit" | "credit";
+
+/** Opening balance an entity (client/supplier/factory) carried in from a
+ *  previous system. Stored once at migration; folded into that entity's
+ *  account summary AND shown as the first, dated line of its ledger. */
+export interface OpeningBalanceInfo {
+  openingBalance?: number;
+  openingDir?: LedgerDir;
+  openingDate?: string;
+}
+
+/** Opening amount the counterparty owes US (debit side), else 0. */
+export function openingDebitAmt(e?: OpeningBalanceInfo): number {
+  return e?.openingBalance && e.openingDir !== "credit" ? Math.abs(e.openingBalance) : 0;
+}
+/** Opening amount WE owe the counterparty (credit / their advance), else 0. */
+export function openingCreditAmt(e?: OpeningBalanceInfo): number {
+  return e?.openingBalance && e.openingDir === "credit" ? Math.abs(e.openingBalance) : 0;
+}
+/** True when a non-zero opening balance is set — used to decide whether to
+ *  render the opening ledger line. */
+export function hasOpeningBalance(e?: OpeningBalanceInfo): boolean {
+  return !!e?.openingBalance && Math.abs(e.openingBalance) > 0;
 }
 
 // Streamlined production stages. "Certification" is only added for orders that
@@ -570,6 +603,11 @@ export interface Supplier {
   gstin?: string;
   createdAt: string;
   active: boolean;
+  // Opening balance carried in at migration. `credit` = we owe them (unpaid old
+  // bills — the usual case); `debit` = they owe us (we hold their credit).
+  openingBalance?: number;
+  openingDir?: LedgerDir;
+  openingDate?: string;
 }
 
 export type PurchaseMaterial = "gold" | "diamond";
@@ -708,6 +746,15 @@ export interface Factory {
   address?: string;
   createdAt: string;
   active: boolean;
+  // Opening making-charge balance at migration. `credit` = we owe the factory
+  // (unpaid old labour — usual case); `debit` = the factory owes us.
+  openingBalance?: number;
+  openingDir?: LedgerDir;
+  openingDate?: string;
+  // Fine (24KT) gold already sitting at the factory when it was added to a
+  // running business — added straight onto factoryFineGoldBalance().
+  openingFineGold?: number;
+  openingFineGoldDate?: string;
 }
 
 // Finished jewelry already sitting in physical inventory — separate from the
@@ -1178,8 +1225,11 @@ export function recordOrderPayment(
   return { applied, toCredit, paidInFull };
 }
 
-/** Client account summary across all their orders (+ carried-forward credit). */
-export function clientAccount(orders: Order[], creditBalance = 0) {
+/** Client account summary across all their orders (+ carried-forward credit).
+ *  `opening` folds in a migration opening balance so the list, detail card and
+ *  ledger export all agree — debit adds to what's billed/outstanding, credit
+ *  adds to their advance. */
+export function clientAccount(orders: Order[], creditBalance = 0, opening?: OpeningBalanceInfo) {
   // Outstanding must be summed PER ORDER (capped at 0) — otherwise an order that
   // was overpaid would wrongly cancel out real balance still due on another order.
   let outstanding = 0,
@@ -1188,9 +1238,11 @@ export function clientAccount(orders: Order[], creditBalance = 0) {
     outstanding += balanceDue(o);
     overpaid += Math.max(0, totalAdvance(o) - orderTotal(o));
   }
-  const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
+  const oDebit = openingDebitAmt(opening), oCredit = openingCreditAmt(opening);
+  outstanding += oDebit;
+  const billed = orders.reduce((s, o) => s + orderTotal(o), 0) + oDebit;
   const allocated = Math.round((billed - outstanding) * 100) / 100; // money applied to bills
-  const credit = Math.round(((creditBalance || 0) + overpaid) * 100) / 100;
+  const credit = Math.round(((creditBalance || 0) + overpaid + oCredit) * 100) / 100;
   return { billed, allocated, outstanding, credit, received: allocated + credit };
 }
 
