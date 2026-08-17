@@ -774,7 +774,8 @@ export interface ReadyStockItem {
   price: number; // USD — sale price, matches client billing currency
   cost?: number; // USD — internal cost basis (materials + making). ADMIN-ONLY: never shown to employees or clients. Drives profit/loss.
   quantity: number; // identical pieces available — "Sold Out" is quantity === 0, never a separate stored flag
-  images: string[]; // Storage URLs, up to 3 — same upload pattern as Order.images
+  images: string[]; // Storage URLs, up to 4 — same upload pattern as Order.images
+  video?: string; // optional single product video (Storage URL)
   sku?: string;
   location?: string; // where the piece physically is — US / Hong Kong / India / Other
   notes?: string;

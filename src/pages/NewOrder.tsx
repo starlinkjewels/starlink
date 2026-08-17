@@ -16,7 +16,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide, Search } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -163,6 +163,18 @@ export function NewOrderPage() {
   // the specs/price below instead of the client/staff typing a custom order.
   const readyStockItems = db.readyStock.filter(i => i.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
   const selectedStockItem = db.readyStock.find(i => i.id === f.readyStockItemId);
+  // Search within Ready Stock (by name, SKU, type, metal or product ID) — helps
+  // when there are many finished pieces to pick from.
+  const [stockSearch, setStockSearch] = useState("");
+  const stockQuery = stockSearch.trim().toLowerCase();
+  const filteredStockItems = stockQuery
+    ? readyStockItems.filter(i =>
+        i.name.toLowerCase().includes(stockQuery) ||
+        (i.sku || "").toLowerCase().includes(stockQuery) ||
+        i.jewelleryType.toLowerCase().includes(stockQuery) ||
+        i.metal.toLowerCase().includes(stockQuery) ||
+        i.id.slice(-6).toLowerCase().includes(stockQuery))
+    : readyStockItems;
 
   const selectReadyStock = (itemId: string) => {
     if (!itemId) { setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later" })); return; }
@@ -452,15 +464,33 @@ export function NewOrderPage() {
         {/* ══ 1b. Sell from Ready Stock (optional) — not for in-house stock builds ══ */}
         {!forReadyStock && (
         <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional — pick an existing finished piece instead of a custom order">
-          <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => selectReadyStock(v === READY_STOCK_NONE ? "" : v)}>
+          <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => { selectReadyStock(v === READY_STOCK_NONE ? "" : v); setStockSearch(""); }}>
             <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="None — custom order" /></SelectTrigger>
             <SelectContent>
+              {/* Search box — stopPropagation so typing doesn't trigger Select's typeahead */}
+              <div className="sticky top-0 z-10 bg-popover p-2 border-b border-border/60">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+                  <Input
+                    value={stockSearch}
+                    onChange={e => setStockSearch(e.target.value)}
+                    onKeyDown={e => e.stopPropagation()}
+                    onPointerDown={e => e.stopPropagation()}
+                    placeholder="Search name, ID, SKU, type…"
+                    className="h-9 pl-8 rounded-lg text-sm"
+                  />
+                </div>
+              </div>
               <SelectItem value={READY_STOCK_NONE}>None — custom order</SelectItem>
-              {readyStockItems.map(item => (
+              {filteredStockItems.map(item => (
                 <SelectItem key={item.id} value={item.id}>
-                  {item.name} — ${item.price.toLocaleString()} ({item.quantity} available)
+                  <span className="font-mono text-[10px] text-muted-foreground mr-1.5">{item.id.slice(-6).toUpperCase()}</span>
+                  {item.name} — ${item.price.toLocaleString()} ({item.quantity} avail{item.sku ? ` · #${item.sku}` : ""})
                 </SelectItem>
               ))}
+              {filteredStockItems.length === 0 && (
+                <div className="px-3 py-4 text-center text-xs text-muted-foreground">No matching items.</div>
+              )}
             </SelectContent>
           </Select>
 
@@ -476,6 +506,9 @@ export function NewOrderPage() {
                 <p className="text-xs text-muted-foreground">
                   {selectedStockItem.jewelleryType} · {selectedStockItem.metal}{selectedStockItem.productKarats ? ` ${selectedStockItem.productKarats}` : ""}
                   {selectedStockItem.diamondWeight ? ` · ${selectedStockItem.diamondWeight}ct diamond` : ""}
+                </p>
+                <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                  Product ID {selectedStockItem.id.slice(-6).toUpperCase()}{selectedStockItem.sku ? ` · Design #${selectedStockItem.sku}` : ""}
                 </p>
               </div>
               <p className="font-display text-lg font-bold text-brand-dark shrink-0">${selectedStockItem.price.toLocaleString()}</p>

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, type ReadyStockItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { uploadDataUrl } from "@/lib/storage";
+import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Film, Play } from "lucide-react";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
@@ -95,10 +95,16 @@ export function ReadyStockPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [f, setF] = useState<ItemForm>(EMPTY_FORM);
   const [images, setImages] = useState<string[]>([]); // existing URLs + new data-urls, mixed until save
+  // Video: `video` holds either the existing https URL or a blob: preview URL;
+  // `videoFile` holds a freshly-picked File (uploaded raw on save).
+  const [video, setVideo] = useState<string>("");
+  const [videoFile, setVideoFile] = useState<File | null>(null);
+  const [videoView, setVideoView] = useState<string | null>(null); // URL open in the viewer modal
   const [saving, setSaving] = useState(false);
   const imgRef = useRef<HTMLInputElement>(null);
+  const vidRef = useRef<HTMLInputElement>(null);
 
-  const openAdd = () => { setEditingId(null); setF(EMPTY_FORM); setImages([]); setOpen(true); };
+  const openAdd = () => { setEditingId(null); setF(EMPTY_FORM); setImages([]); setVideo(""); setVideoFile(null); setOpen(true); };
   const openEdit = (item: ReadyStockItem) => {
     setEditingId(item.id);
     setF({
@@ -112,20 +118,36 @@ export function ReadyStockPage() {
       sku: item.sku || "", location: item.location || "US", notes: item.notes || "",
     });
     setImages(item.images || []);
+    setVideo(item.video || "");
+    setVideoFile(null);
     setOpen(true);
   };
 
   const handleImageFiles = async (files: FileList | null) => {
     if (!files) return;
-    const remaining = 3 - images.length;
-    if (remaining <= 0) { toast.error("Maximum 3 images allowed"); return; }
+    const remaining = 4 - images.length;
+    if (remaining <= 0) { toast.error("Maximum 4 images allowed"); return; }
     const toProcess = Array.from(files).slice(0, remaining);
     try {
       const compressed = await Promise.all(toProcess.map(compressImage));
-      setImages(prev => [...prev, ...compressed].slice(0, 3));
+      setImages(prev => [...prev, ...compressed].slice(0, 4));
     } catch { toast.error("Failed to process image"); }
   };
   const removeImage = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
+
+  const handleVideoFile = (files: FileList | null) => {
+    const file = files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
+    if (file.size > 40 * 1024 * 1024) { toast.error("Video is too large — keep it under 40 MB"); return; }
+    if (video.startsWith("blob:")) URL.revokeObjectURL(video);
+    setVideoFile(file);
+    setVideo(URL.createObjectURL(file));
+  };
+  const removeVideo = () => {
+    if (video.startsWith("blob:")) URL.revokeObjectURL(video);
+    setVideo(""); setVideoFile(null);
+  };
 
   const save = async () => {
     if (!f.name.trim()) { toast.error("Enter an item name"); return; }
@@ -136,6 +158,10 @@ export function ReadyStockPage() {
     try {
       const itemId = editingId || uid("rs_");
       const imageUrls = await Promise.all(images.map(img => uploadDataUrl(img, `readyStock/${itemId}`)));
+      // Upload a freshly-picked video (raw file); keep an existing URL as-is; else none.
+      const videoUrl = videoFile
+        ? await uploadFile(videoFile, `readyStock/${itemId}`)
+        : (/^https?:\/\//i.test(video) ? video : undefined);
       updateDb(d => {
         if (!d.readyStock) d.readyStock = [];
         const base: ReadyStockItem = {
@@ -152,6 +178,7 @@ export function ReadyStockPage() {
           // Cost is admin-only. A non-admin edit must never wipe an existing cost.
           cost: isAdmin ? (Number(f.cost) > 0 ? Number(f.cost) : undefined) : (editingId ? d.readyStock.find(x => x.id === editingId)?.cost : undefined),
           images: imageUrls,
+          video: videoUrl,
           sku: f.sku.trim() || undefined,
           location: f.location || undefined,
           notes: f.notes.trim() || undefined,
@@ -210,7 +237,7 @@ export function ReadyStockPage() {
                     </button>
                   </div>
                 ))}
-                {images.length < 3 && (
+                {images.length < 4 && (
                   <button type="button" onClick={() => imgRef.current?.click()}
                     className="aspect-square rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors flex flex-col items-center justify-center gap-1.5 text-muted-foreground">
                     <ImagePlus className="h-6 w-6" />
@@ -219,6 +246,27 @@ export function ReadyStockPage() {
                 )}
               </div>
               <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={e => handleImageFiles(e.target.files)} />
+              <p className="text-[11px] text-muted-foreground -mt-1">Up to 4 photos and 1 short video.</p>
+
+              {/* Product video (optional, 1) */}
+              <div>
+                {video ? (
+                  <div className="relative rounded-xl overflow-hidden border border-border bg-black">
+                    <video src={video} controls playsInline className="w-full max-h-56 object-contain bg-black" />
+                    <button type="button" onClick={removeVideo}
+                      className="absolute top-2 right-2 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md">
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => vidRef.current?.click()}
+                    className="w-full h-16 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors flex items-center justify-center gap-2 text-muted-foreground">
+                    <Film className="h-5 w-5" />
+                    <span className="text-xs font-medium">Add Video (optional)</span>
+                  </button>
+                )}
+                <input ref={vidRef} type="file" accept="video/*" className="hidden" onChange={e => handleVideoFile(e.target.files)} />
+              </div>
 
               <div>
                 <Label className="text-xs">Item Name</Label>
@@ -368,6 +416,12 @@ export function ReadyStockPage() {
                   <span className="text-white font-semibold text-sm tracking-wide">SOLD OUT</span>
                 </div>
               )}
+              {item.video && (
+                <button onClick={() => setVideoView(item.video!)} title="Play video"
+                  className="absolute bottom-2 left-2 inline-flex items-center gap-1 h-7 pl-1.5 pr-2 rounded-full bg-black/60 hover:bg-black/80 text-white text-[11px] font-medium transition-colors">
+                  <Play className="h-3.5 w-3.5 fill-current" /> Video
+                </button>
+              )}
               {canManage && (
                 <button onClick={() => openEdit(item)} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 hover:bg-white grid place-items-center text-muted-foreground hover:text-primary transition-colors shadow-sm">
                   <Pencil className="h-3.5 w-3.5" />
@@ -387,7 +441,9 @@ export function ReadyStockPage() {
                   {item.netWeight ? `Net ${item.netWeight}g` : ""}
                 </p>
               )}
-              {item.sku && <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">Design #{item.sku}</p>}
+              <p className="text-[11px] text-muted-foreground mt-0.5 font-mono">
+                Product ID {item.id.slice(-6).toUpperCase()}{item.sku ? ` · Design #${item.sku}` : ""}
+              </p>
               {item.location && (
                 <span className="inline-flex items-center gap-1 mt-1 self-start text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                   <MapPin className="h-2.5 w-2.5" /> {item.location}
@@ -445,6 +501,12 @@ export function ReadyStockPage() {
                   ? <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
                   : <div className="w-full h-full grid place-items-center text-muted-foreground/40"><Gem className="h-6 w-6" /></div>}
                 {item.quantity === 0 && <div className="absolute inset-0 bg-black/50 grid place-items-center"><span className="text-white font-semibold text-[9px] tracking-wide">SOLD</span></div>}
+                {item.video && item.quantity !== 0 && (
+                  <button onClick={() => setVideoView(item.video!)} title="Play video"
+                    className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-black/60 hover:bg-black/80 text-white grid place-items-center transition-colors">
+                    <Play className="h-3 w-3 fill-current" />
+                  </button>
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-brand-dark truncate leading-tight">{item.name}</p>
@@ -458,6 +520,7 @@ export function ReadyStockPage() {
                   {item.netWeight ? `Net ${item.netWeight}g` : ""}
                   {item.sku ? `${(item.grossWeight || item.netWeight) ? " · " : ""}Design #${item.sku}` : ""}
                 </p>
+                <p className="text-[11px] text-muted-foreground font-mono truncate">Product ID {item.id.slice(-6).toUpperCase()}</p>
                 {item.location && (
                   <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                     <MapPin className="h-2.5 w-2.5" /> {item.location}
@@ -508,6 +571,14 @@ export function ReadyStockPage() {
         showPrice={db.settings.barcodeBandShowPrice !== false}
         onGenerate={(preset, mode, copies) => { if (bandItem) generateStockBand(bandItem, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies }); }}
       />
+
+      {/* Product video viewer */}
+      <Dialog open={!!videoView} onOpenChange={o => { if (!o) setVideoView(null); }}>
+        <DialogContent className="max-w-2xl rounded-2xl p-2 sm:p-3">
+          <DialogHeader className="px-2 pt-1"><DialogTitle className="font-display text-lg">Product Video</DialogTitle></DialogHeader>
+          {videoView && <video src={videoView} controls autoPlay playsInline className="w-full max-h-[70vh] rounded-xl bg-black" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
