@@ -355,6 +355,7 @@ export function allocateFactoryChargePaymentFIFO(
 
 export interface StockMovementLink {
   label: string; // always present — resolved description, or the movement's own note as fallback
+  invoiceNumber?: string; // supplier invoice # for a purchase_in movement, when recorded
   orderId?: string;
   factoryId?: string;
   supplierId?: string;
@@ -391,10 +392,11 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
     const p = ctx.purchases.find(x => x.id === m.refId);
     if (!p) return { label: m.note || "Purchase (record no longer exists)" };
     const supplier = ctx.suppliers.find(s => s.id === p.supplierId);
+    const inv = p.invoiceNumber?.trim();
     const label = m.type === "purchase_in"
-      ? `Purchased from ${supplier?.name ?? "supplier"}`
-      : `Purchase void reversal — ${supplier?.name ?? "supplier"}`;
-    return { label, supplierId: p.supplierId };
+      ? `Purchased from ${supplier?.name ?? "supplier"}${inv ? ` · Inv ${inv}` : ""}`
+      : `Purchase void reversal — ${supplier?.name ?? "supplier"}${inv ? ` · Inv ${inv}` : ""}`;
+    return { label, supplierId: p.supplierId, invoiceNumber: inv || undefined };
   }
   if (m.refType === "order" && m.refId) {
     const order = ctx.orders.find(o => o.id === m.refId);
@@ -452,6 +454,7 @@ export interface MaterialLedgerRow {
   purityOrQuality: string;
   note?: string;
   link: StockMovementLink;
+  invoiceNumber?: string; // supplier invoice # for a purchase_in row
   inQty: number;   // grams (gold) / carats (diamond) coming IN (purchase / return)
   outQty: number;  // going OUT (issued to factory / used on order / sold)
   rateInr: number | null;   // ₹/unit — only for purchases (linked Purchase)
@@ -497,6 +500,7 @@ export function materialLedger(
     const isIn = m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0);
     return {
       id: m.id, createdAt: m.createdAt, type: m.type, purityOrQuality: m.purityOrQuality, note: m.note, link: m.link,
+      invoiceNumber: m.link.invoiceNumber,
       inQty: isIn ? Math.abs(m.quantity) : 0,
       outQty: isIn ? 0 : Math.abs(m.quantity),
       rateInr, amountInr,

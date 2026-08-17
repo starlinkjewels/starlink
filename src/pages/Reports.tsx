@@ -480,9 +480,9 @@ export function ReportsPage() {
         const led = movementLedger(cat);
         csvDownload(
           `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
-          ["Date", "Particulars", m.detail, `In (${m.unit})`, `Out (${m.unit})`, `Balance (${m.unit})`, "Rate (Rs)", "Amount (Rs)"],
+          ["Date", "Invoice #", "Particulars", m.detail, `In (${m.unit})`, `Out (${m.unit})`, `Balance (${m.unit})`, "Rate (Rs)", "Amount (Rs)"],
           led.map(r => [
-            fmtDate(r.createdAt), r.link.label, r.purityOrQuality,
+            fmtDate(r.createdAt), r.invoiceNumber || "", r.link.label, r.purityOrQuality,
             r.inQty || "", r.outQty || "", r.balance,
             r.rateInr ? Math.round(r.rateInr) : "", r.amountInr ? Math.round(r.amountInr) : "",
           ]),
