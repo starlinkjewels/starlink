@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, nextOrderNumber, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -240,7 +240,7 @@ export function NewOrderPage() {
     let mailInfo: { orderNumber: string; clientName: string; jewelleryType?: string; metal?: string; quantity?: number; expectedDelivery?: string } | null = null;
 
     updateDb(d => {
-      const num = `SLJ-${new Date().getFullYear()}-${String(1000 + d.orders.length + 1).padStart(4, "0")}`;
+      const num = nextOrderNumber(d.orders);
       const advance = Number(f.advanceAmount) || 0;
 
       // Assign the order to an employee so it shows in their views: the creating

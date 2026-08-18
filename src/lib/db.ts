@@ -391,6 +391,24 @@ export function nextInvoiceNumber(d: DB): string {
 }
 
 /**
+ * Next order number — `SLJ-<year>-<seq>`. The sequence is one past the HIGHEST
+ * existing order number, NOT the order count, so deleting/rejecting an order can
+ * never make the next order reuse a live number (the old `1000 + orders.length`
+ * did exactly that — two orders ended up sharing SLJ-2026-1035). Call inside
+ * updateDb() so it reads the freshest list.
+ */
+export function nextOrderNumber(orders: Order[]): string {
+  let max = 1000;
+  for (const o of orders) {
+    // Sequence is the trailing digit group ("SLJ-2026-1035" → 1035).
+    const parts = (o.orderNumber || "").split("-");
+    const seq = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(seq) && seq > max) max = seq;
+  }
+  return `SLJ-${new Date().getFullYear()}-${String(max + 1).padStart(4, "0")}`;
+}
+
+/**
  * Create ONE invoice covering the given orders (dispatch-batch invoicing). Skips
  * any order already invoiced, and any that isn't priced. Returns the new invoice,
  * or null if nothing eligible. Call inside updateDb().
