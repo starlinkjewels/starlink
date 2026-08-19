@@ -365,7 +365,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-semibold">Staff Expenses</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Total: <span className="font-semibold text-destructive">{fmtMoney(totalExpenses)}</span> across {allExpenses.length} entries</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Total: <span className="font-semibold text-destructive">{fmtMoneyInr(totalExpenses)}</span> across {allExpenses.length} entries</p>
             </div>
             <Link to="/expenses?tab=passbook" className="text-sm text-primary flex items-center gap-1 hover:underline">
               Full Passbook <ArrowRight className="h-3 w-3" />
@@ -389,7 +389,7 @@ export function Dashboard() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
-                        <span className="text-sm font-bold text-destructive tabular-nums ml-2">{fmtMoney(total)}</span>
+                        <span className="text-sm font-bold text-destructive tabular-nums ml-2">{fmtMoneyInr(total)}</span>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                         <div

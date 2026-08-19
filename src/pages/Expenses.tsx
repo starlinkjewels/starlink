@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
+import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
@@ -50,12 +50,12 @@ export function ExpensesPage() {
   const [dateTo, setDateTo] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
   const [expLockerId, setExpLockerId] = useState("");
-  const [expLockerAmount, setExpLockerAmount] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
   const expLocker = db.lockers.find(l => l.id === expLockerId);
-  const isUsdExpLocker = (expLocker?.currency || "INR") === "USD";
+  const expCurrency: "INR" | "USD" = (expLocker?.currency || "INR") === "USD" ? "USD" : "INR";
+  const expSymbol = expCurrency === "USD" ? "$" : "₹";
   // Configured list (Settings) for picking a category on a NEW expense —
   // vs. every category that ever appears on an existing expense, for the
   // filter dropdown, so a since-removed category stays filterable.
@@ -143,44 +143,46 @@ export function ExpensesPage() {
 
   async function handleAdd() {
     setError("");
-    if (!form.title.trim()) { setError("Title is required."); return; }
+    // Account FIRST — it decides the currency the amount is entered in.
+    if (!expLockerId) { setError("Choose the account this is paid from."); return; }
     const amount = parseFloat(form.amount);
     if (!amount || isNaN(amount) || amount <= 0) { setError("Enter a valid amount."); return; }
-    if (!expLockerId) { setError("Choose which locker this was paid from."); return; }
-    const paidAmt = isUsdExpLocker ? amount : Number(expLockerAmount);
-    if (!paidAmt || paidAmt <= 0) { setError("Enter the amount actually paid from that locker."); return; }
+    if (!form.title.trim()) { setError("Title is required."); return; }
+    // Employee is compulsory ONLY for a Salary expense.
+    if (form.category === "Salary" && !form.paidToEmployeeId) { setError("Choose which team member this salary is for."); return; }
 
     setSaving(true);
     const now = new Date().toISOString();
+    const fresh = loadDb();
+    const locker = fresh.lockers.find(l => l.id === expLockerId);
+    const currency: "INR" | "USD" = (locker?.currency || "INR") === "USD" ? "USD" : "INR";
     const expense: Expense = {
       id: uid("exp_"),
       title: form.title.trim(),
-      amount,
+      amount, // in the account's own currency
       category: form.category,
       note: form.note.trim() || undefined,
       employeeId: user!.id,
       clientId: form.clientId || undefined,
-      paidToEmployeeId: form.paidToEmployeeId || undefined,
+      // Only carry a payee for Salary expenses.
+      paidToEmployeeId: form.category === "Salary" ? (form.paidToEmployeeId || undefined) : undefined,
+      currency,
       createdAt: now,
-      lockerId: expLockerId || undefined,
+      lockerId: expLockerId,
     };
-    const fresh = loadDb();
     fresh.expenses = [...fresh.expenses, expense];
-    if (expLockerId) {
-      const locker = fresh.lockers.find(l => l.id === expLockerId);
-      if (locker) {
-        fresh.lockerTransactions = [...fresh.lockerTransactions, {
-          id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: paidAmt,
-          currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
-          refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
-        }];
-      }
+    if (locker) {
+      fresh.lockerTransactions = [...fresh.lockerTransactions, {
+        id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: amount,
+        currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
+        refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
+      }];
     }
     saveDb(fresh);
     setDb(fresh);
     await flush(); // keep the button in "Saving…" until Firebase confirms
     setForm(EMPTY_FORM);
-    setExpLockerId(""); setExpLockerAmount("");
+    setExpLockerId("");
     setShowAdd(false);
     setSaving(false);
   }
@@ -499,7 +501,75 @@ export function ExpensesPage() {
                   </div>
                 )}
 
-                {/* Title */}
+                {/* 1. Pay from account — FIRST; it sets the currency the amount is entered in */}
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">
+                    Pay from Account <span className="text-destructive">*</span>
+                  </label>
+                  {activeLockers.length === 0 && (
+                    <p className="text-xs text-amber-600 mb-1.5">
+                      No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
+                    </p>
+                  )}
+                  <Select value={expLockerId} onValueChange={setExpLockerId}>
+                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose account" /></SelectTrigger>
+                    <SelectContent>
+                      {activeLockers.map(l => (
+                        <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* 2. Amount — in the selected account's own currency */}
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">
+                    Amount ({expCurrency}) <span className="text-destructive">*</span>
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">{expSymbol}</span>
+                    <input
+                      type="number"
+                      value={form.amount}
+                      onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                      placeholder={expLockerId ? "0.00" : "Choose an account first"}
+                      disabled={!expLockerId}
+                      min="0"
+                      step="0.01"
+                      className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60"
+                    />
+                  </div>
+                </div>
+
+                {/* 3. Category */}
+                <div>
+                  <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
+                  <Select
+                    value={form.category}
+                    onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory, paidToEmployeeId: v === "Salary" ? f.paidToEmployeeId : "" }))}
+                  >
+                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+                    <SelectContent>{configuredCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+
+                {/* 4. Salary → team member — shown & COMPULSORY only for a Salary expense */}
+                {form.category === "Salary" && (
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1.5 block">
+                      Paid to Team Member <span className="text-destructive">*</span>
+                    </label>
+                    <Select value={form.paidToEmployeeId || ""} onValueChange={v => setForm(f => ({ ...f, paidToEmployeeId: v }))}>
+                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose team member" /></SelectTrigger>
+                      <SelectContent>
+                        {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
+                  </div>
+                )}
+
+                {/* 5. Title */}
                 <div>
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
                     Title <span className="text-destructive">*</span>
@@ -507,40 +577,12 @@ export function ExpensesPage() {
                   <input
                     value={form.title}
                     onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. Client visit travel, Office supplies…"
+                    placeholder="e.g. August salary, Office rent, Travel…"
                     className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
                   />
                 </div>
 
-                {/* Amount + Category */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">
-                      Amount <span className="text-destructive">*</span>
-                    </label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">$</span>
-                      <input
-                        type="number"
-                        value={form.amount}
-                        onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                        placeholder="0.00"
-                        min="0"
-                        step="0.01"
-                        className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
-                    <Select value={form.category} onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory }))}>
-                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                      <SelectContent>{configuredCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                {/* Related Client */}
+                {/* 6. Related Client (optional) */}
                 <div>
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
                     Related Client <span className="text-muted-foreground font-normal">(optional)</span>
@@ -552,64 +594,6 @@ export function ExpensesPage() {
                       {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
                     </SelectContent>
                   </Select>
-                </div>
-
-                {/* Paid to team member — makes this a salary / wages / advance
-                    payment that shows on that employee's payment ledger. */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Salary / Paid to Team Member <span className="text-muted-foreground font-normal">(optional)</span>
-                  </label>
-                  <Select
-                    value={form.paidToEmployeeId || "__none"}
-                    onValueChange={v => setForm(f => ({
-                      ...f,
-                      paidToEmployeeId: v === "__none" ? "" : v,
-                      // Picking a team member? Default the category to Salary (only if still on the default).
-                      category: v !== "__none" && f.category === "Other" ? "Salary" : f.category,
-                    }))}
-                  >
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">Not a staff payment</SelectItem>
-                      {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  {form.paidToEmployeeId && (
-                    <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's payment ledger (Employees → their page).</p>
-                  )}
-                </div>
-
-                {/* Paid from locker — compulsory: every expense must be traceable to an account */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Paid from Locker <span className="text-destructive">*</span>
-                  </label>
-                  {activeLockers.length === 0 && (
-                    <p className="text-xs text-amber-600 mb-1.5">
-                      No lockers yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
-                    </p>
-                  )}
-                  <Select value={expLockerId} onValueChange={setExpLockerId}>
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
-                    <SelectContent>
-                      {activeLockers.map(l => (
-                        <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {expLockerId && !isUsdExpLocker && (
-                    <div className="relative mt-2">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">₹</span>
-                      <input
-                        type="number" min="0" step="0.01"
-                        value={expLockerAmount}
-                        onChange={e => setExpLockerAmount(e.target.value)}
-                        placeholder="Amount actually paid from this locker"
-                        className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
-                      />
-                    </div>
-                  )}
                 </div>
 
                 {/* Note */}
@@ -664,6 +648,8 @@ interface ExpenseListProps {
 
 function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId }: ExpenseListProps) {
   const { paged, page, setPage, totalPages, start, end } = usePagination(expenses, 12);
+  // Format the total in the shared currency; fall back to ₹ when mixed/legacy.
+  const listCurrency: "INR" | "USD" = expenses.length && expenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
   return (
     <div className="card-luxe overflow-hidden">
       {/* Summary bar */}
@@ -673,7 +659,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
         </span>
         <div className="flex items-center gap-1.5">
           <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-          <span className="font-bold text-destructive text-sm">{fmtMoney(total)}</span>
+          <span className="font-bold text-destructive text-sm">{fmtExpenseAmount(total, listCurrency)}</span>
         </div>
       </div>
 
@@ -713,7 +699,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
                 <div className="flex items-start justify-between gap-2">
                   <p className="text-sm font-semibold text-foreground truncate">{exp.title}</p>
                   <span className="font-bold text-sm text-destructive shrink-0 tabular-nums">
-                    {fmtMoney(exp.amount)}
+                    {fmtExpenseAmount(exp.amount, exp.currency)}
                   </span>
                 </div>
 

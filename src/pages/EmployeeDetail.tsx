@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, totalAdvance, balanceDue, employeePayments, employeePaymentTotals } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,7 @@ export function EmployeeDetailPage() {
   // Salary / wages / advances paid to this employee (expenses tagged to them).
   const salaryLedger = employeePayments(db.expenses, employee.id);
   const salaryTotals = employeePaymentTotals(db.expenses, employee.id, new Date().getFullYear());
+  const salaryCur: "INR" | "USD" = salaryLedger.length && salaryLedger.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -125,11 +126,11 @@ export function EmployeeDetailPage() {
           <div className="flex items-center gap-3">
             <div className="text-right">
               <p className="text-[11px] text-muted-foreground">This year</p>
-              <p className="font-semibold text-sm text-brand-dark">{fmtMoney(salaryTotals.thisYear)}</p>
+              <p className="font-semibold text-sm text-brand-dark">{fmtExpenseAmount(salaryTotals.thisYear, salaryCur)}</p>
             </div>
             <div className="text-right pl-3 border-l border-border/60">
               <p className="text-[11px] text-muted-foreground">Total paid to date</p>
-              <p className="font-display text-lg font-bold text-emerald-600">{fmtMoney(salaryTotals.total)}</p>
+              <p className="font-display text-lg font-bold text-emerald-600">{fmtExpenseAmount(salaryTotals.total, salaryCur)}</p>
             </div>
           </div>
         </div>
@@ -152,7 +153,7 @@ export function EmployeeDetailPage() {
                     {exp.category}{exp.note ? ` · ${exp.note}` : ""} · {fmtDate(exp.createdAt)}
                   </p>
                 </div>
-                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtMoney(exp.amount)}</p>
+                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtExpenseAmount(exp.amount, exp.currency)}</p>
               </div>
             ))}
           </div>

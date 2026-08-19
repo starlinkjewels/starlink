@@ -139,7 +139,7 @@ export function IncomePage() {
     if (!isClient) {
       db.expenses.forEach(exp => {
         rows.push({
-          id: exp.id, date: exp.createdAt, currency: "USD", direction: "out", type: "Expense",
+          id: exp.id, date: exp.createdAt, currency: exp.currency ?? "INR", direction: "out", type: "Expense",
           party: "Staff Expense", description: exp.title + (exp.note ? ` — ${exp.note}` : ""),
           link: { label: "Expenses", to: "/expenses" },
           amount: exp.amount,

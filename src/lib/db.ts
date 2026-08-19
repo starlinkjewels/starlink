@@ -450,8 +450,18 @@ export interface Expense {
   // bonus). Drives the per-employee "salary paid to date" ledger. Distinct from
   // `employeeId` (who recorded it).
   paidToEmployeeId?: string;
+  // Currency of `amount` — the currency of the account (Locker) it was paid
+  // from. Older records have no currency; treat those as INR (the local books).
+  currency?: "INR" | "USD";
   createdAt: string;
   lockerId?: string; // optional — which Locker this was actually paid from
+}
+
+/** Format an expense amount in its own account currency (₹ default for legacy). */
+export function fmtExpenseAmount(amount: number, currency?: "INR" | "USD"): string {
+  return currency === "USD"
+    ? "$" + amount.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+    : "₹" + Math.round(amount).toLocaleString("en-IN");
 }
 
 export interface CatalogFolder {

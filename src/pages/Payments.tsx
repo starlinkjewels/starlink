@@ -460,30 +460,31 @@ function PayExpense() {
   const [category, setCategory] = useState((db.settings.expenseCategories?.[0]) || DEFAULT_EXPENSE_CATEGORIES[0]);
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
-  const [lockerAmount, setLockerAmount] = useState("");
   const [paidToEmployeeId, setPaidToEmployeeId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
   const categories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
   const locker = db.lockers.find(l => l.id === lockerId);
-  const isUsdLocker = (locker?.currency || "INR") === "USD";
+  const curr: "INR" | "USD" = (locker?.currency || "INR") === "USD" ? "USD" : "INR";
+  const sym = curr === "USD" ? "$" : "₹";
 
   const submit = () => {
-    if (!title.trim()) { toast.error("Enter a title"); return; }
+    // Account FIRST — it decides the amount's currency.
+    if (!lockerId) { toast.error("Choose the account this is paid from"); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
-    const paidAmt = isUsdLocker ? amt : Number(lockerAmount);
-    if (!paidAmt || paidAmt <= 0) { toast.error("Enter the amount actually paid from that locker"); return; }
-    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, paidAmt)) return;
+    if (!title.trim()) { toast.error("Enter a title"); return; }
+    if (category === "Salary" && !paidToEmployeeId) { toast.error("Choose which team member this salary is for"); return; }
+    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
       const now = new Date().toISOString();
       const expense: Expense = {
         id: uid("exp_"), title: title.trim(), amount: amt, category,
         note: note.trim() || undefined, employeeId: user!.id,
-        paidToEmployeeId: paidToEmployeeId || undefined, createdAt: now, lockerId,
+        paidToEmployeeId: category === "Salary" ? (paidToEmployeeId || undefined) : undefined,
+        currency: curr, createdAt: now, lockerId,
       };
       updateDb(d => {
         d.expenses.push(expense);
@@ -491,69 +492,60 @@ function PayExpense() {
         if (l) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "expense", amountInr: paidAmt,
+            id: uid("ltx_"), lockerId, type: "expense", amountInr: amt,
             currency: l.currency || "INR", category: `Expense — ${title.trim()}`,
             refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
           });
         }
       });
       toast.success("Expense recorded");
-      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setLockerAmount(""); setPaidToEmployeeId("");
+      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId("");
     } finally { setSaving(false); }
   };
 
   return (
     <div className="space-y-3">
+      {/* 1. Account first — sets the currency */}
       <div>
-        <Label className="text-xs">Title</Label>
-        <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. Office supplies" />
+        <Label className="text-xs">Pay from Account *</Label>
+        <Select value={lockerId} onValueChange={setLockerId}>
+          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
+          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+        </Select>
       </div>
+      {/* 2. Amount (in the account's currency) + Category */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label className="text-xs">Amount ($)</Label>
+          <Label className="text-xs">Amount ({curr})</Label>
           <div className="relative mt-1">
-            <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="pl-9 h-10 rounded-xl" />
+            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{sym}</span>
+            <Input type="number" min={0} step="0.01" value={amount} disabled={!lockerId} onChange={e => setAmount(e.target.value)} placeholder={lockerId ? "0.00" : "Choose account first"} className="pl-7 h-10 rounded-xl disabled:opacity-60" />
           </div>
         </div>
         <div>
           <Label className="text-xs">Category</Label>
-          <Select value={category} onValueChange={setCategory}>
+          <Select value={category} onValueChange={v => { setCategory(v); if (v !== "Salary") setPaidToEmployeeId(""); }}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>
-      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
-      <div>
-        <Label className="text-xs">Salary / Paid to Team Member (optional)</Label>
-        <Select value={paidToEmployeeId || "__none"} onValueChange={v => {
-          setPaidToEmployeeId(v === "__none" ? "" : v);
-          if (v !== "__none" && category === "Other") setCategory("Salary");
-        }}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none">Not a staff payment</SelectItem>
-            {staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-          </SelectContent>
-        </Select>
-        {paidToEmployeeId && <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's payment ledger.</p>}
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+      {/* 3. Salary → team member (required) — only for Salary */}
+      {category === "Salary" && (
         <div>
-          <Label className="text-xs">Paid from Locker *</Label>
-          <Select value={lockerId} onValueChange={setLockerId}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          <Label className="text-xs">Paid to Team Member *</Label>
+          <Select value={paidToEmployeeId || ""} onValueChange={setPaidToEmployeeId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose team member" /></SelectTrigger>
+            <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}</SelectContent>
           </Select>
         </div>
-        {lockerId && !isUsdLocker && (
-          <div>
-            <Label className="text-xs">Amount Paid (₹)</Label>
-            <Input type="number" min={0} step="0.01" value={lockerAmount} onChange={e => setLockerAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
-          </div>
-        )}
+      )}
+      {/* 4. Title + note */}
+      <div>
+        <Label className="text-xs">Title *</Label>
+        <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. August salary, Office rent" />
       </div>
+      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Expense"}</AsyncButton>
     </div>
   );
