@@ -43,8 +43,25 @@ export function EmployeeDetailPage() {
 
   // Salary / wages / advances paid to this employee (expenses tagged to them).
   const salaryLedger = employeePayments(db.expenses, employee.id);
-  const salaryTotals = employeePaymentTotals(db.expenses, employee.id, new Date().getFullYear());
-  const salaryCur: "INR" | "USD" = salaryLedger.length && salaryLedger.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
+  const rawTotals = employeePaymentTotals(db.expenses, employee.id, new Date().getFullYear());
+  // Opening amount already paid before the app (migration) — folded into totals
+  // and shown as the ledger's first line.
+  const opening = employee.openingPaid && employee.openingPaid > 0 ? employee.openingPaid : 0;
+  const openingCur: "INR" | "USD" = employee.openingPaidCurrency ?? "INR";
+  const openingInThisYear = opening > 0 && employee.openingPaidDate
+    ? new Date(employee.openingPaidDate).getFullYear() === new Date().getFullYear()
+    : false;
+  const salaryTotals = {
+    total: rawTotals.total + opening,
+    count: rawTotals.count + (opening > 0 ? 1 : 0),
+    thisYear: rawTotals.thisYear + (openingInThisYear ? opening : 0),
+  };
+  // Uniform currency across opening + all payments? else fall back to ₹.
+  const allCurrencies = [
+    ...(opening > 0 ? [openingCur] : []),
+    ...salaryLedger.map(e => e.currency ?? "INR"),
+  ];
+  const salaryCur: "INR" | "USD" = allCurrencies.length > 0 && allCurrencies.every(c => c === "USD") ? "USD" : "INR";
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -134,7 +151,7 @@ export function EmployeeDetailPage() {
             </div>
           </div>
         </div>
-        {salaryLedger.length === 0 ? (
+        {salaryLedger.length === 0 && opening === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
             <Wallet className="h-10 w-10 mb-2 opacity-20" />
             <p className="text-sm">No salary or payments recorded yet.</p>
@@ -142,6 +159,18 @@ export function EmployeeDetailPage() {
           </div>
         ) : (
           <div className="divide-y divide-border/40">
+            {opening > 0 && (
+              <div className="flex items-center gap-3 px-5 py-3 bg-amber-500/5">
+                <div className="h-9 w-9 rounded-xl bg-amber-500/10 text-amber-600 grid place-items-center shrink-0">
+                  <Wallet className="h-4 w-4" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">Opening — paid before this app (brought forward)</p>
+                  <p className="text-xs text-muted-foreground">{employee.openingPaidDate ? fmtDate(employee.openingPaidDate) : "opening balance"}</p>
+                </div>
+                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtExpenseAmount(opening, openingCur)}</p>
+              </div>
+            )}
             {salaryLedger.map(exp => (
               <div key={exp.id} className="flex items-center gap-3 px-5 py-3">
                 <div className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-600 grid place-items-center shrink-0">

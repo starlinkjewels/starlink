@@ -51,6 +51,12 @@ export interface User {
   // (see src/lib/presence.ts) — drives the online/offline + "last seen" display
   // on the Clients page. Not real socket presence, just recency of activity.
   lastActiveAt?: string;
+  // Opening salary/payment already paid to this employee BEFORE the app (for a
+  // running business being migrated). Added onto their "total paid to date" and
+  // shown as the first line of their salary ledger, in its own currency.
+  openingPaid?: number;
+  openingPaidCurrency?: "INR" | "USD";
+  openingPaidDate?: string;
 }
 
 export interface Client {

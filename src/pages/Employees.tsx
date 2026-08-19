@@ -27,6 +27,10 @@ export function EmployeesPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({ name: "", email: "", password: "", phone: "", department: "Sales" });
+  // Opening salary already paid before the app (migration) — optional.
+  const [openingPaid, setOpeningPaid] = useState("");
+  const [openingCurrency, setOpeningCurrency] = useState<"INR" | "USD">("INR");
+  const [openingDate, setOpeningDate] = useState("");
 
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
@@ -48,14 +52,19 @@ export function EmployeesPage() {
     try {
       // Create the Firebase Auth account (password lives in Auth, not Firestore).
       const authUid = await createAuthUser(email, f.password);
+      const opAmt = Number(openingPaid);
       updateDb(d => d.users.push({
         id: uid("u_"), role: "employee", status: "active", createdAt: new Date().toISOString(),
         authUid, username: email, email, password: "",
         name: f.name, phone: f.phone, department: f.department,
+        openingPaid: opAmt > 0 ? opAmt : undefined,
+        openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
+        openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
       } as User));
       toast.success("Employee created — they can sign in with their email & password");
       setOpen(false);
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
+      setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
     } catch (e) {
       toast.error(authErrorMessage(e));
     } finally { setSaving(false); }
@@ -117,6 +126,30 @@ export function EmployeesPage() {
                   <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
+
+              {/* Opening salary already paid before the app (optional, migration) */}
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
+                <p className="text-xs font-semibold text-amber-700">Opening — already paid before this app (optional)</p>
+                <div className="grid grid-cols-3 gap-2">
+                  <div className="col-span-1">
+                    <Label className="text-[11px]">Currency</Label>
+                    <Select value={openingCurrency} onValueChange={v => setOpeningCurrency(v as "INR" | "USD")}>
+                      <SelectTrigger className="rounded-lg mt-1 h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent><SelectItem value="INR">₹ INR</SelectItem><SelectItem value="USD">$ USD</SelectItem></SelectContent>
+                    </Select>
+                  </div>
+                  <div className="col-span-2">
+                    <Label className="text-[11px]">Amount</Label>
+                    <Input type="number" min={0} step="0.01" value={openingPaid} onChange={e => setOpeningPaid(e.target.value)} placeholder="0.00" className="rounded-lg mt-1 h-9" />
+                  </div>
+                </div>
+                <div>
+                  <Label className="text-[11px]">As of date</Label>
+                  <Input type="date" value={openingDate} onChange={e => setOpeningDate(e.target.value)} className="rounded-lg mt-1 h-9" />
+                </div>
+                <p className="text-[11px] text-muted-foreground">Salary/wages already paid to this person before you started using this app. Added to their total paid to date.</p>
+              </div>
+
               <Button onClick={create} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create"}</Button>
             </div>
           </DialogContent>
