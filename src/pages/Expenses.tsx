@@ -120,6 +120,7 @@ export function ExpensesPage() {
   }, [db.expenses, filterEmployee, filterCategory, search, dateFrom, dateTo]);
 
   const myTotal = myExpenses.reduce((s, e) => s + e.amount, 0);
+  const myCur: "INR" | "USD" = myExpenses.length && myExpenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
   const passbookTotal = passbookExpenses.reduce((s, e) => s + e.amount, 0);
 
   // Employee profit stats
@@ -261,7 +262,7 @@ export function ExpensesPage() {
               </div>
               <p className="text-xs text-muted-foreground font-medium">Expenses</p>
             </div>
-            <p className="text-xl font-bold text-destructive">{fmtMoney(myTotal)}</p>
+            <p className="text-xl font-bold text-destructive">{fmtExpenseAmount(myTotal, myCur)}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{myExpenses.length} entries</p>
           </motion.div>
 

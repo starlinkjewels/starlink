@@ -137,7 +137,7 @@ export function EmployeeDetailPage() {
             </div>
             <div>
               <h2 className="font-display text-xl text-brand-dark">Salary &amp; Payments</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""} recorded via Expenses</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""}{opening > 0 ? " (incl. opening)" : ""}</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
