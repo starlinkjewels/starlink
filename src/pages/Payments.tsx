@@ -503,17 +503,36 @@ function PayExpense() {
     } finally { setSaving(false); }
   };
 
+  // Make sure "Salary" is always pickable even if an admin customised categories.
+  const catList = categories.includes("Salary") ? categories : ["Salary", ...categories];
   return (
     <div className="space-y-3">
-      {/* 1. Account first — sets the currency */}
-      <div>
-        <Label className="text-xs">Pay from Account *</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
-        </Select>
+      {/* Account (left) + Salary payee (right) — one row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Pay from Account *</Label>
+          <Select value={lockerId} onValueChange={setLockerId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">Salary — Pay to Team Member (optional)</Label>
+          <Select value={paidToEmployeeId || "__none"} onValueChange={v => {
+            const pid = v === "__none" ? "" : v;
+            setPaidToEmployeeId(pid);
+            if (pid) setCategory("Salary");
+            else if (category === "Salary") setCategory((db.settings.expenseCategories?.[0]) || DEFAULT_EXPENSE_CATEGORIES[0]);
+          }}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Not a salary" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">Not a salary payment</SelectItem>
+              {staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
       </div>
-      {/* 2. Amount (in the account's currency) + Category */}
+      {/* Amount (in the account's currency) + Category */}
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Amount ({curr})</Label>
@@ -526,21 +545,11 @@ function PayExpense() {
           <Label className="text-xs">Category</Label>
           <Select value={category} onValueChange={v => { setCategory(v); if (v !== "Salary") setPaidToEmployeeId(""); }}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>{categories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            <SelectContent>{catList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
           </Select>
         </div>
       </div>
-      {/* 3. Salary → team member (required) — only for Salary */}
-      {category === "Salary" && (
-        <div>
-          <Label className="text-xs">Paid to Team Member *</Label>
-          <Select value={paidToEmployeeId || ""} onValueChange={setPaidToEmployeeId}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose team member" /></SelectTrigger>
-            <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}</SelectContent>
-          </Select>
-        </div>
-      )}
-      {/* 4. Title + note */}
+      {/* Title + note */}
       <div>
         <Label className="text-xs">Title *</Label>
         <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. August salary, Office rent" />

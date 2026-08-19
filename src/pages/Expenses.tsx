@@ -471,16 +471,16 @@ export function ExpensesPage() {
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: 48, scale: 0.97 }}
               transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 inset-x-0 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-50 md:w-[460px] bg-white rounded-t-3xl md:rounded-2xl shadow-2xl overflow-hidden"
+              className="fixed bottom-0 inset-x-0 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-50 md:w-[460px] max-h-[92vh] md:max-h-[88vh] flex flex-col bg-white rounded-t-3xl md:rounded-2xl shadow-2xl overflow-hidden"
               style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
             >
               {/* Sheet handle (mobile) */}
-              <div className="flex justify-center pt-3 pb-0 md:hidden">
+              <div className="flex justify-center pt-3 pb-0 md:hidden shrink-0">
                 <div className="h-1 w-10 rounded-full bg-border" />
               </div>
 
               {/* Header */}
-              <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between">
+              <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between shrink-0">
                 <div>
                   <h2 className="font-display text-lg text-brand-dark">Add Expense</h2>
                   <p className="text-xs text-muted-foreground mt-0.5">Recording as {user?.name}</p>
@@ -493,8 +493,8 @@ export function ExpensesPage() {
                 </button>
               </div>
 
-              {/* Form */}
-              <div className="p-5 space-y-4">
+              {/* Form — scrolls if taller than the sheet */}
+              <div className="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
                 {error && (
                   <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-xl px-3 py-2.5">
                     <X className="h-4 w-4 shrink-0" />

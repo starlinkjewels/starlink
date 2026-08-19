@@ -7,9 +7,10 @@ import { Button } from "@/components/ui/button";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
   ArrowLeft, Mail, Phone, Building2, Users, Package,
-  CheckCircle2, Clock, ListTodo, ExternalLink, History, Wallet, Receipt,
+  CheckCircle2, Clock, ListTodo, ExternalLink, History, Wallet, Receipt, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { motion } from "framer-motion";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 
 export function EmployeeDetailPage() {
   const { id } = useParams();
@@ -17,7 +18,8 @@ export function EmployeeDetailPage() {
   const db = useDb();
   const [tasksOpen, setTasksOpen] = useState(false);
 
-  const employee = db.users.find(u => u.id === id && u.role === "employee");
+  // Salary is payable to any staff member — employees AND the admin/owner.
+  const employee = db.users.find(u => u.id === id && (u.role === "employee" || u.role === "admin"));
   if (!employee) {
     return (
       <div className="text-center py-20 text-muted-foreground">
@@ -62,6 +64,34 @@ export function EmployeeDetailPage() {
     ...salaryLedger.map(e => e.currency ?? "INR"),
   ];
   const salaryCur: "INR" | "USD" = allCurrencies.length > 0 && allCurrencies.every(c => c === "USD") ? "USD" : "INR";
+
+  // Downloadable salary ledger (opening row + each payment).
+  const salaryRows = [
+    ...(opening > 0 ? [{ date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur }] : []),
+    ...salaryLedger.map(e => ({ date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: (e.currency ?? "INR") as "INR" | "USD" })),
+  ];
+  // jsPDF's built-in font can't render ₹ — use a plain-text prefix in the PDF.
+  const pdfAmt = (a: number, c: "INR" | "USD") => (c === "USD" ? "$" : "Rs. ") + Math.round(a).toLocaleString(c === "USD" ? "en-US" : "en-IN");
+  const exportSalaryCsv = () => downloadCsv(
+    `Salary-${employee.name.replace(/\s+/g, "_")}`,
+    ["Date", "Particulars", "Category", "Amount", "Currency"],
+    salaryRows.map(r => [fmtDate(r.date), r.particulars, r.category, Math.round(r.amount), r.currency]),
+  );
+  const exportSalaryPdf = () => downloadLedgerPdf({
+    title: "Salary Ledger",
+    subjectLines: [
+      `Name: ${employee.name}`,
+      employee.department ? `Department: ${employee.department}` : "",
+      `Total paid to date: ${pdfAmt(salaryTotals.total, salaryCur)}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+    ].filter(Boolean),
+    summary: [],
+    columns: [{ header: "Date", x: 20 }, { header: "Particulars", x: 55 }, { header: "Category", x: 120 }, { header: "Amount", x: 175 }],
+    align: ["left", "left", "left", "right"],
+    rows: salaryRows.map(r => [fmtDate(r.date), r.particulars.slice(0, 34), r.category, pdfAmt(r.amount, r.currency)]),
+    totalsRow: ["", "", "Total", pdfAmt(salaryTotals.total, salaryCur)],
+    filename: `Salary-${employee.name.replace(/\s+/g, "_")}`,
+  });
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
@@ -149,6 +179,16 @@ export function EmployeeDetailPage() {
               <p className="text-[11px] text-muted-foreground">Total paid to date</p>
               <p className="font-display text-lg font-bold text-emerald-600">{fmtExpenseAmount(salaryTotals.total, salaryCur)}</p>
             </div>
+            {(salaryLedger.length > 0 || opening > 0) && (
+              <div className="flex items-center gap-1.5 pl-3 border-l border-border/60">
+                <Button variant="outline" size="sm" onClick={exportSalaryCsv} className="rounded-lg gap-1.5" title="Download Excel/CSV">
+                  <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
+                </Button>
+                <Button variant="outline" size="sm" onClick={exportSalaryPdf} className="rounded-lg gap-1.5" title="Download PDF">
+                  <FileText className="h-3.5 w-3.5" /> PDF
+                </Button>
+              </div>
+            )}
           </div>
         </div>
         {salaryLedger.length === 0 && opening === 0 ? (

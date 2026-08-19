@@ -35,12 +35,15 @@ export function EmployeesPage() {
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
 
+  // Include the admin/owner too — salary can be paid to them, so their ledger
+  // needs to be reachable from here. Admins are listed first.
   const emps = db.users
-    .filter(u => u.role === "employee")
+    .filter(u => u.role === "employee" || u.role === "admin")
     .filter(u =>
       u.name.toLowerCase().includes(q.toLowerCase()) ||
       u.email.toLowerCase().includes(q.toLowerCase())
-    );
+    )
+    .sort((a, b) => (a.role === "admin" ? -1 : 0) - (b.role === "admin" ? -1 : 0));
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(emps, PAGE_SIZE);
 
@@ -182,7 +185,7 @@ export function EmployeesPage() {
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-0.5">{u.email}</p>
                   <div className="flex items-center gap-2 mt-2.5">
-                    <span className="text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary">{u.department}</span>
+                    <span className={`text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{u.role === "admin" ? "Owner / Admin" : (u.department || "—")}</span>
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                       <Users className="h-3 w-3" /> {clientCount(u.id)} client{clientCount(u.id) !== 1 ? "s" : ""}
                     </span>
@@ -214,17 +217,20 @@ export function EmployeesPage() {
                   )}
                 </Button>
               </div>
-              <div className="flex items-center gap-2 mt-2">
-                <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
-                  {u.status === "active" ? "Deactivate" : "Activate"}
-                </AsyncButton>
-                <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
-                  <KeyRound className="h-3.5 w-3.5" />
-                </AsyncButton>
-                <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove access">
-                  <Trash2 className="h-3.5 w-3.5" />
-                </AsyncButton>
-              </div>
+              {/* Owner/Admin: no deactivate / reset / delete from here (avoid locking yourself out) */}
+              {u.role !== "admin" && (
+                <div className="flex items-center gap-2 mt-2">
+                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
+                    {u.status === "active" ? "Deactivate" : "Activate"}
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
+                    <KeyRound className="h-3.5 w-3.5" />
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove access">
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </AsyncButton>
+                </div>
+              )}
             </div>
           );
         })}
