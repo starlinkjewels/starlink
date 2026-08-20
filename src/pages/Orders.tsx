@@ -134,7 +134,7 @@ export function OrdersPage() {
             const progress = Math.round(done / o.timeline.length * 100);
             const img = o.cadImage || o.images?.[0];
             return (
-              <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block">
+              <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block min-w-0">
                 <div className={`relative aspect-square overflow-hidden ${img ? "bg-secondary animate-pulse" : "bg-secondary/50"}`}>
                   {img ? (
                     <img
@@ -198,7 +198,7 @@ export function OrdersPage() {
             <Link
               key={o.id}
               to={`/orders/${o.id}`}
-              className="card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px]"
+              className="card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px] min-w-0"
             >
               {/* ── Left: full-height product / CAD photo ── */}
               <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">

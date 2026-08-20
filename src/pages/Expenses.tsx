@@ -502,75 +502,75 @@ export function ExpensesPage() {
                   </div>
                 )}
 
-                {/* 1. Pay from account — FIRST; it sets the currency the amount is entered in */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Pay from Account <span className="text-destructive">*</span>
-                  </label>
-                  {activeLockers.length === 0 && (
-                    <p className="text-xs text-amber-600 mb-1.5">
-                      No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
-                    </p>
-                  )}
-                  <Select value={expLockerId} onValueChange={setExpLockerId}>
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose account" /></SelectTrigger>
-                    <SelectContent>
-                      {activeLockers.map(l => (
-                        <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {activeLockers.length === 0 && (
+                  <p className="text-xs text-amber-600">
+                    No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
+                  </p>
+                )}
 
-                {/* 2. Amount — in the selected account's own currency */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Amount ({expCurrency}) <span className="text-destructive">*</span>
-                  </label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">{expSymbol}</span>
-                    <input
-                      type="number"
-                      value={form.amount}
-                      onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                      placeholder={expLockerId ? "0.00" : "Choose an account first"}
-                      disabled={!expLockerId}
-                      min="0"
-                      step="0.01"
-                      className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60"
-                    />
-                  </div>
-                </div>
-
-                {/* 3. Category */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
-                  <Select
-                    value={form.category}
-                    onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory, paidToEmployeeId: v === "Salary" ? f.paidToEmployeeId : "" }))}
-                  >
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                    <SelectContent>{configuredCategories.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-
-                {/* 4. Salary → team member — shown & COMPULSORY only for a Salary expense */}
-                {form.category === "Salary" && (
+                {/* Account (left) + Salary payee (right) — same flow as Payments → Pay Expense */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">
-                      Paid to Team Member <span className="text-destructive">*</span>
-                    </label>
-                    <Select value={form.paidToEmployeeId || ""} onValueChange={v => setForm(f => ({ ...f, paidToEmployeeId: v }))}>
-                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose team member" /></SelectTrigger>
+                    <label className="text-sm font-medium text-foreground mb-1.5 block">Pay from Account <span className="text-destructive">*</span></label>
+                    <Select value={expLockerId} onValueChange={setExpLockerId}>
+                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose account" /></SelectTrigger>
                       <SelectContent>
+                        {activeLockers.map(l => (
+                          <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1.5 block">Salary — Pay to Team Member <span className="text-muted-foreground font-normal">(optional)</span></label>
+                    <Select
+                      value={form.paidToEmployeeId || "__none"}
+                      onValueChange={v => setForm(f => ({
+                        ...f,
+                        paidToEmployeeId: v === "__none" ? "" : v,
+                        category: v !== "__none" ? "Salary" : (f.category === "Salary" ? "Other" : f.category),
+                      }))}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Not a salary" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">Not a salary payment</SelectItem>
                         {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
                       </SelectContent>
                     </Select>
-                    <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
                   </div>
-                )}
+                </div>
 
-                {/* 5. Title */}
+                {/* Amount (in the account's currency) + Category */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1.5 block">Amount ({expCurrency}) <span className="text-destructive">*</span></label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">{expSymbol}</span>
+                      <input
+                        type="number"
+                        value={form.amount}
+                        onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                        placeholder={expLockerId ? "0.00" : "Choose account first"}
+                        disabled={!expLockerId}
+                        min="0"
+                        step="0.01"
+                        className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
+                    <Select
+                      value={form.category}
+                      onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory, paidToEmployeeId: v === "Salary" ? f.paidToEmployeeId : "" }))}
+                    >
+                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+                      <SelectContent>{(configuredCategories.includes("Salary") ? configuredCategories : ["Salary", ...configuredCategories]).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Title */}
                 <div>
                   <label className="text-sm font-medium text-foreground mb-1.5 block">
                     Title <span className="text-destructive">*</span>

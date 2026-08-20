@@ -230,7 +230,6 @@ export function AppLayout() {
     try { localStorage.setItem("sidebar-collapsed", JSON.stringify([...next])); } catch { /* ignore */ }
     return next;
   });
-  const canCreateOrder = user?.role === "client" || user?.role === "admin" || user?.role === "employee";
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
   const pageTitle = PAGE_TITLES[loc.pathname] ??
@@ -460,7 +459,7 @@ export function AppLayout() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
-          className="flex-1 min-h-0 overflow-y-auto overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
               only while a page's chunk is fetched the first time. */}
@@ -502,16 +501,6 @@ export function AppLayout() {
             More
           </button>
         </nav>
-
-        {/* ── FAB (mobile) ── */}
-        {canCreateOrder && (
-          <button
-            onClick={() => navigate("/orders/new")}
-            className="md:hidden fixed right-4 z-40 h-14 w-14 rounded-full btn-hero grid place-items-center shadow-lg"
-            style={{ bottom: "calc(env(safe-area-inset-bottom) + 5rem)" }}>
-            <Plus className="h-6 w-6" />
-          </button>
-        )}
 
       </div>
 
