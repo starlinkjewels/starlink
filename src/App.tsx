@@ -77,6 +77,44 @@ export function App() {
     initForegroundPush();
   }, [user]);
 
+  // Warm the lazy page chunks in the background once logged in, during idle
+  // time. Each page is code-split, so the FIRST visit would otherwise flash a
+  // loading spinner; prefetching makes navigation instant (chunk already cached).
+  useEffect(() => {
+    if (!user) return;
+    const warm = () => {
+      const chunks: Array<() => Promise<unknown>> = [
+        () => import("./pages/Orders"), () => import("./pages/OrderDetail"),
+        () => import("./pages/Dashboard"), () => import("./pages/NewOrder"),
+        () => import("./pages/Clients"), () => import("./pages/ClientHistory"),
+        () => import("./pages/Invoices"), () => import("./pages/Expenses"),
+        () => import("./pages/Payments"), () => import("./pages/ReadyStock"),
+        () => import("./pages/Catalog"), () => import("./pages/Notifications"),
+        () => import("./pages/Employees"), () => import("./pages/EmployeeDetail"),
+        () => import("./pages/Suppliers"), () => import("./pages/SupplierHistory"),
+        () => import("./pages/Factories"), () => import("./pages/FactoryHistory"),
+        () => import("./pages/Stock"), () => import("./pages/StockSection"),
+        () => import("./pages/Locker"), () => import("./pages/Reports"),
+        () => import("./pages/Profile"), () => import("./pages/Settings"),
+        () => import("./pages/Messages"), () => import("./pages/Income"),
+        () => import("./pages/GiftCard"), () => import("./pages/GiftCardsAdmin"),
+        () => import("./pages/BuyAssign"), () => import("./pages/ProductPhotos"),
+      ];
+      // Fetch a few at a time so we never contend with the current page's work.
+      let i = 0;
+      const step = () => {
+        if (i >= chunks.length) return;
+        chunks[i++]().catch(() => {});
+        chunks[i++]?.().catch(() => {});
+        window.setTimeout(step, 250);
+      };
+      step();
+    };
+    // Start after first paint so we never compete with the initial render.
+    const id = window.setTimeout(warm, 1200);
+    return () => clearTimeout(id);
+  }, [user]);
+
   return (
     <>
       <Routes>
