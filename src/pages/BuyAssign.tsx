@@ -221,33 +221,63 @@ function BuyMaterial() {
    ₹ value) in the stock ledger. ── */
 function OpeningStock() {
   const { user } = useAuth();
-  const [material, setMaterial] = useState<"gold" | "diamond">("gold");
+  const [kind, setKind] = useState<BuyKind>("gold"); // gold | loose | certified
   const [purity, setPurity] = useState("22K");
   const [shape, setShape] = useState("Round");
   const [qty, setQty] = useState("");     // grams (gold) / carats (diamond)
   const [value, setValue] = useState(""); // ₹ valuation (optional)
   const [asOf, setAsOf] = useState("");   // as-of date (optional)
   const [note, setNote] = useState("");
+  // certified grading
+  const [quality, setQuality] = useState("");
+  const [color, setColor] = useState(""); const [clarity, setClarity] = useState("");
+  const [cut, setCut] = useState(""); const [polish, setPolish] = useState(""); const [sym, setSym] = useState("");
+  const [fluor, setFluor] = useState(""); const [measure, setMeasure] = useState("");
+  const [lab, setLab] = useState(""); const [certNo, setCertNo] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const bucket = material === "gold" ? purity : shape;
+  const resetGrading = () => { setQuality(""); setColor(""); setClarity(""); setCut(""); setPolish(""); setSym(""); setFluor(""); setMeasure(""); setLab(""); setCertNo(""); };
 
   const submit = async () => {
     const q = Number(qty);
-    if (!q || q <= 0) { toast.error(`Enter the opening ${material === "gold" ? "weight (g)" : "carats"}`); return; }
+    if (!q || q <= 0) { toast.error(`Enter the opening ${kind === "gold" ? "weight (g)" : "carats"}`); return; }
+    if (kind === "certified" && !certNo.trim()) { toast.error("Enter the report / certificate number"); return; }
+    const val = Number(value) > 0 ? Math.round(Number(value)) : undefined;
+    const createdAt = asOf ? new Date(`${asOf}T00:00:00`).toISOString() : new Date().toISOString();
     setSaving(true);
     try {
+      if (kind === "certified") {
+        // Certified stones are individual packets — never pooled into stockLevels.
+        // Opening one just creates an in-stock packet, with NO supplier / purchase.
+        updateDb(d => {
+          if (!d.diamondPackets) d.diamondPackets = [];
+          d.diamondPackets.unshift({
+            id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape, carat: q,
+            quality: quality.trim() || undefined,
+            color: color.trim() || undefined, clarity: clarity.trim() || undefined,
+            cut: cut.trim() || undefined, polish: polish.trim() || undefined, symmetry: sym.trim() || undefined,
+            fluorescence: fluor.trim() || undefined, measurement: measure.trim() || undefined,
+            certificateNumber: certNo.trim(), certificateLab: lab.trim() || undefined,
+            ratePerCaratInr: val && q > 0 ? Math.round((val / q) * 100) / 100 : undefined,
+            status: "in_stock", createdBy: user!.id, createdAt,
+          });
+        });
+        toast.success(`Opening certified diamond added: ${q}ct ${shape} (${certNo.trim()})`);
+        setQty(""); setValue(""); setAsOf(""); setNote(""); resetGrading();
+        return;
+      }
+      // Gold / loose diamond pool into Stock.
       await increaseStock({
-        material,
-        purityOrQuality: bucket,
+        material: kind === "gold" ? "gold" : "diamond",
+        purityOrQuality: kind === "gold" ? purity : shape,
         quantity: q,
         refType: "opening",
-        valueInr: Number(value) > 0 ? Math.round(Number(value)) : undefined,
+        valueInr: val,
         createdBy: user!.id,
-        createdAt: asOf ? new Date(`${asOf}T00:00:00`).toISOString() : undefined,
+        createdAt: asOf ? createdAt : undefined,
         note: note.trim() || undefined,
       });
-      toast.success(`Opening stock added: ${q} ${material === "gold" ? "g" : "ct"} ${bucket}`);
+      toast.success(`Opening stock added: ${q} ${kind === "gold" ? "g" : "ct"} ${kind === "gold" ? purity : shape}`);
       setQty(""); setValue(""); setAsOf(""); setNote("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't add opening stock");
@@ -260,17 +290,21 @@ function OpeningStock() {
         Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.
       </p>
 
+      {/* Material kind — gold / loose diamond / certified diamond */}
+      <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl">
+        {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck]] as const).map(([k, lbl, Icon]) => (
+          <button key={k} type="button" onClick={() => setKind(k)}
+            className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+            <Icon className="h-3.5 w-3.5" /> {lbl}
+          </button>
+        ))}
+      </div>
+
+      {/* Purity/Shape + quantity */}
       <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label className="text-xs">Material</Label>
-          <Select value={material} onValueChange={v => setMaterial(v as "gold" | "diamond")}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Loose Diamond</SelectItem></SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs">{material === "gold" ? "Purity" : "Shape"}</Label>
-          {material === "gold" ? (
+          <Label className="text-xs">{kind === "gold" ? "Purity" : "Shape"}</Label>
+          {kind === "gold" ? (
             <Select value={purity} onValueChange={setPurity}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
@@ -282,17 +316,31 @@ function OpeningStock() {
             </Select>
           )}
         </div>
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
         <div>
-          <Label className="text-xs">Opening {material === "gold" ? "Weight (g)" : "Carats"} <span className="text-destructive">*</span></Label>
+          <Label className="text-xs">Opening {kind === "gold" ? "Weight (g)" : "Carats"} <span className="text-destructive">*</span></Label>
           <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
         </div>
-        <div>
-          <Label className="text-xs">Opening Value (₹, optional)</Label>
-          <Input type="number" min={0} value={value} onChange={e => setValue(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Valuation for the ledger" />
+      </div>
+
+      {/* Certified grading */}
+      {kind === "certified" && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+          <Input value={color} onChange={e => setColor(e.target.value)} className="rounded-xl h-10" placeholder="Color" />
+          <Input value={clarity} onChange={e => setClarity(e.target.value)} className="rounded-xl h-10" placeholder="Clarity" />
+          <Input value={cut} onChange={e => setCut(e.target.value)} className="rounded-xl h-10" placeholder="Cut" />
+          <Input value={polish} onChange={e => setPolish(e.target.value)} className="rounded-xl h-10" placeholder="Polish" />
+          <Input value={sym} onChange={e => setSym(e.target.value)} className="rounded-xl h-10" placeholder="Symmetry" />
+          <Input value={fluor} onChange={e => setFluor(e.target.value)} className="rounded-xl h-10" placeholder="Fluorescence" />
+          <Input value={measure} onChange={e => setMeasure(e.target.value)} className="rounded-xl h-10 sm:col-span-2" placeholder="Measurement" />
+          <Input value={lab} onChange={e => setLab(e.target.value)} className="rounded-xl h-10" placeholder="Lab (GIA/IGI)" />
+          <Input value={certNo} onChange={e => setCertNo(e.target.value)} className="rounded-xl h-10 sm:col-span-3" placeholder="Report number *" />
         </div>
+      )}
+
+      {/* Value */}
+      <div>
+        <Label className="text-xs">Opening Value (₹, optional)</Label>
+        <Input type="number" min={0} value={value} onChange={e => setValue(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={kind === "certified" ? "Cost basis for this stone" : "Valuation for the ledger"} />
       </div>
 
       <div className="grid grid-cols-2 gap-3">
