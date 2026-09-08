@@ -416,7 +416,9 @@ export function SupplierHistoryPage() {
       rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier) });
     }
     for (const p of purchases) {
-      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}${p.invoiceNumber ? ` (Inv ${p.invoiceNumber})` : ""}`, debit: p.totalInr, credit: 0 });
+      // Show the order number when this purchase was bought for a specific order.
+      const orderNo = p.orderId ? db.orders.find(o => o.id === p.orderId)?.orderNumber : undefined;
+      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}${p.invoiceNumber ? ` (Inv ${p.invoiceNumber})` : ""}${orderNo ? ` · Order ${orderNo}` : ""}`, debit: p.totalInr, credit: 0 });
       for (const pay of p.payments || []) {
         rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
       }
@@ -789,7 +791,9 @@ export function SupplierHistoryPage() {
                       {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold` : `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`}
                     </p>
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
-                      {p.purpose === "order" ? "For Order" : "Stock"}
+                      {p.purpose === "order"
+                        ? `For Order${p.orderId && db.orders.find(o => o.id === p.orderId) ? ` ${db.orders.find(o => o.id === p.orderId)!.orderNumber}` : ""}`
+                        : "Stock"}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
