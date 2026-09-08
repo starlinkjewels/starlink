@@ -125,6 +125,10 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   // movement's cost from the linked Purchase — so the history shows where it was
   // bought AND at what price, like the Certified section. Out-movements have none.
   const inrRateAmount = (m: (typeof rows)[number]): { rate: number; amount: number } | null => {
+    // Opening stock carries its own valuation (no supplier purchase behind it).
+    if (m.refType === "opening" && m.valueInr != null) {
+      return { rate: m.quantity > 0 ? m.valueInr / m.quantity : 0, amount: m.valueInr };
+    }
     if (m.type !== "purchase_in" || m.refType !== "purchase" || !m.refId) return null;
     const p = db.purchases.find(x => x.id === m.refId);
     if (!p) return null;

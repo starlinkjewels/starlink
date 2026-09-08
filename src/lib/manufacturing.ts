@@ -398,6 +398,9 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
       : `Purchase void reversal — ${supplier?.name ?? "supplier"}${inv ? ` · Inv ${inv}` : ""}`;
     return { label, supplierId: p.supplierId, invoiceNumber: inv || undefined };
   }
+  if (m.refType === "opening") {
+    return { label: `Opening Stock (brought forward)${m.note ? ` — ${m.note}` : ""}` };
+  }
   if (m.refType === "order" && m.refId) {
     const order = ctx.orders.find(o => o.id === m.refId);
     if (!order) return { label: m.note || "Used on order" };
@@ -496,6 +499,10 @@ export function materialLedger(
         rateInr = pQty > 0 ? p.totalInr / pQty : 0;
         amountInr = rateInr * m.quantity;
       }
+    } else if (m.refType === "opening" && m.valueInr != null) {
+      // Opening stock carries its own ₹ valuation (no supplier purchase behind it).
+      amountInr = m.valueInr;
+      rateInr = m.quantity > 0 ? m.valueInr / m.quantity : null;
     }
     const isIn = m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0);
     return {

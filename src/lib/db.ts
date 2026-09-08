@@ -897,8 +897,13 @@ export interface StockMovement {
   type: StockMovementType;
   purityOrQuality: string;
   quantity: number; // always positive; direction implied by `type`
-  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual";
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual" | "opening";
   refId?: string;
+  // Value of this movement in ₹ — set for an "opening" stock entry (migration
+  // stock already owned). Lets the stock ledger show the opening amount without
+  // any supplier purchase (so it never touches a supplier's dues). Purchases
+  // still derive their value from the linked Purchase, not this field.
+  valueInr?: number;
   createdBy: string;
   createdAt: string;
   note?: string;

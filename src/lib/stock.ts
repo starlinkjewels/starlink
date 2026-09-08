@@ -69,10 +69,12 @@ export async function increaseStock(args: {
   material: "gold" | "diamond";
   purityOrQuality: string;
   quantity: number;
-  refType: "purchase" | "manual";
+  refType: "purchase" | "manual" | "opening";
   refId?: string;
+  valueInr?: number; // only for an "opening" stock entry — its ₹ valuation
   createdBy: string;
   note?: string;
+  createdAt?: string; // as-of date (opening stock) — defaults to now
 }): Promise<void> {
   const field = args.material === "gold" ? "gold" : "diamond";
   // setDoc+merge (not updateDoc) so the very first stock purchase on a fresh
@@ -89,8 +91,9 @@ export async function increaseStock(args: {
     quantity: args.quantity,
     refType: args.refType,
     refId: args.refId,
+    valueInr: args.valueInr,
     createdBy: args.createdBy,
-    createdAt: new Date().toISOString(),
+    createdAt: args.createdAt || new Date().toISOString(),
     note: args.note,
   });
 }

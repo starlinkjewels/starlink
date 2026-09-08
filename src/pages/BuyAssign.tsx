@@ -8,11 +8,11 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag } from "lucide-react";
+import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes } from "lucide-react";
 import { toast } from "sonner";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
-type Mode = "buy" | "assign" | "sell";
+type Mode = "buy" | "assign" | "sell" | "opening";
 
 /**
  * A simple staff-facing hub to (1) BUY gold / loose / certified diamond from any
@@ -31,9 +31,10 @@ export function BuyAssignPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold to a factory, or sell a diamond directly</p>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         {([
           { m: "buy", label: "Buy Material", icon: ShoppingCart },
+          { m: "opening", label: "Opening Stock", icon: Boxes },
           { m: "assign", label: "Assign Gold", icon: ArrowRightLeft },
           { m: "sell", label: "Sell Diamond", icon: Tag },
         ] as const).map(opt => (
@@ -47,7 +48,7 @@ export function BuyAssignPage() {
       </div>
 
       <div className="card-luxe p-6">
-        {mode === "buy" ? <BuyMaterial /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
+        {mode === "buy" ? <BuyMaterial /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
       </div>
     </div>
   );
@@ -211,6 +212,101 @@ function BuyMaterial() {
         <span className="text-sm">Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span> <span className="text-xs text-muted-foreground">to supplier</span></span>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10">{saving ? "Saving…" : "Buy → Stock"}</AsyncButton>
       </div>
+    </div>
+  );
+}
+
+/* ── Opening Stock → seed material already owned (migration). No supplier, no
+   payable — it just increases Stock and shows an "Opening Stock" line (with its
+   ₹ value) in the stock ledger. ── */
+function OpeningStock() {
+  const { user } = useAuth();
+  const [material, setMaterial] = useState<"gold" | "diamond">("gold");
+  const [purity, setPurity] = useState("22K");
+  const [shape, setShape] = useState("Round");
+  const [qty, setQty] = useState("");     // grams (gold) / carats (diamond)
+  const [value, setValue] = useState(""); // ₹ valuation (optional)
+  const [asOf, setAsOf] = useState("");   // as-of date (optional)
+  const [note, setNote] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const bucket = material === "gold" ? purity : shape;
+
+  const submit = async () => {
+    const q = Number(qty);
+    if (!q || q <= 0) { toast.error(`Enter the opening ${material === "gold" ? "weight (g)" : "carats"}`); return; }
+    setSaving(true);
+    try {
+      await increaseStock({
+        material,
+        purityOrQuality: bucket,
+        quantity: q,
+        refType: "opening",
+        valueInr: Number(value) > 0 ? Math.round(Number(value)) : undefined,
+        createdBy: user!.id,
+        createdAt: asOf ? new Date(`${asOf}T00:00:00`).toISOString() : undefined,
+        note: note.trim() || undefined,
+      });
+      toast.success(`Opening stock added: ${q} ${material === "gold" ? "g" : "ct"} ${bucket}`);
+      setQty(""); setValue(""); setAsOf(""); setNote("");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't add opening stock");
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted-foreground -mt-1">
+        Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.
+      </p>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Material</Label>
+          <Select value={material} onValueChange={v => setMaterial(v as "gold" | "diamond")}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+            <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Loose Diamond</SelectItem></SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">{material === "gold" ? "Purity" : "Shape"}</Label>
+          {material === "gold" ? (
+            <Select value={purity} onValueChange={setPurity}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          ) : (
+            <Select value={shape} onValueChange={setShape}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Opening {material === "gold" ? "Weight (g)" : "Carats"} <span className="text-destructive">*</span></Label>
+          <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+        </div>
+        <div>
+          <Label className="text-xs">Opening Value (₹, optional)</Label>
+          <Input type="number" min={0} value={value} onChange={e => setValue(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Valuation for the ledger" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">As of date (optional)</Label>
+          <Input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
+        <div>
+          <Label className="text-xs">Note (optional)</Label>
+          <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. carried forward" />
+        </div>
+      </div>
+
+      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Add Opening Stock"}</AsyncButton>
     </div>
   );
 }
