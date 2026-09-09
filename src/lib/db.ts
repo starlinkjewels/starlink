@@ -1444,6 +1444,44 @@ let clientAppId: string | null = null;
 let seeded = false; // becomes true once cache has been populated from Firestore
 let persistQueue: Promise<void> = Promise.resolve();
 
+/**
+ * Doc ids the app EXPLICITLY removed (through updateDb/saveDb), per collection.
+ * ONLY these may be deleted from Firestore.
+ *
+ * Why: persist() diffs the local cache against the `remote` mirror, and used to
+ * treat "in remote but missing from cache" as a deletion. But the cache can go
+ * transiently stale — an inbound listener skipped while a write is pending, a
+ * Firestore eventual-consistency blip, a client's partial mirror — and that made
+ * a real, freshly-created record look deleted. A concurrent save then wiped it
+ * for good (this is what silently deleted a live order and a saved locker in
+ * production). Deletions are now driven by explicit intent, never by absence.
+ */
+const intentDeletes: Partial<Record<ArrayCol, Set<string>>> = {};
+
+/** Current doc ids in the cache, per collection. */
+function idsByCol(): Partial<Record<ArrayCol, Set<string>>> {
+  const out: Partial<Record<ArrayCol, Set<string>>> = {};
+  for (const col of ARRAY_COLS) {
+    const arr = (cache[col] as unknown as Record<string, unknown>[]) || [];
+    out[col] = new Set(arr.map((i) => docId(col, i)));
+  }
+  return out;
+}
+
+/** Record every id that `before` held and the cache no longer does — i.e. the
+ *  caller deliberately removed it, so it's safe to delete remotely. */
+function markIntentionalRemovals(before: Partial<Record<ArrayCol, Set<string>>>) {
+  for (const col of ARRAY_COLS) {
+    const prev = before[col];
+    if (!prev || prev.size === 0) continue;
+    const arr = (cache[col] as unknown as Record<string, unknown>[]) || [];
+    const now = new Set(arr.map((i) => docId(col, i)));
+    for (const id of prev) {
+      if (!now.has(id)) (intentDeletes[col] ??= new Set<string>()).add(id);
+    }
+  }
+}
+
 function emit() {
   if (typeof window !== "undefined") window.dispatchEvent(new Event("starlink-db-updated"));
 }
@@ -1454,9 +1492,14 @@ async function persist() {
   // reconciliation both use this frozen copy, so a concurrent updateDb() during
   // the await can't make us mark an unwritten change as already-synced.
   const snap: DB = clean(cache);
-  const batch = writeBatch(fsdb);
+  // Collected as plain descriptors so they can be committed in several batches
+  // (Firestore allows at most 500 writes per batch).
+  type Op =
+    | { kind: "set"; col: string; id: string; data: Record<string, unknown> }
+    | { kind: "del"; col: string; id: string };
+  const opsList: Op[] = [];
   const touched = new Set<string>();
-  let ops = 0;
+  const committedDeletes: { col: ArrayCol; id: string }[] = [];
 
   for (const col of ARRAY_COLS) {
     const cur = (snap[col] as unknown as Record<string, unknown>[]) || [];
@@ -1464,12 +1507,16 @@ async function persist() {
     const curMap = new Map(cur.map((i) => [docId(col, i), i]));
     const prevMap = new Map(prev.map((i) => [docId(col, i), i]));
 
+    // A doc that's present locally again is no longer a pending deletion (it
+    // came back from a listener, or was re-created), so drop any stale intent.
+    const pendingDel = intentDeletes[col];
+    if (pendingDel) for (const id of curMap.keys()) pendingDel.delete(id);
+
     for (const [id, item] of curMap) {
       const before = prevMap.get(id);
       if (!before || !eq(before, item)) {
-        batch.set(doc(fsdb, col, id), item);
+        opsList.push({ kind: "set", col, id, data: item });
         touched.add(col);
-        ops++;
       }
     }
     for (const [id, prevItem] of prevMap) {
@@ -1494,19 +1541,24 @@ async function persist() {
       // empty), which is the sole intentional deletion path.
       if ((col === "orders" || col === "invoices" || col === "giftCards") && curMap.size > 0)
         continue;
-      batch.delete(doc(fsdb, col, id));
+      // THE key guard: only ever delete what the app explicitly removed (see
+      // intentDeletes). A doc merely absent from a stale cache is left alone —
+      // the next inbound snapshot restores it instead of it being wiped.
+      if (!intentDeletes[col]?.has(id)) continue;
+      opsList.push({ kind: "del", col, id });
+      committedDeletes.push({ col, id });
       touched.add(col);
-      ops++;
     }
   }
 
   if (!eq(snap.settings, remote.settings)) {
-    batch.set(
-      doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
-      snap.settings as unknown as Record<string, unknown>,
-    );
+    opsList.push({
+      kind: "set",
+      col: SETTINGS_COL,
+      id: SETTINGS_DOC,
+      data: snap.settings as unknown as Record<string, unknown>,
+    });
     touched.add(SETTINGS_COL);
-    ops++;
   }
 
   // Maintain the userByAuth role index (keyed by Firebase Auth uid). The
@@ -1521,28 +1573,45 @@ async function persist() {
   }
   for (const [auid, data] of Object.entries(desired)) {
     if (remoteIdx[auid] !== JSON.stringify(data)) {
-      batch.set(doc(fsdb, INDEX_COL, auid), data as unknown as Record<string, unknown>);
+      opsList.push({
+        kind: "set",
+        col: INDEX_COL,
+        id: auid,
+        data: data as unknown as Record<string, unknown>,
+      });
       idxWrites[auid] = data;
-      ops++;
     }
   }
   for (const auid of Object.keys(remoteIdx)) {
     if (!desired[auid]) {
-      batch.delete(doc(fsdb, INDEX_COL, auid));
+      opsList.push({ kind: "del", col: INDEX_COL, id: auid });
       idxDeletes.push(auid);
-      ops++;
     }
   }
 
-  if (ops === 0) return;
+  if (opsList.length === 0) return;
   touched.forEach((c) => {
     writePending[c] = (writePending[c] || 0) + 1;
   });
   setPending(pendingCount + 1);
   try {
-    await batch.commit();
+    // Firestore hard-limits a batch to 500 writes. A big save (first bulk sync,
+    // a data restore, or just a busy account) used to exceed that and throw,
+    // which surfaced to staff as "Couldn't save your last change". Commit in
+    // chunks instead so any size of change goes through.
+    const CHUNK = 450;
+    for (let i = 0; i < opsList.length; i += CHUNK) {
+      const batch = writeBatch(fsdb);
+      for (const op of opsList.slice(i, i + CHUNK)) {
+        if (op.kind === "set") batch.set(doc(fsdb, op.col, op.id), op.data);
+        else batch.delete(doc(fsdb, op.col, op.id));
+      }
+      await batch.commit();
+    }
     for (const [auid, data] of Object.entries(idxWrites)) remoteIdx[auid] = JSON.stringify(data);
     for (const auid of idxDeletes) delete remoteIdx[auid];
+    // These deletions are done — stop tracking them.
+    for (const { col, id } of committedDeletes) intentDeletes[col]?.delete(id);
     // Reconcile only the collections we wrote — leaves remote copies that
     // inbound listeners refreshed for other collections untouched.
     for (const c of touched) {
@@ -1577,7 +1646,11 @@ export function saveDb(db?: DB) {
   // Adopt the caller's object into the cache. Callers may pass a loadDb() copy
   // whose top-level arrays were reassigned (e.g. `fresh.expenses = [...]`), so
   // copy its fields in rather than assuming in-place mutation of the cache.
+  // Anything the caller dropped is an INTENTIONAL delete — record it, so
+  // persist() deletes only that and never a transiently-missing doc.
+  const before = idsByCol();
   if (db && db !== cache) Object.assign(cache, db);
+  markIntentionalRemovals(before);
   emit();
   // Chain persists so overlapping saves don't race; each recomputes the diff.
   persistQueue = persistQueue
@@ -1586,7 +1659,9 @@ export function saveDb(db?: DB) {
 }
 
 export function updateDb(fn: (db: DB) => void) {
+  const before = idsByCol();
   fn(cache);
+  markIntentionalRemovals(before); // whatever the mutator removed is a real delete
   saveDb(cache);
   return cache;
 }

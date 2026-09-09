@@ -64,7 +64,17 @@ export function App() {
   // Surface background save failures — writes are optimistic, so without this a
   // failed Firestore write is invisible and the user thinks the change saved.
   useEffect(() => {
-    const onErr = () => toast.error("Couldn't save your last change — check your connection and try again.");
+    // Surface the real reason — "check your connection" is misleading when the
+    // write was actually rejected (permissions) or too large.
+    const onErr = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { code?: string } | undefined;
+      const code = detail?.code;
+      if (code === "permission-denied") {
+        toast.error("Couldn't save — your account doesn't have permission for that change.");
+      } else {
+        toast.error(`Couldn't save your last change${code ? ` (${code})` : ""} — check your connection and try again.`);
+      }
+    };
     window.addEventListener("starlink-db-error", onErr);
     return () => window.removeEventListener("starlink-db-error", onErr);
   }, []);
