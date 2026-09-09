@@ -219,6 +219,10 @@ export async function decreaseStockSelfHealing(
  * reconciliation) in case of any drift, never called automatically.
  */
 export async function recomputeStockFromHistory(movements: StockMovement[]): Promise<StockLevels> {
+  // Safety: this OVERWRITES the whole stockLevels doc. If the caller hands us an
+  // empty history (movements not loaded yet / a stale cache), rebuilding from it
+  // would zero out real stock. Refuse and return what's stored instead.
+  if (!movements || movements.length === 0) return fetchStockLevels();
   const gold: Record<string, number> = {};
   const diamond: Record<string, number> = {};
   for (const m of movements) {

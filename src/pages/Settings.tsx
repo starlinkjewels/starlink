@@ -58,22 +58,19 @@ export function SettingsPage() {
   const bankImg1Ref = useRef<HTMLInputElement>(null);
   const bankImg2Ref = useRef<HTMLInputElement>(null);
 
-  const save = () => {
-    saveDb(db);
-    toast.success("Settings saved");
+  // Persist ONLY the settings object. `db` here is a snapshot taken when this
+  // page mounted, so writing the whole thing back (the old saveDb(db)) reverted
+  // every other collection to that moment — silently deleting anything created
+  // since (this is what wiped a saved locker and a live order). updateDb touches
+  // the live cache in place and leaves all other data alone.
+  const persistSettings = (msg: string) => {
+    updateDb(d => { d.settings = { ...db.settings }; });
+    toast.success(msg);
   };
-  const saveRates = () => {
-    saveDb(db);
-    toast.success("Pricing rates updated");
-  };
-  const saveInvoice = () => {
-    saveDb(db);
-    toast.success("Invoice settings saved");
-  };
-  const saveBand = () => {
-    saveDb(db);
-    toast.success("Label & barcode settings saved");
-  };
+  const save = () => persistSettings("Settings saved");
+  const saveRates = () => persistSettings("Pricing rates updated");
+  const saveInvoice = () => persistSettings("Invoice settings saved");
+  const saveBand = () => persistSettings("Label & barcode settings saved");
 
   // Expense categories — instant add/remove (like toggling a locker/factory
   // active, not a staged "Save" form). Removing one is non-destructive: any
@@ -81,16 +78,20 @@ export function SettingsPage() {
   // stops appearing in the picker for new expenses.
   const [newCategory, setNewCategory] = useState("");
   const expenseCategories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
+  // Write just the category list into the live cache (never the whole snapshot).
+  const setCategories = (list: string[]) => {
+    updateDb(d => { d.settings.expenseCategories = list; });
+    setDb(prev => ({ ...prev, settings: { ...prev.settings, expenseCategories: list } }));
+  };
   const addCategory = () => {
     const name = newCategory.trim();
     if (!name) return;
     if (expenseCategories.some(c => c.toLowerCase() === name.toLowerCase())) { toast.error("That category already exists"); return; }
-    const next = { ...db, settings: { ...db.settings, expenseCategories: [...expenseCategories, name] } };
-    saveDb(next); setDb(next); setNewCategory("");
+    setCategories([...expenseCategories, name]);
+    setNewCategory("");
   };
   const removeCategory = (name: string) => {
-    const next = { ...db, settings: { ...db.settings, expenseCategories: expenseCategories.filter(c => c !== name) } };
-    saveDb(next); setDb(next);
+    setCategories(expenseCategories.filter(c => c !== name));
   };
 
   const exp = () => {

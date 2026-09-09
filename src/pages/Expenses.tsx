@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, saveDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
@@ -171,16 +171,22 @@ export function ExpensesPage() {
       createdAt: now,
       lockerId: expLockerId,
     };
-    fresh.expenses = [...fresh.expenses, expense];
-    if (locker) {
-      fresh.lockerTransactions = [...fresh.lockerTransactions, {
-        id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: amount,
-        currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
-        refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
-      }];
-    }
-    saveDb(fresh);
-    setDb(fresh);
+    // Mutate the LIVE cache in place. Writing back a whole loadDb() copy would
+    // revert every other collection to this moment and delete anything created
+    // in between (that's how records were vanishing) — never do that.
+    updateDb(d => {
+      if (!d.expenses) d.expenses = [];
+      d.expenses.push(expense);
+      if (locker) {
+        if (!d.lockerTransactions) d.lockerTransactions = [];
+        d.lockerTransactions.push({
+          id: uid("ltx_"), lockerId: expLockerId, type: "expense", amountInr: amount,
+          currency: locker.currency || "INR", category: `Expense — ${form.title.trim()}`,
+          refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
+        });
+      }
+    });
+    setDb(loadDb());
     await flush(); // keep the button in "Saving…" until Firebase confirms
     setForm(EMPTY_FORM);
     setExpLockerId("");
@@ -190,11 +196,12 @@ export function ExpensesPage() {
 
   function handleDelete(id: string) {
     if (!confirm("Delete this expense? Its linked locker entry is also removed. This cannot be undone.")) return;
-    const fresh = loadDb();
-    fresh.expenses = fresh.expenses.filter(e => e.id !== id);
-    fresh.lockerTransactions = fresh.lockerTransactions.filter(t => !(t.refType === "expense" && t.refId === id));
-    saveDb(fresh);
-    setDb(fresh);
+    // In-place on the live cache — only this expense + its locker line go.
+    updateDb(d => {
+      d.expenses = d.expenses.filter(e => e.id !== id);
+      d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !(t.refType === "expense" && t.refId === id));
+    });
+    setDb(loadDb());
     toast.success("Expense deleted");
   }
 
