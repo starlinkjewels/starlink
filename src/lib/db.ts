@@ -1484,6 +1484,16 @@ async function persist() {
         (prevItem as { fromUserId?: string }).fromUserId !== clientAppId
       )
         continue;
+      // Orders / invoices / gift cards are APPEND-ONLY in the app — no screen
+      // ever deletes an individual one (they're only status-changed/revoked, or
+      // wiped en-masse by Settings → Clear Data). So a single doc "missing" from
+      // a transiently-stale cache (a Firestore eventual-consistency / listener-
+      // skip artifact, or a partial client mirror) must NEVER be inferred as a
+      // deletion — that's how a freshly-created order could silently vanish.
+      // Only allow these deletions as part of a full-collection clear (curMap
+      // empty), which is the sole intentional deletion path.
+      if ((col === "orders" || col === "invoices" || col === "giftCards") && curMap.size > 0)
+        continue;
       batch.delete(doc(fsdb, col, id));
       touched.add(col);
       ops++;
