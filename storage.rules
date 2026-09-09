@@ -6,6 +6,19 @@ rules_version = '2';
 // user can read any object; tighten later if needed.)
 service firebase.storage {
   match /b/{bucket}/o {
+    // 👇 EDIT: must match ADMIN_EMAILS in src/lib/firebase.ts (and firestore.rules).
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email in ['marketing.starlinkjewels@gmail.com', 'admin@starlinkjewels.com'];
+    }
+
+    // Automatic database backups (src/lib/backup.ts). Each file is a FULL
+    // snapshot of the whole account, so it must never be readable by staff or
+    // clients — admin only. Declared before the catch-all so it wins.
+    match /backups/{file} {
+      allow read, write, delete: if isAdmin();
+    }
+
     match /{allPaths=**} {
       allow read, write: if request.auth != null;
     }

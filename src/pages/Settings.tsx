@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
+import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -152,6 +153,49 @@ export function SettingsPage() {
     await deleteAllCatalogItems();
     toast.success("Data cleared — reloading");
     setTimeout(() => location.reload(), 600);
+  };
+
+  // ── Automatic cloud backups (admin only) ──
+  const [backups, setBackups] = useState<BackupEntry[]>([]);
+  const [backingUp, setBackingUp] = useState(false);
+  const isAdminUser = user?.role === "admin";
+  useEffect(() => {
+    if (active !== "data" || !isAdminUser) return;
+    listBackups().then(setBackups).catch(() => setBackups([]));
+  }, [active, isAdminUser]);
+
+  const backupNow = async () => {
+    setBackingUp(true);
+    try {
+      await createBackup();
+      setBackups(await listBackups());
+      toast.success("Backup saved to the cloud");
+    } catch {
+      toast.error("Backup failed — only an admin account can write backups.");
+    } finally { setBackingUp(false); }
+  };
+
+  const downloadBackup = async (b: BackupEntry) => {
+    try { window.open(await backupUrl(b.path), "_blank"); }
+    catch { toast.error("Couldn't open that backup"); }
+  };
+
+  const restoreFromCloud = async (b: BackupEntry) => {
+    try {
+      const d = (await fetchBackup(b.path)) as unknown as DB;
+      if (!d || !Array.isArray(d.orders) || !Array.isArray(d.clients)) { toast.error("That backup looks invalid."); return; }
+      if (!confirm(
+        `Restore the backup from ${b.date}?\n\nThis REPLACES all current data with that snapshot ` +
+        `(${d.clients.length} clients, ${d.orders.length} orders). Anything created since then will be lost. This cannot be undone.`,
+      )) return;
+      const fresh = loadDb();
+      Object.assign(fresh, d, { session: fresh.session });
+      saveDb(fresh);
+      setDb(fresh);
+      toast.success(`Restored from ${b.date}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Restore failed");
+    }
   };
 
   const [uploadingField, setUploadingField] = useState<string | null>(null);
@@ -887,6 +931,45 @@ export function SettingsPage() {
             </span>
           </label>
         </div>
+        {/* ── Automatic daily cloud backups (admin only) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <div className="h-8 w-8 rounded-lg bg-success/10 text-success grid place-items-center shrink-0"><Database className="h-4 w-4" /></div>
+                <div>
+                  <h3 className="font-semibold text-brand-dark text-sm">Automatic Backups</h3>
+                  <p className="text-[11px] text-muted-foreground">A full snapshot is saved to the cloud once a day — last 14 kept.</p>
+                </div>
+              </div>
+              <AsyncButton variant="outline" onClick={backupNow} disabled={backingUp} className="rounded-lg gap-1.5 shrink-0">
+                <Database className="h-3.5 w-3.5" /> {backingUp ? "Backing up…" : "Back up now"}
+              </AsyncButton>
+            </div>
+
+            <div className="mt-3 space-y-1.5 max-h-64 overflow-y-auto">
+              {backups.map(b => (
+                <div key={b.path} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2">
+                  <p className="text-sm font-medium text-foreground tabular-nums">{b.date}</p>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <Button size="sm" variant="outline" onClick={() => downloadBackup(b)} className="rounded-lg h-8 gap-1.5">
+                      <Upload className="h-3.5 w-3.5 rotate-180" /> Download
+                    </Button>
+                    <AsyncButton size="sm" variant="outline" onClick={() => restoreFromCloud(b)} className="rounded-lg h-8 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                      Restore
+                    </AsyncButton>
+                  </div>
+                </div>
+              ))}
+              {backups.length === 0 && (
+                <p className="text-xs text-muted-foreground px-1 py-2">
+                  No cloud backups yet — one is taken automatically the first time an admin opens the app each day, or press “Back up now”.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
+
         <AsyncButton
           variant="outline"
           onClick={clear}

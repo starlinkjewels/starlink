@@ -87,6 +87,18 @@ export function App() {
     initForegroundPush();
   }, [user]);
 
+  // Automatic daily backup — the first admin session of the day snapshots the
+  // whole database to Storage (last 14 kept), so there is always a recent
+  // restore point. Silent and best-effort; never blocks the app.
+  useEffect(() => {
+    if (user?.role !== "admin") return;
+    // Wait for the initial Firestore sync to finish so we snapshot real data.
+    const id = window.setTimeout(() => {
+      import("./lib/backup").then(m => m.autoBackup()).catch(() => {});
+    }, 8000);
+    return () => clearTimeout(id);
+  }, [user]);
+
   // Warm the lazy page chunks in the background once logged in, during idle
   // time. Each page is code-split, so the FIRST visit would otherwise flash a
   // loading spinner; prefetching makes navigation instant (chunk already cached).
