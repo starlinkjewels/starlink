@@ -30,7 +30,7 @@ import {
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
-import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel } from "@/lib/purchaseVoid";
+import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact } from "@/lib/purchaseVoid";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -268,7 +268,7 @@ export function OrderDetailPage() {
       `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)}) from this order?
 
 ` +
-      "The supplier's due, the material issued to the factory and the stock entry it created will all be reversed. This can't be undone.",
+      "What changes:\n" + voidImpact(db, p).join("\n") + "\n\nThis cannot be undone.",
     )) return;
     setRemovingPurchaseId(p.id);
     try {

@@ -67,6 +67,31 @@ export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: st
 }
 
 /**
+ * Plain-language list of everything this removal will change — shown in the
+ * confirmation so nobody has to take it on trust. Everything here is keyed to
+ * this one purchase; an identical twin (the whole point of a duplicate) is
+ * untouched until it is removed in its own right.
+ */
+export function voidImpact(db: DB, p: Purchase): string[] {
+  const out: string[] = [];
+  const unit = p.material === "gold" ? "g" : "ct";
+  const sup = db.suppliers.find(s => s.id === p.supplierId);
+  out.push(`• ${fmtMoneyInr(p.totalInr)} comes off ${sup?.name || "the supplier"}’s dues`);
+  for (const i of (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id)) {
+    const fac = db.factories.find(f => f.id === i.factoryId);
+    out.push(`• ${i.quantityIssued}${i.material === "gold" ? "g" : "ct"} taken back off ${fac?.name || "the factory"}’s hands`);
+    if (i.makingCharges.amountInr > 0) {
+      out.push(`• the ${fmtMoneyInr(i.makingCharges.amountInr)} making charge on that factory issue is removed too`);
+    }
+  }
+  const packets = (db.diamondPackets ?? []).filter(pk => pk.purchaseId === p.id);
+  if (packets.length) out.push(`• ${packets.length} certified stone record${packets.length !== 1 ? "s" : ""} removed`);
+  if (pooledStock(p) && qtyOf(p) > 0) out.push(`• ${qtyOf(p)}${unit} taken back out of Stock`);
+  out.push("• nothing else changes — the client’s order value, their payments and every other purchase stay exactly as they are");
+  return out;
+}
+
+/**
  * Remove a purchase and reverse every trace of it. Throws if the pooled stock
  * it added has already been consumed (floor-checked), leaving everything
  * untouched. Call canVoidPurchase() first for the friendly pre-checks.

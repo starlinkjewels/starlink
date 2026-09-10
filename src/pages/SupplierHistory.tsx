@@ -8,7 +8,7 @@ import {
   supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { increaseStock } from "@/lib/stock";
-import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel } from "@/lib/purchaseVoid";
+import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact } from "@/lib/purchaseVoid";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -363,7 +363,7 @@ export function SupplierHistoryPage() {
       `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)})?
 
 ` +
-      "It comes off this supplier's dues, and the stock, factory issue and order links it created are all reversed. This can't be undone.",
+      "What changes:\n" + voidImpact(db, p).join("\n") + "\n\nThis cannot be undone.",
     )) return;
     setVoidingId(p.id);
     try {
