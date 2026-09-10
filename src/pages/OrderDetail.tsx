@@ -30,6 +30,7 @@ import {
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
+import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel } from "@/lib/purchaseVoid";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -253,6 +254,30 @@ export function OrderDetailPage() {
 
   // ── Manufacturing: purchases/issuances linked to this order ──
   const linkedPurchases = db.purchases.filter(p => p.orderId === order.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+
+  // Remove a purchase recorded against this order (e.g. the same diamond
+  // entered twice). Reverses EVERYTHING it created — supplier due, the auto
+  // factory issue, stock movements, certified packet and the order links — via
+  // the shared unwind in src/lib/purchaseVoid.ts. Refuses when it can no longer
+  // be undone cleanly (already paid, or the factory already finished the piece).
+  const [removingPurchaseId, setRemovingPurchaseId] = useState<string | null>(null);
+  const removeLinkedPurchase = async (p: Purchase) => {
+    const check = canVoidPurchase(db, p);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    if (!confirm(
+      `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)}) from this order?
+
+` +
+      "The supplier's due, the material issued to the factory and the stock entry it created will all be reversed. This can't be undone.",
+    )) return;
+    setRemovingPurchaseId(p.id);
+    try {
+      await voidPurchaseCascade(db, p, user!.id);
+      toast.success("Duplicate purchase removed — supplier due, factory issue and stock all reversed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't remove this purchase.");
+    } finally { setRemovingPurchaseId(null); }
+  };
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
 
   const buyGrandTotalInr = buyLines.reduce((s, l) => s + buyLineTotalInr(l), 0);
@@ -2830,7 +2855,18 @@ export function OrderDetailPage() {
                       {p.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
                       <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : `${p.diamond?.carat}ct`} from {supplier?.name || "supplier"}</span>
                     </span>
-                    <span className={`shrink-0 font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                    <span className="flex items-center gap-2 shrink-0">
+                      <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                      {user!.role === "admin" && (
+                        <button
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); removeLinkedPurchase(p); }}
+                          disabled={removingPurchaseId === p.id}
+                          title="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
+                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </span>
                   </Link>
                 );
               })}
@@ -2868,6 +2904,15 @@ export function OrderDetailPage() {
                       <span className="flex items-center gap-2 shrink-0">
                         {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                        {srcPurchase && user!.role === "admin" && (
+                          <button
+                            onClick={() => removeLinkedPurchase(srcPurchase)}
+                            disabled={removingPurchaseId === srcPurchase.id}
+                            title="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </span>
                     </div>
                   </div>
