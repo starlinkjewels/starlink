@@ -105,6 +105,13 @@ service cloud.firestore {
       allow delete: if isStaff() || (isClientRole() && resource.data.fromUserId == myAppId());
     }
 
+    // Atomic sequence counters (order no. / invoice no. / diamond stock no.) —
+    // see src/lib/counters.ts. Incremented inside a transaction so two people
+    // creating an order at once can never mint the same number. Any active user
+    // needs this (a client can place an order), and the docs hold no data beyond
+    // a running integer.
+    match /counters/{name} { allow read, write: if isActive(); }
+
     // Staff-only collections — clients never load or touch these.
     match /tasks/{id}    { allow read, write: if isStaff(); }
     match /expenses/{id} { allow read, write: if isStaff(); }

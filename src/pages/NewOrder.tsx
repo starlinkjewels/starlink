@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, nextOrderNumber, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { reserveOrderNumber } from "@/lib/counters";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -239,8 +240,12 @@ export function NewOrderPage() {
     // Captured inside updateDb so we can email marketing AFTER the write.
     let mailInfo: { orderNumber: string; clientName: string; jewelleryType?: string; metal?: string; quantity?: number; expectedDelivery?: string } | null = null;
 
+    // Claim the order number in the database BEFORE writing the order. Deriving
+    // it from the in-memory list (max + 1) let two people creating an order at
+    // the same moment mint the SAME number — a real duplicate in production.
+    const reservedNumber = await reserveOrderNumber(loadDb().orders);
     updateDb(d => {
-      const num = nextOrderNumber(d.orders);
+      const num = reservedNumber;
       const advance = Number(f.advanceAmount) || 0;
 
       // Assign the order to an employee so it shows in their views: the creating

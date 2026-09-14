@@ -22,7 +22,7 @@ import {
   type Query,
   type DocumentData,
 } from "firebase/firestore";
-import { db as fsdb } from "./firebase";
+import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -1564,32 +1564,44 @@ async function persist() {
   // Maintain the userByAuth role index (keyed by Firebase Auth uid). The
   // security rules read these tiny docs to authorise requests. Derived
   // automatically from the users collection — never hand-edited.
+  //
+  // IMPORTANT: firestore.rules only lets a NON-admin write an index doc whose
+  // role is "client" (and a client none at all). Any other index write returns
+  // permission-denied, which used to fail the WHOLE batch — so an employee or
+  // client lost the real data write riding along with it and saw "Couldn't save
+  // your last change" over and over. Mirror the rule exactly here, and commit
+  // whatever survives in its own batch so the index can never take data down.
+  const amAdmin = isAdminEmail(fbAuth.currentUser?.email);
+  const amStaff = messagesScopeIsFull; // non-client scope == staff session
   const idxWrites: Record<string, IndexDoc> = {};
   const idxDeletes: string[] = [];
+  const idxOps: typeof opsList = [];
   const desired: Record<string, IndexDoc> = {};
   for (const u of (snap.users || []) as User[]) {
     if (!u.authUid) continue;
     desired[u.authUid] = indexOf(u);
   }
   for (const [auid, data] of Object.entries(desired)) {
-    if (remoteIdx[auid] !== JSON.stringify(data)) {
-      opsList.push({
-        kind: "set",
-        col: INDEX_COL,
-        id: auid,
-        data: data as unknown as Record<string, unknown>,
-      });
-      idxWrites[auid] = data;
-    }
+    if (remoteIdx[auid] === JSON.stringify(data)) continue;
+    if (!(amAdmin || (amStaff && data.role === "client"))) continue; // not ours to write
+    idxOps.push({
+      kind: "set",
+      col: INDEX_COL,
+      id: auid,
+      data: data as unknown as Record<string, unknown>,
+    });
+    idxWrites[auid] = data;
   }
-  for (const auid of Object.keys(remoteIdx)) {
-    if (!desired[auid]) {
-      opsList.push({ kind: "del", col: INDEX_COL, id: auid });
-      idxDeletes.push(auid);
+  if (amAdmin || amStaff) {
+    for (const auid of Object.keys(remoteIdx)) {
+      if (!desired[auid]) {
+        idxOps.push({ kind: "del", col: INDEX_COL, id: auid });
+        idxDeletes.push(auid);
+      }
     }
   }
 
-  if (opsList.length === 0) return;
+  if (opsList.length === 0 && idxOps.length === 0) return;
   touched.forEach((c) => {
     writePending[c] = (writePending[c] || 0) + 1;
   });
@@ -1608,8 +1620,25 @@ async function persist() {
       }
       await batch.commit();
     }
-    for (const [auid, data] of Object.entries(idxWrites)) remoteIdx[auid] = JSON.stringify(data);
-    for (const auid of idxDeletes) delete remoteIdx[auid];
+    // The role index is bookkeeping, not user data. Commit it separately and
+    // swallow any failure: if the rules reject it, the data above is already
+    // safely written, and an admin session reconciles the index later.
+    if (idxOps.length) {
+      try {
+        for (let i = 0; i < idxOps.length; i += CHUNK) {
+          const ib = writeBatch(fsdb);
+          for (const op of idxOps.slice(i, i + CHUNK)) {
+            if (op.kind === "set") ib.set(doc(fsdb, op.col, op.id), op.data);
+            else ib.delete(doc(fsdb, op.col, op.id));
+          }
+          await ib.commit();
+        }
+        for (const [auid, data] of Object.entries(idxWrites)) remoteIdx[auid] = JSON.stringify(data);
+        for (const auid of idxDeletes) delete remoteIdx[auid];
+      } catch (e) {
+        console.warn("[db] role-index sync skipped (not permitted for this account):", e);
+      }
+    }
     // These deletions are done — stop tracking them.
     for (const { col, id } of committedDeletes) intentDeletes[col]?.delete(id);
     // Reconcile only the collections we wrote — leaves remote copies that
