@@ -43,6 +43,7 @@ import {
   CATALOG_SORT_OPTIONS,
   type CatalogSort,
 } from "@/lib/catalogItems";
+import { toast } from "sonner";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 
 // Rough initial row-height guess for virtualized grids — corrected
@@ -940,13 +941,66 @@ export function CatalogPage() {
   }
 
   /* ── Upload ── */
-  async function handleFiles(files: FileList) {
-    if (!currentFolderId) return;
-    const folderId = currentFolderId;
-    // A folder pick can be hundreds of files. Oversized files are SKIPPED on
-    // purpose; anything else that fails is a real error, and we keep its reason
-    // so the summary says what actually went wrong instead of guessing.
+
+  /**
+   * Recreate the picked folder's structure as catalog folders and return a map
+   * of "Rings/Bands" → folder id, so every file lands where it sat on the PC.
+   * A folder that already exists under the same parent is reused, so uploading
+   * the same folder twice tops it up instead of duplicating the tree.
+   */
+  function buildFolderTree(files: File[]): Map<string, string> {
+    const byPath = new Map<string, string>();
+    updateDb((db) => {
+      for (const f of files) {
+        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+        const parts = rel.split("/").filter(Boolean).slice(0, -1); // drop the file name
+        let parent: string | null = currentFolderId ?? null;
+        let acc = "";
+        for (const seg of parts) {
+          acc = acc ? `${acc}/${seg}` : seg;
+          let id = byPath.get(acc);
+          if (!id) {
+            const existing = db.catalogFolders.find(
+              (x) => x.name === seg && (x.parentId ?? null) === parent,
+            );
+            id = existing?.id ?? uid("cf_");
+            if (!existing) {
+              db.catalogFolders.push({
+                id,
+                name: seg,
+                parentId: parent,
+                createdBy: user!.id,
+                createdAt: new Date().toISOString(),
+              });
+            }
+            byPath.set(acc, id);
+          }
+          parent = id;
+        }
+      }
+    });
+    return byPath;
+  }
+
+  async function handleFiles(files: FileList, keepStructure = false) {
     const all = Array.from(files);
+    if (!all.length) return;
+    // A plain pick drops everything into the folder you're looking at. A folder
+    // pick rebuilds the tree first — that's the whole point of "Upload Folder",
+    // and it's why it also works from the top level, where there is no current
+    // folder to drop into.
+    if (!keepStructure && !currentFolderId) return;
+    const tree = keepStructure ? buildFolderTree(all) : new Map<string, string>();
+    const destOf = (f: File) => {
+      if (!keepStructure) return currentFolderId;
+      const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+      const dir = rel.split("/").filter(Boolean).slice(0, -1).join("/");
+      return tree.get(dir) ?? currentFolderId;
+    };
+
+    // Oversized files are SKIPPED on purpose; anything else that fails is a real
+    // error, and we keep its reason so the summary says what actually went wrong
+    // instead of guessing.
     const tooBig: string[] = [];
     const failed: string[] = [];
     let firstReason = "";
@@ -958,6 +1012,8 @@ export function CatalogPage() {
     const uploadOne = async (file: File) => {
       const mb = file.size / 1024 / 1024;
       if (mb > MAX_FILE_MB) { tooBig.push(file.name); return; }
+      const folderId = destOf(file);
+      if (!folderId) { failed.push(file.name); if (!firstReason) firstReason = "no destination folder"; return; }
       const isImage = file.type.startsWith("image/");
       const isVideo = file.type.startsWith("video/");
       // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
@@ -978,7 +1034,9 @@ export function CatalogPage() {
           createdAt: new Date().toISOString(),
         };
         await createCatalogItem(newItem);
-        setItems((prev) => [newItem, ...prev]); // list is newest-first, so prepend
+        // Only the folder on screen is showing its items — a file that landed in
+        // a freshly created sub-folder is loaded when you open it.
+        if (folderId === currentFolderId) setItems((prev) => [newItem, ...prev]);
       } catch (e) {
         // One bad file must not abandon the rest of a big folder upload.
         failed.push(file.name);
@@ -1008,6 +1066,13 @@ export function CatalogPage() {
           bad === 1
             ? `"${(tooBig[0] ?? failed[0])}" couldn't be uploaded (${parts.join("")}).`
             : `${bad} of ${all.length} files couldn't be uploaded (${parts.join("; ")}). The other ${all.length - bad} went up.`,
+        );
+      }
+      if (bad < all.length) {
+        toast.success(
+          keepStructure
+            ? `${all.length - bad} file${all.length - bad !== 1 ? "s" : ""} uploaded into ${tree.size || 1} folder${tree.size > 1 ? "s" : ""}`
+            : `${all.length - bad} file${all.length - bad !== 1 ? "s" : ""} uploaded`,
         );
       }
     } finally {
@@ -1338,30 +1403,32 @@ export function CatalogPage() {
                         : "Uploading…")
                     : "Upload"}
                 </button>
-                <input
-                  id="catalog-upload-folder-input"
-                  type="file"
-                  // @ts-expect-error — non-standard but supported by Chrome/Edge/Safari
-                  webkitdirectory=""
-                  directory=""
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    if (e.target.files) handleFiles(e.target.files);
-                    e.currentTarget.value = "";
-                  }}
-                />
-                <button
-                  onClick={() => document.getElementById("catalog-upload-folder-input")?.click()}
-                  disabled={uploading}
-                  title="Pick a folder on your computer — everything inside is uploaded in one go"
-                  className="flex items-center gap-2 px-4 h-10 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
-                >
-                  <FolderPlus className="h-4 w-4" />
-                  Upload Folder
-                </button>
               </>
             )}
+            {/* Upload Folder works at the top level too — the picked folder and
+                everything under it is recreated here as catalog folders. */}
+            <input
+              id="catalog-upload-folder-input"
+              type="file"
+              // @ts-expect-error — non-standard but supported by Chrome/Edge/Safari
+              webkitdirectory=""
+              directory=""
+              multiple
+              className="hidden"
+              onChange={(e) => {
+                if (e.target.files) handleFiles(e.target.files, true);
+                e.currentTarget.value = "";
+              }}
+            />
+            <button
+              onClick={() => document.getElementById("catalog-upload-folder-input")?.click()}
+              disabled={uploading}
+              title="Pick a folder on your computer — the folder and everything inside it is uploaded in one go, keeping its sub-folders"
+              className="flex items-center gap-2 px-4 h-10 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
+            >
+              <FolderPlus className="h-4 w-4" />
+              Upload Folder
+            </button>
             {currentFolderId && (
               <ShareFolderButton
                 kind="catalog"
