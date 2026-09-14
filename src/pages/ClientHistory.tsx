@@ -51,13 +51,18 @@ export function ClientHistoryPage() {
   // payments, so all money math runs on billable (non-rejected) orders only.
   const billableOrders = allOrders.filter(o => o.status !== "Rejected");
 
+  // Display only — shows an order's invoice number in the table when it has one.
   const allInvoices = db.invoices.filter(inv => inv.clientId === id);
+
 
   // Summary stats — use the full bill (incl. shipping/cert) so "Total Value"
   // matches the Account Ledger's "Total Billed".
   const totalValue = billableOrders.reduce((s, o) => s + orderTotal(o), 0);
-  const paidAmount = allInvoices.filter(i => i.paid).reduce((s, i) => s + i.amount, 0);
-  const pendingAmount = allInvoices.filter(i => !i.paid).reduce((s, i) => s + i.amount, 0);
+  // Paid / outstanding come from the ORDERS, never from invoice snapshots: an
+  // order can be paid before it is billed, and an invoice raised by mistake can
+  // be deleted from Settings — neither may move this statement by a cent.
+  const pendingAmount = billableOrders.reduce((s, o) => s + balanceDue(o), 0);
+  const paidAmount = totalValue - pendingAmount;
   const activeOrders = allOrders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
   const deliveredOrders = allOrders.filter(o => o.status === "Delivered").length;
 
