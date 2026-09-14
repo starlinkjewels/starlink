@@ -263,7 +263,7 @@ export function SettingsPage() {
   );
 
   function deleteInvoice(id: string, number: string) {
-    if (!confirm(`Delete invoice ${number}? The bill is removed and the number is freed up. The order, its payments and all ledgers stay exactly as they are.`)) return;
+    if (!confirm(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`)) return;
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
     toast.success(`Invoice ${number} deleted`);
   }
@@ -1144,11 +1144,11 @@ export function SettingsPage() {
             </div>
 
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Deleting removes only the bill document and frees its number. The order, its advances,
-              the client ledger and every report read from the order itself, so nothing else changes.
-              Undispatched invoices are listed below; search to find any other one.
+              Deleting removes only the bill document. The order, its advances, the client
+              ledger and every report read from the order itself, so no figure changes — the
+              order simply becomes billable again once it is dispatched. Undispatched invoices
+              are listed below; search to find any other one.
             </p>
-
             <Input
               value={invQuery}
               onChange={e => setInvQuery(e.target.value)}
