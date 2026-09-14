@@ -228,6 +228,9 @@ export interface ManufacturingLogEntry {
 export interface Order {
   id: string;
   orderNumber: string;
+  // Set only when a duplicate order number was repaired (Settings -> Data).
+  // Keeps the original visible so old paperwork can still be traced.
+  previousOrderNumber?: string;
   clientId: string; // empty string when forReadyStock (in-house build, no client)
   forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)

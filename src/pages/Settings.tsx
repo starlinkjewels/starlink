@@ -1,6 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
+import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -31,6 +32,7 @@ import {
   Building2,
   Database,
   SlidersHorizontal,
+  Hash,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -196,6 +198,28 @@ export function SettingsPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Restore failed");
     }
+  };
+
+  // ── Duplicate order numbers (legacy data repaired here) ──
+  const [dupScan, setDupScan] = useState(0); // bump to re-scan after a fix
+  const [fixingOrderId, setFixingOrderId] = useState<string | null>(null);
+  const liveDb = loadDb();
+  const duplicateGroups = useMemo(() => duplicateOrderNumbers(liveDb.orders), [liveDb.orders, dupScan]);
+  const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
+    if (invoiced && !confirm(
+      `This order already has an invoice under ${oldNumber}.
+
+` +
+      "Giving it a new number means the invoice you already sent shows the old one — you will need to re-send the corrected invoice. Continue?"
+    )) return;
+    setFixingOrderId(orderId);
+    try {
+      const fresh = await renumberOrder(loadDb(), orderId);
+      setDupScan(n => n + 1);
+      toast.success(`Renumbered ${oldNumber} → ${fresh}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't renumber that order.");
+    } finally { setFixingOrderId(null); }
   };
 
   const [uploadingField, setUploadingField] = useState<string | null>(null);
@@ -931,6 +955,69 @@ export function SettingsPage() {
             </span>
           </label>
         </div>
+        {/* ── Duplicate order numbers (repairs legacy data) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${duplicateGroups.length ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                <Hash className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Order Numbers</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {duplicateGroups.length === 0
+                    ? "No duplicates — every order number is unique."
+                    : `${duplicateGroups.length} number${duplicateGroups.length !== 1 ? "s are" : " is"} used by more than one order.`}
+                </p>
+              </div>
+            </div>
+
+            {duplicateGroups.length > 0 && (
+              <div className="mt-3 space-y-3">
+                <p className="text-[11px] text-muted-foreground">
+                  The oldest order keeps the number; give the later one a fresh number. Nothing else changes —
+                  invoices, purchases and payments link to the order itself, not to the number.
+                </p>
+                {duplicateGroups.map(g => (
+                  <div key={g.number} className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+                    <p className="text-xs font-semibold text-destructive mb-2">{g.number} — used by {g.orders.length} orders</p>
+                    <div className="space-y-1.5">
+                      {g.orders.map((o, i) => {
+                        const client = liveDb.clients.find(c => c.id === o.clientId);
+                        const invoiced = orderInvoiced(liveDb.invoices, o.id);
+                        return (
+                          <div key={o.id} className="flex items-center justify-between gap-2 rounded-lg bg-white border border-border/60 px-3 py-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium truncate">{client?.companyName || "Ready Stock"} · {o.jewelleryType}</p>
+                              <p className="text-[11px] text-muted-foreground">
+                                {new Date(o.createdAt).toLocaleDateString()} · {o.status}
+                                {invoiced ? " · already invoiced" : ""}
+                              </p>
+                            </div>
+                            {i === 0 ? (
+                              <span className="text-[11px] font-medium text-muted-foreground shrink-0">keeps this number</span>
+                            ) : (
+                              <AsyncButton
+                                size="sm"
+                                variant="outline"
+                                disabled={fixingOrderId === o.id}
+                                onClick={() => fixOrderNumber(o.id, o.orderNumber, invoiced)}
+                                className="rounded-lg h-8 shrink-0"
+                              >
+                                {fixingOrderId === o.id ? "Fixing…" : "Give new number"}
+                              </AsyncButton>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ── Automatic daily cloud backups (admin only) ── */}
         {isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
