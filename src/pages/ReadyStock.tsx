@@ -139,7 +139,7 @@ export function ReadyStockPage() {
     const file = files?.[0];
     if (!file) return;
     if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
-    if (file.size > 40 * 1024 * 1024) { toast.error("Video is too large — keep it under 40 MB"); return; }
+    if (file.size > 500 * 1024 * 1024) { toast.error("Video is too large — keep it under 500 MB"); return; }
     if (video.startsWith("blob:")) URL.revokeObjectURL(video);
     setVideoFile(file);
     setVideo(URL.createObjectURL(file));

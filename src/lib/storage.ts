@@ -2,7 +2,7 @@
 //
 // All images/videos are stored in Firebase Storage (NOT inline in Firestore —
 // base64 blobs would blow the 1 MB/doc limit). Docs keep only the download URL.
-import { ref, uploadString, uploadBytes, getDownloadURL, deleteObject } from "firebase/storage";
+import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage } from "./firebase";
 
 /** Non-random unique-ish suffix (Math.random is fine for storage paths). */
@@ -28,12 +28,36 @@ export async function uploadDataUrl(dataUrl: string, folder: string): Promise<st
   return getDownloadURL(r);
 }
 
-/** Upload a raw File (e.g. video) and return its download URL. */
-export async function uploadFile(file: File, folder: string): Promise<string> {
+/**
+ * Upload a raw File (video, PDF, any attachment) and return its download URL.
+ *
+ * RESUMABLE on purpose: a single all-or-nothing uploadBytes() request is fine
+ * for a small image but unreliable for a 60 MB+ video — it buffers the whole
+ * thing and one network blip fails the lot. uploadBytesResumable sends it in
+ * chunks, survives a hiccup, and reports progress so the UI can show how far a
+ * big file has got instead of looking frozen.
+ */
+export async function uploadFile(
+  file: File,
+  folder: string,
+  onProgress?: (percent: number) => void,
+): Promise<string> {
   const ext = file.name.split(".").pop() || "bin";
   const path = `${folder}/${key()}.${ext}`;
   const r = ref(storage, path);
-  await uploadBytes(r, file);
+  const task = uploadBytesResumable(r, file, { contentType: file.type || undefined });
+  await new Promise<void>((resolve, reject) => {
+    task.on(
+      "state_changed",
+      snap => {
+        if (onProgress && snap.totalBytes) {
+          onProgress(Math.round((snap.bytesTransferred / snap.totalBytes) * 100));
+        }
+      },
+      reject,
+      () => resolve(),
+    );
+  });
   return getDownloadURL(r);
 }
 

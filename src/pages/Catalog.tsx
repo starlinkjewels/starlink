@@ -53,7 +53,7 @@ const ITEM_ROW_ESTIMATE_PX = 230;
 /*  Helpers                                                        */
 /* ─────────────────────────────────────────────────────────────── */
 const MAX_IMAGE_PX = 1200;
-const MAX_FILE_MB = 15;
+const MAX_FILE_MB = 500; // large videos are uploaded in chunks (resumable), so a big cap is safe
 
 function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -374,7 +374,7 @@ function UploadZone({ onFiles, uploading }: { onFiles(f: FileList): void; upload
           {uploading ? "Uploading…" : dragging ? "Drop to upload" : "Tap or drop to upload"}
         </p>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Images &amp; videos · max {MAX_FILE_MB} MB each
+          Any file — images, videos, PDF, Excel · max {MAX_FILE_MB} MB each
         </p>
       </div>
       <input
@@ -714,7 +714,7 @@ export function CatalogPage() {
   const [renameVal, setRenameVal] = useState("");
   const [lightbox, setLightbox] = useState<{ items: CatalogItem[]; idx: number } | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; pct: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -948,14 +948,14 @@ export function CatalogPage() {
     const skipped: string[] = [];
     let done = 0;
     setUploading(true);
-    setUploadProgress({ done: 0, total: all.length });
+    setUploadProgress({ done: 0, total: all.length, pct: 0 });
     setError(null);
     try {
       for (const file of all) {
         const mb = file.size / 1024 / 1024;
         if (mb > MAX_FILE_MB) {
           skipped.push(file.name);
-          setUploadProgress({ done: ++done, total: all.length });
+          setUploadProgress({ done: ++done, total: all.length, pct: 0 });
           continue;
         }
         const isImage = file.type.startsWith("image/");
@@ -966,7 +966,8 @@ export function CatalogPage() {
         try {
           const data = isImage
             ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
-            : await uploadFile(file, `catalog/${currentFolderId}`);
+            : await uploadFile(file, `catalog/${currentFolderId}`, pct =>
+                setUploadProgress({ done, total: all.length, pct }));
           const newItem: CatalogItem = {
             id: uid("ci_"),
             folderId: currentFolderId,
@@ -983,7 +984,7 @@ export function CatalogPage() {
           // One bad file must not abandon the rest of a big folder upload.
           skipped.push(file.name);
         }
-        setUploadProgress({ done: ++done, total: all.length });
+        setUploadProgress({ done: ++done, total: all.length, pct: 0 });
       }
       if (skipped.length) {
         setError(
@@ -1315,7 +1316,9 @@ export function CatalogPage() {
                     <Upload className="h-4 w-4" />
                   )}
                   {uploading
-                    ? (uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : "Uploading…")
+                    ? (uploadProgress
+                        ? `Uploading ${uploadProgress.done + 1}/${uploadProgress.total}${uploadProgress.pct ? ` · ${uploadProgress.pct}%` : ""}…`
+                        : "Uploading…")
                     : "Upload"}
                 </button>
                 <input
