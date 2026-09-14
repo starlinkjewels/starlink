@@ -252,7 +252,7 @@ export function ReadyStockPage() {
               <div>
                 {video ? (
                   <div className="relative rounded-xl overflow-hidden border border-border bg-black">
-                    <video src={video} controls playsInline className="w-full max-h-56 object-contain bg-black" />
+                    <video src={video} controls muted playsInline preload="metadata" className="w-full max-h-56 object-contain bg-black" />
                     <button type="button" onClick={removeVideo}
                       className="absolute top-2 right-2 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md">
                       <X className="h-3.5 w-3.5" />
@@ -576,7 +576,7 @@ export function ReadyStockPage() {
       <Dialog open={!!videoView} onOpenChange={o => { if (!o) setVideoView(null); }}>
         <DialogContent className="max-w-2xl rounded-2xl p-2 sm:p-3">
           <DialogHeader className="px-2 pt-1"><DialogTitle className="font-display text-lg">Product Video</DialogTitle></DialogHeader>
-          {videoView && <video src={videoView} controls autoPlay playsInline className="w-full max-h-[70vh] rounded-xl bg-black" />}
+          {videoView && <video src={videoView} controls autoPlay muted playsInline preload="metadata" className="w-full max-h-[70vh] rounded-xl bg-black" />}
         </DialogContent>
       </Dialog>
     </div>

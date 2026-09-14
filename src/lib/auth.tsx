@@ -85,8 +85,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         username: fb.email ?? "admin", name: fb.displayName || "Administrator",
         email: fb.email ?? "", password: "", createdAt: new Date().toISOString(),
       };
-      updateDb(d => { if (!d.users.some(x => x.authUid === fb.uid)) d.users.push(admin); });
-      return admin;
+      // Re-check against the LIVE cache, matching on the admin e-mail too — not
+      // just authUid. The users list may not have arrived when this runs (or the
+      // Firebase account was recreated with a new uid), and an authUid-only guard
+      // then added a SECOND "Administrator" row every time. Adopt whatever is
+      // already there instead of pushing a duplicate.
+      let adopted: User | null = null;
+      updateDb(d => {
+        const found = d.users.find(x => x.authUid === fb.uid)
+          ?? d.users.find(x => x.role === "admin" && (x.email ?? "").toLowerCase() === email);
+        if (found) {
+          found.authUid = fb.uid; found.role = "admin"; found.status = "active";
+          adopted = { ...found };
+          return;
+        }
+        d.users.push(admin);
+      });
+      return adopted ?? admin;
     }
 
     // Everyone else must have been provisioned by an admin (has an authUid).

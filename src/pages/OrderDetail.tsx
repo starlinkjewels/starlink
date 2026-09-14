@@ -2223,7 +2223,7 @@ export function OrderDetailPage() {
           {order.productVideo && (
             <div className="space-y-2">
               <div className="rounded-xl border border-border bg-black overflow-hidden">
-                <video src={order.productVideo} controls playsInline className="w-full max-h-80 mx-auto" />
+                <video src={order.productVideo} controls muted playsInline preload="metadata" className="w-full max-h-80 mx-auto" />
               </div>
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Video className="h-3.5 w-3.5" /> Product video</p>

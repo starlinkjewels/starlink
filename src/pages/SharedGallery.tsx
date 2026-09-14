@@ -59,7 +59,7 @@ function Lightbox({ items, startIndex, onClose }: { items: ShareItem[]; startInd
             className="flex-1 flex items-center justify-center px-14 h-full min-h-0">
             {item.type === "image"
               ? <img src={item.url} alt={item.name} className="max-w-full max-h-full object-contain rounded-xl select-none" style={{ maxHeight: "calc(100vh - 140px)" }} onClick={onClose} />
-              : <video src={item.url} controls autoPlay playsInline className="max-w-full rounded-xl" style={{ maxHeight: "calc(100vh - 140px)" }} />}
+              : <video src={item.url} controls autoPlay muted playsInline preload="metadata" className="max-w-full rounded-xl" style={{ maxHeight: "calc(100vh - 140px)" }} />}
           </motion.div>
         </AnimatePresence>
         {hasNext && <button onClick={next} className="absolute right-2 z-10 h-11 w-11 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><ChevronRight className="h-6 w-6" /></button>}

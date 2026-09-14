@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   FolderOpen,
   Folder,
+  FolderPlus,
   Plus,
   Trash2,
   Upload,
@@ -223,6 +224,8 @@ function Lightbox({
                 src={item.data}
                 controls
                 autoPlay
+                muted
+                preload="metadata"
                 playsInline
                 className="max-w-full rounded-xl"
                 style={{ maxHeight: "calc(100vh - 140px)" }}
@@ -711,6 +714,7 @@ export function CatalogPage() {
   const [renameVal, setRenameVal] = useState("");
   const [lightbox, setLightbox] = useState<{ items: CatalogItem[]; idx: number } | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
 
@@ -938,13 +942,20 @@ export function CatalogPage() {
   /* ── Upload ── */
   async function handleFiles(files: FileList) {
     if (!currentFolderId) return;
+    // A folder pick can be hundreds of files, so track progress and collect the
+    // skipped ones into ONE summary instead of overwriting the error each time.
+    const all = Array.from(files);
+    const skipped: string[] = [];
+    let done = 0;
     setUploading(true);
+    setUploadProgress({ done: 0, total: all.length });
     setError(null);
     try {
-      for (const file of Array.from(files)) {
+      for (const file of all) {
         const mb = file.size / 1024 / 1024;
         if (mb > MAX_FILE_MB) {
-          setError(`"${file.name}" exceeds ${MAX_FILE_MB} MB — skipped.`);
+          skipped.push(file.name);
+          setUploadProgress({ done: ++done, total: all.length });
           continue;
         }
         const isImage = file.type.startsWith("image/");
@@ -952,26 +963,38 @@ export function CatalogPage() {
         // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
         // attachment — uploaded as-is, listed in the folder, downloadable.
         // Upload to Firebase Storage; the doc stores only the download URL.
-        const data = isImage
-          ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
-          : await uploadFile(file, `catalog/${currentFolderId}`);
-        const newItem: CatalogItem = {
-          id: uid("ci_"),
-          folderId: currentFolderId,
-          name: file.name,
-          type: isImage ? "image" : isVideo ? "video" : "file",
-          data,
-          mime: isImage || isVideo ? undefined : (file.type || undefined),
-          createdBy: user!.id,
-          createdAt: new Date().toISOString(),
-        };
-        await createCatalogItem(newItem);
-        setItems((prev) => [newItem, ...prev]); // list is newest-first, so prepend
+        try {
+          const data = isImage
+            ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
+            : await uploadFile(file, `catalog/${currentFolderId}`);
+          const newItem: CatalogItem = {
+            id: uid("ci_"),
+            folderId: currentFolderId,
+            name: file.name,
+            type: isImage ? "image" : isVideo ? "video" : "file",
+            data,
+            mime: isImage || isVideo ? undefined : (file.type || undefined),
+            createdBy: user!.id,
+            createdAt: new Date().toISOString(),
+          };
+          await createCatalogItem(newItem);
+          setItems((prev) => [newItem, ...prev]); // list is newest-first, so prepend
+        } catch {
+          // One bad file must not abandon the rest of a big folder upload.
+          skipped.push(file.name);
+        }
+        setUploadProgress({ done: ++done, total: all.length });
       }
-    } catch {
-      setError("Upload failed. Try a smaller file.");
+      if (skipped.length) {
+        setError(
+          skipped.length === 1
+            ? `"${skipped[0]}" couldn't be uploaded (over ${MAX_FILE_MB} MB or unreadable) — everything else went up.`
+            : `${skipped.length} of ${all.length} files couldn't be uploaded (over ${MAX_FILE_MB} MB or unreadable) — the rest went up.`,
+        );
+      }
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   }
 
@@ -1291,7 +1314,31 @@ export function CatalogPage() {
                   ) : (
                     <Upload className="h-4 w-4" />
                   )}
-                  {uploading ? "Uploading…" : "Upload"}
+                  {uploading
+                    ? (uploadProgress ? `Uploading ${uploadProgress.done}/${uploadProgress.total}…` : "Uploading…")
+                    : "Upload"}
+                </button>
+                <input
+                  id="catalog-upload-folder-input"
+                  type="file"
+                  // @ts-expect-error — non-standard but supported by Chrome/Edge/Safari
+                  webkitdirectory=""
+                  directory=""
+                  multiple
+                  className="hidden"
+                  onChange={(e) => {
+                    if (e.target.files) handleFiles(e.target.files);
+                    e.currentTarget.value = "";
+                  }}
+                />
+                <button
+                  onClick={() => document.getElementById("catalog-upload-folder-input")?.click()}
+                  disabled={uploading}
+                  title="Pick a folder on your computer — everything inside is uploaded in one go"
+                  className="flex items-center gap-2 px-4 h-10 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  Upload Folder
                 </button>
               </>
             )}

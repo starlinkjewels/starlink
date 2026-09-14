@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
+import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -203,8 +204,27 @@ export function SettingsPage() {
   // ── Duplicate order numbers (legacy data repaired here) ──
   const [dupScan, setDupScan] = useState(0); // bump to re-scan after a fix
   const [fixingOrderId, setFixingOrderId] = useState<string | null>(null);
+  const [mergingEmail, setMergingEmail] = useState<string | null>(null);
+  const mergeAccounts = (email: string, keepId: string, dropIds: string[]) => {
+    const refs = countReferences(loadDb(), dropIds);
+    if (!confirm(
+      `Merge ${dropIds.length + 1} accounts for ${email} into one?
+
+` +
+      `${refs} record${refs === 1 ? "" : "s"} attributed to the extra account${dropIds.length === 1 ? "" : "s"} will be moved onto the one you keep, then the extras are removed. Nothing is lost.`
+    )) return;
+    setMergingEmail(email);
+    try {
+      mergeUsers(keepId, dropIds);
+      setDupScan(n => n + 1);
+      toast.success("Duplicate accounts merged into one");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't merge those accounts.");
+    } finally { setMergingEmail(null); }
+  };
   const liveDb = loadDb();
   const duplicateGroups = useMemo(() => duplicateOrderNumbers(liveDb.orders), [liveDb.orders, dupScan]);
+  const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
     if (invoiced && !confirm(
       `This order already has an invoice under ${oldNumber}.
@@ -955,6 +975,51 @@ export function SettingsPage() {
             </span>
           </label>
         </div>
+        {/* ── Duplicate staff accounts (same person added twice) ── */}
+        {isAdminUser && duplicateAccounts.length > 0 && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-destructive/10 text-destructive">
+                <ShieldCheck className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Duplicate Accounts</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  The same e-mail appears on more than one account. Merge them so history stays under one person.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-3 space-y-3">
+              {duplicateAccounts.map(g => {
+                const keep = g.users[0];
+                const drops = g.users.slice(1);
+                return (
+                  <div key={g.email} className="rounded-lg bg-white border border-border/60 p-3">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">{keep.name} · {g.email}</p>
+                        <p className="text-[11px] text-muted-foreground">
+                          {g.users.length} accounts — keeping the oldest ({new Date(keep.createdAt).toLocaleDateString()}), removing {drops.length}
+                        </p>
+                      </div>
+                      <AsyncButton
+                        size="sm"
+                        variant="outline"
+                        disabled={mergingEmail === g.email}
+                        onClick={() => mergeAccounts(g.email, keep.id, drops.map(u => u.id))}
+                        className="rounded-lg h-8 shrink-0"
+                      >
+                        {mergingEmail === g.email ? "Merging…" : "Merge into one"}
+                      </AsyncButton>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ── Duplicate order numbers (repairs legacy data) ── */}
         {isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
