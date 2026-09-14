@@ -66,6 +66,7 @@ function BuyMaterial() {
   const [qty, setQty] = useState("");          // grams (gold) or carats (diamond)
   const [rate, setRate] = useState("");         // per gram / per carat
   const [quality, setQuality] = useState("");
+  const [pcs, setPcs] = useState(""); // loose diamonds are counted as well as weighed
   const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
   const [xrate, setXrate] = useState("");
   // certified grading
@@ -108,6 +109,7 @@ function BuyMaterial() {
           gold: kind === "gold" ? { weightGrams: q, purity, ratePerGram: Number(rate) || 0 } : undefined,
           diamond: kind !== "gold" ? {
             carat: q, quality: quality.trim() || undefined, ratePerCarat: Number(rate) || 0,
+            pieces: kind === "loose" && Number(pcs) > 0 ? Math.round(Number(pcs)) : undefined,
             kind: kind === "certified" ? "certified" : "loose", shape,
             certificateNumber: kind === "certified" ? certNo.trim() : undefined,
             certificateLab: kind === "certified" ? (lab.trim() || undefined) : undefined,
@@ -132,7 +134,7 @@ function BuyMaterial() {
         }
       });
       toast.success(`Bought ${q}${kind === "gold" ? "g" : "ct"} → stock · ${fmtMoneyInr(totalInr)} to ${supplier?.name || "supplier"}`);
-      setQty(""); setRate(""); setQuality(""); setXrate("");
+      setQty(""); setRate(""); setQuality(""); setPcs(""); setXrate("");
       setColor(""); setClarity(""); setCut(""); setPolish(""); setSym(""); setFluor(""); setMeasure(""); setLab(""); setCertNo("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
@@ -176,7 +178,10 @@ function BuyMaterial() {
             <div><Label className="text-xs">Rate / ct ({currency})</Label><Input type="number" min={0} value={rate} onChange={e => setRate(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
           </div>
           {kind === "loose" ? (
-            <Input value={quality} onChange={e => setQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+            <div className="grid grid-cols-2 gap-2.5">
+              <Input value={quality} onChange={e => setQuality(e.target.value)} className="rounded-xl h-10" placeholder="Quality (optional)" />
+              <Input type="number" min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
+            </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               <Input value={color} onChange={e => setColor(e.target.value)} className="rounded-xl h-10" placeholder="Color" />

@@ -39,6 +39,7 @@ interface PurchaseLine {
   goldPurity: string;
   goldRate: string;
   diaCarat: string;
+  diaPcs: string;
   diaQuality: string;
   diaRate: string;
   diaKind: "loose" | "certified";
@@ -63,7 +64,7 @@ function emptyPurchaseLine(): PurchaseLine {
   return {
     material: "gold", purpose: "stock", orderNumber: "",
     goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaQuality: "", diaRate: "",
+    diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     currency: "INR", totalUsd: "", exchangeRate: "",
@@ -568,7 +569,10 @@ export function SupplierHistoryPage() {
                     </div>
                     <div className="grid grid-cols-3 gap-2.5">
                       <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                      <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                      <div className="grid grid-cols-2 gap-2.5">
+                        <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                        <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
+                      </div>
                       <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
                     </div>
                     {line.diaKind === "certified" && (

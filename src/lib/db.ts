@@ -231,6 +231,11 @@ export interface Order {
   // Set only when a duplicate order number was repaired (Settings -> Data).
   // Keeps the original visible so old paperwork can still be traced.
   previousOrderNumber?: string;
+  // Two-tone pieces — a SECOND metal used alongside the gold, captured at
+  // Final Approval (e.g. platinum bezel on a gold ring, or gold + silver).
+  otherMetal?: string;        // "Platinum" | "Silver" | "White Gold" | …
+  otherMetalWeight?: number;  // grams
+  otherMetalPurity?: number;  // ‰ (e.g. 950 for platinum) — optional
   clientId: string; // empty string when forReadyStock (in-house build, no client)
   forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
@@ -670,6 +675,7 @@ export const DIAMOND_SHAPES = [
 
 export interface DiamondPurchaseDetail {
   carat: number;
+  pieces?: number; // how many STONES (loose parcels are counted as well as weighed)
   quality?: string; // clarity/color grade, free text
   ratePerCarat: number; // in the purchase's billing currency
   // "loose" → pooled into stock by shape; "certified" → each stone an individual
@@ -880,6 +886,8 @@ export interface MaterialIssuance {
   finishedPurity?: number;    // actual purity entered at Final Approval (‰, e.g. 750) — drives the pure-gold conversion
   finishDisposition?: "used" | "returned"; // certified diamond issuances: chosen at Final Approval (so a later edit knows the current state)
   finishReturnedCt?: number; // loose diamond issuances: carats returned to stock at Final Approval (partial allowed; used = issued − this)
+  piecesIssued?: number;     // loose diamond issuances: how many stones went out
+  finishReturnedPcs?: number; // loose diamond issuances: how many stones came back at Final Approval
   // Structured labour that makes up makingCharges.amountInr (the factory payable):
   //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
   //   + otherCharges + metalByFactoryGrams × metalByFactoryRate

@@ -44,6 +44,7 @@ interface BuyLine {
   goldPurity: string;
   goldRate: string;
   diaCarat: string;
+  diaPcs: string;
   diaQuality: string;
   diaRate: string;
   // Diamond kind + certified grading (mirrors the Supplier purchase form).
@@ -67,7 +68,7 @@ interface BuyLine {
 function emptyBuyLine(): BuyLine {
   return {
     material: "diamond", goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaQuality: "", diaRate: "",
+    diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     currency: "INR", exchangeRate: "",
@@ -333,6 +334,7 @@ export function OrderDetailPage() {
       gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
       diamond: line.material === "diamond" ? {
         carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0,
+        pieces: line.diaKind === "loose" && Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
         kind: line.diaKind, shape: line.diaShape,
         certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
         certificateLab: line.diaKind === "certified" ? (line.diaLab.trim() || undefined) : undefined,
@@ -438,6 +440,8 @@ export function OrderDetailPage() {
             id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
             purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
             diamondKind: purchase.material === "diamond" ? line.diaKind : undefined,
+            piecesIssued: purchase.material === "diamond" && line.diaKind === "loose" && Number(line.diaPcs) > 0
+              ? Math.round(Number(line.diaPcs)) : undefined,
             diamondPacketIds: packetIds,
             issuedAt: now, issuedBy: user!.id, status: "open",
             finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
@@ -580,6 +584,11 @@ export function OrderDetailPage() {
   const [faGoldPurity, setFaGoldPurity] = useState(""); // actual purity ‰ (e.g. 750), replaces the karat dropdown
   const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({}); // certified packets: whole used/returned
   const [faDiaReturnedCt, setFaDiaReturnedCt] = useState<Record<string, string>>({}); // loose diamonds: carats returned (partial allowed)
+  const [faDiaReturnedPcs, setFaDiaReturnedPcs] = useState<Record<string, string>>({}); // loose diamonds: how many STONES came back
+  // Two-tone pieces — a second metal alongside the gold (platinum / silver / …).
+  const [faOtherMetal, setFaOtherMetal] = useState("");
+  const [faOtherNet, setFaOtherNet] = useState("");
+  const [faOtherPurity, setFaOtherPurity] = useState("");
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
   const [faDiaHandling, setFaDiaHandling] = useState("");
@@ -918,6 +927,12 @@ export function OrderDetailPage() {
     });
     setFaDia(disp);
     setFaDiaReturnedCt(ret);
+    const retPcs: Record<string, string> = {};
+    dias.forEach(i => { retPcs[i.id] = i.finishReturnedPcs != null ? String(i.finishReturnedPcs) : ""; });
+    setFaDiaReturnedPcs(retPcs);
+    setFaOtherMetal(order.otherMetal ?? "");
+    setFaOtherNet(order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
+    setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
     setFaIdx(idx);
@@ -1017,11 +1032,20 @@ export function OrderDetailPage() {
             // Loose — record the partial returned carats; used = issued − returned.
             const returned = looseReturnedCt(i);
             mi.finishReturnedCt = returned;
+            const retPcsRaw = (faDiaReturnedPcs[i.id] ?? "").trim();
+            mi.finishReturnedPcs = retPcsRaw === "" ? undefined : Math.max(0, Math.round(Number(retPcsRaw) || 0));
             mi.finishDisposition = returned >= i.quantityIssued ? "returned" : "used";
             const usedCt = Math.round((i.quantityIssued - returned) * 1000) / 1000;
             mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: usedCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
           }
         }
+        // Two-tone: the second metal used in the finished piece.
+        const otherW = parseFloat(faOtherNet);
+        const otherP = parseFloat(faOtherPurity);
+        o.otherMetal = faOtherMetal.trim() || undefined;
+        o.otherMetalWeight = faOtherMetal.trim() && !isNaN(otherW) && otherW > 0 ? otherW : undefined;
+        o.otherMetalPurity = faOtherMetal.trim() && !isNaN(otherP) && otherP > 0 ? otherP : undefined;
+
         // Client billing.
         if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
         if (faShipping.trim() !== "" && !isNaN(ship) && ship >= 0) o.shippingCharge = ship;
@@ -3175,6 +3199,38 @@ export function OrderDetailPage() {
                 </div>
               )}
 
+              {/* Other metal — two-tone pieces (platinum bezel on gold, gold + silver, …) */}
+              <div className="mb-4">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Other metal (optional)</p>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div>
+                    <Label className="text-[11px]">Metal</Label>
+                    <Select value={faOtherMetal || "__none"} onValueChange={v => setFaOtherMetal(v === "__none" ? "" : v)}>
+                      <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue placeholder="None" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none">None</SelectItem>
+                        {["Platinum", "Silver", "White Gold", "Rose Gold", "Yellow Gold", "Other"].map(m => (
+                          <SelectItem key={m} value={m}>{m}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">Net Weight (g)</Label>
+                    <Input type="number" min={0} step="0.001" value={faOtherNet} disabled={!faOtherMetal}
+                      onChange={e => setFaOtherNet(e.target.value)} className="rounded-lg h-9 mt-1 disabled:opacity-60" />
+                  </div>
+                  <div>
+                    <Label className="text-[11px]">Purity (‰)</Label>
+                    <Input type="number" min={0} step="0.1" value={faOtherPurity} disabled={!faOtherMetal}
+                      onChange={e => setFaOtherPurity(e.target.value)} className="rounded-lg h-9 mt-1 disabled:opacity-60" placeholder="e.g. 950" />
+                  </div>
+                </div>
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  For a two-tone piece — the second metal used alongside the gold. It is added into the gross weight below.
+                </p>
+              </div>
+
               {faOpenDia.length > 0 && (
                 <div className="mb-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Diamonds — used or returned?</p>
@@ -3215,13 +3271,21 @@ export function OrderDetailPage() {
                                 onChange={e => setFaDiaReturnedCt(m => ({ ...m, [i.id]: e.target.value }))}
                                 className="h-8 w-24 rounded-lg" />
                             </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[11px] text-muted-foreground">Pcs</span>
+                              <Input type="number" min={0} step="1" value={faDiaReturnedPcs[i.id] ?? ""}
+                                onChange={e => setFaDiaReturnedPcs(m => ({ ...m, [i.id]: e.target.value }))}
+                                placeholder={i.piecesIssued != null ? String(i.piecesIssued) : "pcs"}
+                                title="How many stones came back"
+                                className="h-8 w-20 rounded-lg" />
+                            </div>
                           </div>
-                          <p className="text-[11px] text-muted-foreground mt-1">Used <span className="font-medium text-foreground">{usedCt} ct</span>{ret > 0 ? <> · Returned <span className="font-medium text-amber-600">{ret} ct</span> → stock</> : null}</p>
+                          <p className="text-[11px] text-muted-foreground mt-1">Used <span className="font-medium text-foreground">{usedCt} ct</span>{ret > 0 ? <> · Returned <span className="font-medium text-amber-600">{ret} ct</span> → stock</> : null}{i.piecesIssued != null ? <> · {i.piecesIssued} pcs issued</> : null}</p>
                         </div>
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">For a loose diamond, enter how many carats came back (e.g. issued 1ct, 0.50ct returned). Returned carats go back to stock; the rest is used in the piece.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">For a loose diamond, enter how many carats came back (e.g. issued 1ct, 0.50ct returned) and how many stones (pcs). Returned carats go back to stock; the rest is used in the piece.</p>
                 </div>
               )}
 
@@ -3229,12 +3293,14 @@ export function OrderDetailPage() {
               {(() => {
                 const diaG = Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000;
                 const netG = needsGold ? (Number(faGoldNet) || 0) : 0;
-                const gross = Math.round((netG + diaG) * 1000) / 1000;
+                const otherG = faOtherMetal ? (Number(faOtherNet) || 0) : 0;
+                const gross = Math.round((netG + otherG + diaG) * 1000) / 1000;
                 return (
                   <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-muted-foreground">Total diamond used</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({diaG} g)</span></div>
                     {needsGold && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
-                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (gold + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
+                    {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{otherG} g</span></div>}
+                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
                   </div>
                 );
               })()}
