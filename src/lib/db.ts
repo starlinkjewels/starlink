@@ -480,14 +480,15 @@ export interface CatalogFolder {
   bannerUrl?: string; // that item's image URL, denormalized here so folder cards render without an extra fetch
 }
 
-export type CatalogItemType = "image" | "video";
+export type CatalogItemType = "image" | "video" | "file";
 
 export interface CatalogItem {
   id: string;
   folderId: string;
   name: string;
   type: CatalogItemType;
-  data: string; // base64 data URL
+  data: string; // Firebase Storage download URL
+  mime?: string; // original content type — set for "file" items (pdf, xls, zip…)
   createdBy: string; // userId
   createdAt: string;
 }
@@ -501,7 +502,7 @@ export interface ProductPhotoItem {
   id: string;
   folderId: string; // a folder in db.productPhotoFolders
   name: string;
-  type: CatalogItemType; // "image" | "video"
+  type: "image" | "video";
   url: string; // Firebase Storage download URL
   createdBy: string; // userId
   createdAt: string;

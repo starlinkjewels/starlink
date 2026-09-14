@@ -19,6 +19,7 @@ import {
   ChevronLeft,
   Heart,
   ImagePlus,
+  FileText,
 } from "lucide-react";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
@@ -204,6 +205,19 @@ function Lightbox({
                 style={{ maxHeight: "calc(100vh - 140px)" }}
                 onClick={onClose}
               />
+            ) : item.type === "file" ? (
+              <div className="flex flex-col items-center gap-4 text-white">
+                <FileText className="h-20 w-20 opacity-70" />
+                <p className="text-sm font-medium text-center max-w-xs break-words">{item.name}</p>
+                <a
+                  href={item.data}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-4 h-10 rounded-xl bg-white text-brand-dark text-sm font-semibold"
+                >
+                  <Download className="h-4 w-4" /> Open / Download
+                </a>
+              </div>
             ) : (
               <video
                 src={item.data}
@@ -243,7 +257,9 @@ function Lightbox({
                 <img src={it.data} alt="" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full bg-slate-700 flex items-center justify-center">
-                  <Play className="h-4 w-4 text-white" />
+                  {it.type === "file"
+                    ? <FileText className="h-4 w-4 text-white" />
+                    : <Play className="h-4 w-4 text-white" />}
                 </div>
               )}
             </button>
@@ -361,7 +377,7 @@ function UploadZone({ onFiles, uploading }: { onFiles(f: FileList): void; upload
       <input
         ref={ref}
         type="file"
-        accept="image/*,video/*"
+        accept="*/*"
         multiple
         className="hidden"
         onChange={(e) => {
@@ -417,7 +433,9 @@ function ItemCard({
           />
         ) : (
           <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200">
-            <Video className="h-10 w-10 text-slate-400" />
+            {item.type === "file"
+              ? <FileText className="h-10 w-10 text-slate-400" />
+              : <Video className="h-10 w-10 text-slate-400" />}
           </div>
         )}
         {item.type === "video" && (
@@ -432,6 +450,8 @@ function ItemCard({
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">
             {item.type === "video" ? (
               <Video className="h-2.5 w-2.5" />
+            ) : item.type === "file" ? (
+              <FileText className="h-2.5 w-2.5" />
             ) : (
               <ImageIcon className="h-2.5 w-2.5" />
             )}
@@ -929,12 +949,9 @@ export function CatalogPage() {
         }
         const isImage = file.type.startsWith("image/");
         const isVideo = file.type.startsWith("video/");
-        if (!isImage && !isVideo) {
-          setError(`"${file.name}" not supported — skipped.`);
-          continue;
-        }
-        // Upload to Firebase Storage — images are compressed first, videos
-        // uploaded as-is. The doc stores only the download URL.
+        // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
+        // attachment — uploaded as-is, listed in the folder, downloadable.
+        // Upload to Firebase Storage; the doc stores only the download URL.
         const data = isImage
           ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
           : await uploadFile(file, `catalog/${currentFolderId}`);
@@ -942,8 +959,9 @@ export function CatalogPage() {
           id: uid("ci_"),
           folderId: currentFolderId,
           name: file.name,
-          type: isImage ? "image" : "video",
+          type: isImage ? "image" : isVideo ? "video" : "file",
           data,
+          mime: isImage || isVideo ? undefined : (file.type || undefined),
           createdBy: user!.id,
           createdAt: new Date().toISOString(),
         };
@@ -1255,7 +1273,7 @@ export function CatalogPage() {
                 <input
                   id="catalog-upload-input"
                   type="file"
-                  accept="image/*,video/*"
+                  accept="*/*"
                   multiple
                   className="hidden"
                   onChange={(e) => {
