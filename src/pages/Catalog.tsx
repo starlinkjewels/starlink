@@ -942,55 +942,72 @@ export function CatalogPage() {
   /* ── Upload ── */
   async function handleFiles(files: FileList) {
     if (!currentFolderId) return;
-    // A folder pick can be hundreds of files, so track progress and collect the
-    // skipped ones into ONE summary instead of overwriting the error each time.
+    const folderId = currentFolderId;
+    // A folder pick can be hundreds of files. Oversized files are SKIPPED on
+    // purpose; anything else that fails is a real error, and we keep its reason
+    // so the summary says what actually went wrong instead of guessing.
     const all = Array.from(files);
-    const skipped: string[] = [];
+    const tooBig: string[] = [];
+    const failed: string[] = [];
+    let firstReason = "";
     let done = 0;
     setUploading(true);
     setUploadProgress({ done: 0, total: all.length, pct: 0 });
     setError(null);
-    try {
-      for (const file of all) {
-        const mb = file.size / 1024 / 1024;
-        if (mb > MAX_FILE_MB) {
-          skipped.push(file.name);
-          setUploadProgress({ done: ++done, total: all.length, pct: 0 });
-          continue;
-        }
-        const isImage = file.type.startsWith("image/");
-        const isVideo = file.type.startsWith("video/");
-        // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
-        // attachment — uploaded as-is, listed in the folder, downloadable.
-        // Upload to Firebase Storage; the doc stores only the download URL.
-        try {
-          const data = isImage
-            ? await uploadDataUrl(await compressImage(file), `catalog/${currentFolderId}`)
-            : await uploadFile(file, `catalog/${currentFolderId}`, pct =>
-                setUploadProgress({ done, total: all.length, pct }));
-          const newItem: CatalogItem = {
-            id: uid("ci_"),
-            folderId: currentFolderId,
-            name: file.name,
-            type: isImage ? "image" : isVideo ? "video" : "file",
-            data,
-            mime: isImage || isVideo ? undefined : (file.type || undefined),
-            createdBy: user!.id,
-            createdAt: new Date().toISOString(),
-          };
-          await createCatalogItem(newItem);
-          setItems((prev) => [newItem, ...prev]); // list is newest-first, so prepend
-        } catch {
-          // One bad file must not abandon the rest of a big folder upload.
-          skipped.push(file.name);
-        }
-        setUploadProgress({ done: ++done, total: all.length, pct: 0 });
+
+    const uploadOne = async (file: File) => {
+      const mb = file.size / 1024 / 1024;
+      if (mb > MAX_FILE_MB) { tooBig.push(file.name); return; }
+      const isImage = file.type.startsWith("image/");
+      const isVideo = file.type.startsWith("video/");
+      // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
+      // attachment — uploaded as-is, listed in the folder, downloadable.
+      try {
+        const data = isImage
+          ? await uploadDataUrl(await compressImage(file), `catalog/${folderId}`)
+          : await uploadFile(file, `catalog/${folderId}`, pct =>
+              setUploadProgress({ done, total: all.length, pct }));
+        const newItem: CatalogItem = {
+          id: uid("ci_"),
+          folderId,
+          name: file.name,
+          type: isImage ? "image" : isVideo ? "video" : "file",
+          data,
+          mime: isImage || isVideo ? undefined : (file.type || undefined),
+          createdBy: user!.id,
+          createdAt: new Date().toISOString(),
+        };
+        await createCatalogItem(newItem);
+        setItems((prev) => [newItem, ...prev]); // list is newest-first, so prepend
+      } catch (e) {
+        // One bad file must not abandon the rest of a big folder upload.
+        failed.push(file.name);
+        if (!firstReason) firstReason = e instanceof Error ? e.message : String(e);
       }
-      if (skipped.length) {
+    };
+
+    try {
+      // Four at a time: a 600-file folder one-by-one takes forever, and more
+      // than a handful of parallel uploads just starves each other's bandwidth.
+      let next = 0;
+      const worker = async () => {
+        while (next < all.length) {
+          const file = all[next++];
+          await uploadOne(file);
+          setUploadProgress({ done: ++done, total: all.length, pct: 0 });
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, all.length) }, worker));
+
+      const bad = tooBig.length + failed.length;
+      if (bad) {
+        const parts: string[] = [];
+        if (tooBig.length) parts.push(`${tooBig.length} over ${MAX_FILE_MB} MB`);
+        if (failed.length) parts.push(`${failed.length} failed${firstReason ? ` — ${firstReason}` : ""}`);
         setError(
-          skipped.length === 1
-            ? `"${skipped[0]}" couldn't be uploaded (over ${MAX_FILE_MB} MB or unreadable) — everything else went up.`
-            : `${skipped.length} of ${all.length} files couldn't be uploaded (over ${MAX_FILE_MB} MB or unreadable) — the rest went up.`,
+          bad === 1
+            ? `"${(tooBig[0] ?? failed[0])}" couldn't be uploaded (${parts.join("")}).`
+            : `${bad} of ${all.length} files couldn't be uploaded (${parts.join("; ")}). The other ${all.length - bad} went up.`,
         );
       }
     } finally {

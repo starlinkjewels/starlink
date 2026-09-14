@@ -125,8 +125,17 @@ export async function fetchCatalogItemsByIds(ids: string[]): Promise<CatalogItem
   return out;
 }
 
+/**
+ * Firestore rejects a document that carries an `undefined` field value, and it
+ * throws for the WHOLE document — an image has no `mime`, so passing the item
+ * straight through made every single upload fail ("672 of 672 files couldn't be
+ * uploaded"). Drop the empty keys before writing.
+ */
 export async function createCatalogItem(item: CatalogItem): Promise<void> {
-  await setDoc(doc(fsdb, COL, item.id), item);
+  const clean = Object.fromEntries(
+    Object.entries(item).filter(([, v]) => v !== undefined),
+  ) as Record<string, unknown>;
+  await setDoc(doc(fsdb, COL, item.id), clean);
 }
 
 export async function deleteCatalogItem(id: string): Promise<void> {

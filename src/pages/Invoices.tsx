@@ -19,6 +19,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
+import { reserveInvoiceNumber } from "@/lib/counters";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -94,12 +95,15 @@ export function InvoicesPage() {
   const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   const toggleAll = () => setSelected(prev => prev.size === eligibleIds.length ? new Set() : new Set(eligibleIds));
 
-  const generateInvoice = () => {
+  const generateInvoice = async () => {
     if (clientFilter === "all") { toast.error("Select a client first"); return; }
     const ids = eligibleIds.filter(id => selected.has(id));
     if (!ids.length) { toast.error("Select at least one order"); return; }
     let created: Invoice | null = null;
-    updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString()); });
+    // Claim the number in the database first, so two people invoicing at the same
+    // moment can never be handed the same invoice number.
+    const number = await reserveInvoiceNumber(db.invoices || []);
+    updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString(), number); });
     if (created) {
       toast.success(`Invoice ${(created as Invoice).number} created — ${ids.length} order${ids.length > 1 ? "s" : ""}`);
       setSelected(new Set());

@@ -427,7 +427,7 @@ export function nextOrderNumber(orders: Order[]): string {
  * any order already invoiced, and any that isn't priced. Returns the new invoice,
  * or null if nothing eligible. Call inside updateDb().
  */
-export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: string[], at: string): Invoice | null {
+export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: string[], at: string, number?: string): Invoice | null {
   if (!d.invoices) d.invoices = [];
   const eligible = orderIds.filter(oid => {
     const o = d.orders.find(x => x.id === oid);
@@ -441,7 +441,7 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
   const allCleared = eligible.every(oid => balanceDue(d.orders.find(x => x.id === oid)!) <= 0);
   const inv: Invoice = {
     id: uid("inv_"), orderId: eligible[0], orderIds: eligible, clientId,
-    number: nextInvoiceNumber(d), amount, paid: allCleared, createdAt: at,
+    number: number || nextInvoiceNumber(d), amount, paid: allCleared, createdAt: at,
   };
   d.invoices.push(inv);
   return inv;
@@ -1139,30 +1139,6 @@ export function cashbackPercentFor(d: DB, client: Client | undefined): number {
   if (!client?.giftCardEnabled) return 0;
   const pct = client.cashbackPercent ?? d.settings.cashbackPercent ?? 0;
   return pct > 0 ? pct : 0;
-}
-
-/**
- * Auto-assign an invoice number to a priced order that doesn't have one yet.
- * Called wherever an order gets a price (creation, pricing, final approval),
- * so invoice numbers happen automatically — no manual "generate" step. The
- * number is the next sequential across all existing invoices, zero-padded.
- * No-op if the order isn't priced, is rejected, or already has an invoice.
- */
-export function ensureInvoiceForOrder(d: DB, orderId: string): void {
-  const o = d.orders.find(x => x.id === orderId);
-  if (!o || o.amount <= 0 || o.status === "Rejected") return;
-  if (!d.invoices) d.invoices = [];
-  if (d.invoices.some(i => i.orderId === orderId)) return;
-  const nextNum = d.invoices.reduce((m, i) => Math.max(m, parseInt(i.number, 10) || 0), 0) + 1;
-  d.invoices.push({
-    id: uid("inv_"),
-    orderId,
-    clientId: o.clientId,
-    number: String(nextNum).padStart(4, "0"),
-    amount: orderTotal(o),
-    paid: balanceDue(o) <= 0,
-    createdAt: o.createdAt,
-  });
 }
 
 /**

@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
 } from "@/lib/db";
@@ -1542,13 +1542,14 @@ export function OrderDetailPage() {
       printInvoice(order, client, db.settings, existing.number, mainDiamondShape(db, order.id));
       return;
     }
-    // Not billed yet — create a single-order invoice on demand, then print.
-    let invNumber = "";
-    updateDb(d => {
-      invNumber = nextInvoiceNumber(d);
-      d.invoices.push({ id: uid("inv_"), orderId: order.id, orderIds: [order.id], clientId: order.clientId, number: invNumber, amount, paid, createdAt: new Date().toISOString() });
+    // Not billed yet. Printing must NEVER mint an invoice number — a real invoice
+    // is only ever issued from Invoices → "Create invoice from dispatched orders".
+    // (An order that was neither approved nor dispatched once got invoice 0002
+    // purely because someone opened its bill from here.) Print a PROFORMA instead.
+    printInvoice(order, client, db.settings, "", mainDiamondShape(db, order.id), true);
+    toast.message("Proforma printed — no invoice number issued", {
+      description: "The real invoice is created from Invoices → Create invoice from dispatched orders.",
     });
-    printInvoice(order, client, db.settings, invNumber, mainDiamondShape(db, order.id));
   };
 
   // In-house build → create a Ready Stock item pre-filled from this order. Admin
@@ -1633,7 +1634,7 @@ export function OrderDetailPage() {
                     ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
                     : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                 ))
-              : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />Print / Download Bill</Button>}
+              : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button>}
             {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && (
               <Button variant="outline" onClick={() => setBandOpen(true)} className="rounded-xl" title="Print / download the barcode jewellery band">
                 <Tag className="h-4 w-4 mr-2" />Band

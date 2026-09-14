@@ -34,6 +34,8 @@ import {
   Database,
   SlidersHorizontal,
   Hash,
+  Receipt,
+  Trash2,
 } from "lucide-react";
 
 async function toBase64(file: File): Promise<string> {
@@ -224,6 +226,47 @@ export function SettingsPage() {
   };
   const liveDb = loadDb();
   const duplicateGroups = useMemo(() => duplicateOrderNumbers(liveDb.orders), [liveDb.orders, dupScan]);
+
+  // ── Invoices raised by mistake ────────────────────────────────────────────
+  // A bill should only exist for a DISPATCHED order. One was once raised for an
+  // order that was neither approved nor dispatched, so admins need a way to take
+  // it back. Deleting an invoice only removes the bill document — the order, its
+  // payments and every ledger figure live on the order itself and are untouched.
+  const [invQuery, setInvQuery] = useState("");
+  const invoiceRows = useMemo(() => {
+    const rows = (liveDb.invoices || []).map(inv => {
+      const ids = inv.orderIds?.length ? inv.orderIds : [inv.orderId];
+      const orders = ids.map(id => liveDb.orders.find(o => o.id === id)).filter((o): o is NonNullable<typeof o> => !!o);
+      const dispatched = orders.length > 0 && orders.every(o =>
+        o.status === "Dispatched" || o.status === "Delivered" ||
+        o.timeline.some(t => t.step === "Dispatch" && t.status === "done"));
+      const client = liveDb.clients.find(c => c.id === inv.clientId);
+      const paid = orders.reduce((s, o) => s + balanceDue(o), 0) <= 0 && orders.length > 0;
+      return { inv, orders, dispatched, client, paid };
+    });
+    const q = invQuery.trim().toLowerCase();
+    const match = q
+      ? rows.filter(r => r.inv.number.toLowerCase().includes(q)
+          || (r.client?.companyName ?? "").toLowerCase().includes(q)
+          || r.orders.some(o => o.orderNumber.toLowerCase().includes(q)))
+      : rows.filter(r => !r.dispatched);
+    return match.sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt));
+  }, [liveDb.invoices, liveDb.orders, liveDb.clients, invQuery]);
+  const undispatchedCount = useMemo(
+    () => (liveDb.invoices || []).filter(inv => {
+      const ids = inv.orderIds?.length ? inv.orderIds : [inv.orderId];
+      const orders = ids.map(id => liveDb.orders.find(o => o.id === id)).filter(Boolean);
+      return !(orders.length > 0 && orders.every(o => o!.status === "Dispatched" || o!.status === "Delivered"
+        || o!.timeline.some(t => t.step === "Dispatch" && t.status === "done")));
+    }).length,
+    [liveDb.invoices, liveDb.orders],
+  );
+
+  function deleteInvoice(id: string, number: string) {
+    if (!confirm(`Delete invoice ${number}? The bill is removed and the number is freed up. The order, its payments and all ledgers stay exactly as they are.`)) return;
+    updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
+    toast.success(`Invoice ${number} deleted`);
+  }
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
     if (invoiced && !confirm(
@@ -1080,6 +1123,74 @@ export function SettingsPage() {
                 ))}
               </div>
             )}
+          </div>
+        )}
+
+        {/* ── Invoices raised by mistake (admin only) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${undispatchedCount ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
+                <Receipt className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Delete an Invoice</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {undispatchedCount === 0
+                    ? "Every invoice belongs to a dispatched order."
+                    : `${undispatchedCount} invoice${undispatchedCount !== 1 ? "s were" : " was"} raised for an order that isn't dispatched.`}
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              Deleting removes only the bill document and frees its number. The order, its advances,
+              the client ledger and every report read from the order itself, so nothing else changes.
+              Undispatched invoices are listed below; search to find any other one.
+            </p>
+
+            <Input
+              value={invQuery}
+              onChange={e => setInvQuery(e.target.value)}
+              placeholder="Search invoice #, client or order #…"
+              className="rounded-xl h-9 mt-3"
+            />
+
+            <div className="mt-3 space-y-1.5">
+              {invoiceRows.length === 0 ? (
+                <p className="text-xs text-muted-foreground py-2">
+                  {invQuery.trim() ? "No invoice matches that search." : "Nothing to clean up."}
+                </p>
+              ) : invoiceRows.slice(0, 40).map(r => (
+                <div
+                  key={r.inv.id}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 ${r.dispatched ? "border-border/60 bg-white" : "border-destructive/30 bg-destructive/5"}`}
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium truncate">
+                      Invoice {r.inv.number} · {r.client?.companyName || "—"}
+                    </p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {r.orders.map(o => o.orderNumber).join(", ") || "order missing"} ·{" "}
+                      {new Date(r.inv.createdAt).toLocaleDateString()} ·{" "}
+                      {r.dispatched ? "dispatched" : "NOT dispatched"}
+                      {r.paid ? " · fully paid" : ""}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => deleteInvoice(r.inv.id, r.inv.number)}
+                    className="rounded-lg h-8 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />Delete
+                  </Button>
+                </div>
+              ))}
+              {invoiceRows.length > 40 && (
+                <p className="text-[11px] text-muted-foreground">Showing the 40 newest — search to narrow it down.</p>
+              )}
+            </div>
           </div>
         )}
 

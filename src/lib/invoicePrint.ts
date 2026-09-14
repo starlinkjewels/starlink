@@ -133,8 +133,10 @@ function buildInvoiceDoc(opts: {
   dateLabel: string;
   itemRows: string;
   totalsRows: string;
+  /** Preview for an order that isn't billed yet — no invoice number is issued. */
+  draft?: boolean;
 }): string {
-  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows } = opts;
+  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft } = opts;
 
   /* QR / stamp placeholders — vertical rectangle so a QR-code-plus-logo image
      (Venmo, Zelle, etc.) scales proportionally instead of being squashed into a square. */
@@ -334,7 +336,7 @@ function buildInvoiceDoc(opts: {
 
   <hr class="rule"/>
 
-  <div class="title">INVOICE</div>
+  <div class="title">${draft ? "PROFORMA INVOICE" : "INVOICE"}</div>
 
   <!-- TO + Invoice meta -->
   <div class="inforow">
@@ -350,7 +352,7 @@ function buildInvoiceDoc(opts: {
     </div>
     <div class="meta">
       <table>
-        <tr><td>Invoice No:</td><td>${invoiceNumber}</td></tr>
+        <tr><td>${draft ? "Proforma" : "Invoice No:"}</td><td>${draft ? "NOT BILLED" : invoiceNumber}</td></tr>
         <tr><td>Date:</td><td>${dateLabel}</td></tr>
         <tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>
       </table>
@@ -440,6 +442,7 @@ export function printInvoice(
   settings: Settings,
   invoiceNumber: string,
   mainShape?: string,
+  draft?: boolean,
 ) {
   const adv = totalAdvance(order);
   const total = orderTotal(order);
@@ -452,7 +455,7 @@ export function printInvoice(
   const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order, mainShape) : BLANK_ROW).join("\n");
 
   const html = buildInvoiceDoc({
-    client, settings, invoiceNumber,
+    client, settings, invoiceNumber, draft,
     dateLabel: localDate(order.createdAt),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
