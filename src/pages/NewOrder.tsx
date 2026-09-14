@@ -21,6 +21,13 @@ import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, Credi
 
 const READY_STOCK_NONE = "none";
 
+/** Default expected delivery — 10 days out, as a YYYY-MM-DD date-input value. */
+function defaultDeliveryDate(): string {
+  const d = new Date();
+  d.setDate(d.getDate() + 10);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 /** Compress a File to a base64 JPEG ≤800px, quality 0.75 */
 async function compressImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -76,7 +83,7 @@ export function NewOrderPage() {
     estimatedGrossWeight: 0,
     estimatedNetWeight: 0,
     instructions: "",
-    expectedDelivery: "",
+    expectedDelivery: defaultDeliveryDate(), // 10 days out by default — staff can change it
     priority: "Normal",
     designNumber: "",
     productSize: "",
@@ -282,7 +289,7 @@ export function NewOrderPage() {
         readyStockItemId: f.materialSourcing === "readyStock" ? f.readyStockItemId : undefined,
         assignedFactoryId: f.assignedFactoryId || undefined,
         instructions: f.instructions,
-        expectedDelivery: f.expectedDelivery || new Date(Date.now() + 45 * 86400000).toISOString(),
+        expectedDelivery: f.expectedDelivery || defaultDeliveryDate(),
         priority: f.priority as Order["priority"],
         status: forReadyStock ? "In Production" : isReadyStockSale ? "Ready" : "Waiting",
         amount: forReadyStock ? 0 : f.orderValue,

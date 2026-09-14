@@ -4,6 +4,7 @@ import { useAuth } from "@/lib/auth";
 import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, nextInvoiceNumber, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
+  mainDiamondShape,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
@@ -284,6 +285,15 @@ export function OrderDetailPage() {
   // Correct a purchase entered wrong (carat/rate/certificate). The change is
   // carried through the supplier due, factory issue, packet and stock trail.
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+  // Design number — correctable at any time (it drives the invoice stock id and
+  // the Product Photos grouping, so a typo needs to be fixable).
+  const [editDesign, setEditDesign] = useState<string | null>(null);
+  const saveDesignNumber = () => {
+    const v = (editDesign ?? "").trim();
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id); if (o) o.designNumber = v || undefined; });
+    setEditDesign(null);
+    toast.success(v ? `Design number set to ${v}` : "Design number cleared");
+  };
   const openEditPurchase = (p: Purchase) => {
     const check = canEditPurchase(db, p);
     if (!check.ok) { toast.error(check.reason!); return; }
@@ -1522,14 +1532,14 @@ export function OrderDetailPage() {
       // Part of a dispatch-batch invoice → print the whole invoice (all orders).
       if (ids.length > 1) {
         const orders = ids.map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
-        printBatchInvoice(orders, client, db.settings, existing.number, existing.createdAt.slice(0, 10));
+        printBatchInvoice(orders, client, db.settings, existing.number, existing.createdAt.slice(0, 10), Object.fromEntries(orders.map(o => [o.id, mainDiamondShape(db, o.id) ?? ""])));
         return;
       }
       // Single-order invoice → keep its snapshot current, then print.
       if (existing.amount !== amount || existing.paid !== paid) {
         updateDb(d => { const i = d.invoices.find(x => x.id === existing.id); if (i) { i.amount = amount; i.paid = paid; } });
       }
-      printInvoice(order, client, db.settings, existing.number);
+      printInvoice(order, client, db.settings, existing.number, mainDiamondShape(db, order.id));
       return;
     }
     // Not billed yet — create a single-order invoice on demand, then print.
@@ -1538,7 +1548,7 @@ export function OrderDetailPage() {
       invNumber = nextInvoiceNumber(d);
       d.invoices.push({ id: uid("inv_"), orderId: order.id, orderIds: [order.id], clientId: order.clientId, number: invNumber, amount, paid, createdAt: new Date().toISOString() });
     });
-    printInvoice(order, client, db.settings, invNumber);
+    printInvoice(order, client, db.settings, invNumber, mainDiamondShape(db, order.id));
   };
 
   // In-house build → create a Ready Stock item pre-filled from this order. Admin
@@ -1638,6 +1648,37 @@ export function OrderDetailPage() {
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
+          {/* Design Number — editable inline (staff), and addable when missing */}
+          <div>
+            <p className="text-xs text-muted-foreground">Design Number</p>
+            {editDesign !== null ? (
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <Input
+                  value={editDesign}
+                  autoFocus
+                  onChange={e => setEditDesign(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") saveDesignNumber(); if (e.key === "Escape") setEditDesign(null); }}
+                  placeholder="e.g. LR-1418"
+                  className="h-8 rounded-lg text-sm"
+                />
+                <button onClick={saveDesignNumber} className="h-8 px-2.5 rounded-lg btn-hero text-xs font-medium shrink-0">Save</button>
+                <button onClick={() => setEditDesign(null)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground shrink-0"><X className="h-3.5 w-3.5" /></button>
+              </div>
+            ) : (
+              <p className="font-medium mt-0.5 flex items-center gap-1.5">
+                {order.designNumber || <span className="text-muted-foreground italic font-normal">—</span>}
+                {canEditStage() && (
+                  <button
+                    onClick={() => setEditDesign(order.designNumber ?? "")}
+                    title="Edit design number"
+                    className="h-6 w-6 rounded grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0"
+                  >
+                    <Pencil className="h-3 w-3" />
+                  </button>
+                )}
+              </p>
+            )}
+          </div>
           {([
             ["Quantity", `${order.quantity} pcs`],
             ["Est. Diamond Wt", `${order.diamondWeight} ct (${order.diamondType})`],
@@ -1647,7 +1688,6 @@ export function OrderDetailPage() {
             ["Delivery Date", fmtDate(order.expectedDelivery)],
             ["Assigned to", employee?.name || "—"],
             ["Created", fmtDate(order.createdAt)],
-            ...(order.designNumber  ? [["Design Number",  order.designNumber]]  : []),
             ...(order.productColor  ? [["Color",          order.productColor]]  : []),
             ...(order.productKarats ? [["Karats",         order.productKarats]] : []),
             ...(order.productSize   ? [["Product Size",   order.productSize]]   : []),

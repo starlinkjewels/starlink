@@ -3,6 +3,7 @@ import { useAuth } from "@/lib/auth";
 import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb,
   invoiceOrderIds, orderInvoiced, createInvoiceFromOrders, recordOrderPayment,
+  mainDiamondShape,
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -137,8 +138,8 @@ export function InvoicesPage() {
   const printInv = (inv: Invoice) => {
     const { orders } = invLive(inv);
     const client = db.clients.find(c => c.id === inv.clientId);
-    if (orders.length <= 1 && orders[0]) printInvoice(orders[0], client, db.settings, inv.number);
-    else if (orders.length) printBatchInvoice(orders, client, db.settings, inv.number, inv.createdAt.slice(0, 10));
+    if (orders.length <= 1 && orders[0]) printInvoice(orders[0], client, db.settings, inv.number, mainDiamondShape(db, orders[0].id));
+    else if (orders.length) printBatchInvoice(orders, client, db.settings, inv.number, inv.createdAt.slice(0, 10), Object.fromEntries(orders.map(o => [o.id, mainDiamondShape(db, o.id) ?? ""])));
     else toast.error("This invoice has no orders to print.");
   };
 

@@ -2134,3 +2134,33 @@ export function timeAgo(iso?: string): string {
   if (day < 7) return `${day}d ago`;
   return fmtDate(iso);
 }
+
+/**
+ * The MAIN diamond's shape for an order — the biggest stone actually on it.
+ * Used for the invoice description ("14KT WG Round Ring US-7"). The order
+ * itself doesn't carry a shape, so it is read from (in order of confidence)
+ * the certified packets on the order, the loose diamond issued to the factory,
+ * then any diamond bought for the order.
+ */
+export function mainDiamondShape(d: DB, orderId: string): string | undefined {
+  let best: { shape: string; carat: number } | undefined;
+  const take = (shape: string | undefined, carat: number) => {
+    const s = (shape ?? "").trim();
+    if (!s || s.toLowerCase() === "certified" || s.toLowerCase() === "unspecified") return;
+    if (!best || carat > best.carat) best = { shape: s, carat };
+  };
+  for (const p of d.diamondPackets ?? []) {
+    if (p.orderId === orderId && p.status !== "in_stock") take(p.shape, p.carat || 0);
+  }
+  if (!best) {
+    for (const i of d.materialIssuances ?? []) {
+      if (i.orderId === orderId && i.material === "diamond") take(i.purityOrQuality, i.quantityIssued || 0);
+    }
+  }
+  if (!best) {
+    for (const p of d.purchases ?? []) {
+      if (p.orderId === orderId && p.material === "diamond") take(p.diamond?.shape, p.diamond?.carat || 0);
+    }
+  }
+  return best?.shape;
+}

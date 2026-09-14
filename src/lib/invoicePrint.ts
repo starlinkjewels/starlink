@@ -15,23 +15,41 @@ function usd(n: number) {
   return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 }
 
-function itemDescription(order: Order): string {
-  const baseDescription = [
-    order.productKarats,
-    order.jewelleryType.toUpperCase(),
-    order.metal !== "Gold" ? order.metal.toUpperCase() : "",
-  ].filter(Boolean).join(" ") || `${order.jewelleryType} - ${order.metal}`.toUpperCase();
+/**
+ * Invoice line description, in the exact order the client asked for:
+ *   gold karat · gold colour · main diamond shape · item · size
+ *   e.g. "14KT WG Round Ring US-7"
+ * Anything unknown is simply left out, so a silver or diamond-only piece still
+ * reads cleanly. `mainShape` comes from mainDiamondShape() at the call site.
+ */
+function itemDescription(order: Order, mainShape?: string): string {
+  // 14K -> 14KT
+  const karat = order.productKarats ? order.productKarats.trim().toUpperCase().replace(/K$/, "KT") : "";
 
-  const weightDetails = [
-    order.actualGrossWeight ? `Gross Weight: ${order.actualGrossWeight}g` : "",
-    order.actualNetWeight ? `Net Weight: ${order.actualNetWeight}g` : "",
-    order.actualDiamondWeight ? `Diamond Weight: ${order.actualDiamondWeight}ct` : "",
-  ].filter(Boolean).join(", ");
+  // WG / YG / RG — from the chosen colour, else inferred from the metal.
+  const colourSrc = order.productColor || order.metal || "";
+  const colour = /white/i.test(colourSrc) ? "WG"
+    : /rose|pink/i.test(colourSrc) ? "RG"
+    : /yellow/i.test(colourSrc) ? "YG"
+    : "";
 
-  return baseDescription + (weightDetails ? ` (${weightDetails})` : "");
+  // Non-gold metals are named outright instead of a karat/colour pair.
+  const otherMetal = /platinum/i.test(order.metal) ? "PT" : /silver/i.test(order.metal) ? "SILVER" : "";
+
+  // Ring sizes are quoted US-x unless the size already says so.
+  const rawSize = (order.productSize ?? "").trim();
+  const size = !rawSize ? ""
+    : /^(us|uk|eu)\b|-/i.test(rawSize) ? rawSize.toUpperCase()
+    : /ring/i.test(order.jewelleryType) ? `US-${rawSize}`
+    : rawSize;
+
+  const line = [karat || otherMetal, karat ? colour : "", mainShape, order.jewelleryType, size]
+    .filter(Boolean)
+    .join(" ");
+  return line || `${order.jewelleryType} - ${order.metal}`.toUpperCase();
 }
 
-function itemRowHtml(sr: number, order: Order): string {
+function itemRowHtml(sr: number, order: Order, mainShape?: string): string {
   const stockId = order.designNumber || order.orderNumber;
   const weight = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
   const itemPrice = order.amount ? usd(order.amount) : "—";
@@ -39,7 +57,7 @@ function itemRowHtml(sr: number, order: Order): string {
   return `<tr class="item-row">
         <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${itemDescription(order)}</td>
+        <td class="l">${itemDescription(order, mainShape)}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>
         <td class="c">${itemPrice}</td>
@@ -321,10 +339,14 @@ function buildInvoiceDoc(opts: {
   <!-- TO + Invoice meta -->
   <div class="inforow">
     <div class="to">
-      <div class="name">TO: ${(client?.ownerName || client?.companyName || "").toUpperCase()}</div>
-      ${client?.address ? `<div>${client.address}</div>` : ""}
-      ${client?.companyName && client?.ownerName ? `<div>${client.companyName}</div>` : ""}
-      ${client?.phone ? `<div>Tel: ${client.phone}</div>` : ""}
+      <div class="name">TO: ${(client?.companyName || client?.ownerName || "").toUpperCase()}</div>
+      ${client?.ownerName ? `<div>${client.ownerName}</div>` : ""}
+      ${[client?.address, client?.zip, client?.country].filter(Boolean).length
+        ? `<div>${[client?.address, client?.zip, client?.country].filter(Boolean).join(", ")}</div>`
+        : ""}
+      ${client?.phone || client?.email
+        ? `<div>${[client?.phone ? `Tel: ${client.phone}` : "", client?.email ? `Email: ${client.email}` : ""].filter(Boolean).join("&nbsp;&nbsp;&nbsp;")}</div>`
+        : ""}
     </div>
     <div class="meta">
       <table>
@@ -417,6 +439,7 @@ export function printInvoice(
   client: Client | undefined,
   settings: Settings,
   invoiceNumber: string,
+  mainShape?: string,
 ) {
   const adv = totalAdvance(order);
   const total = orderTotal(order);
@@ -426,7 +449,7 @@ export function printInvoice(
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
   const ITEM_ROWS = 10;
-  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order) : BLANK_ROW).join("\n");
+  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order, mainShape) : BLANK_ROW).join("\n");
 
   const html = buildInvoiceDoc({
     client, settings, invoiceNumber,
@@ -448,6 +471,7 @@ export function printBatchInvoice(
   settings: Settings,
   invoiceNumber: string,
   dateStr: string, // "YYYY-MM-DD"
+  mainShapes?: Record<string, string>, // orderId -> main diamond shape
 ) {
   const adv = orders.reduce((s, o) => s + totalAdvance(o), 0);
   const total = orders.reduce((s, o) => s + orderTotal(o), 0);
@@ -460,7 +484,7 @@ export function printBatchInvoice(
   // orders and zero blank rows left, the images would overlap real item rows.
   const ITEM_ROWS = Math.max(10, orders.length + 4);
   const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) =>
-    i < orders.length ? itemRowHtml(i + 1, orders[i]) : BLANK_ROW
+    i < orders.length ? itemRowHtml(i + 1, orders[i], mainShapes?.[orders[i].id]) : BLANK_ROW
   ).join("\n");
 
   const html = buildInvoiceDoc({
