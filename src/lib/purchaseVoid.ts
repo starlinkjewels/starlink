@@ -17,7 +17,7 @@
 // stone already used/sold. Those must be undone at the source first.
 import { updateDb, uid, type DB, type Purchase } from "./db";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
-import { decreaseStockSelfHealing } from "./stock";
+import { decreaseStockSelfHealing, increaseStock } from "./stock";
 
 /** Human description of what was bought, for confirmations and the audit line. */
 export function purchaseLabel(p: Purchase): string {
@@ -172,6 +172,141 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
           amountInr: p.totalInr,
           remarks: `Correction — removed duplicate purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)}). Supplier due, factory issue and stock all reversed.`,
         });
+        o.manufacturingLog = log;
+      }
+    }
+  });
+}
+
+/** The correctable fields of a purchase. Amounts are computed by the caller so
+ *  the USD × exchange-rate maths stays in one place (the form). */
+export interface PurchaseEdit {
+  quantity: number;      // grams (gold) / carats (diamond)
+  ratePerUnit: number;   // per gram / per carat, in the purchase's billing currency
+  totalInr: number;
+  totalUsd?: number;
+  exchangeRate?: number;
+  invoiceNumber?: string;
+  notes?: string;
+  quality?: string;
+  certificateNumber?: string;
+  certificateLab?: string;
+}
+
+/**
+ * Can this purchase still be corrected? Same rule as removing it: once the
+ * money is paid or the factory has turned the material into a finished piece,
+ * changing the quantity or value would silently desync the ledgers, so it's refused.
+ */
+export function canEditPurchase(db: DB, p: Purchase): { ok: boolean; reason?: string } {
+  const base = canVoidPurchase(db, p);
+  if (base.ok) return base;
+  return { ok: false, reason: base.reason!.replace("removed", "changed").replace("remove", "change") };
+}
+
+/**
+ * Apply a correction to a purchase and carry it through EVERYTHING it created:
+ * the supplier's due, the factory issue, the certified packet, the stock trail
+ * and the order's log line. Mirrors voidPurchase()'s cascade — a corrected
+ * purchase must never leave the ledgers disagreeing.
+ */
+export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, userId: string): Promise<void> {
+  const oldQty = qtyOf(p);
+  const newQty = edit.quantity;
+  const delta = Math.round((newQty - oldQty) * 1000) / 1000;
+
+  // Pooled stock moves by the DIFFERENCE. Done first because a decrease is
+  // floor-checked and may legitimately fail (material already consumed) — in
+  // which case nothing else has been touched yet.
+  if (pooledStock(p) && delta !== 0) {
+    const note = `Correction to purchase ${p.invoiceNumber || p.id.slice(-6)}`;
+    if (delta > 0) {
+      await increaseStock({
+        material: p.material, purityOrQuality: bucketOf(p), quantity: delta,
+        refType: "purchase", refId: p.id, createdBy: userId, note,
+      });
+    } else {
+      await decreaseStockSelfHealing({
+        material: p.material, purityOrQuality: bucketOf(p), quantity: -delta,
+        type: "issuance_out", refType: "purchase", refId: p.id, createdBy: userId, note,
+      }, db.stockMovements);
+    }
+  }
+
+  updateDb(d => {
+    const pur = (d.purchases ?? []).find(x => x.id === p.id);
+    if (!pur) return;
+
+    // 1. The purchase itself → supplier's due / statement / cost reports.
+    if (pur.material === "gold" && pur.gold) {
+      pur.gold.weightGrams = newQty;
+      pur.gold.ratePerGram = edit.ratePerUnit;
+    }
+    if (pur.material === "diamond" && pur.diamond) {
+      pur.diamond.carat = newQty;
+      pur.diamond.ratePerCarat = edit.ratePerUnit;
+      if (edit.quality !== undefined) pur.diamond.quality = edit.quality.trim() || undefined;
+      if (pur.diamond.kind === "certified") {
+        if (edit.certificateNumber !== undefined) pur.diamond.certificateNumber = edit.certificateNumber.trim() || undefined;
+        if (edit.certificateLab !== undefined) pur.diamond.certificateLab = edit.certificateLab.trim() || undefined;
+      }
+    }
+    pur.totalInr = edit.totalInr;
+    if (edit.totalUsd !== undefined) pur.totalUsd = edit.totalUsd;
+    if (edit.exchangeRate !== undefined) pur.exchangeRate = edit.exchangeRate;
+    pur.invoiceNumber = edit.invoiceNumber?.trim() || undefined;
+    pur.notes = edit.notes?.trim() || undefined;
+
+    // 2. The factory issue auto-created from it — otherwise the factory's
+    //    outstanding gold/diamond stays on the old figure.
+    for (const i of d.materialIssuances ?? []) {
+      if (i.source !== "purchase" || i.sourcePurchaseId !== p.id) continue;
+      i.quantityIssued = newQty;
+      // The "used" line is auto-prefilled with the whole quantity at purchase
+      // time; keep it mirroring so nothing shows as phantom wastage.
+      if (i.finishedPieces && i.finishedPieces.length === 1) i.finishedPieces[0].quantityUsed = newQty;
+    }
+
+    // 3. Certified packet.
+    for (const pk of d.diamondPackets ?? []) {
+      if (pk.purchaseId !== p.id) continue;
+      pk.carat = newQty;
+      pk.ratePerCaratInr = newQty > 0 ? Math.round((edit.totalInr / newQty) * 100) / 100 : undefined;
+      if (edit.certificateNumber) pk.certificateNumber = edit.certificateNumber.trim();
+      if (edit.certificateLab !== undefined) pk.certificateLab = edit.certificateLab.trim() || undefined;
+      if (edit.quality !== undefined) pk.quality = edit.quality.trim() || undefined;
+    }
+
+    // 4. Stock trail. For an ORDER purchase the in/out pair must both move (they
+    //    net to zero either way). For POOLED stock we deliberately leave the
+    //    original row alone — the ± correction movement written above is the
+    //    honest audit trail, and rewriting the row too would double-count.
+    if (!pooledStock(p)) {
+      for (const m of d.stockMovements ?? []) {
+        if (m.refType === "purchase" && m.refId === p.id && m.type === "purchase_in") m.quantity = newQty;
+      }
+      if (p.orderId) {
+        const idx = (d.stockMovements ?? []).findIndex(m =>
+          m.type === "order_direct_use" && m.refType === "order" && m.refId === p.orderId &&
+          m.material === p.material && m.createdAt === p.createdAt &&
+          Math.abs(m.quantity - oldQty) < 0.0001);
+        if (idx >= 0) d.stockMovements[idx].quantity = newQty;
+      }
+    }
+
+    // 5. The order's log line — keep the recorded figures honest.
+    if (p.orderId) {
+      const o = d.orders.find(x => x.id === p.orderId);
+      if (o) {
+        const log = o.manufacturingLog ?? [];
+        const li = log.findIndex(m => m.type === "material_purchased" && m.amountInr === p.totalInr && m.at === p.createdAt);
+        if (li >= 0) {
+          log[li].amountMaterial = newQty;
+          log[li].amountInr = edit.totalInr;
+          if (!/\(corrected\)$/.test(log[li].remarks ?? "")) {
+            log[li].remarks = `${log[li].remarks ?? ""} (corrected)`.trim();
+          }
+        }
         o.manufacturingLog = log;
       }
     }

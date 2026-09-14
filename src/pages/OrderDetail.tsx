@@ -17,7 +17,7 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, PackageCheck, Gift, Tag,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag,
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -30,7 +30,8 @@ import {
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
-import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact } from "@/lib/purchaseVoid";
+import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
+import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -277,6 +278,24 @@ export function OrderDetailPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't remove this purchase.");
     } finally { setRemovingPurchaseId(null); }
+  };
+
+  // Correct a purchase entered wrong (carat/rate/certificate). The change is
+  // carried through the supplier due, factory issue, packet and stock trail.
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+  const openEditPurchase = (p: Purchase) => {
+    const check = canEditPurchase(db, p);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    setEditingPurchase(p);
+  };
+  const saveEditPurchase = async (edit: PurchaseEdit) => {
+    if (!editingPurchase) return;
+    try {
+      await editPurchase(db, editingPurchase, edit, user!.id);
+      toast.success("Purchase corrected — supplier due, factory issue and stock updated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't apply the correction.");
+    }
   };
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
 
@@ -2858,6 +2877,13 @@ export function OrderDetailPage() {
                     <span className="flex items-center gap-2 shrink-0">
                       <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
                       {user!.role === "admin" && (
+                        <>
+                        <button
+                          onClick={e => { e.preventDefault(); e.stopPropagation(); openEditPurchase(p); }}
+                          title="Correct this purchase (wrong carat / rate / invoice)"
+                          className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
                         <button
                           onClick={e => { e.preventDefault(); e.stopPropagation(); removeLinkedPurchase(p); }}
                           disabled={removingPurchaseId === p.id}
@@ -2865,6 +2891,7 @@ export function OrderDetailPage() {
                           className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
                           <Trash2 className="h-3.5 w-3.5" />
                         </button>
+                        </>
                       )}
                     </span>
                   </Link>
@@ -2905,6 +2932,13 @@ export function OrderDetailPage() {
                         {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
                         {srcPurchase && user!.role === "admin" && (
+                          <>
+                          <button
+                            onClick={() => openEditPurchase(srcPurchase)}
+                            title="Correct this purchase (wrong carat / rate / invoice)"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
                           <button
                             onClick={() => removeLinkedPurchase(srcPurchase)}
                             disabled={removingPurchaseId === srcPurchase.id}
@@ -2912,6 +2946,7 @@ export function OrderDetailPage() {
                             className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
                             <Trash2 className="h-3.5 w-3.5" />
                           </button>
+                          </>
                         )}
                       </span>
                     </div>
@@ -3243,6 +3278,13 @@ export function OrderDetailPage() {
       presets={labelPresets(db.settings)}
       showPrice={db.settings.barcodeBandShowPrice !== false}
       onGenerate={(preset, mode, copies) => generateBand(order, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies })}
+    />
+
+    {/* ── Correct a purchase entered wrong ── */}
+    <EditPurchaseDialog
+      purchase={editingPurchase}
+      onClose={() => setEditingPurchase(null)}
+      onSave={saveEditPurchase}
     />
     </>
   );
