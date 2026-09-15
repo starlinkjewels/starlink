@@ -1241,6 +1241,76 @@ export function allocateToInvoice(
   return Math.round(left * 100) / 100;
 }
 
+/**
+ * Re-spread everything a client has ALREADY paid, putting one invoice first.
+ *
+ * Payments are allocated oldest-bill-first as they come in, which is right in
+ * general but wrong when the client says "this transfer is for invoice 0001":
+ * the money lands on older unbilled work and the invoice they just settled
+ * still reads as pending. Nothing is created or destroyed here — every existing
+ * advance is pooled and laid down again in a different order, so the client's
+ * total paid, the lockers and every cash figure are untouched.
+ *
+ * Each payment keeps its own note, date, recorder and locker link; a payment
+ * that has to straddle two orders is split, not rewritten. Returns what moved.
+ */
+export function reallocateClientPayments(
+  d: DB,
+  clientId: string,
+  invoiceFirstId?: string,
+): { total: number; toInvoice: number; credit: number } {
+  const r2n = (n: number) => Math.round(n * 100) / 100;
+  const client = d.clients.find(c => c.id === clientId);
+  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
+
+  // 1. Lift every payment off the orders, oldest first, keeping its details.
+  const pool: AdvancePayment[] = [];
+  for (const o of orders) {
+    for (const a of o.advances ?? []) pool.push({ ...a });
+    o.advances = [];
+  }
+  pool.sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+  const total = r2n(pool.reduce((s, a) => s + a.amount, 0) + (client?.creditBalance || 0));
+
+  // Carried credit joins the pool as one more source, so it settles bills too.
+  if (client?.creditBalance && client.creditBalance > 0) {
+    pool.push({
+      id: uid("adv_"), amount: client.creditBalance, note: "Credit carried forward",
+      recordedBy: "system", createdAt: new Date().toISOString(),
+    });
+  }
+
+  // 2. The named invoice's orders come first; everything else stays oldest-first.
+  const firstIds = invoiceFirstId
+    ? invoiceOrderIds((d.invoices ?? []).find(i => i.id === invoiceFirstId) ?? { orderId: "" } as Invoice)
+    : [];
+  const rank = (o: Order) => (firstIds.includes(o.id) ? 0 : 1);
+  const targets = [...orders].sort((a, b) =>
+    rank(a) - rank(b) || +new Date(a.createdAt) - +new Date(b.createdAt));
+
+  // 3. Lay the pool back down, splitting a payment across orders when needed.
+  let toInvoice = 0;
+  let src = 0;
+  for (const o of targets) {
+    let need = orderTotal(o);
+    while (need > 0.009 && src < pool.length) {
+      const take = Math.min(need, pool[src].amount);
+      if (!o.advances) o.advances = [];
+      o.advances.push({ ...pool[src], id: uid("adv_"), amount: r2n(take) });
+      if (firstIds.includes(o.id)) toInvoice = r2n(toInvoice + take);
+      pool[src].amount = r2n(pool[src].amount - take);
+      need = r2n(need - take);
+      if (pool[src].amount <= 0.009) src++;
+    }
+  }
+
+  // 4. Anything the bills couldn't absorb goes back to credit.
+  const credit = r2n(pool.slice(src).reduce((s, a) => s + a.amount, 0));
+  if (client) client.creditBalance = credit > 0 ? credit : undefined;
+  return { total, toInvoice, credit };
+}
+
+
 
 /**
  * Reconcile a client's account: reclaim any per-order overpayment, add carried

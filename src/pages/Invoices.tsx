@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb,
   invoiceOrderIds, orderInvoiced, createInvoiceFromOrders, recordOrderPayment,
-  mainDiamondShape,
+  mainDiamondShape, reallocateClientPayments,
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -12,6 +12,7 @@ import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, P
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -170,6 +171,34 @@ export function InvoicesPage() {
   const PAGE_SIZE = 10;
   const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE);
   const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE);
+
+
+  /** What this client has paid that is sitting on orders OUTSIDE this invoice —
+   *  the money that could be settling it instead. */
+  const clientPaidElsewhere = (clientId: string, invoiceOrderIdList: string[]) => {
+    const client = db.clients.find(c => c.id === clientId);
+    const elsewhere = db.orders
+      .filter(o => o.clientId === clientId && o.status !== "Rejected" && !invoiceOrderIdList.includes(o.id))
+      .reduce((s, o) => s + totalAdvance(o), 0);
+    return Math.round((elsewhere + (client?.creditBalance || 0)) * 100) / 100;
+  };
+
+  const reapplyToInvoice = async (invoiceId: string, number: string, clientId: string) => {
+    const name = db.clients.find(c => c.id === clientId)?.companyName ?? "this client";
+    if (!confirm(
+      `Re-apply everything ${name} has paid, settling invoice ${number} first?
+
+`
+      + "Nothing is added or removed — the same money is spread over their bills in a different order. "
+      + "Their total paid, the lockers and their overall balance stay exactly the same, and older orders may go back to showing a balance."
+    )) return;
+    let res: { total: number; toInvoice: number; credit: number } | null = null;
+    updateDb(d => { res = reallocateClientPayments(d, clientId, invoiceId); });
+    if (res) {
+      const r = res as { total: number; toInvoice: number; credit: number };
+      toast.success(`${fmtMoney(r.toInvoice)} now sits on invoice ${number}${r.credit > 0 ? ` · ${fmtMoney(r.credit)} left as credit` : ""}`);
+    }
+  };
 
   const detailInv = detailInvId ? db.invoices.find(i => i.id === detailInvId) : undefined;
 
@@ -483,6 +512,32 @@ export function InvoicesPage() {
                       <span className="font-semibold text-primary">−{fmtMoney(gift)}</span>
                     </div>
                   )}
+
+                  {/* Money the client has already paid can sit on OTHER orders —
+                      payments land oldest-bill-first, so a transfer meant for this
+                      invoice can end up on older unbilled work while this one still
+                      reads as pending. This re-spreads what they have already paid,
+                      putting this invoice first. No money is created or removed. */}
+                  {isStaff && bal > 0 && clientPaidElsewhere(detailInv.clientId, orders.map(o => o.id)) > 0 && (
+                    <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
+                      <p className="text-xs font-semibold text-brand-dark">
+                        {fmtMoney(clientPaidElsewhere(detailInv.clientId, orders.map(o => o.id)))} of this client&rsquo;s money is on their other orders
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Payments are applied oldest-bill-first, so a transfer sent for this invoice can land on older
+                        orders instead. Re-applying pools everything they have paid and settles this invoice first —
+                        the totals, the lockers and their overall balance do not change.
+                      </p>
+                      <AsyncButton
+                        size="sm" variant="outline"
+                        onClick={() => reapplyToInvoice(detailInv.id, detailInv.number, detailInv.clientId)}
+                        className="rounded-xl h-8 mt-2"
+                      >
+                        Apply their payments to this invoice first
+                      </AsyncButton>
+                    </div>
+                  )}
+
 
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Orders on this invoice</p>
