@@ -944,35 +944,53 @@ export function CatalogPage() {
 
   /**
    * Recreate the picked folder's structure as catalog folders and return a map
-   * of "Rings/Bands" → folder id, so every file lands where it sat on the PC.
+   * of "Rings/Bands" -> folder id, so every file lands where it sat on the PC.
    * A folder that already exists under the same parent is reused, so uploading
    * the same folder twice tops it up instead of duplicating the tree.
+   *
+   * The "" key is the home for anything the browser hands over without a
+   * relative path. A folder upload must NEVER spill files into the folder you
+   * were looking at - that is what made an upload look like it had landed in
+   * the folder above - so those files go to the picked folder itself.
    */
   function buildFolderTree(files: File[]): Map<string, string> {
+    const relOf = (f: File) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+    // The name of the folder the user actually picked, taken from the first file
+    // that carries a path. A browser that reports no paths at all still gets a
+    // folder of its own rather than spilling into the current one.
+    const firstRel = files.map(relOf).find((r) => r.includes("/")) || "";
+    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString()}`;
+
     const byPath = new Map<string, string>();
     updateDb((db) => {
+      const folderFor = (name: string, parent: string | null): string => {
+        const existing = db.catalogFolders.find(
+          (x) => x.name === name && (x.parentId ?? null) === parent,
+        );
+        if (existing) return existing.id;
+        const id = uid("cf_");
+        db.catalogFolders.push({
+          id,
+          name,
+          parentId: parent,
+          createdBy: user!.id,
+          createdAt: new Date().toISOString(),
+        });
+        return id;
+      };
+
+      const home = currentFolderId ?? null;
+      byPath.set("", folderFor(rootName, home));
+
       for (const f of files) {
-        const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
-        const parts = rel.split("/").filter(Boolean).slice(0, -1); // drop the file name
-        let parent: string | null = currentFolderId ?? null;
+        const parts = relOf(f).split("/").filter(Boolean).slice(0, -1); // drop the file name
+        let parent: string | null = home;
         let acc = "";
         for (const seg of parts) {
           acc = acc ? `${acc}/${seg}` : seg;
           let id = byPath.get(acc);
           if (!id) {
-            const existing = db.catalogFolders.find(
-              (x) => x.name === seg && (x.parentId ?? null) === parent,
-            );
-            id = existing?.id ?? uid("cf_");
-            if (!existing) {
-              db.catalogFolders.push({
-                id,
-                name: seg,
-                parentId: parent,
-                createdBy: user!.id,
-                createdAt: new Date().toISOString(),
-              });
-            }
+            id = folderFor(seg, parent);
             byPath.set(acc, id);
           }
           parent = id;
@@ -995,7 +1013,7 @@ export function CatalogPage() {
       if (!keepStructure) return currentFolderId;
       const rel = (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
       const dir = rel.split("/").filter(Boolean).slice(0, -1).join("/");
-      return tree.get(dir) ?? currentFolderId;
+      return tree.get(dir) ?? tree.get("") ?? currentFolderId;
     };
 
     // Oversized files are SKIPPED on purpose; anything else that fails is a real
@@ -1069,9 +1087,12 @@ export function CatalogPage() {
         );
       }
       if (bad < all.length) {
+        // Distinct ids: the "" key points at the picked folder, so counting keys
+        // would report it twice.
+        const folderCount = new Set(tree.values()).size || 1;
         toast.success(
           keepStructure
-            ? `${all.length - bad} file${all.length - bad !== 1 ? "s" : ""} uploaded into ${tree.size || 1} folder${tree.size > 1 ? "s" : ""}`
+            ? `${all.length - bad} file${all.length - bad !== 1 ? "s" : ""} uploaded into ${folderCount} folder${folderCount !== 1 ? "s" : ""}`
             : `${all.length - bad} file${all.length - bad !== 1 ? "s" : ""} uploaded`,
         );
       }

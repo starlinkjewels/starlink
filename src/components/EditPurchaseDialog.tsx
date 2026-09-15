@@ -24,6 +24,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
 
   const [qty, setQty] = useState("");
   const [rate, setRate] = useState("");
+  const [discount, setDiscount] = useState("");
   const [inv, setInv] = useState("");
   const [notes, setNotes] = useState("");
   const [quality, setQuality] = useState("");
@@ -36,6 +37,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
     if (!purchase) return;
     setQty(String(purchase.material === "gold" ? purchase.gold?.weightGrams ?? 0 : purchase.diamond?.carat ?? 0));
     setRate(String(purchase.material === "gold" ? purchase.gold?.ratePerGram ?? 0 : purchase.diamond?.ratePerCarat ?? 0));
+    setDiscount(purchase.discountPct ? String(purchase.discountPct) : "");
     setInv(purchase.invoiceNumber ?? "");
     setNotes(purchase.notes ?? "");
     setQuality(purchase.diamond?.quality ?? "");
@@ -51,8 +53,12 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
   // rate still applies, so ₹ = qty × rate × fx.
   const isUsd = purchase.currency === "USD";
   const fx = purchase.exchangeRate ?? 0;
-  const totalUsd = isUsd ? Math.round(q * r * 100) / 100 : undefined;
-  const totalInr = isUsd ? Math.round(q * r * fx) : Math.round(q * r);
+  // A supplier discount ("less 5%") comes off before the currency conversion,
+  // exactly as it does when the purchase is first recorded.
+  const disc = Math.min(Math.max(Number(discount) || 0, 0), 100);
+  const net = q * r * (1 - disc / 100);
+  const totalUsd = isUsd ? Math.round(net * 100) / 100 : undefined;
+  const totalInr = isUsd ? Math.round(net * fx) : Math.round(net);
 
   const submit = async () => {
     setSaving(true);
@@ -60,6 +66,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
       await onSave({
         quantity: q,
         ratePerUnit: r,
+        discountPct: disc,
         totalInr,
         totalUsd,
         exchangeRate: isUsd ? fx : undefined,
@@ -91,6 +98,10 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
           <div>
             <Label className="text-xs">Rate / {unit} ({purchase.currency})</Label>
             <Input type="number" min={0} step="0.01" value={rate} onChange={e => setRate(e.target.value)} className="rounded-xl h-10 mt-1" />
+          </div>
+          <div>
+            <Label className="text-xs">Discount %</Label>
+            <Input type="number" min={0} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
           </div>
         </div>
 

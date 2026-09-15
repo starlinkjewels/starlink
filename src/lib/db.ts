@@ -779,6 +779,9 @@ export interface Purchase {
   totalInr: number; // ALWAYS present — the one canonical amount every ledger function sums
 
   payments: PurchasePayment[]; // mirrors Order.advances[] — paid/pending are derived, never stored
+  /** Supplier discount already taken off this line, in % ("less 5%"). Stored
+   *  for the record only — totalInr/totalUsd are the discounted figures. */
+  discountPct?: number;
   invoiceNumber?: string;
   invoiceDate?: string;
   notes?: string;

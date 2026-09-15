@@ -6,7 +6,7 @@ import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
-import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, ImagePlus, Trash2, Pencil, Loader2, Check, Package } from "lucide-react";
+import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package } from "lucide-react";
 
 const MAX_VIDEO_MB = 60;
 
@@ -225,11 +225,13 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [folderProgress, setFolderProgress] = useState<{ done: number; total: number } | null>(null);
   const [videoUploading, setVideoUploading] = useState(false);
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
   const imgRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null);
+  const folderRef = useRef<HTMLInputElement>(null);
 
   const folders = db.productPhotoFolders ?? [];
   const allItems = db.productPhotoItems ?? [];
@@ -287,6 +289,86 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     } catch { toast.error("Failed to upload the video"); }
     setVideoUploading(false);
   };
+  /**
+   * Upload a whole folder from the PC, keeping its sub-folders. The picked
+   * folder is recreated here (reusing one of the same name under the same
+   * parent), and every image/video lands in the sub-folder it sat in. Files are
+   * never dropped into the folder you were looking at.
+   */
+  const uploadFolderFiles = async (files: FileList) => {
+    const relOf = (f: File) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || "";
+    const picked = Array.from(files);
+    const media = picked.filter(f => f.type.startsWith("image/") || f.type.startsWith("video/"));
+    if (!media.length) { toast.error("That folder has no images or videos"); return; }
+
+    const firstRel = picked.map(relOf).find(r => r.includes("/")) || "";
+    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString()}`;
+    const byPath = new Map<string, string>();
+    updateDb(d => {
+      if (!d.productPhotoFolders) d.productPhotoFolders = [];
+      const folderFor = (name: string, parent: string | null): string => {
+        const existing = d.productPhotoFolders.find(x => x.name === name && (x.parentId ?? null) === parent);
+        if (existing) return existing.id;
+        const id = uid("ppf_");
+        d.productPhotoFolders.push({ id, name, parentId: parent, createdBy: user!.id, createdAt: new Date().toISOString() });
+        return id;
+      };
+      const home = currentFolderId ?? null;
+      byPath.set("", folderFor(rootName, home));
+      for (const f of media) {
+        const parts = relOf(f).split("/").filter(Boolean).slice(0, -1);
+        let parent: string | null = home;
+        let acc = "";
+        for (const seg of parts) {
+          acc = acc ? `${acc}/${seg}` : seg;
+          let id = byPath.get(acc);
+          if (!id) { id = folderFor(seg, parent); byPath.set(acc, id); }
+          parent = id;
+        }
+      }
+    });
+
+    const made: ProductPhotoItem[] = [];
+    const failed: string[] = [];
+    let done = 0;
+    setFolderProgress({ done: 0, total: media.length });
+    const uploadOne = async (f: File) => {
+      const dir = relOf(f).split("/").filter(Boolean).slice(0, -1).join("/");
+      const folderId = byPath.get(dir) ?? byPath.get("")!;
+      const isVideo = f.type.startsWith("video/");
+      if (isVideo && f.size > MAX_VIDEO_MB * 1024 * 1024) { failed.push(f.name); return; }
+      try {
+        const url = isVideo
+          ? await uploadFile(f, `productPhotos/${folderId}`)
+          : await uploadDataUrl(await compressImage(f), `productPhotos/${folderId}`);
+        made.push({
+          id: uid("ppi_"), folderId,
+          name: f.name.replace(/\.[^.]+$/, "").slice(0, 60) || (isVideo ? "Video" : "Image"),
+          type: isVideo ? "video" : "image", url,
+          createdBy: user!.id, createdAt: new Date().toISOString(),
+        } as ProductPhotoItem);
+      } catch { failed.push(f.name); }
+    };
+    try {
+      // Four at a time, and ONE save at the end — a folder of hundreds of files
+      // must not fire hundreds of separate writes.
+      let next = 0;
+      const worker = async () => {
+        while (next < media.length) {
+          await uploadOne(media[next++]);
+          setFolderProgress({ done: ++done, total: media.length });
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(4, media.length) }, worker));
+      if (made.length) updateDb(d => { d.productPhotoItems.unshift(...made); });
+      const folderCount = new Set(byPath.values()).size || 1;
+      if (made.length) toast.success(`${made.length} file${made.length !== 1 ? "s" : ""} uploaded into ${folderCount} folder${folderCount !== 1 ? "s" : ""}`);
+      if (failed.length) toast.error(`${failed.length} file${failed.length !== 1 ? "s" : ""} couldn't be uploaded (a video over ${MAX_VIDEO_MB} MB, or an upload error)`);
+      if (picked.length > media.length) toast.message(`${picked.length - media.length} non-media file${picked.length - media.length !== 1 ? "s were" : " was"} skipped`);
+    } finally { setFolderProgress(null); }
+  };
+
+
   const deleteItem = async (id: string) => { const it = allItems.find(x => x.id === id); updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); }); if (it) await deleteByUrl(it.url); };
   const downloadAll = async () => { setDownloading(true); try { for (const it of gallery) await downloadOne(it.src, it.filename); } finally { setDownloading(false); } };
 
@@ -309,6 +391,22 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
         {isStaff && (
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
             <button onClick={() => { setShowNewFolder(v => !v); setNewFolderName(""); }} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark"><FolderPlus className="h-4 w-4" /> {atRoot ? "New Category" : "New Folder"}</button>
+            {/* Whole folder from the PC — works at the top level too, where it
+                becomes a new category. */}
+            <input
+              ref={folderRef}
+              type="file"
+              // @ts-expect-error — non-standard but supported by Chrome/Edge/Safari
+              webkitdirectory=""
+              directory=""
+              multiple
+              className="hidden"
+              onChange={async e => { if (e.target.files?.length) await uploadFolderFiles(e.target.files); e.target.value = ""; }}
+            />
+            <button onClick={() => folderRef.current?.click()} disabled={!!folderProgress} title="Pick a folder on your computer — its sub-folders are recreated here" className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark disabled:opacity-60">
+              {folderProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderUp className="h-4 w-4" />}
+              {folderProgress ? `Uploading ${folderProgress.done}/${folderProgress.total}…` : "Upload Folder"}
+            </button>
             {!atRoot && currentFolderId && (
               <>
                 <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={async e => { if (e.target.files?.length) await uploadImages(e.target.files); e.target.value = ""; }} />

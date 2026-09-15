@@ -60,6 +60,8 @@ interface BuyLine {
   diaSym: string;
   diaFluor: string;
   diaMeasure: string;
+  /** Supplier discount on this line, in % off the weight x rate amount. */
+  discountPct: string;
   currency: PurchaseCurrency;
   exchangeRate: string;
   invoiceNumber: string;
@@ -72,17 +74,21 @@ function emptyBuyLine(): BuyLine {
     diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
-    currency: "INR", exchangeRate: "",
+    discountPct: "", currency: "INR", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
 }
 
-/** Weight × rate, in the line's own billing currency — always the source of
- *  truth for the amount (never manually typed). */
+/** Weight × rate less the supplier discount, in the line’s own billing
+ *  currency — always the source of truth for the amount (never manually typed). */
 function buyLineBaseAmount(line: BuyLine): number {
-  return line.material === "gold"
+  const gross = line.material === "gold"
     ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
     : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
+  // A supplier discount ("less 5%") comes off the line before anything else —
+  // the stock value, the supplier bill and the order cost all use this figure.
+  const disc = Math.min(Math.max(Number(line.discountPct) || 0, 0), 100);
+  return gross * (1 - disc / 100);
 }
 
 function buyLineTotalInr(line: BuyLine): number {
@@ -355,6 +361,7 @@ export function OrderDetailPage() {
       totalUsd: line.currency === "USD" ? Math.round(buyLineBaseAmount(line) * 100) / 100 : undefined,
       exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
       totalInr: buyLineTotalInr(line),
+      discountPct: Number(line.discountPct) > 0 ? Number(line.discountPct) : undefined,
       payments: [],
       invoiceNumber: line.invoiceNumber.trim() || undefined,
       notes: line.notes.trim() || undefined,
@@ -2754,6 +2761,7 @@ export function OrderDetailPage() {
                         <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
                       </Select>
                       <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                      <Input type="number" min={0} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="Discount %" />
                     </div>
                   ) : (
                     <div className="space-y-2.5">
@@ -2772,7 +2780,11 @@ export function OrderDetailPage() {
                           <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
                         </Select>
                         <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder={line.diaKind === "certified" ? "Size (ct)" : "Carat"} />
+                        {line.diaKind === "loose" && (
+                          <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updateBuyLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs" />
+                        )}
                         <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                        <Input type="number" min={0} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="Discount %" />
                       </div>
                       {line.diaKind === "loose" ? (
                         <Input value={line.diaQuality} onChange={e => updateBuyLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
@@ -2812,7 +2824,12 @@ export function OrderDetailPage() {
                     <Input value={line.notes} onChange={e => updateBuyLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
                   </div>
 
-                  <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(buyLineTotalInr(line))}</span></p>
+                  <p className="text-xs text-muted-foreground text-right">
+                    {Number(line.discountPct) > 0 && (
+                      <span className="mr-2">less {Number(line.discountPct)}% · </span>
+                    )}
+                    Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(buyLineTotalInr(line))}</span>
+                  </p>
                 </div>
               ))}
 
