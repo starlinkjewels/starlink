@@ -5,6 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { recomputeStockFromHistory } from "@/lib/stock";
+import { canEditPurchase, editPurchase } from "@/lib/purchaseVoid";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -355,6 +356,9 @@ function CertifiedSection() {
   const { user } = useAuth();
   const db = useDb();
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
+  // Rate is edited as free text so a half-typed number does not snap to 0.
+  const [editRate, setEditRate] = useState("");
+  const [savingPacket, setSavingPacket] = useState(false);
   const [search, setSearch] = useState("");
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
@@ -437,12 +441,71 @@ function CertifiedSection() {
     toast.success("Stock numbers assigned");
   };
 
-  const savePacketEdit = () => {
+  /**
+   * Save the packet. Grading details are the packet's own, but CARAT and the
+   * RATE belong to the purchase that brought the stone in — change either here
+   * and the supplier's bill, the order's cost log and the stock trail have to
+   * move with it, or the stone's value and what we owe for it stop agreeing.
+   * So those two go through editPurchase()'s cascade whenever the stone came
+   * from a recorded purchase.
+   */
+  const savePacketEdit = async () => {
     if (!editPacket) return;
     const p = editPacket;
     if (!p.shape) { toast.error("Choose a shape"); return; }
     if (!p.carat || p.carat <= 0) { toast.error("Enter a valid carat weight"); return; }
     if (!p.certificateNumber.trim()) { toast.error("Report number is required"); return; }
+    const rateInr = editRate.trim() === "" ? undefined : Number(editRate);
+    if (rateInr !== undefined && (!isFinite(rateInr) || rateInr < 0)) { toast.error("Enter a valid rate per carat"); return; }
+
+    const live = loadDb();
+    const before = (live.diamondPackets ?? []).find(x => x.id === p.id);
+    const purchase = p.purchaseId ? (live.purchases ?? []).find(x => x.id === p.purchaseId) : undefined;
+    const moneyChanged =
+      Math.abs((before?.carat ?? 0) - p.carat) > 0.0001 ||
+      Math.round((before?.ratePerCaratInr ?? 0) * 100) !== Math.round((rateInr ?? 0) * 100);
+
+    let billNote = "";
+    if (moneyChanged && purchase) {
+      const chk = canEditPurchase(live, purchase);
+      if (chk.ok) {
+        // The rate on a packet is its NET cost per carat. Convert it back into
+        // the purchase's own billing currency, keeping any recorded discount so
+        // qty x rate less discount still lands on the same rupee figure.
+        const disc = Math.min(Math.max(purchase.discountPct ?? 0, 0), 99.99);
+        const netInr = (rateInr ?? 0) * p.carat;
+        const isUsd = purchase.currency === "USD";
+        const fx = purchase.exchangeRate ?? 0;
+        const netBilling = isUsd && fx > 0 ? netInr / fx : netInr;
+        const grossRate = p.carat > 0 ? netBilling / p.carat / (1 - disc / 100) : 0;
+        setSavingPacket(true);
+        try {
+          await editPurchase(live, purchase, {
+            quantity: p.carat,
+            ratePerUnit: Math.round(grossRate * 100) / 100,
+            discountPct: disc,
+            totalInr: Math.round(netInr),
+            totalUsd: isUsd ? Math.round(netBilling * 100) / 100 : undefined,
+            exchangeRate: isUsd ? fx : undefined,
+            invoiceNumber: purchase.invoiceNumber,
+            notes: purchase.notes,
+            quality: p.quality,
+            certificateNumber: p.certificateNumber,
+            certificateLab: p.certificateLab,
+          }, user!.id);
+          billNote = " — the supplier's bill was corrected too";
+        } catch {
+          toast.error("Couldn't update the supplier's bill — nothing was changed");
+          setSavingPacket(false);
+          return;
+        } finally { setSavingPacket(false); }
+      } else {
+        // Paid for, or already used in a piece. Re-valuing the stone is still
+        // allowed, but the supplier's settled bill must not move underneath it.
+        billNote = ` — the supplier's bill was left alone (${chk.reason})`;
+      }
+    }
+
     updateDb(d => {
       const idx = (d.diamondPackets ?? []).findIndex(x => x.id === p.id);
       if (idx >= 0) {
@@ -451,6 +514,7 @@ function CertifiedSection() {
           ...d.diamondPackets[idx],
           shape: p.shape,
           carat: p.carat,
+          ratePerCaratInr: rateInr && rateInr > 0 ? Math.round(rateInr * 100) / 100 : undefined,
           color: clean(p.color?.trim()),
           clarity: clean(p.clarity?.trim()),
           cut: clean(p.cut?.trim()),
@@ -463,7 +527,7 @@ function CertifiedSection() {
         };
       }
     });
-    toast.success("Certificate details updated");
+    toast.success(`Certified diamond updated${billNote}`);
     setEditPacket(null);
   };
 
@@ -544,7 +608,7 @@ function CertifiedSection() {
                   })()}
                   {user?.role === "admin" && (
                     <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
-                      <button onClick={() => setEditPacket({ ...p })} className="text-[11px] text-primary inline-flex items-center gap-1 hover:underline">
+                      <button onClick={() => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); }} className="text-[11px] text-primary inline-flex items-center gap-1 hover:underline">
                         <Pencil className="h-3 w-3" /> Edit
                       </button>
                       <button onClick={() => deletePacket(p)} className="text-[11px] text-destructive inline-flex items-center gap-1 hover:underline">
@@ -642,7 +706,7 @@ function CertifiedSection() {
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setEditPacket(null)}>
           <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="font-display text-lg text-brand-dark mb-1">Edit Certified Diamond</h3>
-            <p className="text-xs text-muted-foreground mb-4">Correct the certificate or grading details for this packet.</p>
+            <p className="text-xs text-muted-foreground mb-4">Correct the certificate, grading details or cost for this packet.</p>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Shape</Label>
@@ -654,6 +718,14 @@ function CertifiedSection() {
               <div>
                 <Label className="text-xs">Carat</Label>
                 <Input type="number" step="0.01" min={0} value={editPacket.carat} onChange={e => setEditPacket({ ...editPacket, carat: Number(e.target.value) })} className="rounded-xl mt-1" />
+              </div>
+              <div className="col-span-2">
+                <Label className="text-xs">Rate / ct (INR)</Label>
+                <Input type="number" step="0.01" min={0} value={editRate} onChange={e => setEditRate(e.target.value)} className="rounded-xl mt-1" placeholder="Cost per carat" />
+                <p className="text-[11px] text-muted-foreground mt-1">
+                  Stone value {editPacket.carat > 0 && Number(editRate) > 0 ? fmtMoneyInr(Math.round(Number(editRate) * editPacket.carat)) : "—"}.
+                  {editPacket.purchaseId ? " Changing the carat or rate corrects the supplier’s bill for this stone too." : ""}
+                </p>
               </div>
               <div>
                 <Label className="text-xs">Color</Label>
@@ -694,7 +766,7 @@ function CertifiedSection() {
             </div>
             <div className="flex gap-2 mt-5">
               <button onClick={() => setEditPacket(null)} className="flex-1 rounded-xl border border-border py-2 text-sm">Cancel</button>
-              <button onClick={savePacketEdit} className="btn-hero flex-1 rounded-xl py-2 text-sm">Save Changes</button>
+              <AsyncButton onClick={savePacketEdit} disabled={savingPacket} className="btn-hero flex-1 rounded-xl py-2 text-sm h-auto">{savingPacket ? "Saving…" : "Save Changes"}</AsyncButton>
             </div>
           </div>
         </div>
