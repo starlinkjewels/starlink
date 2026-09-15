@@ -521,11 +521,19 @@ export interface ProductPhotoItem {
 // share doc is fully self-contained and exposes nothing but the shared media
 // (Storage download URLs are already public/tokenized). Read by anyone via the
 // /s/:id route (see firestore.rules — shares are the one public-read collection).
+/** One folder inside a shared subtree, so a public link can be browsed exactly
+ *  like the folder it came from instead of dumping every file into one grid. */
+export interface ShareFolder {
+  id: string;
+  name: string;
+  parentId: string | null; // null = the shared folder itself (the root of the link)
+}
 export interface ShareItem {
   type: CatalogItemType; // "image" | "video"
   url: string;
   name: string;
-  folder?: string; // originating sub-folder name, for grouping/labels
+  folder?: string;   // originating sub-folder name, for grouping/labels
+  folderId?: string; // which ShareFolder it belongs to; absent = the root
 }
 export interface Share {
   id: string;
@@ -534,6 +542,11 @@ export interface Share {
   title: string; // folder name shown to the public viewer
   items: ShareItem[];
   count: number;
+  folders?: ShareFolder[]; // the sub-folder tree, so the link is browsable
+  /** Items are split across shares/{id}/items/{0..pageCount-1} when the folder
+   *  is too big for one Firestore document. 0 / absent = all of them are in
+   *  `items` above. */
+  pageCount?: number;
   createdBy: string;
   createdAt: string;
   updatedAt: string;

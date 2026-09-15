@@ -2,10 +2,10 @@ import { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
 import { doc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
-import type { Share, ShareItem } from "@/lib/db";
-import { SHARE_MAIN_SITE, shareIsExpired } from "@/lib/share";
+import type { Share, ShareItem, ShareFolder } from "@/lib/db";
+import { SHARE_MAIN_SITE, shareIsExpired, loadShareItems } from "@/lib/share";
 import { motion, AnimatePresence } from "framer-motion";
-import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock } from "lucide-react";
+import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, ChevronRight as Crumb } from "lucide-react";
 
 async function downloadOne(fileUrl: string, filename: string) {
   try {
@@ -74,6 +74,9 @@ export function SharedGalleryPage() {
   const [status, setStatus] = useState<"loading" | "ok" | "missing" | "expired">("loading");
   const [lightbox, setLightbox] = useState<number | null>(null);
   const [downloading, setDownloading] = useState(false);
+  const [allItems, setAllItems] = useState<ShareItem[]>([]);
+  // Which sub-folder the visitor is looking at (null = the shared folder itself).
+  const [path, setPath] = useState<ShareFolder[]>([]);
 
   useEffect(() => {
     let alive = true;
@@ -84,6 +87,11 @@ export function SharedGalleryPage() {
         if (snap.exists()) {
           const s = snap.data() as Share;
           setShare(s);
+          // Big folders are split across shares/{id}/items/{n} — pull them all in
+          // so the visitor sees the whole folder, not just the first page.
+          const full = await loadShareItems({ ...s, id: id! });
+          if (!alive) return;
+          setAllItems(full);
           setStatus(shareIsExpired(s) ? "expired" : "ok");
         } else setStatus("missing");
       } catch { if (alive) setStatus("missing"); }
@@ -98,7 +106,29 @@ export function SharedGalleryPage() {
     return () => clearTimeout(t);
   }, [status]);
 
-  const items = share?.items ?? [];
+  // ── What this screen is showing right now ───────────────────────────────────
+  // A share made before folders were kept has no `folders` list: fall back to
+  // the old flat grid rather than hiding everything behind an empty root.
+  const folders = share?.folders ?? [];
+  const browsable = folders.length > 0;
+  const hereId = path.length ? path[path.length - 1].id : null;
+  const subFolders = browsable ? folders.filter(f => (f.parentId ?? null) === hereId) : [];
+  const items = browsable
+    ? allItems.filter(it => (it.folderId ?? null) === hereId)
+    : allItems;
+  const countIn = (folderId: string): number => {
+    // Everything under this folder, however deep — what the folder card shows.
+    const ids = new Set([folderId]);
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const f of folders) {
+        if (f.parentId && ids.has(f.parentId) && !ids.has(f.id)) { ids.add(f.id); grew = true; }
+      }
+    }
+    return allItems.filter(it => it.folderId && ids.has(it.folderId)).length;
+  };
+
   const downloadAll = async () => {
     setDownloading(true);
     try { for (let i = 0; i < items.length; i++) await downloadOne(items[i].url, filenameFor(items[i], i)); }
@@ -150,13 +180,62 @@ export function SharedGalleryPage() {
         {status === "ok" && share && (
           <>
             <div className="mb-5">
-              <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{share.title}</h1>
-              <p className="text-sm text-muted-foreground mt-0.5">{items.length} item{items.length !== 1 ? "s" : ""} · shared by Starlink Jewels</p>
+              {/* Breadcrumb — a shared folder keeps its sub-folders, so the
+                  visitor browses it the same way we do. */}
+              <nav className="flex items-center gap-1 flex-wrap text-sm mb-1">
+                <button onClick={() => setPath([])}
+                  className={`font-medium ${path.length ? "text-primary hover:underline" : "text-brand-dark"}`}>
+                  {share.title}
+                </button>
+                {path.map((f, i) => (
+                  <span key={f.id} className="flex items-center gap-1 min-w-0">
+                    <Crumb className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <button onClick={() => setPath(path.slice(0, i + 1))}
+                      className={`font-medium truncate ${i === path.length - 1 ? "text-brand-dark" : "text-primary hover:underline"}`}>
+                      {f.name}
+                    </button>
+                  </span>
+                ))}
+              </nav>
+              <h1 className="font-display text-2xl md:text-3xl text-brand-dark">
+                {path.length ? path[path.length - 1].name : share.title}
+              </h1>
+              <p className="text-sm text-muted-foreground mt-0.5">
+                {subFolders.length > 0 && `${subFolders.length} folder${subFolders.length !== 1 ? "s" : ""} · `}
+                {items.length} item{items.length !== 1 ? "s" : ""}
+                {browsable && !path.length && allItems.length !== items.length ? ` · ${allItems.length} in total` : ""}
+                {" · shared by Starlink Jewels"}
+              </p>
             </div>
 
-            {items.length === 0 ? (
+            {subFolders.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
+                {subFolders.map(f => {
+                  const cover = allItems.find(it => it.folderId === f.id && it.type === "image");
+                  return (
+                    <button key={f.id} onClick={() => setPath([...path, f])}
+                      className="rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm text-left hover:shadow-md transition-shadow">
+                      <div className="aspect-square bg-secondary/30 overflow-hidden">
+                        {cover
+                          ? <img src={cover.url} alt={f.name} loading="lazy" decoding="async" className="w-full h-full object-cover" />
+                          : <div className="w-full h-full grid place-items-center"><Folder className="h-10 w-10 text-slate-300" /></div>}
+                      </div>
+                      <div className="px-2.5 pt-2 pb-2">
+                        <p className="text-sm font-medium text-brand-dark truncate flex items-center gap-1.5">
+                          <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />{f.name}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground">{countIn(f.id)} items</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+
+            {items.length === 0 && subFolders.length === 0 ? (
               <div className="py-20 text-center text-muted-foreground">This folder is empty.</div>
-            ) : (
+            ) : items.length === 0 ? null : (
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
                 {items.map((it, i) => (
                   <motion.div key={i} whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col">

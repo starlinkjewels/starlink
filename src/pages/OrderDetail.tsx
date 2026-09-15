@@ -31,7 +31,7 @@ import {
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
-import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
+import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
@@ -301,8 +301,10 @@ export function OrderDetailPage() {
     toast.success(v ? `Design number set to ${v}` : "Design number cleared");
   };
   const openEditPurchase = (p: Purchase) => {
-    const check = canEditPurchase(db, p);
-    if (!check.ok) { toast.error(check.reason!); return; }
+    // A finished piece locks the WEIGHT, not the price — open the dialog in
+    // price-only mode instead of refusing, so a mistyped rate is still fixable.
+    const scope = purchaseEditScope(db, p);
+    if (!scope.quantity && !scope.money) { toast.error(scope.reason!); return; }
     setEditingPurchase(p);
   };
   const saveEditPurchase = async (edit: PurchaseEdit) => {
@@ -3409,6 +3411,8 @@ export function OrderDetailPage() {
       purchase={editingPurchase}
       onClose={() => setEditingPurchase(null)}
       onSave={saveEditPurchase}
+      lockQuantity={!!editingPurchase && !purchaseEditScope(db, editingPurchase).quantity}
+      lockNote={editingPurchase ? purchaseEditScope(db, editingPurchase).reason : undefined}
     />
     </>
   );

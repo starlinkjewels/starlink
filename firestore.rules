@@ -152,6 +152,10 @@ service cloud.firestore {
     // already public tokenized Storage URLs). Anyone with the unguessable link
     // can read it (no login); only staff can create/update/delete shares.
     match /shares/{id} { allow read: if true; allow write: if isStaff(); }
+    // A folder with thousands of photos does not fit in one 1 MiB document, so
+    // the overflow is written to pages under the share. Same access as the
+    // share itself: public to read, staff to write.
+    match /shares/{id}/items/{page} { allow read: if true; allow write: if isStaff(); }
 
     // App settings / branding — readable by any active user; edited by staff.
     match /meta/{doc} {

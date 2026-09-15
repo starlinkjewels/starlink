@@ -13,10 +13,14 @@ import type { PurchaseEdit } from "@/lib/purchaseVoid";
  * Saving carries the change through the supplier's due, the factory issue, the
  * certified packet and the stock trail — see editPurchase() in purchaseVoid.ts.
  */
-export function EditPurchaseDialog({ purchase, onClose, onSave }: {
+export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lockNote }: {
   purchase: Purchase | null;
   onClose: () => void;
   onSave: (edit: PurchaseEdit) => Promise<void>;
+  /** True once the material has been made into a finished piece — the weight is
+   *  fixed from then on, but the rate can still be corrected. */
+  lockQuantity?: boolean;
+  lockNote?: string;
 }) {
   const isGold = purchase?.material === "gold";
   const isCertified = purchase?.material === "diamond" && purchase?.diamond?.kind === "certified";
@@ -93,7 +97,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
         <div className="grid grid-cols-2 gap-3 mt-1">
           <div>
             <Label className="text-xs">{isGold ? "Weight (g)" : "Carat (ct)"}</Label>
-            <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} disabled={lockQuantity} className="rounded-xl h-10 mt-1 disabled:opacity-60" />
           </div>
           <div>
             <Label className="text-xs">Rate / {unit} ({purchase.currency})</Label>
@@ -104,6 +108,9 @@ export function EditPurchaseDialog({ purchase, onClose, onSave }: {
             <Input type="number" min={0} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
           </div>
         </div>
+        {lockQuantity && lockNote && (
+          <p className="text-[11px] text-muted-foreground -mt-1">{lockNote}</p>
+        )}
 
         {purchase.material === "diamond" && !isCertified && (
           <div>

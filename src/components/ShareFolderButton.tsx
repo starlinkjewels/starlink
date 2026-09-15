@@ -20,15 +20,15 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  const buildItems = async () =>
+  const buildSnapshot = async () =>
     kind === "catalog" ? await buildCatalogItems(folderId) : buildProductPhotoItems(folderId);
 
   const generate = async (refresh: boolean) => {
     setBusy(true);
     try {
-      const items = await buildItems();
+      const { items, folders } = await buildSnapshot();
       if (items.length === 0) { toast.error("This folder has no photos or videos to share yet."); return; }
-      saveShare({ kind, sourceFolderId: folderId, title: folderName, items, createdBy: user!.id });
+      await saveShare({ kind, sourceFolderId: folderId, title: folderName, items, folders, createdBy: user!.id });
       setOpen(true);
       if (refresh) toast.success(`Link updated · ${items.length} item${items.length !== 1 ? "s" : ""}`);
       if (items.length >= MAX_SHARE_ITEMS) toast.message(`Shared the first ${MAX_SHARE_ITEMS} items (folder is very large).`);
@@ -46,7 +46,7 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
   const stop = () => {
     if (!existing) return;
     if (!confirm("Stop sharing this folder? The public link will stop working.")) return;
-    deleteShare(existing.id);
+    void deleteShare(existing.id, existing.pageCount);
     setOpen(false);
     toast.success("Sharing stopped");
   };

@@ -5,7 +5,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { recomputeStockFromHistory } from "@/lib/stock";
-import { canEditPurchase, editPurchase } from "@/lib/purchaseVoid";
+import { purchaseEditScope, editPurchase } from "@/lib/purchaseVoid";
 import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -467,8 +467,15 @@ function CertifiedSection() {
 
     let billNote = "";
     if (moneyChanged && purchase) {
-      const chk = canEditPurchase(live, purchase);
-      if (chk.ok) {
+      const scope = purchaseEditScope(live, purchase);
+      // A stone already set into a finished piece keeps its weight; only its
+      // price can still be corrected.
+      const caratChanged = Math.abs((before?.carat ?? 0) - p.carat) > 0.0001;
+      if (caratChanged && !scope.quantity) {
+        toast.error(scope.reason ?? "This stone’s weight can no longer be changed.");
+        return;
+      }
+      if (scope.money) {
         // The rate on a packet is its NET cost per carat. Convert it back into
         // the purchase's own billing currency, keeping any recorded discount so
         // qty x rate less discount still lands on the same rupee figure.
@@ -502,7 +509,7 @@ function CertifiedSection() {
       } else {
         // Paid for, or already used in a piece. Re-valuing the stone is still
         // allowed, but the supplier's settled bill must not move underneath it.
-        billNote = ` — the supplier's bill was left alone (${chk.reason})`;
+        billNote = ` — the supplier’s bill was left alone (${scope.reason ?? "it is already settled"})`;
       }
     }
 

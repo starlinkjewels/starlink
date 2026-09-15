@@ -195,14 +195,50 @@ export interface PurchaseEdit {
 }
 
 /**
- * Can this purchase still be corrected? Same rule as removing it: once the
- * money is paid or the factory has turned the material into a finished piece,
- * changing the quantity or value would silently desync the ledgers, so it's refused.
+ * What may still be corrected on this purchase.
+ *
+ * Quantity and value are two different risks. Moving the QUANTITY moves real
+ * material — the factory's hands, the stock ledger, a certified packet — so it
+ * is refused the moment that material has been turned into a finished piece.
+ * The VALUE moves only money, and correcting a mistyped rate stays safe right
+ * up until someone pays against it; refusing that too meant a wrong price was
+ * stuck on the supplier's bill forever, which is not a correction anyone can
+ * make "at the source".
+ */
+export function purchaseEditScope(db: DB, p: Purchase): {
+  quantity: boolean;
+  money: boolean;
+  /** Why the quantity is locked, when it is. */
+  reason?: string;
+} {
+  if (purchasePaid(p) > 0) {
+    return { quantity: false, money: false, reason: "A payment has already been made against this purchase. Reverse that payment from the Locker first." };
+  }
+  const issuances = (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
+  for (const i of issuances) {
+    if (issuancePaid(i) > 0) {
+      return { quantity: false, money: false, reason: "Making charges have already been paid to the factory for this material. Reverse that payment first." };
+    }
+    if (i.status === "closed" || i.finishedNetWeight != null) {
+      return { quantity: false, money: true, reason: "The factory has already returned the finished piece made from this material, so the weight can't change — but the rate still can." };
+    }
+  }
+  const packets = (db.diamondPackets ?? []).filter(pk => pk.purchaseId === p.id);
+  if (packets.some(pk => pk.status === "used" || pk.status === "sold")) {
+    return { quantity: false, money: true, reason: "A certified stone from this purchase is already used in a piece or sold, so its weight can't change — but the rate still can." };
+  }
+  return { quantity: true, money: true };
+}
+
+/**
+ * Can this purchase still be corrected AT ALL? True when either the quantity or
+ * the value is still open. Callers that need to know which one should use
+ * purchaseEditScope() directly.
  */
 export function canEditPurchase(db: DB, p: Purchase): { ok: boolean; reason?: string } {
-  const base = canVoidPurchase(db, p);
-  if (base.ok) return base;
-  return { ok: false, reason: base.reason!.replace("removed", "changed").replace("remove", "change") };
+  const scope = purchaseEditScope(db, p);
+  if (scope.quantity || scope.money) return { ok: true };
+  return { ok: false, reason: scope.reason };
 }
 
 /**
