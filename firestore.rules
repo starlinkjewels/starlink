@@ -126,6 +126,10 @@ service cloud.firestore {
     match /factories/{id}          { allow read, write: if isStaff(); }
     match /materialIssuances/{id}  { allow read, write: if isStaff(); }
     match /diamondPackets/{id}     { allow read, write: if isStaff(); }
+    // A diamond sold straight to a buyer (loose out of pooled stock, or one
+    // certified packet) rather than set into an order. Same staff-only access as
+    // every other manufacturing record.
+    match /diamondSales/{id}        { allow read, write: if isStaff(); }
     match /stockMovements/{id}     { allow read, write: if isStaff(); }
     // Singleton running stock balance — mutated only via a transaction in
     // src/lib/stock.ts; this rule is defense-in-depth, not the primary
