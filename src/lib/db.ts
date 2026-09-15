@@ -1209,6 +1209,40 @@ export function capOrderAdvances(o: Order): number {
 }
 
 /**
+ * Apply money the client has sent AGAINST ONE INVOICE. Its own orders are
+ * cleared first (oldest first), and only what is left over spills onto their
+ * other unpaid orders and finally to credit.
+ *
+ * Plain FIFO across every order is right for "here is some money"; it is wrong
+ * for "here is the payment for invoice 0001", which would land on older unbilled
+ * work and leave the invoice the client just paid still showing as pending.
+ * Returns the leftover, for the caller to store as client credit.
+ */
+export function allocateToInvoice(
+  d: DB,
+  invoiceId: string,
+  amount: number,
+  recordedBy: string,
+  at: string,
+  note?: string,
+): number {
+  const inv = (d.invoices ?? []).find(i => i.id === invoiceId);
+  if (!inv) return amount;
+  const ids = invoiceOrderIds(inv);
+  const invOrders = ids
+    .map(id => d.orders.find(o => o.id === id))
+    .filter((o): o is Order => !!o && o.status !== "Rejected");
+  let left = allocatePaymentFIFO(invOrders, amount, recordedBy, at, note ?? `Payment — invoice ${inv.number}`);
+  if (left > 0.009) {
+    const others = d.orders.filter(o =>
+      o.clientId === inv.clientId && o.status !== "Rejected" && !ids.includes(o.id));
+    left = allocatePaymentFIFO(others, left, recordedBy, at, note ?? `Payment — invoice ${inv.number}`);
+  }
+  return Math.round(left * 100) / 100;
+}
+
+
+/**
  * Reconcile a client's account: reclaim any per-order overpayment, add carried
  * credit and any `extra` new payment, then re-allocate oldest-bill-first.
  * Mutates the given orders; returns the leftover to store as client credit.

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
-  reconcileClientAccount, type Expense, type Locker, type LockerTransaction,
+  reconcileClientAccount, allocateToInvoice, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import {
@@ -100,9 +100,25 @@ function ReceiveFromClient() {
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
   const [exchangeRate, setExchangeRate] = useState("");
+  // Money sent to settle ONE invoice should clear THAT invoice. Without this the
+  // payment went oldest-bill-first and the invoice the client just paid for could
+  // still read as pending.
+  const [invoiceId, setInvoiceId] = useState("");
   const [saving, setSaving] = useState(false);
 
   const clients = db.clients.filter(c => c.status === "active").sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const openInvoices = clientId
+    ? (db.invoices ?? [])
+        .filter(i => i.clientId === clientId)
+        .map(i => ({
+          inv: i,
+          bal: invoiceOrderIds(i)
+            .map(oid => db.orders.find(o => o.id === oid))
+            .filter((o): o is Order => !!o && o.status !== "Rejected")
+            .reduce((s, o) => s + balanceDue(o), 0),
+        }))
+        .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
+    : [];
   const locker = db.lockers.find(l => l.id === lockerId);
   const lockerCurrency = locker?.currency || "INR";
   // A client always pays in USD (that's what the order is billed in) — only
@@ -125,8 +141,11 @@ function ReceiveFromClient() {
       updateDb(d => {
         const client = d.clients.find(x => x.id === clientId);
         if (!client) return;
-        const clientOrders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
-        const leftover = reconcileClientAccount(clientOrders, amt, client.creditBalance || 0, user!.id, now, noteText);
+        const leftover = invoiceId
+          ? allocateToInvoice(d, invoiceId, amt + (client.creditBalance || 0), user!.id, now, noteText)
+          : reconcileClientAccount(
+              d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected"),
+              amt, client.creditBalance || 0, user!.id, now, noteText);
         client.creditBalance = leftover > 0 ? leftover : undefined;
         const locker = d.lockers.find(l => l.id === lockerId);
         if (locker) {
@@ -146,7 +165,7 @@ function ReceiveFromClient() {
         });
       });
       toast.success(`${fmtMoney(amt)} received from ${c.companyName}`);
-      setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate("");
+      setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId("");
     } finally { setSaving(false); }
   };
 
@@ -160,6 +179,22 @@ function ReceiveFromClient() {
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
           <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
         </Select>
+          {clientId && openInvoices.length > 0 && (
+            <div>
+              <Label className="text-xs">Against</Label>
+              <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
+                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="fifo">Oldest bills first</SelectItem>
+                  {openInvoices.map(({ inv, bal }) => (
+                    <SelectItem key={inv.id} value={inv.id}>
+                      Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
       </div>
       <div className="grid grid-cols-2 gap-3">
         <div>

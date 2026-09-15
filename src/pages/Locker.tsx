@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, type LockerType } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, orderTotal, balanceDue, totalAdvance, invoiceOrderIds, reconcileClientAccount, allocateToInvoice, type LockerType, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
@@ -48,9 +48,35 @@ export function LockerPage() {
   const [txnNote, setTxnNote] = useState("");
   const [txnTargetLocker, setTxnTargetLocker] = useState("");
   const [txnExchangeRate, setTxnExchangeRate] = useState("");
+  // Income can be a REAL client payment rather than a loose cash entry: pick the
+  // client (and the invoice it settles) and the money is allocated to their
+  // orders, instead of sitting in the locker while the invoice still reads unpaid.
+  const [txnClientId, setTxnClientId] = useState("");
+  const [txnInvoiceId, setTxnInvoiceId] = useState("");
+  // Repairing an income row that was typed in as a loose entry when it was
+  // really a client payment — the cash is already in the locker, only the
+  // allocation to their orders is missing.
+  const [fixTxnId, setFixTxnId] = useState<string | null>(null);
+  const [fixClientId, setFixClientId] = useState("");
+  const [fixInvoiceId, setFixInvoiceId] = useState("");
+  const [fixRate, setFixRate] = useState("");
 
   const lockers = db.lockers.filter(l => l.active !== false);
   const selected = lockers.find(l => l.id === selectedId) ?? null;
+
+  // ── Client payments recorded straight from the locker ──────────────────────
+  const clientsSorted = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const invLiveBalance = (ids: string[]) =>
+    ids.map(oid => db.orders.find(o => o.id === oid))
+      .filter((o): o is Order => !!o && o.status !== "Rejected")
+      .reduce((s, o) => s + balanceDue(o), 0);
+  const clientInvoices = txnClientId
+    ? (db.invoices ?? [])
+        .filter(i => i.clientId === txnClientId)
+        .map(i => ({ inv: i, bal: invLiveBalance(invoiceOrderIds(i)) }))
+        .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
+    : [];
+
 
   const createLocker = () => {
     if (!f.name.trim()) { toast.error("Enter an account name"); return; }
@@ -111,6 +137,11 @@ export function LockerPage() {
     const crossCurrency = !!target && (target.currency || "INR") !== (selected.currency || "INR");
     const rate = Number(txnExchangeRate);
     if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
+    // An INR locker taking a USD-billed client payment needs the rate to know
+    // how much of their bill this actually settles.
+    if (txnType === "income" && txnClientId && (selected.currency || "INR") !== "USD" && (!rate || rate <= 0)) {
+      toast.error("Enter the exchange rate — the client is billed in USD"); return;
+    }
     // Overdraw warning — money leaving the locker (expense / transfer out) that
     // would take it below zero is almost always a mistake (wrong locker, or a
     // deposit that was never recorded). Warn, but let them proceed knowingly.
@@ -153,16 +184,81 @@ export function LockerPage() {
           recordedBy: user!.id, createdAt: now,
         });
       } else {
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
-          category: txnCategory.trim() || undefined, refType: "manual",
-          note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
-        });
+        // Income the client sent us is a PAYMENT, not a loose cash entry: put it
+        // through the same allocation the Payments screen uses, or the money sits
+        // in the locker while their invoice still reads unpaid (exactly what
+        // happened to invoice 0001).
+        const payClient = txnType === "income" && txnClientId
+          ? d.clients.find(c => c.id === txnClientId)
+          : undefined;
+        if (payClient) {
+          // Orders are billed in USD; the amount typed here is in the LOCKER's
+          // currency, so an INR locker converts back through the entered rate.
+          const billed = currency === "USD" ? amt : (rate > 0 ? Math.round((amt / rate) * 100) / 100 : 0);
+          const noteText = txnNote.trim() || undefined;
+          const leftover = txnInvoiceId
+            ? allocateToInvoice(d, txnInvoiceId, billed + (payClient.creditBalance || 0), user!.id, now, noteText)
+            : reconcileClientAccount(
+                d.orders.filter(o => o.clientId === payClient.id && o.status !== "Rejected"),
+                billed, payClient.creditBalance || 0, user!.id, now, noteText);
+          payClient.creditBalance = leftover > 0 ? leftover : undefined;
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: selected.id, type: "income", amountInr: amt, currency,
+            category: `Client Payment — ${payClient.companyName}`,
+            refType: "clientPayment", refId: payClient.id,
+            note: noteText, recordedBy: user!.id, createdAt: now,
+            exchangeRate: currency === "USD" ? undefined : (rate || undefined),
+          });
+        } else {
+          d.lockerTransactions.push({
+            id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
+            category: txnCategory.trim() || undefined, refType: "manual",
+            note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
+          });
+        }
       }
     });
     toast.success("Transaction recorded");
-    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnMode(false);
+    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnClientId(""); setTxnInvoiceId(""); setTxnMode(false);
   };
+
+  /**
+   * Turn an income row that was recorded as a loose entry into a real client
+   * payment. The locker row is NOT duplicated — the cash was always counted,
+   * it just never reached the client's orders, so this only runs the missing
+   * allocation and re-tags the row.
+   */
+  const applyIncomeToClient = () => {
+    const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
+    const client = db.clients.find(c => c.id === fixClientId);
+    if (!txn || !client) { toast.error("Choose the client this money came from"); return; }
+    const isUsd = (txn.currency ?? "INR") === "USD";
+    const rate = Number(fixRate) || 0;
+    if (!isUsd && rate <= 0) { toast.error("Enter the exchange rate — the client is billed in USD"); return; }
+    const billed = isUsd ? txn.amountInr : Math.round((txn.amountInr / rate) * 100) / 100;
+    const now = new Date().toISOString();
+    let settled = 0;
+    updateDb(d => {
+      const t = d.lockerTransactions.find(x => x.id === txn.id);
+      const c = d.clients.find(x => x.id === client.id);
+      if (!t || !c) return;
+      const before = d.orders.filter(o => o.clientId === c.id).reduce((s, o) => s + totalAdvance(o), 0);
+      const leftover = fixInvoiceId
+        ? allocateToInvoice(d, fixInvoiceId, billed + (c.creditBalance || 0), user!.id, now, t.note)
+        : reconcileClientAccount(
+            d.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"),
+            billed, c.creditBalance || 0, user!.id, now, t.note);
+      c.creditBalance = leftover > 0 ? leftover : undefined;
+      settled = Math.round((d.orders.filter(o => o.clientId === c.id).reduce((s, o) => s + totalAdvance(o), 0) - before) * 100) / 100;
+      t.refType = "clientPayment";
+      t.refId = c.id;
+      t.category = `Client Payment — ${c.companyName}`;
+      if (!isUsd) t.exchangeRate = rate;
+    });
+    toast.success(`${fmtMoney(settled)} applied to ${client.companyName}'s bills`);
+    setFixTxnId(null);
+  };
+
 
   const txns = selected
     ? db.lockerTransactions.filter(t => t.lockerId === selected.id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
@@ -432,6 +528,56 @@ export function LockerPage() {
                 <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
               </div>
 
+              {txnType === "income" && (
+                <div className="p-3 rounded-xl bg-secondary space-y-2.5">
+                  <Label className="text-xs">Money received from a client? Pick them and it settles their bill.</Label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                    <Select value={txnClientId || "none"} onValueChange={v => { setTxnClientId(v === "none" ? "" : v); setTxnInvoiceId(""); }}>
+                      <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Not a client payment</SelectItem>
+                        {clientsSorted.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                      </SelectContent>
+                    </Select>
+                    {txnClientId && (
+                      <Select value={txnInvoiceId || "fifo"} onValueChange={v => setTxnInvoiceId(v === "fifo" ? "" : v)}>
+                        <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fifo">Oldest bills first</SelectItem>
+                          {clientInvoices.map(({ inv, bal }) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </div>
+                  {txnClientId && (selected.currency || "INR") !== "USD" && (
+                    <>
+                      <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+                      <Input type="number" min={0} step="0.01" value={txnExchangeRate} onChange={e => setTxnExchangeRate(e.target.value)}
+                        className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
+                    </>
+                  )}
+                  {txnClientId && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {(() => {
+                        const amt = Number(txnAmount) || 0;
+                        const r = Number(txnExchangeRate) || 0;
+                        const billed = (selected.currency || "INR") === "USD" ? amt : (r > 0 ? amt / r : 0);
+                        const chosen = clientInvoices.find(x => x.inv.id === txnInvoiceId);
+                        if (!billed) return "Enter the amount to see what it settles.";
+                        return chosen
+                          ? `${fmtMoney(billed)} goes against invoice ${chosen.inv.number} (${fmtMoney(chosen.bal)} pending); anything left over moves to their other bills, then to credit.`
+                          : `${fmtMoney(billed)} is applied to their oldest unpaid orders first; anything left over becomes client credit.`;
+                      })()}
+                    </p>
+                  )}
+                </div>
+              )}
+
+
               {txnType === "transfer_out" && txnTargetLocker && (() => {
                 const target = lockers.find(l => l.id === txnTargetLocker);
                 if (!target) return null;
@@ -491,6 +637,12 @@ export function LockerPage() {
                     {t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}
                   </p>
                   <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
+                  {t.type === "income" && t.refType !== "clientPayment" && (
+                    <button onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
+                      className="text-[11px] text-primary hover:underline mt-0.5">
+                      Apply to a client’s bill
+                    </button>
+                  )}
                 </div>
                 <div className="w-20 sm:w-24 text-right shrink-0">
                   {!isCredit && <p className="text-sm font-semibold text-destructive">{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}</p>}
@@ -578,6 +730,73 @@ export function LockerPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* Apply a loose income row to a client's bill (repairs a payment that was
+          typed in as a plain locker entry and never reached their orders). */}
+      <Dialog open={!!fixTxnId} onOpenChange={o => { if (!o) setFixTxnId(null); }}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader><DialogTitle className="font-display text-xl">Apply to a client&rsquo;s bill</DialogTitle></DialogHeader>
+          {(() => {
+            const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
+            if (!txn) return null;
+            const isUsd = (txn.currency ?? "INR") === "USD";
+            const rate = Number(fixRate) || 0;
+            const billed = isUsd ? txn.amountInr : (rate > 0 ? txn.amountInr / rate : 0);
+            const invs = fixClientId
+              ? (db.invoices ?? [])
+                  .filter(i => i.clientId === fixClientId)
+                  .map(i => ({ inv: i, bal: invLiveBalance(invoiceOrderIds(i)) }))
+                  .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
+              : [];
+            return (
+              <>
+                <p className="text-sm text-muted-foreground -mt-1">
+                  {fmtLockerAmount(txn.amountInr, txn.currency)} received on {fmtDate(txn.createdAt)} is already counted in this locker.
+                  It was never applied to anyone&rsquo;s orders, which is why their invoice still shows as pending. No second
+                  entry is made here — only the missing allocation.
+                </p>
+                <div className="space-y-2.5 mt-1">
+                  <div>
+                    <Label className="text-xs">Received from</Label>
+                    <Select value={fixClientId} onValueChange={v => { setFixClientId(v); setFixInvoiceId(""); }}>
+                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose the client" /></SelectTrigger>
+                      <SelectContent>{clientsSorted.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  {fixClientId && (
+                    <div>
+                      <Label className="text-xs">Against</Label>
+                      <Select value={fixInvoiceId || "fifo"} onValueChange={v => setFixInvoiceId(v === "fifo" ? "" : v)}>
+                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fifo">Oldest bills first</SelectItem>
+                          {invs.map(({ inv, bal }) => (
+                            <SelectItem key={inv.id} value={inv.id}>
+                              Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  {!isUsd && (
+                    <div>
+                      <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+                      <Input type="number" min={0} step="0.01" value={fixRate} onChange={e => setFixRate(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 83.50" />
+                    </div>
+                  )}
+                  {billed > 0 && <p className="text-[11px] text-muted-foreground">Settles {fmtMoney(billed)} of their billing.</p>}
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <Button variant="outline" onClick={() => setFixTxnId(null)} className="rounded-xl flex-1">Cancel</Button>
+                  <Button onClick={applyIncomeToClient} disabled={!fixClientId} className="btn-hero rounded-xl flex-1">Apply</Button>
+                </div>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }
