@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
+import { unappliedIncome, invoiceBalance, applyIncomeToClient } from "@/lib/clientPayments";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -35,6 +36,7 @@ import {
   SlidersHorizontal,
   Hash,
   Receipt,
+  Banknote,
   Trash2,
 } from "lucide-react";
 
@@ -267,6 +269,43 @@ export function SettingsPage() {
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
     toast.success(`Invoice ${number} deleted`);
   }
+
+  // ── Client money that never reached their orders ───────────────────────────
+  // A payment typed into the Locker as a plain entry sits there as cash while
+  // the client's invoice still reads unpaid. These are every such row, so the
+  // ones recorded before the Locker learnt about client payments can be put
+  // right rather than being re-keyed and double-counted.
+  const [fixTxnId, setFixTxnId] = useState<string | null>(null);
+  const [fixClientId, setFixClientId] = useState("");
+  const [fixInvoiceId, setFixInvoiceId] = useState("");
+  const [fixRate, setFixRate] = useState("");
+  const looseIncome = useMemo(() => unappliedIncome(liveDb), [liveDb]);
+  const fixTxn = looseIncome.find(t => t.id === fixTxnId) ?? null;
+  const fixInvoices = useMemo(
+    () => (fixClientId
+      ? (liveDb.invoices ?? [])
+          .filter(i => i.clientId === fixClientId)
+          .map(i => ({ inv: i, bal: invoiceBalance(liveDb, i.id) }))
+          .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
+      : []),
+    [liveDb, fixClientId],
+  );
+
+  function applyLooseIncome() {
+    if (!fixTxn) return;
+    const client = liveDb.clients.find(c => c.id === fixClientId);
+    if (!client) { toast.error("Choose the client this money came from"); return; }
+    const res = applyIncomeToClient({
+      txnId: fixTxn.id, clientId: client.id,
+      invoiceId: fixInvoiceId || undefined,
+      exchangeRate: Number(fixRate) || undefined,
+      userId: user!.id,
+    });
+    if (!res.ok) { toast.error(res.error); return; }
+    toast.success(`${fmtMoney(res.settled)} applied to ${client.companyName}'s bills`);
+    setFixTxnId(null); setFixClientId(""); setFixInvoiceId(""); setFixRate("");
+  }
+
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
     if (invoiced && !confirm(
@@ -1125,6 +1164,108 @@ export function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ── Client payments that never reached their orders (admin only) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${looseIncome.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
+                <Banknote className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Unapplied Money In</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {looseIncome.length === 0
+                    ? "Every deposit is accounted for."
+                    : `${looseIncome.length} deposit${looseIncome.length !== 1 ? "s are" : " is"} sitting in a locker without being applied to anyone.`}
+                </p>
+              </div>
+            </div>
+
+            {looseIncome.length > 0 && (
+              <>
+                <p className="mt-3 text-[11px] text-muted-foreground">
+                  Money typed into a locker as a plain entry is counted as cash but never settles a bill,
+                  so the client&rsquo;s invoice keeps reading as pending. Applying one runs only the missing
+                  allocation — the locker amount and its balance do not change, and nothing is counted twice.
+                  Leave anything that genuinely is not a client payment (capital, interest, a refund) alone.
+                </p>
+                <div className="mt-3 space-y-1.5">
+                  {looseIncome.slice(0, 30).map(t => {
+                    const locker = liveDb.lockers.find(l => l.id === t.lockerId);
+                    return (
+                      <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-white px-3 py-2">
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium truncate">
+                            {(t.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(t.amountInr).toLocaleString("en-IN")} · {t.category || t.note || "Money in"}
+                          </p>
+                          <p className="text-[11px] text-muted-foreground truncate">
+                            {locker?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
+                          </p>
+                        </div>
+                        <Button
+                          size="sm" variant="outline"
+                          onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
+                          className="rounded-lg h-8 shrink-0"
+                        >
+                          Apply to a client
+                        </Button>
+                      </div>
+                    );
+                  })}
+                  {looseIncome.length > 30 && (
+                    <p className="text-[11px] text-muted-foreground">Showing the 30 newest.</p>
+                  )}
+                </div>
+              </>
+            )}
+
+            {fixTxn && (
+              <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2.5">
+                <p className="text-xs font-semibold text-brand-dark">
+                  Apply {(fixTxn.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(fixTxn.amountInr).toLocaleString("en-IN")} from {new Date(fixTxn.createdAt).toLocaleDateString()}
+                </p>
+                <div>
+                  <Label className="text-xs">Received from</Label>
+                  <Select value={fixClientId} onValueChange={v => { setFixClientId(v); setFixInvoiceId(""); }}>
+                    <SelectTrigger className="h-10 rounded-xl mt-1 bg-white"><SelectValue placeholder="Choose the client" /></SelectTrigger>
+                    <SelectContent>
+                      {[...liveDb.clients].sort((a, b) => a.companyName.localeCompare(b.companyName))
+                        .map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {fixClientId && (
+                  <div>
+                    <Label className="text-xs">Against</Label>
+                    <Select value={fixInvoiceId || "fifo"} onValueChange={v => setFixInvoiceId(v === "fifo" ? "" : v)}>
+                      <SelectTrigger className="h-10 rounded-xl mt-1 bg-white"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="fifo">Oldest bills first</SelectItem>
+                        {fixInvoices.map(({ inv, bal }) => (
+                          <SelectItem key={inv.id} value={inv.id}>
+                            Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+                {(fixTxn.currency ?? "INR") !== "USD" && (
+                  <div>
+                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+                    <Input type="number" min={0} step="0.01" value={fixRate} onChange={e => setFixRate(e.target.value)} className="rounded-xl h-10 mt-1 bg-white" placeholder="e.g. 83.50" />
+                  </div>
+                )}
+                <div className="flex gap-2 pt-1">
+                  <Button variant="outline" onClick={() => setFixTxnId(null)} className="rounded-xl flex-1 h-9">Cancel</Button>
+                  <Button onClick={applyLooseIncome} disabled={!fixClientId} className="btn-hero rounded-xl flex-1 h-9">Apply</Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
 
         {/* ── Invoices raised by mistake (admin only) ── */}
         {isAdminUser && (

@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, orderTotal, balanceDue, totalAdvance, invoiceOrderIds, reconcileClientAccount, allocateToInvoice, type LockerType, type Order } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, reconcileClientAccount, allocateToInvoice, type LockerType, type Order } from "@/lib/db";
+import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
@@ -222,40 +223,19 @@ export function LockerPage() {
     setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnClientId(""); setTxnInvoiceId(""); setTxnMode(false);
   };
 
-  /**
-   * Turn an income row that was recorded as a loose entry into a real client
-   * payment. The locker row is NOT duplicated — the cash was always counted,
-   * it just never reached the client's orders, so this only runs the missing
-   * allocation and re-tags the row.
-   */
-  const applyIncomeToClient = () => {
+  // Shared with Settings' sweep of old entries — see src/lib/clientPayments.ts.
+  const applyIncome = () => {
     const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
     const client = db.clients.find(c => c.id === fixClientId);
     if (!txn || !client) { toast.error("Choose the client this money came from"); return; }
-    const isUsd = (txn.currency ?? "INR") === "USD";
-    const rate = Number(fixRate) || 0;
-    if (!isUsd && rate <= 0) { toast.error("Enter the exchange rate — the client is billed in USD"); return; }
-    const billed = isUsd ? txn.amountInr : Math.round((txn.amountInr / rate) * 100) / 100;
-    const now = new Date().toISOString();
-    let settled = 0;
-    updateDb(d => {
-      const t = d.lockerTransactions.find(x => x.id === txn.id);
-      const c = d.clients.find(x => x.id === client.id);
-      if (!t || !c) return;
-      const before = d.orders.filter(o => o.clientId === c.id).reduce((s, o) => s + totalAdvance(o), 0);
-      const leftover = fixInvoiceId
-        ? allocateToInvoice(d, fixInvoiceId, billed + (c.creditBalance || 0), user!.id, now, t.note)
-        : reconcileClientAccount(
-            d.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"),
-            billed, c.creditBalance || 0, user!.id, now, t.note);
-      c.creditBalance = leftover > 0 ? leftover : undefined;
-      settled = Math.round((d.orders.filter(o => o.clientId === c.id).reduce((s, o) => s + totalAdvance(o), 0) - before) * 100) / 100;
-      t.refType = "clientPayment";
-      t.refId = c.id;
-      t.category = `Client Payment — ${c.companyName}`;
-      if (!isUsd) t.exchangeRate = rate;
+    const res = applyIncomeToClient({
+      txnId: txn.id, clientId: client.id,
+      invoiceId: fixInvoiceId || undefined,
+      exchangeRate: Number(fixRate) || undefined,
+      userId: user!.id,
     });
-    toast.success(`${fmtMoney(settled)} applied to ${client.companyName}'s bills`);
+    if (!res.ok) { toast.error(res.error); return; }
+    toast.success(`${fmtMoney(res.settled)} applied to ${client.companyName}'s bills`);
     setFixTxnId(null);
   };
 
@@ -789,7 +769,7 @@ export function LockerPage() {
                 </div>
                 <div className="flex gap-2 mt-4">
                   <Button variant="outline" onClick={() => setFixTxnId(null)} className="rounded-xl flex-1">Cancel</Button>
-                  <Button onClick={applyIncomeToClient} disabled={!fixClientId} className="btn-hero rounded-xl flex-1">Apply</Button>
+                  <Button onClick={applyIncome} disabled={!fixClientId} className="btn-hero rounded-xl flex-1">Apply</Button>
                 </div>
               </>
             );
