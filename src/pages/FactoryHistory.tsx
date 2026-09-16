@@ -21,7 +21,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
-import { FullLedgerTable } from "@/components/FullLedgerTable";
+import { FullLedgerTable, type MovementRow } from "@/components/FullLedgerTable";
 import { FactoryOrderLedger, buildFactoryOrderRows } from "@/components/FactoryOrderLedger";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import {
@@ -641,6 +641,46 @@ export function FactoryHistoryPage() {
     return rows.sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))); // chronological (oldest first), opening pinned
   };
 
+  /**
+   * Flatten the two-sided rows into one movement per line — material named, with
+   * a running balance inside that material. The old debit/credit block layout
+   * left a page of white space between two thin columns when a factory only
+   * handles one material.
+   */
+  const flattenMovements = (rows: UniRow[]): MovementRow[] => {
+    const parts: { key: string; label: string; dr: (r: UniRow) => number; cr: (r: UniRow) => number; money?: boolean }[] = [
+      { key: "gold", label: "Gold (g fine)", dr: r => r.drGold, cr: r => r.crGold },
+      { key: "silver", label: "Silver (g)", dr: r => r.drSilver, cr: r => r.crSilver },
+      { key: "dia", label: "Diamond (ct)", dr: r => r.drDia, cr: r => r.crDia },
+      { key: "other", label: "Other metal (g)", dr: r => r.drOther, cr: r => r.crOther },
+      { key: "amount", label: "Amount (Rs)", dr: r => r.drAmount, cr: r => r.crAmount, money: true },
+    ];
+    const out: MovementRow[] = [];
+    const running: Record<string, number> = {};
+    for (const r of rows) {
+      for (const p of parts) {
+        const d = p.dr(r), c = p.cr(r);
+        if (!d && !c) continue;
+        // Money runs the other way round: a charge raises what we owe.
+        const delta = p.money ? c - d : d - c;
+        running[p.key] = Math.round(((running[p.key] || 0) + delta) * 1000) / 1000;
+        out.push({
+          id: `${r.id}-${p.key}`,
+          date: r.date,
+          ref: r.ref,
+          particular: r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""),
+          material: p.label,
+          out: p.money ? c : d,
+          in: p.money ? d : c,
+          balance: running[p.key],
+          money: p.money,
+        });
+      }
+    }
+    return out;
+  };
+
+
   const uniTotals = (rows: UniRow[]) => rows.reduce(
     (t, r) => ({ drGold: t.drGold + r.drGold, drSilver: t.drSilver + r.drSilver, drDia: t.drDia + r.drDia, drOther: t.drOther + r.drOther, drAmount: t.drAmount + r.drAmount, crGold: t.crGold + r.crGold, crSilver: t.crSilver + r.crSilver, crDia: t.crDia + r.crDia, crOther: t.crOther + r.crOther, crAmount: t.crAmount + r.crAmount }),
     { drGold: 0, drSilver: 0, drDia: 0, drOther: 0, drAmount: 0, crGold: 0, crSilver: 0, crDia: 0, crOther: 0, crAmount: 0 },
@@ -651,28 +691,6 @@ export function FactoryHistoryPage() {
    * was printing eight permanently blank columns and squeezing the particulars
    * into nothing; dropping them gives the description the room it needs.
    */
-  /** Column total, taken through the column’s own accessor so the totals row
-   *  can never drift out of step with the column it sits under. */
-  const sumOf = (rows: UniRow[], pick: (r: UniRow) => number) =>
-    Math.round(rows.reduce((s, r) => s + pick(r), 0) * 1000) / 1000;
-
-  const usedCols = (rows: UniRow[]) => {
-    const on = {
-      gold: rows.some(r => r.drGold || r.crGold),
-      silver: rows.some(r => r.drSilver || r.crSilver),
-      dia: rows.some(r => r.drDia || r.crDia),
-      other: rows.some(r => r.drOther || r.crOther),
-      amount: rows.some(r => r.drAmount || r.crAmount),
-    };
-    const all = [
-      { key: "gold", label: "Gold g", dr: (r: UniRow) => r.drGold, cr: (r: UniRow) => r.crGold, money: false },
-      { key: "silver", label: "Silver g", dr: (r: UniRow) => r.drSilver, cr: (r: UniRow) => r.crSilver, money: false },
-      { key: "dia", label: "Dia ct", dr: (r: UniRow) => r.drDia, cr: (r: UniRow) => r.crDia, money: false },
-      { key: "other", label: "Other g", dr: (r: UniRow) => r.drOther, cr: (r: UniRow) => r.crOther, money: false },
-      { key: "amount", label: "Amount", dr: (r: UniRow) => r.drAmount, cr: (r: UniRow) => r.crAmount, money: true },
-    ] as const;
-    return all.filter(c => on[c.key]);
-  };
 
 
   // ── Order-by-order downloads: the summary people actually read ──────────
@@ -783,110 +801,61 @@ export function FactoryHistoryPage() {
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
     const acct = factoryAccount(iss, orderNo ? undefined : factory);
-    const rows = buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to));
-    const T = uniTotals(rows);
+    const rows = flattenMovements(
+      buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
+    );
+    // One flowing table: Date, Ref, Particular, Material, Out, In, Balance. The
+    // old two-block layout left the middle of the page empty for a factory that
+    // only handles one material.
     downloadLedgerPdf({
-      title: `Factory Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
+      title: `Factory Movement Sheet — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
-        orderNo ? `Filtered to order: ${orderNo}` : "",
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
-      // Only the positions that mean something for this factory.
       summary: [
-        ...(T.drGold || T.crGold ? [{ label: "Fine Gold at Factory (24KT)", value: `${q3(T.drGold - T.crGold)} g` }] : []),
-        ...(T.drSilver || T.crSilver ? [{ label: "Silver (net)", value: `${q3(T.drSilver - T.crSilver)} g` }] : []),
-        ...(T.drDia || T.crDia ? [{ label: "Diamond (net)", value: `${q3(T.drDia - T.crDia)} ct` }] : []),
-        ...(T.drOther || T.crOther ? [{ label: "Other metal (net)", value: `${q3(T.drOther - T.crOther)} g` }] : []),
         { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
       ],
       landscape: true,
-      // Columns are laid out from what this factory actually deals in: each
-      // numeric column takes 22mm, and everything left over goes to the
-      // particulars instead of the text being cut.
-      ...(() => {
-        const cs = usedCols(rows);
-        // Each numeric column narrows as more materials appear, so the two blocks
-        // plus the particulars always fit the page instead of the credit block
-        // being pushed off the right edge.
-        const DATE = 24, REF = 30, L0 = 14, RIGHT = 283, MIN_PART = 60;
-        const W = Math.min(22, (RIGHT - L0 - DATE - REF - MIN_PART) / Math.max(1, cs.length * 2));
-        const drX = L0;
-        const midX = drX + cs.length * W;
-        const partX = midX + DATE + REF;
-        const crX = RIGHT - cs.length * W;
-        const partW = crX - partX - 4;
-        const cut = (s: string, mm: number) => {
-          const max = Math.max(8, Math.floor(mm / 1.6));
-          return s.length <= max ? s : s.slice(0, max - 1) + "…";
-        };
-        return {
-          groupHeaders: [
-            { label: "DEBIT  (issued to factory / paid)", startX: drX, endX: midX - 2 },
-            { label: "CREDIT  (returned / billed)", startX: crX, endX: RIGHT },
-          ],
-          columns: [
-            ...cs.map((c, i) => ({ header: c.label, x: drX + i * W })),
-            { header: "Date", x: midX },
-            { header: "Inv/Ref", x: midX + DATE },
-            { header: "Particular", x: partX },
-            ...cs.map((c, i) => ({ header: c.label, x: crX + i * W })),
-          ],
-          align: [
-            ...cs.map(() => "right" as const),
-            "left" as const, "left" as const, "left" as const,
-            ...cs.map(() => "right" as const),
-          ],
-          rows: rows.map(r => [
-            ...cs.map(c => (c.dr(r) ? (c.money ? rs(c.dr(r)) : String(q3(c.dr(r)))) : "")),
-            r.id === "opening" ? "Opening" : fmtDate(r.date),
-            cut(r.ref || "", REF - 2),
-            cut(r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""), partW),
-            ...cs.map(c => (c.cr(r) ? (c.money ? rs(c.cr(r)) : String(q3(c.cr(r)))) : "")),
-          ]),
-          totalsRow: [
-            ...cs.map(c => (c.money ? rs(sumOf(rows, c.dr)) : String(q3(sumOf(rows, c.dr))))),
-            "", "", "Totals",
-            ...cs.map(c => (c.money ? rs(sumOf(rows, c.cr)) : String(q3(sumOf(rows, c.cr))))),
-          ],
-        };
-      })(),
-      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
+      columns: [
+        { header: "Date", x: 14 },
+        { header: "Order / Ref", x: 42 },
+        { header: "Particular", x: 84 },
+        { header: "Material", x: 176 },
+        { header: "Out", x: 218 },
+        { header: "In", x: 242 },
+        { header: "Balance", x: 262 },
+      ],
+      align: ["left", "left", "left", "left", "right", "right", "right"],
+      rows: rows.map(r => [
+        r.id.startsWith("opening") ? "Opening" : fmtDate(r.date),
+        fit(r.ref || "", 40),
+        fit(r.particular, 88),
+        r.material,
+        r.out ? (r.money ? rs(r.out) : String(q3(r.out))) : "",
+        r.in ? (r.money ? rs(r.in) : String(q3(r.in))) : "",
+        r.money ? rs(r.balance) : String(q3(r.balance)),
+      ]),
+      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Movements`,
     });
   };
 
   const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const rows = buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to));
-    const cs = usedCols(rows);
-    // Same rule as the PDF: only the materials this factory deals in.
+    const rows = flattenMovements(
+      buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
+    );
     downloadCsv(
-      `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
-      [
-        "Date", "Inv/Ref", "Particular",
-        ...cs.map(c => `Debit ${c.label}`),
-        ...cs.map(c => `Credit ${c.label}`),
-      ],
-      [
-        ...rows.map(r => [
-          r.id === "opening" ? "Opening" : fmtDate(r.date),
-          r.ref,
-          r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""),
-          ...cs.map(c => (c.dr(r) ? (c.money ? Math.round(c.dr(r)) : q3(c.dr(r))) : "")),
-          ...cs.map(c => (c.cr(r) ? (c.money ? Math.round(c.cr(r)) : q3(c.cr(r))) : "")),
-        ] as (string | number)[]),
-        [
-          "", "", "TOTALS",
-          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.dr)) : q3(sumOf(rows, c.dr)))),
-          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.cr)) : q3(sumOf(rows, c.cr)))),
-        ],
-        [
-          "", "", "CLOSING (debit - credit)",
-          ...cs.map(c => (c.money ? "" : q3(sumOf(rows, c.dr) - sumOf(rows, c.cr)))),
-          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.cr) - sumOf(rows, c.dr)) : "")),
-        ],
-      ],
+      `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Movements`,
+      ["Date", "Order / Ref", "Particular", "Material", "Out", "In", "Balance"],
+      rows.map(r => [
+        r.id.startsWith("opening") ? "Opening" : fmtDate(r.date),
+        r.ref, r.particular, r.material,
+        r.out ? (r.money ? Math.round(r.out) : q3(r.out)) : "",
+        r.in ? (r.money ? Math.round(r.in) : q3(r.in)) : "",
+        r.money ? Math.round(r.balance) : q3(r.balance),
+      ]),
     );
   };
 
@@ -928,8 +897,8 @@ export function FactoryHistoryPage() {
               options={[
                 { label: "Order Ledger — PDF", sublabel: "Order by order: material out/back, labour, pending", kind: "pdf", run: exportOrdersPdf },
                 { label: "Order Ledger — Excel", sublabel: "Order by order: material out/back, labour, pending", kind: "excel", run: exportOrdersCsv },
-                { label: "Full Ledger — PDF", sublabel: "One Debit / Credit table — gold, diamond & amount together", kind: "pdf", run: exportCombinedPdf },
-                { label: "Full Ledger — Excel", sublabel: "One Debit / Credit table — gold, diamond & amount together", kind: "excel", run: exportCombinedCsv },
+                { label: "Movement Sheet — PDF", sublabel: "Every issue and return, with a running balance", kind: "pdf", run: exportCombinedPdf },
+                { label: "Movement Sheet — Excel", sublabel: "Every issue and return, with a running balance", kind: "excel", run: exportCombinedCsv },
                 { label: "Account Statement — PDF", sublabel: "Making charges & payments only", kind: "pdf", run: exportPdf },
                 { label: "Account Statement — Excel", sublabel: "Making charges & payments only", kind: "excel", run: exportCsv },
                 { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },
@@ -1118,8 +1087,8 @@ export function FactoryHistoryPage() {
 
       <FullLedgerTable
         title="Movement sheet"
-        caption="Every issue and return in order, for checking a figure line by line"
-        rows={buildUnifiedLedger(issuances, true)}
+        caption="Every issue and return in date order, each with its own running balance"
+        rows={flattenMovements(buildUnifiedLedger(issuances, true))}
         onExport={() => setShowExport(true)}
       />
 
