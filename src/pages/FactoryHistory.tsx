@@ -682,8 +682,11 @@ export function FactoryHistoryPage() {
 
   const exportOrdersPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const rows = orderRowsFor(from, to, orderNo);
-    const hasGold = rows.some(r => r.goldOut || r.goldIn);
-    const hasDia = rows.some(r => r.diaOut || r.diaIn);
+    // Metal and diamond always print — a factory ledger without them is no use.
+    const hasGold = true;
+    const hasDia = true;
+    const hasSilver = rows.some(r => r.silverIn);
+    const hasOther = rows.some(r => r.otherIn);
     const T = rows.reduce((t, r) => ({
       goldOut: t.goldOut + r.goldOut, goldIn: t.goldIn + r.goldIn,
       diaOut: t.diaOut + r.diaOut, diaIn: t.diaIn + r.diaIn,
@@ -694,15 +697,19 @@ export function FactoryHistoryPage() {
     let x = 14;
     const col = (header: string, w: number) => { const c = { header, x }; x += w; return c; };
     const columns = [
-      col("Order", 30), col("Date", 24), col("Item", 30),
+      col("Order", 30), col("Date", 24), col("Item", 46),
       ...(hasGold ? [col("Gold out", 22), col("Gold back", 22), col("With fact.", 24)] : []),
       ...(hasDia ? [col("Dia out", 20), col("Dia back", 20), col("Open ct", 20)] : []),
+      ...(hasSilver ? [col("Silver g", 22)] : []),
+      ...(hasOther ? [col("Other g", 22)] : []),
       col("Labour", 24), col("Paid", 22), col("Pending", 24), col("Status", 24),
     ];
     const align: ("left" | "right")[] = [
       "left", "left", "left",
       ...(hasGold ? (["right", "right", "right"] as const) : []),
       ...(hasDia ? (["right", "right", "right"] as const) : []),
+      ...(hasSilver ? (["right"] as const) : []),
+      ...(hasOther ? (["right"] as const) : []),
       "right", "right", "right", "left",
     ];
     downloadLedgerPdf({
@@ -722,9 +729,11 @@ export function FactoryHistoryPage() {
       columns,
       align,
       rows: rows.map(r => [
-        r.orderNo, fmtDate(r.date), (r.jewellery || "").slice(0, 16),
+        r.orderNo, fmtDate(r.date), [r.jewellery, r.metalNote].filter(Boolean).join(" · ").slice(0, 26),
         ...(hasGold ? [q3(r.goldOut) || "", q3(r.goldIn) || "", q3(r.goldOut - r.goldIn) || "0"] : []),
         ...(hasDia ? [r.diaOut ? r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
+        ...(hasSilver ? [q3(r.silverIn) || ""] : []),
+        ...(hasOther ? [q3(r.otherIn) || ""] : []),
         r.labour ? rs(r.labour) : "", r.paid ? rs(r.paid) : "",
         r.labour - r.paid > 0.5 ? rs(r.labour - r.paid) : "",
         r.open > 0 ? `${r.open} open` : "Done",
@@ -733,6 +742,8 @@ export function FactoryHistoryPage() {
         "", "", "Totals",
         ...(hasGold ? [String(q3(T.goldOut)), String(q3(T.goldIn)), String(q3(T.goldOut - T.goldIn))] : []),
         ...(hasDia ? [T.diaOut.toFixed(2), T.diaIn.toFixed(2), (T.diaOut - T.diaIn).toFixed(2)] : []),
+        ...(hasSilver ? [String(q3(rows.reduce((s, r) => s + r.silverIn, 0)))] : []),
+        ...(hasOther ? [String(q3(rows.reduce((s, r) => s + r.otherIn, 0)))] : []),
         rs(T.labour), rs(T.paid), rs(Math.max(0, T.labour - T.paid)), "",
       ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,

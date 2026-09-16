@@ -24,6 +24,8 @@ export interface FactoryOrderRow {
   open: number;      // issuances still open
   total: number;     // issuances on this order
   orderStatus: string;
+  /** "14K White Gold" — what the piece is made of, for the Item column. */
+  metalNote?: string;
 }
 
 /**
@@ -53,6 +55,7 @@ export function buildFactoryOrderRows(
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
+        metalNote: undefined,
       };
       byOrder.set(key, row);
     }
@@ -81,14 +84,28 @@ export function buildFactoryOrderRows(
     row.paid += (mi.makingCharges?.payments || []).reduce((s, p) => s + p.amountInr, 0);
   }
 
-  // The second metal in the finished piece is recorded on the order.
+  // Metal in the finished piece. It normally rides on the gold issuance created
+  // at Final Approval, but an order that never went through that step still has
+  // its real net weight and karat on the ORDER — a factory ledger with no metal
+  // column is no use to a jeweller, so read it from there when it is missing.
   for (const row of byOrder.values()) {
     const order = orders.find(o => o.id === row.orderId);
-    const om = (order?.otherMetal || "").trim();
-    const w = order?.otherMetalWeight || 0;
+    if (!order) continue;
+    if (row.goldIn === 0 && order.actualNetWeight && /gold/i.test(order.metal)) {
+      row.goldIn = order.productKarats
+        ? toPureGold(order.actualNetWeight, order.productKarats)
+        : order.actualNetWeight;
+      row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
+    }
+    if (order.metal === "Silver" && order.actualNetWeight && row.silverIn === 0) {
+      row.silverIn = order.actualNetWeight;
+    }
+    const om = (order.otherMetal || "").trim();
+    const w = order.otherMetalWeight || 0;
     if (om && w > 0) {
       if (/silver/i.test(om)) row.silverIn += w; else row.otherIn += w;
     }
+    if (!row.metalNote) row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
   }
 
   return [...byOrder.values()].sort((a, b) => +new Date(a.date) - +new Date(b.date));
@@ -128,9 +145,11 @@ export function FactoryOrderLedger({
     labour: t.labour + r.labour, paid: t.paid + r.paid,
   }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0, labour: 0, paid: 0 });
 
-  // Only show material groups this factory actually handles.
-  const hasGold = rows.some(r => r.goldOut || r.goldIn);
-  const hasDia = rows.some(r => r.diaOut || r.diaIn);
+  // Metal and diamond are what a jewellery factory holds, so those columns are
+  // always there even at zero — a factory ledger with no metal column tells a
+  // jeweller nothing. Silver and the second metal only appear when used.
+  const hasGold = true;
+  const hasDia = true;
   const hasSilver = rows.some(r => r.silverIn);
   const hasOther = rows.some(r => r.otherIn);
   const active = !!q.trim() || !!from || !!to || only !== "all";
@@ -239,7 +258,10 @@ export function FactoryOrderLedger({
                       : <span className="text-muted-foreground">{r.orderNo}</span>}
                   </td>
                   <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">{fmtDate(r.date)}</td>
-                  <td className="px-2 py-2 min-w-[120px]">{r.jewellery || "—"}</td>
+                  <td className="px-2 py-2 min-w-[150px]">
+                    {r.jewellery || "—"}
+                    {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
+                  </td>
                   {hasGold && (<>
                     <td className={`${num} border-l border-border/60`}>{g3(r.goldOut)}</td>
                     <td className={num}>{g3(r.goldIn)}</td>
