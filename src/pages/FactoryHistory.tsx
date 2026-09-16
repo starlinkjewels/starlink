@@ -818,7 +818,10 @@ export function FactoryHistoryPage() {
               r.credit ? rs(r.credit) : "",
               rs(r.balance),
             ]),
-          totalsRow: ["", "", "Totals", rs(acct.chargesTotal), rs(acct.chargesPaid), rs(acct.chargesPending)],
+          // The Balance column closes on billed minus paid. chargesPending clamps
+          // each issue at zero, so an overpaid one would leave the column not
+          // adding up to the figure printed under it.
+          totalsRow: ["", "", "Totals", rs(acct.chargesTotal), rs(acct.chargesPaid), rs(acct.chargesTotal - acct.chargesPaid)],
         },
       ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Complete-Statement`,

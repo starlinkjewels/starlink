@@ -247,7 +247,7 @@ export function ClientHistoryPage() {
         { label: "Total Billed (gross)", value: fmtMoney(grossBilled) },
         ...(giftUsed > 0 ? [{ label: "Gift Card Used", value: fmtMoney(giftUsed) }] : []),
         { label: "Received", value: fmtMoney(paidAmount) },
-        { label: "Outstanding", value: fmtMoney(pendingAmount) },
+        { label: "Outstanding", value: fmtMoney(account.outstanding) },
         { label: "Credit (Advance)", value: fmtMoney(account.credit) },
       ],
       landscape: true,
@@ -270,6 +270,9 @@ export function ClientHistoryPage() {
         r.credit ? fmtMoney(r.credit) : "",
         fmtMoney(r.balance),
       ]),
+      // Proves itself: billed less received is the balance the last row closes on.
+      totalsRow: ["", "", "", "Totals",
+        fmtMoney(grossBilled), fmtMoney(giftUsed + paidAmount), fmtMoney(account.outstanding)],
       filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
     });
   };
@@ -578,7 +581,10 @@ export function ClientHistoryPage() {
           { label: "Total billed", value: fmtMoney(grossBilled), tone: "out" },
           ...(giftUsed > 0 ? [{ label: "Gift card used", value: fmtMoney(giftUsed), tone: "in" as const }] : []),
           { label: "Received", value: fmtMoney(paidAmount), tone: "in" },
-          { label: "Outstanding", value: fmtMoney(pendingAmount), tone: pendingAmount > 0 ? "due" : "in" },
+          // account.outstanding carries the opening balance; pendingAmount does
+          // not, so the card used to disagree with the closing balance of the
+          // statement right underneath it whenever a client had an opening.
+          { label: "Outstanding", value: fmtMoney(account.outstanding), tone: account.outstanding > 0 ? "due" : "in" },
           { label: "Orders", value: String(billableOrders.length) },
         ]}
         rowAction={r => (r.credit > 0 && !r.pinned && user?.role === "admin" ? (

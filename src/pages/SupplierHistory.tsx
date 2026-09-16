@@ -496,6 +496,9 @@ export function SupplierHistoryPage() {
         { label: "Total Purchased", value: fmtInrPlain(account.totalPurchased) },
         { label: "Total Paid", value: fmtInrPlain(account.totalPaid) },
         { label: "Balance Owed", value: fmtInrPlain(account.balanceOwed) },
+        // The figure the table below actually closes on: what is owed after any
+        // refunds received and any purchase that was overpaid.
+        { label: "Closing Balance", value: fmtInrPlain(account.net) },
         { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
       ],
       // Landscape: a jeweller’s ledger line is the weight, the supplier’s invoice
@@ -523,6 +526,12 @@ export function SupplierHistoryPage() {
         r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "",
         fmtInrPlain(r.balance).replace("Rs. ", ""),
       ]),
+      // A totals line so the columns prove themselves: bills less payments is
+      // the balance the last row closes on.
+      totalsRow: ["", "", "Totals", "", "",
+        fmtInrPlain(account.totalPurchased).replace("Rs. ", ""),
+        fmtInrPlain(account.totalPaid + account.received).replace("Rs. ", ""),
+        fmtInrPlain(account.net).replace("Rs. ", "")],
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
     });
   };
@@ -809,7 +818,9 @@ export function SupplierHistoryPage() {
         summary={[
           { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
           { label: "Total paid", value: fmtMoneyInr(account.totalPaid), tone: "in" },
-          { label: "Outstanding", value: fmtMoneyInr(account.balanceOwed), tone: account.balanceOwed > 0 ? "due" : "in" },
+          // net = what is owed AFTER refunds received and any overpayment, which
+          // is exactly where the running balance below ends up.
+          { label: "Outstanding", value: fmtMoneyInr(account.net), tone: account.net > 0 ? "due" : "in" },
           { label: "Purchases", value: String(purchases.length) },
         ]}
       />
