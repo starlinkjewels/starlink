@@ -13,6 +13,10 @@ export interface StatementRow {
   particulars: string;
   /** The document it belongs to: order no., invoice no., stock no. */
   ref?: string;
+  /** Kept apart from `ref` so a download can give each its own column instead
+   *  of squeezing both into one and cutting the end off. */
+  invoiceNo?: string;
+  orderNo?: string;
   debit: number;
   credit: number;
   /** Running balance AFTER this row. Computed by the caller, which knows the
