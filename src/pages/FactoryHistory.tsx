@@ -705,9 +705,13 @@ export function FactoryHistoryPage() {
     const hasDia = true;
     const hasSilver = rows.some(r => r.silverIn);
     const hasOther = rows.some(r => r.otherIn);
+    // Estimates print on their row but never count toward a balance — see the
+    // same rule in FactoryOrderLedger.
     const T = rows.reduce((t, r) => ({
-      goldOut: t.goldOut + r.goldOut, goldIn: t.goldIn + r.goldIn,
-      diaOut: t.diaOut + r.diaOut, diaIn: t.diaIn + r.diaIn,
+      goldOut: t.goldOut + (r.goldEstimated ? 0 : r.goldOut),
+      goldIn: t.goldIn + r.goldIn,
+      diaOut: t.diaOut + (r.diaEstimated ? 0 : r.diaOut),
+      diaIn: t.diaIn + r.diaIn,
       labour: t.labour + r.labour, paid: t.paid + r.paid,
     }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, labour: 0, paid: 0 });
 
@@ -749,7 +753,7 @@ export function FactoryHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        { label: "Gold still at factory", value: `${q3(T.goldOut - T.goldIn)} g fine` },
+        { label: "Gold still at factory", value: `${q3((factory.openingFineGold || 0) + T.goldOut - T.goldIn)} g fine` },
         { label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` },
         { label: "Labour billed", value: fmtInrPlain(T.labour) },
         { label: "Labour pending", value: fmtInrPlain(Math.max(0, T.labour - T.paid)) },
@@ -1060,6 +1064,9 @@ export function FactoryHistoryPage() {
       </div>
       {/* Account Statement — the money side on its own, in the same ledger shape
           as every other account in the app. */}
+      {/* No summary cards on this one: the Factory Account block directly above
+          already carries the same four figures, and two copies of a number on one
+          page is how they end up disagreeing. */}
       <StatementLedger
         title="Account Statement"
         caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · making charges and payments, running balance in INR`}
@@ -1068,12 +1075,6 @@ export function FactoryHistoryPage() {
         debitLabel="Charged"
         creditLabel="Paid"
         onExport={() => setShowExport(true)}
-        summary={[
-          { label: "Charges billed", value: fmtMoneyInr(account.chargesTotal), tone: "out" },
-          { label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in" },
-          { label: "Pending", value: fmtMoneyInr(account.chargesPending), tone: account.chargesPending > 0 ? "due" : "in" },
-          { label: "Fine gold held", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold).toLocaleString()} g` },
-        ]}
       />
 
 
@@ -1084,6 +1085,7 @@ export function FactoryHistoryPage() {
       <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}
+        openingFineGold={factory.openingFineGold || 0}
         onExport={() => setShowExport(true)}
       />
 

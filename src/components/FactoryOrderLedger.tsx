@@ -107,16 +107,17 @@ export function buildFactoryOrderRows(
     row.quotedUsd = order.estimatedMakingCharges || 0;
     row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
 
+    // Gold figures the ISSUANCES do not have. The Factory Account card is
+    // computed from issuances alone, so anything read off the order is marked
+    // and kept out of every total — otherwise this ledger and that card would
+    // quote two different "gold at factory" figures for the same factory.
     const isMetal = /gold|platinum/i.test(order.metal);
-    if (row.goldIn === 0 && order.actualNetWeight && isMetal) {
-      row.goldIn = order.productKarats
-        ? toPureGold(order.actualNetWeight, order.productKarats)
-        : order.actualNetWeight;
-    }
-    const estNet = order.estimatedNetWeight || order.metalWeight || 0;
-    if (row.goldOut === 0 && row.goldIn === 0 && estNet > 0 && isMetal) {
-      row.goldOut = order.productKarats ? toPureGold(estNet, order.productKarats) : estNet;
-      row.goldEstimated = true;
+    if (row.goldOut === 0 && row.goldIn === 0 && isMetal) {
+      const w = order.actualNetWeight || order.estimatedNetWeight || order.metalWeight || 0;
+      if (w > 0) {
+        row.goldOut = order.productKarats ? toPureGold(w, order.productKarats) : w;
+        row.goldEstimated = true;
+      }
     }
     if (row.diaOut === 0 && order.diamondWeight > 0) {
       row.diaOut = order.diamondWeight;
@@ -138,10 +139,13 @@ export function buildFactoryOrderRows(
 }
 
 export function FactoryOrderLedger({
-  rows, factoryName, onExport,
+  rows, factoryName, openingFineGold = 0, onExport,
 }: {
   rows: FactoryOrderRow[];
   factoryName: string;
+  /** Fine gold the factory already held at migration. The Factory Account card
+   *  counts it, so this summary has to as well or the two disagree. */
+  openingFineGold?: number;
   onExport?: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -164,12 +168,19 @@ export function FactoryOrderLedger({
     });
   }, [rows, q, from, to, only]);
 
+  // Estimates are for reading, never for totalling: a figure taken from an order
+  // that has not been finally approved is not material the factory holds, and
+  // adding it made "Diamond not accounted" disagree with the Factory Account card
+  // above. Only real issues and returns are summed, plus the opening gold.
   const T = filtered.reduce((t, r) => ({
-    goldOut: t.goldOut + r.goldOut, goldIn: t.goldIn + r.goldIn,
-    diaOut: t.diaOut + r.diaOut, diaIn: t.diaIn + r.diaIn,
+    goldOut: t.goldOut + (r.goldEstimated ? 0 : r.goldOut),
+    goldIn: t.goldIn + (r.goldEstimated ? 0 : r.goldIn),
+    diaOut: t.diaOut + (r.diaEstimated ? 0 : r.diaOut),
+    diaIn: t.diaIn + r.diaIn,
     silverIn: t.silverIn + r.silverIn, otherIn: t.otherIn + r.otherIn,
     labour: t.labour + r.labour, paid: t.paid + r.paid,
   }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0, labour: 0, paid: 0 });
+  const goldAtFactory = openingFineGold + T.goldOut - T.goldIn;
 
   // Metal and diamond are what a jewellery factory holds, so those columns are
   // always there even at zero — a factory ledger with no metal column tells a
@@ -208,7 +219,8 @@ export function FactoryOrderLedger({
         {hasGold && (
           <div className="rounded-xl p-3 text-center bg-amber-500/10 text-amber-700">
             <p className="text-[10px] uppercase tracking-wider opacity-80">Gold still at factory</p>
-            <p className="text-base font-semibold mt-0.5">{(T.goldOut - T.goldIn).toFixed(3)} g fine</p>
+            <p className="text-base font-semibold mt-0.5">{goldAtFactory.toFixed(3)} g fine</p>
+            {openingFineGold > 0 && <p className="text-[10px] opacity-70">includes {openingFineGold.toFixed(3)} g opening</p>}
           </div>
         )}
         {hasDia && (
@@ -296,12 +308,12 @@ export function FactoryOrderLedger({
                   {hasGold && (<>
                     <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
                     <td className={num}>{g3(r.goldIn)}</td>
-                    <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : "text-success"}`}>{g3(goldBal) || "0"}</td>
+                    <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : "text-success"}`}>{r.goldEstimated ? "—" : (g3(goldBal) || "0")}</td>
                   </>)}
                   {hasDia && (<>
                     <td className={`${num} border-l border-border/60${r.diaEstimated ? " italic text-muted-foreground" : ""}`}>{r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : ""}</td>
                     <td className={num}>{r.diaIn ? r.diaIn.toFixed(2) : ""}</td>
-                    <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-success"}`}>{diaBal > 0.005 ? diaBal.toFixed(2) : "0"}</td>
+                    <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-success"}`}>{r.diaEstimated ? "—" : (diaBal > 0.005 ? diaBal.toFixed(2) : "0")}</td>
                   </>)}
                   {hasSilver && <td className={`${num} border-l border-border/60`}>{g3(r.silverIn)}</td>}
                   {hasOther && <td className={`${num} border-l border-border/60`}>{g3(r.otherIn)}</td>}
@@ -326,7 +338,7 @@ export function FactoryOrderLedger({
                 {hasGold && (<>
                   <td className={`${num} border-l border-border/60`}>{g3(T.goldOut)}</td>
                   <td className={num}>{g3(T.goldIn)}</td>
-                  <td className={num}>{g3(T.goldOut - T.goldIn) || "0"}</td>
+                  <td className={num}>{g3(goldAtFactory) || "0"}</td>
                 </>)}
                 {hasDia && (<>
                   <td className={`${num} border-l border-border/60`}>{T.diaOut.toFixed(2)}</td>
