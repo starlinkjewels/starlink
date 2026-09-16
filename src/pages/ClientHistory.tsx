@@ -61,6 +61,10 @@ export function ClientHistoryPage() {
   // Paid / outstanding come from the ORDERS, never from invoice snapshots: an
   // order can be paid before it is billed, and an invoice raised by mistake can
   // be deleted from Settings — neither may move this statement by a cent.
+  // Gross billed and gift-card credit, so the summary reconciles with the
+  // statement columns line for line.
+  const grossBilled = billableOrders.reduce((s, o) => s + orderGrossTotal(o), 0);
+  const giftUsed = billableOrders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
   const pendingAmount = billableOrders.reduce((s, o) => s + balanceDue(o), 0);
   const paidAmount = totalValue - pendingAmount;
   const activeOrders = allOrders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
@@ -237,9 +241,13 @@ export function ClientHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
-        { label: "Total Billed", value: fmtMoney(account.billed) },
-        { label: "Received", value: fmtMoney(account.allocated) },
-        { label: "Outstanding", value: fmtMoney(account.outstanding) },
+        // Same basis as the columns below: gross billed, the gift card as its own
+        // line, then what was received. A summary on a different basis to the
+        // table it heads is a reconciliation problem waiting to happen.
+        { label: "Total Billed (gross)", value: fmtMoney(grossBilled) },
+        ...(giftUsed > 0 ? [{ label: "Gift Card Used", value: fmtMoney(giftUsed) }] : []),
+        { label: "Received", value: fmtMoney(paidAmount) },
+        { label: "Outstanding", value: fmtMoney(pendingAmount) },
         { label: "Credit (Advance)", value: fmtMoney(account.credit) },
       ],
       landscape: true,
@@ -564,7 +572,11 @@ export function ClientHistoryPage() {
         creditLabel="Received"
         onExport={() => setShowExport(true)}
         summary={[
-          { label: "Total billed", value: fmtMoney(totalValue), tone: "out" },
+          // These have to add up to the columns underneath: the Billed column
+          // carries the GROSS value and a gift card shows as its own credit line,
+          // so a card reading the net would never reconcile with the table.
+          { label: "Total billed", value: fmtMoney(grossBilled), tone: "out" },
+          ...(giftUsed > 0 ? [{ label: "Gift card used", value: fmtMoney(giftUsed), tone: "in" as const }] : []),
           { label: "Received", value: fmtMoney(paidAmount), tone: "in" },
           { label: "Outstanding", value: fmtMoney(pendingAmount), tone: pendingAmount > 0 ? "due" : "in" },
           { label: "Orders", value: String(billableOrders.length) },

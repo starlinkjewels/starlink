@@ -414,8 +414,16 @@ export function SupplierHistoryPage() {
   const statement = (() => {
     const rows: StatementRow[] = [];
     // Opening balance carried in from a previous system — always the first line.
+    // Opening balance. openingCreditAmt() is what WE owe them, which in this
+    // statement is a DEBIT — it was going into the Paid column, so the running
+    // balance started negative and never agreed with Balance Owed above.
     if (hasOpeningBalance(supplier)) {
-      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Balance brought forward", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier), balance: 0, kind: "Opening", pinned: true });
+      rows.push({
+        id: "opening", date: supplier.openingDate || supplier.createdAt,
+        particulars: "Balance brought forward",
+        debit: openingCreditAmt(supplier), credit: openingDebitAmt(supplier),
+        balance: 0, kind: "Opening", pinned: true,
+      });
     }
     for (const p of purchases) {
       // Show the order number when this purchase was bought for a specific order.
