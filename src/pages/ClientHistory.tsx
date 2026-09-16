@@ -2,7 +2,6 @@ import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
@@ -181,39 +180,7 @@ export function ClientHistoryPage() {
     toast.success("Payment reversed");
   };
 
-  // Full account statement — every order billed and every payment received,
-  // chronological, with a running balance — the "professional ledger" view,
-  // separate from the Order History table below (which is order-by-order).
-  const statement = (() => {
-    const rows: StatementRow[] = [];
-    // Opening balance carried in from a previous system — always the first line.
-    if (hasOpeningBalance(client)) {
-      rows.push({ id: "opening", date: client.openingDate || client.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(client), credit: openingCreditAmt(client), balance: 0, kind: "Opening", pinned: true });
-    }
-    for (const o of billableOrders) {
-      // Bill the GROSS value, then show any gift-card redemption as its own
-      // discount line — so the ledger explains why the balance is lower.
-      rows.push({ id: o.id, date: o.createdAt, particulars: `${o.jewelleryType}${o.designNumber ? ` · #${o.designNumber}` : ""}`, ref: o.orderNumber, debit: orderGrossTotal(o), credit: 0, balance: 0, kind: "Order billed" });
-      if (o.giftCardRedeemed && o.giftCardRedeemed > 0) {
-        rows.push({ id: o.id + "-gift", date: o.createdAt, particulars: "Gift card redeemed", ref: o.orderNumber, debit: 0, credit: o.giftCardRedeemed, balance: 0, kind: "Gift card" });
-      }
-      for (const adv of o.advances || []) {
-        rows.push({ id: adv.id, date: adv.createdAt, particulars: adv.note || "Payment received", ref: o.orderNumber, debit: 0, credit: adv.amount, balance: 0, kind: "Payment" });
-      }
-    }
-    let running = 0;
-    const withBalance = [...rows]
-      // Opening balance is pinned first regardless of its as-of date.
-      .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
-      .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
-    return withBalance.reverse();
-  })();
 
-  // A statement is READ oldest-first: every balance is the balance AFTER that
-  // row, so printing newest-first ran the running total backwards and pushed
-  // the opening line to the bottom. The screen shows newest first; downloads
-  // must not.
-  const statementAsc = [...statement].reverse();
 
   /** Trim only when the text genuinely cannot fit the column (8.5pt Helvetica
    *  is about 1.6mm a character), so nothing is cut that would have fitted. */
@@ -230,8 +197,29 @@ export function ClientHistoryPage() {
    * Order-by-order is our internal view — a client does not recognise an order
    * number they were never given.
    */
+  const exportInvoiceStatementCsv = (from: Date | null, to: Date | null) => {
+    const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
+    const rows: (string | number)[][] = [];
+    for (const b of blocks) {
+      for (const i of b.items) {
+        rows.push([b.number, fmtDate(b.date), i.orderNo, i.description, i.qty,
+          i.gross, i.gift || "", i.received || "", i.balance]);
+      }
+      for (const p of b.payments) {
+        rows.push([b.number, fmtDate(p.date), "", p.note, "", "", "", p.amount, ""]);
+      }
+      rows.push([b.number, "", "", "Invoice total", "", b.gross, b.gift || "", b.received, b.balance]);
+    }
+    downloadCsv(
+      `Client-Invoice-Statement-${client.companyName.replace(/\s+/g, "_")}`,
+      ["Invoice", "Date", "Order", "Description / Particular", "Qty", "Billed", "Gift card", "Received", "Balance"],
+      rows,
+    );
+  };
+
+
   const exportInvoiceStatementPdf = (from: Date | null, to: Date | null) => {
-    const blocks = invoiceBlocks.filter(b => b.unbilled || inDateRange(b.date, from, to));
+    const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
     const oD = openingDebitAmt(client), oC = openingCreditAmt(client);
     const T = blocks.reduce((t, b) => ({
       gross: t.gross + b.gross, gift: t.gift + b.gift,
@@ -241,9 +229,7 @@ export function ClientHistoryPage() {
 
     // One table per invoice: its pieces, then the payments received against it.
     const sections = blocks.map(b => ({
-      heading: b.unbilled
-        ? `Not yet invoiced — ${b.items.length} piece${b.items.length !== 1 ? "s" : ""}`
-        : `Invoice ${b.number} · ${fmtDate(b.date)} · ${fmtMoney(b.gross)}${b.balance > 0.009 ? ` · ${fmtMoney(b.balance)} outstanding` : " · settled"}`,
+      heading: `Invoice ${b.number} · ${fmtDate(b.date)} · ${fmtMoney(b.gross)}${b.balance > 0.009 ? ` · ${fmtMoney(b.balance)} outstanding` : " · settled"}`,
       columns: [
         { header: "Order", x: 14 },
         { header: "Description", x: 46 },
@@ -284,7 +270,7 @@ export function ClientHistoryPage() {
         ...(T.gift > 0 ? [{ label: "Gift card used", value: fmtMoney(T.gift) }] : []),
         { label: "Received", value: fmtMoney(T.received) },
         { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
-        { label: "Invoices", value: String(blocks.filter(b => !b.unbilled).length) },
+        { label: "Invoices", value: String(blocks.length) },
       ],
       landscape: true,
       sections,
@@ -293,62 +279,7 @@ export function ClientHistoryPage() {
   };
 
 
-  const exportStatementCsv = (from: Date | null, to: Date | null) => {
-    downloadCsv(
-      `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
-      ["Date", "Order / Ref", "Particulars", "Type", "Billed (USD)", "Received (USD)", "Balance (USD)"],
-      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date),
-        r.ref ?? "", r.particulars, r.kind ?? "",
-        r.debit || "", r.credit || "", r.balance,
-      ]),
-    );
-  };
 
-  const exportStatementPdf = (from: Date | null, to: Date | null) => {
-    downloadLedgerPdf({
-      title: "Client Account Statement",
-      subjectLines: [
-        `Client: ${client.companyName}`,
-        `Owner: ${client.ownerName}`,
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
-      ],
-      summary: [
-        // Same basis as the columns below: gross billed, the gift card as its own
-        // line, then what was received. A summary on a different basis to the
-        // table it heads is a reconciliation problem waiting to happen.
-        { label: "Total Billed (gross)", value: fmtMoney(grossBilled) },
-        ...(giftUsed > 0 ? [{ label: "Gift Card Used", value: fmtMoney(giftUsed) }] : []),
-        { label: "Received", value: fmtMoney(paidAmount) },
-        { label: "Outstanding", value: fmtMoney(account.outstanding) },
-        { label: "Credit (Advance)", value: fmtMoney(account.credit) },
-      ],
-      landscape: true,
-      columns: [
-        { header: "Date", x: 14 },
-        { header: "Order / Ref", x: 42 },
-        { header: "Particulars", x: 88 },
-        { header: "Type", x: 170 },
-        { header: "Billed", x: 206 },
-        { header: "Received", x: 236 },
-        { header: "Balance", x: 264 },
-      ],
-      align: ["left", "left", "left", "left", "right", "right", "right"],
-      rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date),
-        fit(r.ref ?? "", 44),
-        fit(r.particulars, 80),
-        fit(r.kind ?? "", 34),
-        r.debit ? fmtMoney(r.debit) : "",
-        r.credit ? fmtMoney(r.credit) : "",
-        fmtMoney(r.balance),
-      ]),
-      // Proves itself: billed less received is the balance the last row closes on.
-      totalsRow: ["", "", "", "Totals",
-        fmtMoney(grossBilled), fmtMoney(giftUsed + paidAmount), fmtMoney(account.outstanding)],
-      filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
-    });
-  };
 
   const filtered = allOrders.filter(o => {
     const matchQ = !q || o.orderNumber.toLowerCase().includes(q.toLowerCase()) || o.jewelleryType.toLowerCase().includes(q.toLowerCase());
@@ -519,8 +450,7 @@ export function ClientHistoryPage() {
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
               { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
-              { label: "Account Statement — PDF", sublabel: "Bills & payments (USD)", kind: "pdf", run: exportStatementPdf },
-              { label: "Account Statement — Excel", sublabel: "Bills & payments (USD)", kind: "excel", run: exportStatementCsv },
+              { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
             ]} />
             {account.credit > 0 && account.outstanding > 0 && (
               <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
@@ -644,38 +574,11 @@ export function ClientHistoryPage() {
         openingDebit={openingDebitAmt(client)}
         openingCredit={openingCreditAmt(client)}
         onExport={() => setShowExport(true)}
+        onReversePayment={user?.role === "admin" ? reversePayment : undefined}
       />
 
       {/* Account Statement — same ledger as Stock and Locker: summary, filters,
           then every entry with a running balance. */}
-      <StatementLedger
-        title="Account Statement"
-        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · orders billed and payments received, running balance in USD`}
-        rows={statement}
-        fmt={fmtMoney}
-        debitLabel="Billed"
-        creditLabel="Received"
-        onExport={() => setShowExport(true)}
-        summary={[
-          // These have to add up to the columns underneath: the Billed column
-          // carries the GROSS value and a gift card shows as its own credit line,
-          // so a card reading the net would never reconcile with the table.
-          { label: "Total billed", value: fmtMoney(grossBilled), tone: "out" },
-          ...(giftUsed > 0 ? [{ label: "Gift card used", value: fmtMoney(giftUsed), tone: "in" as const }] : []),
-          { label: "Received", value: fmtMoney(paidAmount), tone: "in" },
-          // account.outstanding carries the opening balance; pendingAmount does
-          // not, so the card used to disagree with the closing balance of the
-          // statement right underneath it whenever a client had an opening.
-          { label: "Outstanding", value: fmtMoney(account.outstanding), tone: account.outstanding > 0 ? "due" : "in" },
-          { label: "Orders", value: String(billableOrders.length) },
-        ]}
-        rowAction={r => (r.credit > 0 && !r.pinned && user?.role === "admin" ? (
-          <button onClick={() => reversePayment(r.date)} title="Reverse this payment"
-            className="shrink-0 text-muted-foreground hover:text-destructive p-1">
-            <Undo2 className="h-4 w-4" />
-          </button>
-        ) : null)}
-      />
 
 
       {/* Order History */}

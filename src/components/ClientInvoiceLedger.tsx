@@ -9,7 +9,7 @@ import { Search, Download, ChevronRight, FileText, Package } from "lucide-react"
 
 export interface InvoiceBlock {
   id: string;
-  /** "0001", or "" for work that has not been billed yet. */
+  /** The invoice number, e.g. "0001". */
   number: string;
   date: string;
   items: {
@@ -30,7 +30,6 @@ export interface InvoiceBlock {
   balance: number;
   /** Payments received against this invoice's orders, for the drill-down. */
   payments: { id: string; date: string; note: string; amount: number }[];
-  unbilled?: boolean;
 }
 
 /** One line per piece, the way it reads on the invoice itself. */
@@ -59,7 +58,6 @@ export function buildInvoiceBlocks(
   clientId: string,
 ): InvoiceBlock[] {
   const mine = orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
-  const billed = new Set<string>();
   const blocks: InvoiceBlock[] = [];
 
   const lineOf = (o: Order) => ({
@@ -89,7 +87,6 @@ export function buildInvoiceBlocks(
     const os = invoiceOrderIds(inv)
       .map(id => mine.find(o => o.id === id))
       .filter((o): o is Order => !!o);
-    os.forEach(o => billed.add(o.id));
     const items = os.map(lineOf);
     blocks.push({
       id: inv.id, number: inv.number, date: inv.createdAt,
@@ -97,28 +94,24 @@ export function buildInvoiceBlocks(
     });
   }
 
-  // Work done but not yet on an invoice still belongs on the client's account —
-  // leaving it out would make the statement disagree with what they owe.
-  const rest = mine.filter(o => !billed.has(o.id));
-  if (rest.length) {
-    const items = rest.map(lineOf);
-    blocks.push({
-      id: "__unbilled", number: "", date: rest[0].createdAt,
-      items, ...sum(items), payments: paymentsOf(rest), unbilled: true,
-    });
-  }
+  // Only invoices. Work that has not been billed is deliberately NOT here: this
+  // is the statement a client is sent, and it shows what they were invoiced and
+  // what they have paid against it, nothing else.
 
   return blocks.sort((a, b) => +new Date(a.date) - +new Date(b.date));
 }
 
 export function ClientInvoiceLedger({
-  blocks, client, openingDebit = 0, openingCredit = 0, onExport,
+  blocks, client, openingDebit = 0, openingCredit = 0, onExport, onReversePayment,
 }: {
   blocks: InvoiceBlock[];
   client: Client;
   openingDebit?: number;
   openingCredit?: number;
   onExport?: () => void;
+  /** Reverse a payment recorded in error. Kept on the payment row itself, which
+   *  is the only place it can be aimed at the right entry. */
+  onReversePayment?: (createdAt: string) => void;
 }) {
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
@@ -231,11 +224,9 @@ export function ClientInvoiceLedger({
                     <ChevronRight className={`h-4 w-4 transition-transform ${open.has(b.id) ? "rotate-90" : ""}`} />
                   </td>
                   <td className="px-2 py-2.5 font-medium whitespace-nowrap">
-                    {b.unbilled
-                      ? <span className="text-muted-foreground">Not yet invoiced</span>
-                      : <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span>}
+                    <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span>
                   </td>
-                  <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{b.unbilled ? "—" : fmtDate(b.date)}</td>
+                  <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(b.date)}</td>
                   <td className="px-2 py-2.5 text-xs text-muted-foreground">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</td>
                   <td className="px-2 py-2.5 text-right font-medium">{fmtMoney(b.gross)}</td>
                   <td className="px-2 py-2.5 text-right text-primary">{b.gift ? `−${fmtMoney(b.gift)}` : ""}</td>
@@ -269,7 +260,15 @@ export function ClientInvoiceLedger({
                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(p.date)}</td>
                     <td colSpan={4} className="px-2 py-1.5 text-muted-foreground">{p.note}</td>
                     <td className="px-2 py-1.5 text-right text-success font-medium">{fmtMoney(p.amount)}</td>
-                    <td />
+                    <td className="px-2 py-1.5 text-right">
+                      {onReversePayment && (
+                        <button onClick={e => { e.stopPropagation(); onReversePayment(p.date); }}
+                          title="Reverse this payment"
+                          className="text-[11px] text-muted-foreground hover:text-destructive hover:underline">
+                          reverse
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </>
@@ -290,8 +289,8 @@ export function ClientInvoiceLedger({
         </table>
       </div>
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
-        Tap an invoice to see the pieces on it and the payments received against it. Work that has not been billed
-        yet is grouped at the end — it is part of what the client owes, so leaving it out would understate the balance.
+        Tap an invoice to see the pieces on it and the payments received against it. Only invoiced work appears
+        here — an order that has not been billed yet is not on the client’s account.
       </p>
     </div>
   );
