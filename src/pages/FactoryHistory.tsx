@@ -644,6 +644,35 @@ export function FactoryHistoryPage() {
     { drGold: 0, drSilver: 0, drDia: 0, drOther: 0, drAmount: 0, crGold: 0, crSilver: 0, crDia: 0, crOther: 0, crAmount: 0 },
   );
 
+  /**
+   * Which material columns this factory actually uses. A diamond-only factory
+   * was printing eight permanently blank columns and squeezing the particulars
+   * into nothing; dropping them gives the description the room it needs.
+   */
+  /** Column total, taken through the column’s own accessor so the totals row
+   *  can never drift out of step with the column it sits under. */
+  const sumOf = (rows: UniRow[], pick: (r: UniRow) => number) =>
+    Math.round(rows.reduce((s, r) => s + pick(r), 0) * 1000) / 1000;
+
+  const usedCols = (rows: UniRow[]) => {
+    const on = {
+      gold: rows.some(r => r.drGold || r.crGold),
+      silver: rows.some(r => r.drSilver || r.crSilver),
+      dia: rows.some(r => r.drDia || r.crDia),
+      other: rows.some(r => r.drOther || r.crOther),
+      amount: rows.some(r => r.drAmount || r.crAmount),
+    };
+    const all = [
+      { key: "gold", label: "Gold g", dr: (r: UniRow) => r.drGold, cr: (r: UniRow) => r.crGold, money: false },
+      { key: "silver", label: "Silver g", dr: (r: UniRow) => r.drSilver, cr: (r: UniRow) => r.crSilver, money: false },
+      { key: "dia", label: "Dia ct", dr: (r: UniRow) => r.drDia, cr: (r: UniRow) => r.crDia, money: false },
+      { key: "other", label: "Other g", dr: (r: UniRow) => r.drOther, cr: (r: UniRow) => r.crOther, money: false },
+      { key: "amount", label: "Amount", dr: (r: UniRow) => r.drAmount, cr: (r: UniRow) => r.crAmount, money: true },
+    ] as const;
+    return all.filter(c => on[c.key]);
+  };
+
+
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
     const acct = factoryAccount(iss, orderNo ? undefined : factory);
@@ -657,27 +686,61 @@ export function FactoryHistoryPage() {
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
+      // Only the positions that mean something for this factory.
       summary: [
-        { label: "Fine Gold at Factory (24KT)", value: `${q3(T.drGold - T.crGold)} g` },
-        { label: "Diamond (net)", value: `${q3(T.drDia - T.crDia)} ct` },
+        ...(T.drGold || T.crGold ? [{ label: "Fine Gold at Factory (24KT)", value: `${q3(T.drGold - T.crGold)} g` }] : []),
+        ...(T.drSilver || T.crSilver ? [{ label: "Silver (net)", value: `${q3(T.drSilver - T.crSilver)} g` }] : []),
+        ...(T.drDia || T.crDia ? [{ label: "Diamond (net)", value: `${q3(T.drDia - T.crDia)} ct` }] : []),
+        ...(T.drOther || T.crOther ? [{ label: "Other metal (net)", value: `${q3(T.drOther - T.crOther)} g` }] : []),
         { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
       ],
       landscape: true,
-      groupHeaders: [
-        { label: "DEBIT  (issued to factory / paid)", startX: 14, endX: 100 },
-        { label: "CREDIT  (returned / billed)", startX: 192, endX: 283 },
-      ],
-      columns: [
-        { header: "Gold g", x: 16 }, { header: "Silver g", x: 33 }, { header: "Dia ct", x: 50 }, { header: "Other g", x: 67 }, { header: "Amount", x: 84 },
-        { header: "Date", x: 104 }, { header: "Inv/Ref", x: 126 }, { header: "Particular", x: 148 },
-        { header: "Gold g", x: 194 }, { header: "Silver g", x: 211 }, { header: "Dia ct", x: 228 }, { header: "Other g", x: 245 }, { header: "Amount", x: 262 },
-      ],
-      align: ["right", "right", "right", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"],
-      rows: rows.map(r => [
-        r.drGold ? String(q3(r.drGold)) : "", r.drSilver ? String(q3(r.drSilver)) : "", r.drDia ? String(q3(r.drDia)) : "", r.drOther ? String(q3(r.drOther)) : "", r.drAmount ? rs(r.drAmount) : "",
-        fmtDate(r.date), r.ref || "", (r.particular + (r.otherLabel ? ` (${r.otherLabel})` : "")).slice(0, 28),
-        r.crGold ? String(q3(r.crGold)) : "", r.crSilver ? String(q3(r.crSilver)) : "", r.crDia ? String(q3(r.crDia)) : "", r.crOther ? String(q3(r.crOther)) : "", r.crAmount ? rs(r.crAmount) : "",
-      ]),
+      // Columns are laid out from what this factory actually deals in: each
+      // numeric column takes 22mm, and everything left over goes to the
+      // particulars instead of the text being cut.
+      ...(() => {
+        const cs = usedCols(rows);
+        const W = 22, DATE = 24, REF = 30, L0 = 14, RIGHT = 283;
+        const drX = L0;
+        const midX = drX + cs.length * W;
+        const partX = midX + DATE + REF;
+        const crX = RIGHT - cs.length * W;
+        const partW = crX - partX - 4;
+        const cut = (s: string, mm: number) => {
+          const max = Math.max(8, Math.floor(mm / 1.6));
+          return s.length <= max ? s : s.slice(0, max - 1) + "…";
+        };
+        return {
+          groupHeaders: [
+            { label: "DEBIT  (issued to factory / paid)", startX: drX, endX: midX - 2 },
+            { label: "CREDIT  (returned / billed)", startX: crX, endX: RIGHT },
+          ],
+          columns: [
+            ...cs.map((c, i) => ({ header: c.label, x: drX + i * W })),
+            { header: "Date", x: midX },
+            { header: "Inv/Ref", x: midX + DATE },
+            { header: "Particular", x: partX },
+            ...cs.map((c, i) => ({ header: c.label, x: crX + i * W })),
+          ],
+          align: [
+            ...cs.map(() => "right" as const),
+            "left" as const, "left" as const, "left" as const,
+            ...cs.map(() => "right" as const),
+          ],
+          rows: rows.map(r => [
+            ...cs.map(c => (c.dr(r) ? (c.money ? rs(c.dr(r)) : String(q3(c.dr(r)))) : "")),
+            r.id === "opening" ? "Opening" : fmtDate(r.date),
+            cut(r.ref || "", REF - 2),
+            cut(r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""), partW),
+            ...cs.map(c => (c.cr(r) ? (c.money ? rs(c.cr(r)) : String(q3(c.cr(r)))) : "")),
+          ]),
+          totalsRow: [
+            ...cs.map(c => (c.money ? rs(sumOf(rows, c.dr)) : String(q3(sumOf(rows, c.dr))))),
+            "", "", "Totals",
+            ...cs.map(c => (c.money ? rs(sumOf(rows, c.cr)) : String(q3(sumOf(rows, c.cr))))),
+          ],
+        };
+      })(),
       totalsRow: [
         String(q3(T.drGold)), String(q3(T.drSilver)), String(q3(T.drDia)), String(q3(T.drOther)), rs(T.drAmount),
         "", "", "Totals",
@@ -690,16 +753,33 @@ export function FactoryHistoryPage() {
   const exportCombinedCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
     const rows = buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to));
-    const T = uniTotals(rows);
+    const cs = usedCols(rows);
+    // Same rule as the PDF: only the materials this factory deals in.
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
-      ["Date", "Inv/Ref", "Particular", "Debit Gold (g fine)", "Debit Silver (g)", "Debit Diamond (ct)", "Debit Other Metal (g)", "Debit Amount (Rs)", "Credit Gold (g fine)", "Credit Silver (g)", "Credit Diamond (ct)", "Credit Other Metal (g)", "Credit Amount (Rs)"],
       [
-        ...rows.map(r => [fmtDate(r.date), r.ref, r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""), r.drGold ? q3(r.drGold) : "", r.drSilver ? q3(r.drSilver) : "", r.drDia ? q3(r.drDia) : "", r.drOther ? q3(r.drOther) : "", r.drAmount ? Math.round(r.drAmount) : "", r.crGold ? q3(r.crGold) : "", r.crSilver ? q3(r.crSilver) : "", r.crDia ? q3(r.crDia) : "", r.crOther ? q3(r.crOther) : "", r.crAmount ? Math.round(r.crAmount) : ""] as (string | number)[]),
-        ["", "", "TOTALS", q3(T.drGold), q3(T.drSilver), q3(T.drDia), q3(T.drOther), Math.round(T.drAmount), q3(T.crGold), q3(T.crSilver), q3(T.crDia), q3(T.crOther), Math.round(T.crAmount)],
-        ["", "", "Fine Gold at Factory (24KT)", q3(T.drGold - T.crGold), "", "", "", "", "", "", "", "", ""],
-        ["", "", "Diamond net (ct)", "", "", q3(T.drDia - T.crDia), "", "", "", "", "", "", ""],
-        ["", "", "Charges Pending (Rs)", "", "", "", "", Math.round(T.crAmount - T.drAmount), "", "", "", "", ""],
+        "Date", "Inv/Ref", "Particular",
+        ...cs.map(c => `Debit ${c.label}`),
+        ...cs.map(c => `Credit ${c.label}`),
+      ],
+      [
+        ...rows.map(r => [
+          r.id === "opening" ? "Opening" : fmtDate(r.date),
+          r.ref,
+          r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""),
+          ...cs.map(c => (c.dr(r) ? (c.money ? Math.round(c.dr(r)) : q3(c.dr(r))) : "")),
+          ...cs.map(c => (c.cr(r) ? (c.money ? Math.round(c.cr(r)) : q3(c.cr(r))) : "")),
+        ] as (string | number)[]),
+        [
+          "", "", "TOTALS",
+          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.dr)) : q3(sumOf(rows, c.dr)))),
+          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.cr)) : q3(sumOf(rows, c.cr)))),
+        ],
+        [
+          "", "", "CLOSING (debit - credit)",
+          ...cs.map(c => (c.money ? "" : q3(sumOf(rows, c.dr) - sumOf(rows, c.cr)))),
+          ...cs.map(c => (c.money ? Math.round(sumOf(rows, c.cr) - sumOf(rows, c.dr)) : "")),
+        ],
       ],
     );
   };

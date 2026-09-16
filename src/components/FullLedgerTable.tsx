@@ -51,6 +51,31 @@ export function FullLedgerTable({
     });
   }, [rows, q, from, to]);
 
+  // Only show what this factory actually deals in. A diamond-only factory was
+  // printing eight permanently blank columns — Gold, Silver, Other Metal and
+  // Amount on both sides — which made a real ledger look broken and squeezed
+  // the particulars into nothing.
+  const used = rows.reduce((u, r) => ({
+    gold: u.gold || !!r.drGold || !!r.crGold,
+    silver: u.silver || !!r.drSilver || !!r.crSilver,
+    dia: u.dia || !!r.drDia || !!r.crDia,
+    other: u.other || !!r.drOther || !!r.crOther,
+    amount: u.amount || !!r.drAmount || !!r.crAmount,
+  }), { gold: false, silver: false, dia: false, other: false, amount: false });
+  const cols: { key: keyof typeof used; label: string }[] = [
+    { key: "gold", label: "Gold g" },
+    { key: "silver", label: "Silver g" },
+    { key: "dia", label: "Diamond ct" },
+    { key: "other", label: "Other g" },
+    { key: "amount", label: "Amount ₹" },
+  ].filter(c => used[c.key as keyof typeof used]) as { key: keyof typeof used; label: string }[];
+  const span = Math.max(1, cols.length);
+  const valOf = (r: FullLedgerRow, side: "dr" | "cr", key: string) => {
+    const v = (r as unknown as Record<string, number>)[`${side}${key[0].toUpperCase()}${key.slice(1)}`] ?? 0;
+    return key === "amount" ? n2(v) : n3(v);
+  };
+
+
   const T = filtered.reduce((t, r) => ({
     drGold: t.drGold + r.drGold, drSilver: t.drSilver + r.drSilver, drDia: t.drDia + r.drDia,
     drOther: t.drOther + r.drOther, drAmount: t.drAmount + r.drAmount,
@@ -90,50 +115,44 @@ export function FullLedgerTable({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-xs min-w-[1040px]">
+        {/* Width follows the columns actually shown, so a diamond-only factory
+            fits without a horizontal scroll. */}
+        <table className="w-full text-xs" style={{ minWidth: 420 + span * 2 * 92 }}>
           <thead>
             <tr className="bg-secondary/60 text-muted-foreground">
               <th className="px-3 py-2 text-left font-semibold" rowSpan={2}>Date</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Ref</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Particular</th>
-              <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60 text-destructive" colSpan={5}>Issued / Owed (Debit)</th>
-              <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60 text-success" colSpan={5}>Received / Paid (Credit)</th>
+              <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60 text-destructive" colSpan={span}>Issued / Owed (Debit)</th>
+              <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60 text-success" colSpan={span}>Received / Paid (Credit)</th>
             </tr>
             <tr className="bg-secondary/40 text-muted-foreground text-[11px]">
-              <th className={`${th} border-l border-border/60`}>Gold g</th>
-              <th className={th}>Silver g</th>
-              <th className={th}>Diamond ct</th>
-              <th className={th}>Other g</th>
-              <th className={th}>Amount ₹</th>
-              <th className={`${th} border-l border-border/60`}>Gold g</th>
-              <th className={th}>Silver g</th>
-              <th className={th}>Diamond ct</th>
-              <th className={th}>Other g</th>
-              <th className={th}>Amount ₹</th>
+              {cols.map((c, i) => (
+                <th key={`dr-${c.key}`} className={`${th}${i === 0 ? " border-l border-border/60" : ""}`}>{c.label}</th>
+              ))}
+              {cols.map((c, i) => (
+                <th key={`cr-${c.key}`} className={`${th}${i === 0 ? " border-l border-border/60" : ""}`}>{c.label}</th>
+              ))}
             </tr>
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={13} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={3 + span * 2} className="px-5 py-10 text-center text-muted-foreground">
                 {active ? "Nothing in that range." : "No entries yet."}
               </td></tr>
             ) : filtered.map(r => (
               <tr key={r.id} className="border-t border-border/40 hover:bg-secondary/30">
                 <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.id === "opening" ? "—" : fmtDate(r.date)}</td>
                 <td className="px-2 py-2 font-mono text-[11px] text-primary whitespace-nowrap">{r.ref}</td>
-                <td className="px-2 py-2 max-w-[260px] truncate" title={r.particular}>
+                <td className="px-2 py-2 min-w-[220px]" title={r.particular}>
                   {r.particular}{r.otherLabel ? ` (${r.otherLabel})` : ""}
                 </td>
-                <td className={`${th} border-l border-border/60 text-destructive`}>{n3(r.drGold)}</td>
-                <td className={`${th} text-destructive`}>{n3(r.drSilver)}</td>
-                <td className={`${th} text-destructive`}>{n3(r.drDia)}</td>
-                <td className={`${th} text-destructive`}>{n3(r.drOther)}</td>
-                <td className={`${th} text-destructive`}>{n2(r.drAmount)}</td>
-                <td className={`${th} border-l border-border/60 text-success`}>{n3(r.crGold)}</td>
-                <td className={`${th} text-success`}>{n3(r.crSilver)}</td>
-                <td className={`${th} text-success`}>{n3(r.crDia)}</td>
-                <td className={`${th} text-success`}>{n3(r.crOther)}</td>
-                <td className={`${th} text-success`}>{n2(r.crAmount)}</td>
+                {cols.map((c, i) => (
+                  <td key={`dr-${c.key}`} className={`${th} text-destructive${i === 0 ? " border-l border-border/60" : ""}`}>{valOf(r, "dr", c.key)}</td>
+                ))}
+                {cols.map((c, i) => (
+                  <td key={`cr-${c.key}`} className={`${th} text-success${i === 0 ? " border-l border-border/60" : ""}`}>{valOf(r, "cr", c.key)}</td>
+                ))}
               </tr>
             ))}
           </tbody>
@@ -141,29 +160,34 @@ export function FullLedgerTable({
             <tfoot>
               <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
                 <td className="px-3 py-2" colSpan={3}>Totals{active ? " (filtered)" : ""}</td>
-                <td className={`${th} border-l border-border/60`}>{n3(T.drGold)}</td>
-                <td className={th}>{n3(T.drSilver)}</td>
-                <td className={th}>{n3(T.drDia)}</td>
-                <td className={th}>{n3(T.drOther)}</td>
-                <td className={th}>{n2(T.drAmount)}</td>
-                <td className={`${th} border-l border-border/60`}>{n3(T.crGold)}</td>
-                <td className={th}>{n3(T.crSilver)}</td>
-                <td className={th}>{n3(T.crDia)}</td>
-                <td className={th}>{n3(T.crOther)}</td>
-                <td className={th}>{n2(T.crAmount)}</td>
+                {cols.map((c, i) => (
+                  <td key={`tdr-${c.key}`} className={`${th}${i === 0 ? " border-l border-border/60" : ""}`}>
+                    {c.key === "amount" ? n2(T.drAmount) : n3(T[`dr${c.key[0].toUpperCase()}${c.key.slice(1)}` as keyof typeof T])}
+                  </td>
+                ))}
+                {cols.map((c, i) => (
+                  <td key={`tcr-${c.key}`} className={`${th}${i === 0 ? " border-l border-border/60" : ""}`}>
+                    {c.key === "amount" ? n2(T.crAmount) : n3(T[`cr${c.key[0].toUpperCase()}${c.key.slice(1)}` as keyof typeof T])}
+                  </td>
+                ))}
               </tr>
               <tr className="bg-white text-[11px] text-muted-foreground">
                 <td className="px-3 py-2" colSpan={3}>Closing position (debit − credit)</td>
-                <td className={`${th} border-l border-border/60 text-brand-dark`}>{n3(T.drGold - T.crGold)}</td>
-                <td className={`${th} text-brand-dark`}>{n3(T.drSilver - T.crSilver)}</td>
-                <td className={`${th} text-brand-dark`}>{n3(T.drDia - T.crDia)}</td>
-                <td className={`${th} text-brand-dark`}>{n3(T.drOther - T.crOther)}</td>
-                <td className={`${th} text-brand-dark`} colSpan={6}>
-                  {T.crAmount - T.drAmount > 0
-                    ? `₹${Math.round(T.crAmount - T.drAmount).toLocaleString("en-IN")} payable to the factory`
-                    : T.crAmount - T.drAmount < 0
-                      ? `₹${Math.round(T.drAmount - T.crAmount).toLocaleString("en-IN")} overpaid`
-                      : "Charges cleared"}
+                {cols.filter(c => c.key !== "amount").map((c, i) => {
+                  const key = `${c.key[0].toUpperCase()}${c.key.slice(1)}`;
+                  const net = (T[`dr${key}` as keyof typeof T] as number) - (T[`cr${key}` as keyof typeof T] as number);
+                  return (
+                    <td key={`net-${c.key}`} className={`${th} text-brand-dark${i === 0 ? " border-l border-border/60" : ""}`}>{n3(net)}</td>
+                  );
+                })}
+                <td className={`${th} text-brand-dark`} colSpan={span * 2 - (cols.filter(c => c.key !== "amount").length)}>
+                  {used.amount
+                    ? (T.crAmount - T.drAmount > 0
+                        ? `₹${Math.round(T.crAmount - T.drAmount).toLocaleString("en-IN")} payable to the factory`
+                        : T.crAmount - T.drAmount < 0
+                          ? `₹${Math.round(T.drAmount - T.crAmount).toLocaleString("en-IN")} overpaid`
+                          : "Charges cleared")
+                    : ""}
                 </td>
               </tr>
             </tfoot>
