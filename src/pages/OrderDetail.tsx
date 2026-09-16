@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
 } from "@/lib/db";
@@ -975,8 +975,13 @@ export function OrderDetailPage() {
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
     setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
-    // Prefill purity ‰: saved value, else the textbook purity of the order's karat (editable).
-    const defaultPurity = order.productKarats ? Math.round((KARAT_PURITY[parseInt(order.productKarats, 10)] ?? 0) * 1000) : 0;
+    // Prefill the purity the FACTORY works to for this karat (14KT = 595, not the
+    // textbook 583). That is what actually gets entered; the textbook figure is
+    // the fallback for a karat not in that table.
+    const defaultPurity = order.productKarats
+      ? (FACTORY_PURITY[order.productKarats]
+          ?? Math.round((KARAT_PURITY[parseInt(order.productKarats, 10)] ?? 0) * 1000))
+      : 0;
     setFaGoldPurity(finish?.finishedPurity != null ? String(finish.finishedPurity) : (defaultPurity ? String(defaultPurity) : ""));
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
@@ -2759,6 +2764,9 @@ export function OrderDetailPage() {
                       <span className="text-[11px] text-muted-foreground">issued {issuedDiaCt} ct</span>
                     )}
                   </div>
+                  {hasActuals && (
+                    <p className="font-bold text-destructive pt-1">JOB FINISH — the factory’s actual details are recorded</p>
+                  )}
                 </div>
               );
             })() : (
@@ -3359,7 +3367,27 @@ export function OrderDetailPage() {
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Gold used</p>
                   <div className="grid grid-cols-2 gap-2.5">
                     <div><Label className="text-[11px]">Net Weight (g)</Label><Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
-                    <div><Label className="text-[11px]">Purity (‰ — e.g. 750, 595)</Label><Input type="number" min={0} step="0.1" value={faGoldPurity} onChange={e => setFaGoldPurity(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="actual purity from factory" /></div>
+                    <div>
+                      <Label className="text-[11px]">Purity (‰)</Label>
+                      {/* One tap per karat — a factory works to a set purity and
+                          retyping 595 on every order is how a 559 gets in. Typing
+                          a different figure still wins, for a factory that
+                          works to its own. */}
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {Object.entries(FACTORY_PURITY).map(([kt, pu]) => (
+                          <button key={kt} type="button" onClick={() => setFaGoldPurity(String(pu))}
+                            className={`h-7 px-2 rounded-lg text-[11px] font-medium border transition-colors ${
+                              Number(faGoldPurity) === pu
+                                ? "bg-primary text-white border-primary"
+                                : "bg-white border-border text-muted-foreground hover:border-primary/40"}`}>
+                            {kt} · {pu}
+                          </button>
+                        ))}
+                      </div>
+                      <Input type="number" min={0} step="0.1" value={faGoldPurity}
+                        onChange={e => setFaGoldPurity(e.target.value)}
+                        className="rounded-lg h-9 mt-1.5" placeholder="or type the factory’s own" />
+                    </div>
                   </div>
                   {Number(faGoldNet) > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(Number(faGoldNet), Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
                 </div>

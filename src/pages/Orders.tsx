@@ -15,6 +15,13 @@ import type { Order } from "@/lib/db";
 
 const PAGE_SIZE = 12;
 
+/** The factory has reported back: net weight, purity and the finished piece are
+ *  recorded, so the job itself is done even if the order has not shipped. */
+function jobFinished(o: Order): boolean {
+  return !!(o.actualNetWeight || o.actualGrossWeight || o.actualDiamondWeight);
+}
+
+
 function lastTrackingStep(o: Order): string {
   const inProgress = o.timeline.find(t => t.status === "in_progress");
   if (inProgress) return inProgress.step;
@@ -156,6 +163,9 @@ export function OrdersPage() {
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                     {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
+                  {jobFinished(o) && (
+                    <p className="text-[11px] font-bold text-destructive truncate">JOB FINISH</p>
+                  )}
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
                     : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
@@ -217,6 +227,9 @@ export function OrdersPage() {
                       {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
                       {o.designNumber ? ` · #${o.designNumber}` : ""}
                     </p>
+                    {jobFinished(o) && (
+                      <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
+                    )}
                   </div>
                   <StatusBadge status={o.status} />
                 </div>

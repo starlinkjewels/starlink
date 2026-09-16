@@ -143,6 +143,21 @@ export type TimelineStep = string;
 // (in its karat) to pure/fine gold (24KT equivalent) when deducting from a
 // factory's gold, per the client's spec. Keyed by the karat number so "18K",
 // "18KT", "18kt" all resolve.
+/**
+ * The purity a factory actually works to, per karat (‰). Not the theoretical
+ * figure — 14KT is 583‰ on paper but a factory casts and bills at 595. These
+ * are the numbers the trade uses, offered as one-tap choices at Final Approval
+ * so nobody retypes them; a factory that works to something else can still be
+ * entered by hand.
+ */
+export const FACTORY_PURITY: Record<string, number> = {
+  "9K": 390,
+  "10K": 430,
+  "14K": 595,
+  "18K": 760,
+};
+
+
 export const KARAT_PURITY: Record<number, number> = {
   9: 0.375, 10: 0.417, 14: 0.585, 18: 0.75, 22: 0.916, 24: 1,
 };
