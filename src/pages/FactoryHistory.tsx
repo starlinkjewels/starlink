@@ -741,11 +741,6 @@ export function FactoryHistoryPage() {
           ],
         };
       })(),
-      totalsRow: [
-        String(q3(T.drGold)), String(q3(T.drSilver)), String(q3(T.drDia)), String(q3(T.drOther)), rs(T.drAmount),
-        "", "", "Totals",
-        String(q3(T.crGold)), String(q3(T.crSilver)), String(q3(T.crDia)), String(q3(T.crOther)), rs(T.crAmount),
-      ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
     });
   };

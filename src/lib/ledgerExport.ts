@@ -65,8 +65,14 @@ export function downloadLedgerPdf(opts: {
   // For right-aligned columns, anchor text at the column's right edge (just
   // before the next column starts, or the page margin for the last one).
   const alignOf = (i: number): "left" | "right" => (opts.align?.[i] === "right" ? "right" : "left");
-  const anchorX = (i: number) => (alignOf(i) === "right" ? (i < cols.length - 1 ? cols[i + 1].x - 3 : R) : cols[i].x);
-  const cell = (text: string, i: number, y: number) => doc.text(text, anchorX(i), y, { align: alignOf(i) });
+  // A row with more cells than columns used to crash the whole download
+  // (reading .x of undefined). Extra cells are dropped instead.
+  const anchorX = (i: number) => {
+    const c = cols[i];
+    if (!c) return null;
+    return alignOf(i) === "right" ? (cols[i + 1] ? cols[i + 1].x - 3 : R) : c.x;
+  };
+  const cell = (text: string, i: number, yy: number) => { const x = anchorX(i); if (x != null) doc.text(text, x, yy, { align: alignOf(i) }); };
 
   const brand = () => { doc.setFillColor(47, 93, 170); doc.rect(0, 0, PAGE_W, 26, "F"); };
   const pageHeader = () => {
@@ -187,14 +193,19 @@ export function downloadLedgerPdfMulti(opts: {
     doc.setFont("helvetica", "bold"); doc.setFontSize(10); doc.text("Summary", L, y); y += 6;
     doc.setFont("helvetica", "normal"); doc.setFontSize(9.5);
     for (const s of opts.summary) { doc.text(`${s.label}:`, L, y); doc.setFont("helvetica", "bold"); doc.text(s.value, L + 55, y); doc.setFont("helvetica", "normal"); y += 5.5; }
-    y += 2;
   }
 
   for (const sec of opts.sections) {
     const cols = sec.columns;
     const alignOf = (i: number): "left" | "right" => (sec.align?.[i] === "right" ? "right" : "left");
-    const anchorX = (i: number) => (alignOf(i) === "right" ? (i < cols.length - 1 ? cols[i + 1].x - 3 : R) : cols[i].x);
-    const cell = (text: string, i: number, yy: number) => doc.text(text, anchorX(i), yy, { align: alignOf(i) });
+    // A row with more cells than columns used to crash the whole download
+    // (reading .x of undefined). Extra cells are skipped instead.
+    const anchorX = (i: number): number | null => {
+      const c = cols[i];
+      if (!c) return null;
+      return alignOf(i) === "right" ? (cols[i + 1] ? cols[i + 1].x - 3 : R) : c.x;
+    };
+    const cell = (text: string, i: number, yy: number) => { const x = anchorX(i); if (x != null) doc.text(text, x, yy, { align: alignOf(i) }); };
     const tableHead = (yy: number) => {
       doc.setFillColor(234, 238, 246);
       doc.rect(L - 2, yy - 4.6, R - L + 4, 7, "F");

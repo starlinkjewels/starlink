@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
+import { updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -378,8 +378,35 @@ export function SupplierHistoryPage() {
 
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
-  const purchaseDesc = (p: Purchase) =>
-    p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} gold` : `${p.diamond?.carat}ct diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
+  /**
+   * What was actually bought, in the words a jeweller uses. The weight has its
+   * own column, so this is the description: shape, loose or certified, the
+   * quality grade and the report number for a certified stone; karat, purity
+   * and the supplier's own bill number for gold.
+   */
+  const purchaseDesc = (p: Purchase) => {
+    if (p.material === "gold") {
+      const g = p.gold;
+      const bits = [
+        g?.purity ? `${g.purity} gold` : "Gold",
+        g?.purity && KARAT_PURITY[parseInt(g.purity, 10)]
+          ? `${Math.round(KARAT_PURITY[parseInt(g.purity, 10)] * 1000)}‰`
+          : undefined,
+        p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
+      ].filter(Boolean);
+      return bits.join(" · ");
+    }
+    const d = p.diamond;
+    const bits = [
+      d?.shape || "Diamond",
+      d?.kind === "certified" ? "certified" : "loose",
+      d?.quality,
+      d?.pieces ? `${d.pieces} pcs` : undefined,
+      d?.certificateNumber ? `${d.certificateLab || "Cert"} ${d.certificateNumber}` : undefined,
+      p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
+    ].filter(Boolean);
+    return bits.join(" · ");
+  };
 
   // Full account statement — every purchase (owed) and every payment (paid)
   // across all purchases, chronological, with a running balance. This is the
@@ -388,7 +415,7 @@ export function SupplierHistoryPage() {
     const rows: StatementRow[] = [];
     // Opening balance carried in from a previous system — always the first line.
     if (hasOpeningBalance(supplier)) {
-      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier), balance: 0, kind: "Opening", pinned: true });
+      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Balance brought forward", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier), balance: 0, kind: "Opening", pinned: true });
     }
     for (const p of purchases) {
       // Show the order number when this purchase was bought for a specific order.
@@ -401,7 +428,7 @@ export function SupplierHistoryPage() {
         id: p.id, date: p.createdAt,
         particulars: purchaseDesc(p),
         invoiceNo: p.invoiceNumber || undefined, orderNo,
-        ref: [p.invoiceNumber, orderNo].filter(Boolean).join(" · ") || undefined,
+        ref: orderNo,
         qty: qty || undefined, unit, rate: qty > 0 ? Math.round((p.totalInr / qty) * 100) / 100 : undefined,
         debit: p.totalInr, credit: 0, balance: 0, kind: "Purchase",
       });
@@ -439,10 +466,10 @@ export function SupplierHistoryPage() {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Invoice No", "Order No", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
+      ["Date", "Order No", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
       statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
         r.id === "opening" ? "Opening" : fmtDate(r.date),
-        r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
+        r.orderNo ?? "", r.particulars,
         r.qty ? `${r.qty}${r.unit ?? ""}` : "",
         r.rate ?? "", r.debit || "", r.credit || "", r.balance,
       ]),
@@ -469,21 +496,19 @@ export function SupplierHistoryPage() {
       landscape: true,
       columns: [
         { header: "Date", x: 14 },
-        { header: "Invoice No", x: 40 },
-        { header: "Order No", x: 76 },
-        { header: "Particulars", x: 116 },
+        { header: "Order No", x: 40 },
+        { header: "Particulars", x: 78 },
         { header: "Weight", x: 158 },
         { header: "Rate", x: 184 },
         { header: "Bill Amount", x: 210 },
         { header: "Paid", x: 240 },
         { header: "Balance", x: 264 },
       ],
-      align: ["left", "left", "left", "left", "right", "right", "right", "right", "right"],
+      align: ["left", "left", "left", "right", "right", "right", "right", "right"],
       rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
         r.id === "opening" ? "Opening" : fmtDate(r.date),
-        fit(r.invoiceNo ?? "", 34),
-        fit(r.orderNo ?? "", 38),
-        fit(r.particulars, 40),
+        fit(r.orderNo ?? "", 36),
+        fit(r.particulars, 78),
         r.qty ? `${r.qty}${r.unit ?? ""}` : "",
         r.rate ? fmtInrPlain(r.rate).replace("Rs. ", "") : "",
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "",
