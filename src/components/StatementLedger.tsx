@@ -18,6 +18,11 @@ export interface StatementRow {
   /** Running balance AFTER this row. Computed by the caller, which knows the
    *  opening balance and the order rows should be read in. */
   balance: number;
+  /** Quantity and rate behind the amount — a purchase line carries its carats
+   *  or grams and the per-unit rate, so a statement explains its own figures. */
+  qty?: number;
+  unit?: string;
+  rate?: number;
   /** Groups the row for the type filter, e.g. "Purchase" / "Payment". */
   kind?: string;
   /** Pinned to the top and never filtered out — an opening balance. */
@@ -195,7 +200,8 @@ export function StatementLedger({
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium truncate">{r.particulars}</p>
               <p className="text-xs text-muted-foreground truncate">
-                {fmtDate(r.date)}{r.ref ? ` · ${r.ref}` : ""}{r.kind ? ` · ${r.kind}` : ""}
+                {fmtDate(r.date)}{r.ref ? ` · ${r.ref}` : ""}
+                {r.qty ? ` · ${r.qty}${r.unit ?? ""}${r.rate ? ` @ ${fmt(r.rate)}` : ""}` : ""}
               </p>
             </div>
             <div className="w-24 text-right shrink-0 hidden sm:block">

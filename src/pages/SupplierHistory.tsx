@@ -393,7 +393,17 @@ export function SupplierHistoryPage() {
     for (const p of purchases) {
       // Show the order number when this purchase was bought for a specific order.
       const orderNo = p.orderId ? db.orders.find(o => o.id === p.orderId)?.orderNumber : undefined;
-      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}`, ref: [p.invoiceNumber ? `Inv ${p.invoiceNumber}` : "", orderNo ? `Order ${orderNo}` : ""].filter(Boolean).join(" · ") || undefined, debit: p.totalInr, credit: 0, balance: 0, kind: "Purchase" });
+      // Everything the purchase entry captured: the weight, the chitthi/invoice
+      // number it came in on, the rate behind the amount and the order it was for.
+      const qty = p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0);
+      const unit = p.material === "gold" ? "g" : "ct";
+      rows.push({
+        id: p.id, date: p.createdAt,
+        particulars: purchaseDesc(p),
+        ref: [p.invoiceNumber ? `Inv ${p.invoiceNumber}` : "", orderNo ? `Order ${orderNo}` : ""].filter(Boolean).join(" · ") || undefined,
+        qty: qty || undefined, unit, rate: qty > 0 ? Math.round((p.totalInr / qty) * 100) / 100 : undefined,
+        debit: p.totalInr, credit: 0, balance: 0, kind: "Purchase",
+      });
       for (const pay of p.payments || []) {
         rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, ref: p.invoiceNumber ? `Inv ${p.invoiceNumber}` : undefined, debit: 0, credit: pay.amountInr, balance: 0, kind: "Payment" });
       }
@@ -416,12 +426,25 @@ export function SupplierHistoryPage() {
   // must not.
   const statementAsc = [...statement].reverse();
 
+  /** Trim only if the text genuinely cannot fit the column (8.5pt Helvetica is
+   *  about 1.6mm per character), so nothing is cut that would have fitted. */
+  const fit = (s: string, mm: number) => {
+    const max = Math.floor(mm / 1.6);
+    return s.length <= max ? s : s.slice(0, max - 1) + "…";
+  };
+
+
 
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Particulars", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
-      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      ["Date", "Inv / Chitthi", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
+      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
+        r.id === "opening" ? "Opening" : fmtDate(r.date),
+        r.ref ?? "", r.particulars,
+        r.qty ? `${r.qty}${r.unit ?? ""}` : "",
+        r.rate ?? "", r.debit || "", r.credit || "", r.balance,
+      ]),
     );
   };
 
@@ -439,18 +462,29 @@ export function SupplierHistoryPage() {
         { label: "Balance Owed", value: fmtInrPlain(account.balanceOwed) },
         { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
       ],
+      // Landscape: a jeweller's ledger line is the weight, the chitthi/invoice it
+      // came in on, the rate and the amount. None of that fits a portrait page,
+      // which is why the particulars were being cut off mid-word.
+      landscape: true,
       columns: [
-        { header: "Date", x: 20 },
-        { header: "Particulars", x: 46 },
-        { header: "Bill Amount", x: 112 },
-        { header: "Paid", x: 145 },
-        { header: "Balance", x: 170 },
+        { header: "Date", x: 14 },
+        { header: "Inv / Chitthi", x: 42 },
+        { header: "Particulars", x: 88 },
+        { header: "Weight", x: 158 },
+        { header: "Rate", x: 184 },
+        { header: "Bill Amount", x: 210 },
+        { header: "Paid", x: 240 },
+        { header: "Balance", x: 264 },
       ],
-      align: ["left", "left", "right", "right", "right"],
+      align: ["left", "left", "left", "right", "right", "right", "right", "right"],
       rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
-        r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
-        r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
+        r.id === "opening" ? "Opening" : fmtDate(r.date),
+        fit(r.ref ?? "", 44),
+        fit(r.particulars, 68),
+        r.qty ? `${r.qty}${r.unit ?? ""}` : "",
+        r.rate ? fmtInrPlain(r.rate).replace("Rs. ", "") : "",
+        r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "",
+        r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "",
         fmtInrPlain(r.balance).replace("Rs. ", ""),
       ]),
       filename: `Supplier-${supplier.name.replace(/\s+/g, "_")}`,

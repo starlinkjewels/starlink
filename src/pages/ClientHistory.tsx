@@ -208,12 +208,24 @@ export function ClientHistoryPage() {
   // must not.
   const statementAsc = [...statement].reverse();
 
+  /** Trim only when the text genuinely cannot fit the column (8.5pt Helvetica
+   *  is about 1.6mm a character), so nothing is cut that would have fitted. */
+  const fit = (s: string, mm: number) => {
+    const max = Math.floor(mm / 1.6);
+    return s.length <= max ? s : s.slice(0, max - 1) + "…";
+  };
+
+
 
   const exportStatementCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
-      ["Date", "Particulars", "Billed (USD)", "Received (USD)", "Balance (USD)"],
-      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      ["Date", "Order / Ref", "Particulars", "Type", "Billed (USD)", "Received (USD)", "Balance (USD)"],
+      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
+        r.id === "opening" ? "Opening" : fmtDate(r.date),
+        r.ref ?? "", r.particulars, r.kind ?? "",
+        r.debit || "", r.credit || "", r.balance,
+      ]),
     );
   };
 
@@ -231,18 +243,24 @@ export function ClientHistoryPage() {
         { label: "Outstanding", value: fmtMoney(account.outstanding) },
         { label: "Credit (Advance)", value: fmtMoney(account.credit) },
       ],
+      landscape: true,
       columns: [
-        { header: "Date", x: 20 },
-        { header: "Particulars", x: 46 },
-        { header: "Billed", x: 118 },
-        { header: "Received", x: 145 },
-        { header: "Balance", x: 172 },
+        { header: "Date", x: 14 },
+        { header: "Order / Ref", x: 42 },
+        { header: "Particulars", x: 88 },
+        { header: "Type", x: 170 },
+        { header: "Billed", x: 206 },
+        { header: "Received", x: 236 },
+        { header: "Balance", x: 264 },
       ],
-      align: ["left", "left", "right", "right", "right"],
+      align: ["left", "left", "left", "left", "right", "right", "right"],
       rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
-        r.debit ? fmtMoney(r.debit) : "—",
-        r.credit ? fmtMoney(r.credit) : "—",
+        r.id === "opening" ? "Opening" : fmtDate(r.date),
+        fit(r.ref ?? "", 44),
+        fit(r.particulars, 80),
+        fit(r.kind ?? "", 34),
+        r.debit ? fmtMoney(r.debit) : "",
+        r.credit ? fmtMoney(r.credit) : "",
         fmtMoney(r.balance),
       ]),
       filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,

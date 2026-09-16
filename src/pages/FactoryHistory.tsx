@@ -472,6 +472,14 @@ export function FactoryHistoryPage() {
   const statementAsc = buildStatement(issuances, true);
   const statement = [...statementAsc].reverse(); // newest first, for the screen
 
+  /** Trim only when the text genuinely cannot fit (8.5pt Helvetica is about
+   *  1.6mm a character), so nothing is cut that would have fitted. */
+  const fit = (s: string, mm: number) => {
+    const max = Math.floor(mm / 1.6);
+    return s.length <= max ? s : s.slice(0, max - 1) + "…";
+  };
+
+
   // ── Gold ledger (in fine 24KT grams, so the running balance matches the
   //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
   const buildGoldLedger = (iss: MaterialIssuance[], includeOpening = false) => {
@@ -530,8 +538,8 @@ export function FactoryHistoryPage() {
   const exportCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
-      ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      ["Date", "Order / Ref", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
+      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.ref ?? "", r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
@@ -561,9 +569,10 @@ export function FactoryHistoryPage() {
       ],
       align: ["left", "left", "right", "right", "right"],
       rows: buildStatement(iss, !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
-        r.debit ? rs(r.debit) : "—",
-        r.credit ? rs(r.credit) : "—",
+        r.id === "opening" ? "Opening" : fmtDate(r.date),
+        fit(r.particulars + (r.ref ? ` (${r.ref})` : ""), 70),
+        r.debit ? rs(r.debit) : "",
+        r.credit ? rs(r.credit) : "",
         rs(r.balance),
       ]),
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
