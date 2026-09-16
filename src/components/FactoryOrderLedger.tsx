@@ -37,6 +37,10 @@ export interface FactoryOrderRow {
   /** Making charge quoted in USD when the factory was assigned, before the piece
    *  exists. Kept apart from the rupee labour so the two currencies never mix. */
   quotedUsd: number;
+  /** The entries behind the row: every gold and diamond movement and every
+   *  labour payment, so this one table can be opened up rather than sending
+   *  anyone to a second ledger to find out when something was paid. */
+  entries: { id: string; date: string; text: string; qty?: string; amount?: number; kind: "out" | "in" | "pay" }[];
 }
 
 /**
@@ -66,7 +70,7 @@ export function buildFactoryOrderRows(
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
-        quotedUsd: 0,
+        quotedUsd: 0, entries: [],
         metalNote: undefined,
       };
       byOrder.set(key, row);
@@ -92,6 +96,51 @@ export function buildFactoryOrderRows(
         row.diaIn += mi.quantityIssued;
       }
     }
+    // Keep the entries behind the figures so the row can be opened up.
+    if (mi.material === "gold") {
+      if (mi.source !== "factoryPool") {
+        row.entries.push({
+          id: mi.id + "-gin", date: mi.issuedAt, kind: "out",
+          text: `Gold given — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
+          qty: `${toPureGold(mi.quantityIssued, mi.purityOrQuality).toFixed(3)} g fine`,
+        });
+      }
+      if (mi.finishedNetWeight != null) {
+        const fine = mi.finishedPurity != null
+          ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity)
+          : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
+        row.entries.push({
+          id: mi.id + "-gout", date: mi.issuedAt, kind: "in",
+          text: `Finished piece — net ${mi.finishedNetWeight}g${mi.finishedPurity ? ` @ ${mi.finishedPurity}‰` : ""}`,
+          qty: `${fine.toFixed(3)} g fine`,
+        });
+      }
+    }
+    if (mi.material === "diamond") {
+      row.entries.push({
+        id: mi.id + "-din", date: mi.issuedAt, kind: "out",
+        text: `Diamond given — ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`,
+        qty: `${mi.quantityIssued} ct`,
+      });
+      if (mi.status === "closed") {
+        const ret = mi.diamondKind === "certified"
+          ? (mi.finishDisposition === "returned" ? mi.quantityIssued : 0)
+          : (mi.finishReturnedCt || 0);
+        const used = Math.round((mi.quantityIssued - ret) * 1000) / 1000;
+        if (used > 0) row.entries.push({ id: mi.id + "-du", date: mi.issuedAt, kind: "in", text: "Used in the piece", qty: `${used} ct` });
+        if (ret > 0) row.entries.push({ id: mi.id + "-dr", date: mi.issuedAt, kind: "in", text: "Returned to stock", qty: `${ret} ct` });
+      }
+    }
+    if (mi.makingCharges?.amountInr) {
+      row.entries.push({ id: mi.id + "-chg", date: mi.issuedAt, kind: "out", text: "Labour billed", amount: mi.makingCharges.amountInr });
+    }
+    for (const pay of mi.makingCharges?.payments || []) {
+      row.entries.push({
+        id: pay.id, date: pay.createdAt, kind: "pay",
+        text: `Labour paid${pay.note ? ` — ${pay.note}` : ""}`, amount: pay.amountInr,
+      });
+    }
+
     row.labour += mi.makingCharges?.amountInr || 0;
     row.paid += (mi.makingCharges?.payments || []).reduce((s, p) => s + p.amountInr, 0);
   }
@@ -135,6 +184,10 @@ export function buildFactoryOrderRows(
   }
 
 
+  for (const row of byOrder.values()) {
+    row.entries.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  }
+
   return [...byOrder.values()].sort((a, b) => +new Date(a.date) - +new Date(b.date));
 }
 
@@ -152,6 +205,7 @@ export function FactoryOrderLedger({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [only, setOnly] = useState<"all" | "open" | "done">("all");
+  const [open, setOpen] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -194,6 +248,9 @@ export function FactoryOrderLedger({
   const hasOther = rows.some(r => r.otherIn);
   const hasQuote = rows.some(r => r.quotedUsd > 0);
   const active = !!q.trim() || !!from || !!to || only !== "all";
+
+  const toggle = (id: string) =>
+    setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   const num = "px-2 py-2 text-right whitespace-nowrap";
   const head = "px-2 py-2 text-right font-semibold whitespace-nowrap";
@@ -293,8 +350,12 @@ export function FactoryOrderLedger({
               const goldBal = r.goldOut - r.goldIn;
               const diaBal = r.diaOut - r.diaIn;
               const pending = r.labour - r.paid;
+              const key = r.orderId || r.orderNo;
+              const isOpen = open.has(key);
+              const cols = 3 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
               return (
-                <tr key={r.orderId || r.orderNo} className="border-t border-border/40 hover:bg-secondary/30">
+                <>
+                <tr key={key} onClick={() => toggle(key)} className="border-t border-border/40 hover:bg-secondary/30 cursor-pointer">
                   <td className="px-3 py-2 whitespace-nowrap">
                     {r.orderId
                       ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
@@ -328,6 +389,23 @@ export function FactoryOrderLedger({
                     </span>
                   </td>
                 </tr>
+                {isOpen && r.entries.map(en => (
+                  <tr key={en.id} className={`text-[11px] ${en.kind === "pay" ? "bg-success/5" : "bg-secondary/20"}`}>
+                    <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(en.date)}</td>
+                    <td className="px-2 py-1.5 text-muted-foreground" colSpan={cols - 3}>{en.text}</td>
+                    <td className="px-2 py-1.5 text-right whitespace-nowrap" colSpan={2}>
+                      {en.qty ?? (en.amount != null ? fmtMoneyInr(en.amount) : "")}
+                    </td>
+                  </tr>
+                ))}
+                {isOpen && r.entries.length === 0 && (
+                  <tr className="text-[11px] bg-secondary/20">
+                    <td className="px-3 py-1.5 text-muted-foreground" colSpan={cols}>
+                      Nothing issued or paid on this order yet — the figures above are the estimate from order creation.
+                    </td>
+                  </tr>
+                )}
+                </>
               );
             })}
           </tbody>
@@ -358,6 +436,8 @@ export function FactoryOrderLedger({
         </table>
       </div>
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
+        Tap a row to see every entry behind it — gold and diamond given, what came back, labour billed and each
+        payment made against it.
         Gold is in fine (24KT) grams so every karat compares. &ldquo;With factory&rdquo; is what they still hold of
         ours; &ldquo;Open&rdquo; diamond is issued but not yet accounted for. A figure written <span className="italic">~like this</span>
         is the estimate from order creation — that order has not reached Final Approval, so no real weight exists yet.
