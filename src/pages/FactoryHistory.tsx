@@ -693,25 +693,36 @@ export function FactoryHistoryPage() {
       labour: t.labour + r.labour, paid: t.paid + r.paid,
     }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, labour: 0, paid: 0 });
 
-    // Lay the columns out from what this factory deals in, left to right.
-    let x = 14;
-    const col = (header: string, w: number) => { const c = { header, x }; x += w; return c; };
-    const columns = [
-      col("Order", 30), col("Date", 24), col("Item", 46),
-      ...(hasGold ? [col("Gold out", 22), col("Gold back", 22), col("With fact.", 24)] : []),
-      ...(hasDia ? [col("Dia out", 20), col("Dia back", 20), col("Open ct", 20)] : []),
-      ...(hasSilver ? [col("Silver g", 22)] : []),
-      ...(hasOther ? [col("Other g", 22)] : []),
-      col("Labour", 24), col("Paid", 22), col("Pending", 24), col("Status", 24),
+    // Columns are laid out by WIDTH and then fitted to the page. Adding them up
+    // as fixed positions ran 322mm across a 269mm page, so Pending and Status
+    // fell off the right-hand edge entirely.
+    const want: { header: string; w: number; right?: boolean }[] = [
+      { header: "Order", w: 30 },
+      { header: "Date", w: 22 },
+      { header: "Item", w: 40 },
+      ...(hasGold ? [
+        { header: "Gold out", w: 20, right: true },
+        { header: "Gold back", w: 20, right: true },
+        { header: "With fact.", w: 20, right: true },
+      ] : []),
+      ...(hasDia ? [
+        { header: "Dia out", w: 18, right: true },
+        { header: "Dia back", w: 18, right: true },
+        { header: "Open ct", w: 18, right: true },
+      ] : []),
+      ...(hasSilver ? [{ header: "Silver g", w: 18, right: true }] : []),
+      ...(hasOther ? [{ header: "Other g", w: 18, right: true }] : []),
+      { header: "Labour", w: 22, right: true },
+      { header: "Paid", w: 20, right: true },
+      { header: "Pending", w: 22, right: true },
+      { header: "Status", w: 24 },
     ];
-    const align: ("left" | "right")[] = [
-      "left", "left", "left",
-      ...(hasGold ? (["right", "right", "right"] as const) : []),
-      ...(hasDia ? (["right", "right", "right"] as const) : []),
-      ...(hasSilver ? (["right"] as const) : []),
-      ...(hasOther ? (["right"] as const) : []),
-      "right", "right", "right", "left",
-    ];
+    const AVAIL = 269; // 297mm landscape less the 14mm margins
+    const total = want.reduce((s, c) => s + c.w, 0);
+    const scale = total > AVAIL ? AVAIL / total : 1;
+    let cx = 14;
+    const columns = want.map(c => { const col = { header: c.header, x: cx }; cx += c.w * scale; return col; });
+    const align: ("left" | "right")[] = want.map(c => (c.right ? "right" : "left"));
     downloadLedgerPdf({
       title: `Factory Ledger — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
       subjectLines: [
@@ -729,7 +740,7 @@ export function FactoryHistoryPage() {
       columns,
       align,
       rows: rows.map(r => [
-        r.orderNo, fmtDate(r.date), [r.jewellery, r.metalNote].filter(Boolean).join(" · ").slice(0, 26),
+        r.orderNo, fmtDate(r.date), fit([r.jewellery, r.metalNote].filter(Boolean).join(" · "), 40 * scale),
         ...(hasGold ? [q3(r.goldOut) || "", q3(r.goldIn) || "", q3(r.goldOut - r.goldIn) || "0"] : []),
         ...(hasDia ? [r.diaOut ? r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [q3(r.silverIn) || ""] : []),
@@ -796,7 +807,11 @@ export function FactoryHistoryPage() {
       // particulars instead of the text being cut.
       ...(() => {
         const cs = usedCols(rows);
-        const W = 22, DATE = 24, REF = 30, L0 = 14, RIGHT = 283;
+        // Each numeric column narrows as more materials appear, so the two blocks
+        // plus the particulars always fit the page instead of the credit block
+        // being pushed off the right edge.
+        const DATE = 24, REF = 30, L0 = 14, RIGHT = 283, MIN_PART = 60;
+        const W = Math.min(22, (RIGHT - L0 - DATE - REF - MIN_PART) / Math.max(1, cs.length * 2));
         const drX = L0;
         const midX = drX + cs.length * W;
         const partX = midX + DATE + REF;
