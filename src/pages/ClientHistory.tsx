@@ -3,6 +3,7 @@ import { useParams, Link, useNavigate } from "react-router-dom";
 import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
+import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
 import { Button } from "@/components/ui/button";
@@ -20,7 +21,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
@@ -61,6 +62,9 @@ export function ClientHistoryPage() {
   // Paid / outstanding come from the ORDERS, never from invoice snapshots: an
   // order can be paid before it is billed, and an invoice raised by mistake can
   // be deleted from Settings — neither may move this statement by a cent.
+  // A client reads their account by INVOICE, not by our internal order numbers.
+  const invoiceBlocks = buildInvoiceBlocks(db.invoices ?? [], db.orders, id!);
+
   // Gross billed and gift-card credit, so the summary reconciles with the
   // statement columns line for line.
   const grossBilled = billableOrders.reduce((s, o) => s + orderGrossTotal(o), 0);
@@ -218,6 +222,75 @@ export function ClientHistoryPage() {
     return s.length <= max ? s : s.slice(0, max - 1) + "…";
   };
 
+
+
+  /**
+   * The statement a client is actually sent: invoice by invoice, with the pieces
+   * on each invoice listed underneath it, then what was received against it.
+   * Order-by-order is our internal view — a client does not recognise an order
+   * number they were never given.
+   */
+  const exportInvoiceStatementPdf = (from: Date | null, to: Date | null) => {
+    const blocks = invoiceBlocks.filter(b => b.unbilled || inDateRange(b.date, from, to));
+    const oD = openingDebitAmt(client), oC = openingCreditAmt(client);
+    const T = blocks.reduce((t, b) => ({
+      gross: t.gross + b.gross, gift: t.gift + b.gift,
+      received: t.received + b.received, balance: t.balance + b.balance,
+    }), { gross: 0, gift: 0, received: 0, balance: 0 });
+    const closing = oD - oC + T.balance;
+
+    // One table per invoice: its pieces, then the payments received against it.
+    const sections = blocks.map(b => ({
+      heading: b.unbilled
+        ? `Not yet invoiced — ${b.items.length} piece${b.items.length !== 1 ? "s" : ""}`
+        : `Invoice ${b.number} · ${fmtDate(b.date)} · ${fmtMoney(b.gross)}${b.balance > 0.009 ? ` · ${fmtMoney(b.balance)} outstanding` : " · settled"}`,
+      columns: [
+        { header: "Order", x: 14 },
+        { header: "Description", x: 46 },
+        { header: "Qty", x: 150 },
+        { header: "Billed", x: 176 },
+        { header: "Gift card", x: 206 },
+        { header: "Received", x: 236 },
+        { header: "Balance", x: 262 },
+      ],
+      align: ["left", "left", "right", "right", "right", "right", "right"] as ("left" | "right")[],
+      rows: [
+        ...b.items.map(i => [
+          i.orderNo, fit(i.description || "—", 100), String(i.qty),
+          fmtMoney(i.gross), i.gift ? `-${fmtMoney(i.gift)}` : "",
+          i.received ? fmtMoney(i.received) : "",
+          i.balance > 0.009 ? fmtMoney(i.balance) : "Cleared",
+        ]),
+        ...b.payments.map(p => [
+          fmtDate(p.date), fit(p.note, 100), "", "", "", fmtMoney(p.amount), "",
+        ]),
+      ],
+      totalsRow: ["", "Invoice total", "", fmtMoney(b.gross), b.gift ? `-${fmtMoney(b.gift)}` : "",
+        fmtMoney(b.received), b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"],
+    }));
+
+    downloadLedgerPdfMulti({
+      title: "Client Account Statement",
+      subjectLines: [
+        client.companyName,
+        [client.ownerName, client.country].filter(Boolean).join(" · "),
+        [client.email, client.phone].filter(Boolean).join("   "),
+        from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ].filter(Boolean),
+      summary: [
+        ...(oD || oC ? [{ label: "Balance brought forward", value: fmtMoney(oD - oC) }] : []),
+        { label: "Total billed (gross)", value: fmtMoney(T.gross) },
+        ...(T.gift > 0 ? [{ label: "Gift card used", value: fmtMoney(T.gift) }] : []),
+        { label: "Received", value: fmtMoney(T.received) },
+        { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
+        { label: "Invoices", value: String(blocks.filter(b => !b.unbilled).length) },
+      ],
+      landscape: true,
+      sections,
+      filename: `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
+    });
+  };
 
 
   const exportStatementCsv = (from: Date | null, to: Date | null) => {
@@ -445,6 +518,7 @@ export function ClientHistoryPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
+              { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
               { label: "Account Statement — PDF", sublabel: "Bills & payments (USD)", kind: "pdf", run: exportStatementPdf },
               { label: "Account Statement — Excel", sublabel: "Bills & payments (USD)", kind: "excel", run: exportStatementCsv },
             ]} />
@@ -564,6 +638,14 @@ export function ClientHistoryPage() {
           );
         })()}
       </div>
+      <ClientInvoiceLedger
+        blocks={invoiceBlocks}
+        client={client}
+        openingDebit={openingDebitAmt(client)}
+        openingCredit={openingCreditAmt(client)}
+        onExport={() => setShowExport(true)}
+      />
+
       {/* Account Statement — same ledger as Stock and Locker: summary, filters,
           then every entry with a running balance. */}
       <StatementLedger

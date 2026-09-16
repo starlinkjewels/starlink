@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
@@ -599,6 +599,39 @@ export function OrderDetailPage() {
     } finally { setRwSaving(false); }
   };
 
+  // Carats actually issued to the factory for this order — the figure the scale
+  // adjustment is measured against.
+  const issuedDiaCt = Math.round(
+    db.materialIssuances
+      .filter(i => i.orderId === order.id && i.material === "diamond")
+      .reduce((s2, i) => s2 + i.quantityIssued, 0) * 1000) / 1000;
+
+  useEffect(() => {
+    setDiaTotW(order.actualDiamondWeight != null ? String(order.actualDiamondWeight) : "");
+    setDiaTotPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
+  }, [order.id, order.actualDiamondWeight, order.actualDiamondPcs]);
+
+  /** Save the factory-bill diamond totals. The difference from what we issued is
+   *  kept as the scale adjustment, so the two ledgers can still be reconciled. */
+  const saveDiamondTotals = () => {
+    const w = diaTotW.trim() === "" ? undefined : Number(diaTotW);
+    const pcs = diaTotPcs.trim() === "" ? undefined : Math.round(Number(diaTotPcs));
+    if (w !== undefined && (!isFinite(w) || w < 0)) return;
+    if (pcs !== undefined && (!isFinite(pcs) || pcs < 0)) return;
+    if (w === order.actualDiamondWeight && pcs === order.actualDiamondPcs) return;
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id);
+      if (!o) return;
+      o.actualDiamondWeight = w && w > 0 ? w : undefined;
+      o.actualDiamondPcs = pcs && pcs > 0 ? pcs : undefined;
+      o.diamondWeightAdjust = w && issuedDiaCt > 0
+        ? Math.round((w - issuedDiaCt) * 1000) / 1000 || undefined
+        : undefined;
+    });
+    toast.success("Diamond totals saved");
+  };
+
+
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
   // ── Final Approval popup: one window for all the actual details ──
@@ -614,6 +647,10 @@ export function OrderDetailPage() {
   // adjustment (+ or −), and the stone count that goes on the same bill.
   const [faDiaAdjust, setFaDiaAdjust] = useState("");
   const [faDiaPcs, setFaDiaPcs] = useState("");
+  // The same two figures, editable straight from the Manufacturing card so they
+  // can be set from the factory’s bill without reopening Final Approval.
+  const [diaTotW, setDiaTotW] = useState("");
+  const [diaTotPcs, setDiaTotPcs] = useState("");
   // Two-tone pieces — a second metal alongside the gold (platinum / silver / …).
   const [faOtherMetal, setFaOtherMetal] = useState("");
   const [faOtherNet, setFaOtherNet] = useState("");
@@ -2698,6 +2735,30 @@ export function OrderDetailPage() {
                     }
                     return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className={i.finishDisposition === "returned" ? "text-amber-600 font-medium" : "text-success font-medium"}>{i.finishDisposition === "returned" ? "returned to stock" : "used in piece"}</span></div>;
                   })}
+                  {/* The figure the factory bills handling on — their scale, not
+                      ours — with the stone count from the same bill. Editable here
+                      so it can be set without reopening Final Approval. */}
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1.5 mt-1 border-t border-border/50">
+                    <span className="text-muted-foreground">Total diamond weight:</span>
+                    {canEditStage() ? (
+                      <Input type="number" step="0.001" min={0} value={diaTotW}
+                        onChange={e => setDiaTotW(e.target.value)} onBlur={saveDiamondTotals}
+                        className="h-7 w-24 rounded-lg text-xs" placeholder="ct" />
+                    ) : (
+                      <span className="font-semibold text-foreground">{order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : "—"}</span>
+                    )}
+                    <span className="text-muted-foreground">Total diamond pcs:</span>
+                    {canEditStage() ? (
+                      <Input type="number" step="1" min={0} value={diaTotPcs}
+                        onChange={e => setDiaTotPcs(e.target.value)} onBlur={saveDiamondTotals}
+                        className="h-7 w-20 rounded-lg text-xs" placeholder="pcs" />
+                    ) : (
+                      <span className="font-semibold text-foreground">{order.actualDiamondPcs ?? "—"}</span>
+                    )}
+                    {issuedDiaCt > 0 && (
+                      <span className="text-[11px] text-muted-foreground">issued {issuedDiaCt} ct</span>
+                    )}
+                  </div>
                 </div>
               );
             })() : (
