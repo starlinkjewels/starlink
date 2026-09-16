@@ -465,9 +465,12 @@ export function FactoryHistoryPage() {
     const withBalance = [...rows]
       .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
       .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
-    return withBalance.reverse();
+    // Chronological: a balance is the balance AFTER its row, so a download read
+    // newest-first ran the running total backwards. The screen flips it.
+    return withBalance;
   };
-  const statement = buildStatement(issuances, true);
+  const statementAsc = buildStatement(issuances, true);
+  const statement = [...statementAsc].reverse(); // newest first, for the screen
 
   // ── Gold ledger (in fine 24KT grams, so the running balance matches the
   //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
@@ -489,9 +492,9 @@ export function FactoryHistoryPage() {
       }
     }
     let running = 0;
-    return [...rows].sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
+    return [...rows].sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; });  // chronological — the running balance only reads correctly oldest-first
   };
-  const goldLedger = buildGoldLedger(issuances, true);
+
 
   // ── Diamond ledger (carats): issued in; once finished, used-in-piece + returned out. ──
   const buildDiamondLedger = (iss: MaterialIssuance[]) => {
@@ -508,9 +511,9 @@ export function FactoryHistoryPage() {
       }
     }
     let running = 0;
-    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; }).reverse();
+    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; });  // chronological — the running balance only reads correctly oldest-first
   };
-  const diamondLedger = buildDiamondLedger(issuances);
+
 
   // Limit the export to a single order's issuances (matched on order number,
   // forgiving of the SLJ-… prefix), or all of them when no order is given.
@@ -521,14 +524,14 @@ export function FactoryHistoryPage() {
   };
 
   const ordSuffix = (o?: string) => (o ? `-Order-${o.replace(/[^\w.-]+/g, "_")}` : "");
-  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
-  const exportDiamondCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], buildDiamondLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
+  const exportDiamondCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], buildDiamondLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
 
   const exportCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
       ["Date", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
@@ -551,14 +554,14 @@ export function FactoryHistoryPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Particulars", x: 50 },
-        { header: "Charged", x: 122 },
-        { header: "Paid", x: 148 },
+        { header: "Particulars", x: 46 },
+        { header: "Charged", x: 118 },
+        { header: "Paid", x: 145 },
         { header: "Balance", x: 170 },
       ],
       align: ["left", "left", "right", "right", "right"],
       rows: buildStatement(iss, !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [
-        fmtDate(r.date), r.particulars.slice(0, 40),
+        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
         r.debit ? rs(r.debit) : "—",
         r.credit ? rs(r.credit) : "—",
         rs(r.balance),

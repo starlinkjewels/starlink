@@ -82,25 +82,22 @@ export function PaymentsPage() {
         </div>
       )}
 
-      {/* The form is a narrow column; the ledger beside it fills the rest of the
-          page, so both sides of a wide screen are doing something. They stack on
-          a phone. */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,380px)_1fr] gap-5 items-start">
-        <div className="card-luxe p-6 xl:sticky xl:top-4">
-            {mode === "client" && <ReceiveFromClient />}
-            {mode === "supplier" && <PaySupplier />}
-            {mode === "factory" && <PayFactory />}
-            {mode === "expense" && <PayExpense />}
-            {mode === "locker" && <LockerActions />}
-        </div>
-        <div className="min-w-0">
-          {mode === "client" && <ReceiptLedger />}
-          {mode === "supplier" && <MoneyLedger kind="supplier" />}
-          {mode === "factory" && <MoneyLedger kind="factory" />}
-          {mode === "expense" && <MoneyLedger kind="expense" />}
-          {mode === "locker" && <MoneyLedger kind="locker" />}
-        </div>
+      {/* Form first, then the table underneath at full width — the entries are
+          what people come back to read, so they get the whole page. */}
+      <div className="card-luxe p-6">
+        {mode === "client" && <ReceiveFromClient />}
+        {mode === "supplier" && <PaySupplier />}
+        {mode === "factory" && <PayFactory />}
+        {mode === "expense" && <PayExpense />}
+        {mode === "locker" && <LockerActions />}
       </div>
+
+      {mode === "client" && <ReceiptLedger />}
+      {mode === "supplier" && <MoneyLedger kind="supplier" />}
+      {mode === "factory" && <MoneyLedger kind="factory" />}
+      {mode === "expense" && <MoneyLedger kind="expense" />}
+      {mode === "locker" && <MoneyLedger kind="locker" />}
+
     </div>
   );
 }
@@ -192,35 +189,34 @@ function ReceiveFromClient() {
 
   return (
     <div className="space-y-3">
-      <div>
-        <Label className="text-xs">Client</Label>
-        <Select value={clientId} onValueChange={setClientId}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
-          <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
-        </Select>
-          {clientId && openInvoices.length > 0 && (
-            <div>
-              <Label className="text-xs">Against {invoiceId ? <span className="text-success">(auto-selected)</span> : ""}</Label>
-              <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
-                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="fifo">Oldest bills first</SelectItem>
-                  {openInvoices.map(({ inv, bal }) => (
-                    <SelectItem key={inv.id} value={inv.id}>
-                      Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                {invoiceId
-                  ? "Clears that invoice first. Anything left over rolls on to their next invoice, then to credit."
-                  : "Oldest bills first — pick an invoice if the client sent this for one in particular."}
-              </p>
-            </div>
-          )}
-      </div>
-      <div className="grid grid-cols-2 gap-3">
+      {/* Fields spread across the width instead of one long column — the card is
+          full-page now that the receipts table sits underneath it. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        <div>
+          <Label className="text-xs">Client</Label>
+          <Select value={clientId} onValueChange={setClientId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
+            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+
+        {clientId && openInvoices.length > 0 && (
+          <div>
+            <Label className="text-xs">Against {invoiceId ? <span className="text-success">(auto-selected)</span> : ""}</Label>
+            <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fifo">Oldest bills first</SelectItem>
+                {openInvoices.map(({ inv, bal }) => (
+                  <SelectItem key={inv.id} value={inv.id}>
+                    Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div>
           <Label className="text-xs">Amount Received ($)</Label>
           <div className="relative mt-1">
@@ -228,6 +224,7 @@ function ReceiveFromClient() {
             <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="pl-9 h-10 rounded-xl" />
           </div>
         </div>
+
         <div>
           <Label className="text-xs">Method</Label>
           <Select value={method} onValueChange={setMethod}>
@@ -235,42 +232,57 @@ function ReceiveFromClient() {
             <SelectContent>{["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
-      </div>
-      <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
-      <div>
-        <Label className="text-xs">Deposited to Locker *</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
-        </Select>
-      </div>
-      {needsRate && (
-        <div className="p-3 rounded-xl bg-secondary space-y-2">
-          <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-          <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
-          <p className="text-xs text-muted-foreground">This locker holds INR, not USD — enter today's rate to convert what lands in it.</p>
+
+        <div>
+          <Label className="text-xs">Deposited to Locker *</Label>
+          <Select value={lockerId} onValueChange={setLockerId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          </Select>
         </div>
-      )}
-      {amount && lockerId && (
-        <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Received</span>
-            <span className="font-medium text-foreground">{fmtMoney(Number(amount))}</span>
+
+        <div>
+          <Label className="text-xs">Remark / ref</Label>
+          <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="optional" />
+        </div>
+
+        {needsRate && (
+          <div className="sm:col-span-2 lg:col-span-3 p-3 rounded-xl bg-secondary">
+            <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+            <Input type="number" min={0} step="0.01" value={exchangeRate} onChange={e => setExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white mt-1 max-w-xs" placeholder="e.g. 83.50" />
+            <p className="text-xs text-muted-foreground mt-1">This locker holds INR, not USD — enter today's rate to convert what lands in it.</p>
           </div>
-          <div className="flex items-center justify-between text-sm">
-            <span className="text-muted-foreground">Applied to client's order</span>
-            <span className="font-semibold text-primary">{fmtMoney(Number(amount))}</span>
+        )}
+      </div>
+
+      {clientId && openInvoices.length > 0 && (
+        <p className="text-[11px] text-muted-foreground">
+          {invoiceId
+            ? "Clears that invoice first. Anything left over rolls on to their next invoice, then to credit."
+            : "Oldest bills first — pick an invoice if the client sent this for one in particular."}
+        </p>
+      )}
+
+      {amount && lockerId && (
+        <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Received</p>
+            <p className="font-medium text-foreground">{fmtMoney(Number(amount))}</p>
+          </div>
+          <div>
+            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Applied to their bills</p>
+            <p className="font-semibold text-primary">{fmtMoney(Number(amount))}</p>
           </div>
           {depositPreview != null && locker && (
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-muted-foreground">Deposited to {locker.name}</span>
-              <span className="font-semibold text-foreground">{lockerCurrency === "USD" ? "$" : "₹"}{depositPreview.toFixed(2)}</span>
+            <div>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Deposited to {locker.name}</p>
+              <p className="font-semibold text-foreground">{lockerCurrency === "USD" ? "$" : "₹"}{depositPreview.toFixed(2)}</p>
             </div>
           )}
         </div>
       )}
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
+
+      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full sm:w-auto sm:px-10">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
     </div>
   );
 }

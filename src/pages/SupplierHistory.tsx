@@ -410,11 +410,18 @@ export function SupplierHistoryPage() {
     return withBalance.reverse(); // newest first, matching every other list on this page
   })();
 
+  // A statement is READ oldest-first: every balance is the balance after that
+  // row, so newest-first printed the running total backwards and put the
+  // opening line at the bottom. The screen shows newest first; the download
+  // must not.
+  const statementAsc = [...statement].reverse();
+
+
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Particulars", "Purchased (INR)", "Paid (INR)", "Balance (INR)"],
-      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      ["Date", "Particulars", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
+      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
@@ -434,13 +441,14 @@ export function SupplierHistoryPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Particulars", x: 50 },
-        { header: "Purchased", x: 122 },
-        { header: "Paid", x: 148 },
+        { header: "Particulars", x: 46 },
+        { header: "Bill Amount", x: 112 },
+        { header: "Paid", x: 145 },
         { header: "Balance", x: 170 },
       ],
-      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
-        fmtDate(r.date), r.particulars.slice(0, 28),
+      align: ["left", "left", "right", "right", "right"],
+      rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
+        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "—",
         r.credit ? fmtInrPlain(r.credit).replace("Rs. ", "") : "—",
         fmtInrPlain(r.balance).replace("Rs. ", ""),
@@ -725,7 +733,7 @@ export function SupplierHistoryPage() {
         caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · purchases and payments, running balance in INR`}
         rows={statement}
         fmt={fmtMoneyInr}
-        debitLabel="Purchased"
+        debitLabel="Bill"
         creditLabel="Paid"
         onExport={() => setShowExport(true)}
         summary={[

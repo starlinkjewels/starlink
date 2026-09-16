@@ -202,11 +202,18 @@ export function ClientHistoryPage() {
     return withBalance.reverse();
   })();
 
+  // A statement is READ oldest-first: every balance is the balance AFTER that
+  // row, so printing newest-first ran the running total backwards and pushed
+  // the opening line to the bottom. The screen shows newest first; downloads
+  // must not.
+  const statementAsc = [...statement].reverse();
+
+
   const exportStatementCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Client-Statement-${client.companyName.replace(/\s+/g, "_")}`,
       ["Date", "Particulars", "Billed (USD)", "Received (USD)", "Balance (USD)"],
-      statement.filter(r => inDateRange(r.date, from, to)).map(r => [fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
+      statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.debit || "", r.credit || "", r.balance]),
     );
   };
 
@@ -226,13 +233,14 @@ export function ClientHistoryPage() {
       ],
       columns: [
         { header: "Date", x: 20 },
-        { header: "Particulars", x: 50 },
-        { header: "Billed", x: 122 },
-        { header: "Received", x: 148 },
-        { header: "Balance", x: 174 },
+        { header: "Particulars", x: 46 },
+        { header: "Billed", x: 118 },
+        { header: "Received", x: 145 },
+        { header: "Balance", x: 172 },
       ],
-      rows: statement.filter(r => inDateRange(r.date, from, to)).map(r => [
-        fmtDate(r.date), r.particulars.slice(0, 28),
+      align: ["left", "left", "right", "right", "right"],
+      rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
+        r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars.slice(0, 42),
         r.debit ? fmtMoney(r.debit) : "—",
         r.credit ? fmtMoney(r.credit) : "—",
         fmtMoney(r.balance),
