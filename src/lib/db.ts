@@ -263,6 +263,12 @@ export interface Order {
   actualGrossWeight?: number; // grams
   actualNetWeight?: number; // grams
   actualDiamondWeight?: number; // carats
+  /** Carats added or taken off at Final Approval so OUR total matches the
+   *  factory’s scale (they bill handling on their figure). Kept separately so
+   *  the difference is visible rather than buried in the total. */
+  diamondWeightAdjust?: number;
+  /** How many stones the factory’s bill counts. */
+  actualDiamondPcs?: number;
   actualMetalRate?: number; // $ per gram
   actualDiamondRate?: number; // $ per carat
   actualMakingCharges?: number; // flat $ making charges

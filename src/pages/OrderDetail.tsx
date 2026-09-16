@@ -229,6 +229,10 @@ export function OrderDetailPage() {
   const [rwGoldDir, setRwGoldDir] = useState<"none" | "add" | "remove">("none");
   const [rwGoldG, setRwGoldG] = useState("");
   const [rwGoldKarat, setRwGoldKarat] = useState("22K");
+  // Where the added gold comes from. Normally the factory takes it from the
+  // gold it already holds of ours, so THEIR ledger drops by the pure (24KT)
+  // equivalent and our warehouse stock is untouched.
+  const [rwGoldFrom, setRwGoldFrom] = useState<"factory" | "stock">("factory");
   const [rwDiaDir, setRwDiaDir] = useState<"none" | "add" | "remove">("none");
   const [rwDiaCt, setRwDiaCt] = useState("");
   const [rwDiaShape, setRwDiaShape] = useState("Round");
@@ -517,7 +521,7 @@ export function OrderDetailPage() {
     const noteBase = `Rework — ${order.orderNumber}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`;
     try {
       // Stock first — an insufficient-stock error aborts before any record is written.
-      if (goldG > 0 && rwGoldDir === "add") {
+      if (goldG > 0 && rwGoldDir === "add" && rwGoldFrom === "stock") {
         await decreaseStockSelfHealing({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${goldG}g ${rwGoldKarat} gold for ${order.orderNumber}` }, db.stockMovements);
       } else if (goldG > 0 && rwGoldDir === "remove") {
         await increaseStock({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, refType: "manual", createdBy: user!.id, note: `Rework −${goldG}g ${rwGoldKarat} gold from ${order.orderNumber} → stock` });
@@ -540,12 +544,12 @@ export function OrderDetailPage() {
           const iid = uid("mi_");
           d.materialIssuances.unshift({
             id: iid, factoryId, orderId: o.id, material: "gold", purityOrQuality: rwGoldKarat,
-            quantityIssued: goldG, source: "stock",
+            quantityIssued: goldG, source: rwGoldFrom === "stock" ? "stock" : "factoryPool",
             finishedNetWeight: goldG, finishedKarat: rwGoldKarat, finishedPurity: purMille,
             finishedPieces: [{ id: uid("fp_"), quantityUsed: goldG, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
             issuedAt: now, issuedBy: user!.id, status: "closed",
             makingCharges: { amountInr: charge, payments: [] },
-            notes: `${noteBase} (added ${goldG}g ${rwGoldKarat} gold)`,
+            notes: `${noteBase} (added ${goldG}g ${rwGoldKarat} gold from ${rwGoldFrom === "stock" ? "our stock" : "the factory’s holding"})`,
           } as MaterialIssuance);
           o.materialIssuanceIds.push(iid);
           chargeAttached = charge > 0;
@@ -604,6 +608,12 @@ export function OrderDetailPage() {
   const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({}); // certified packets: whole used/returned
   const [faDiaReturnedCt, setFaDiaReturnedCt] = useState<Record<string, string>>({}); // loose diamonds: carats returned (partial allowed)
   const [faDiaReturnedPcs, setFaDiaReturnedPcs] = useState<Record<string, string>>({}); // loose diamonds: how many STONES came back
+  // A factory weighs the stones on its own scale, so its bill can read 6.60ct
+  // where we issued 6.58ct. Handling charges are billed on THEIR total, so
+  // without a way to match it the two ledgers can never agree. This is that
+  // adjustment (+ or −), and the stone count that goes on the same bill.
+  const [faDiaAdjust, setFaDiaAdjust] = useState("");
+  const [faDiaPcs, setFaDiaPcs] = useState("");
   // Two-tone pieces — a second metal alongside the gold (platinum / silver / …).
   const [faOtherMetal, setFaOtherMetal] = useState("");
   const [faOtherNet, setFaOtherNet] = useState("");
@@ -949,6 +959,8 @@ export function OrderDetailPage() {
     const retPcs: Record<string, string> = {};
     dias.forEach(i => { retPcs[i.id] = i.finishReturnedPcs != null ? String(i.finishReturnedPcs) : ""; });
     setFaDiaReturnedPcs(retPcs);
+    setFaDiaAdjust(order.diamondWeightAdjust != null ? String(order.diamondWeightAdjust) : "");
+    setFaDiaPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
     setFaOtherMetal(order.otherMetal ?? "");
     setFaOtherNet(order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
     setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
@@ -968,10 +980,14 @@ export function OrderDetailPage() {
     // Carats actually consumed into the piece: certified = whole if "used";
     // loose = issued minus the partial returned amount.
     const looseReturnedCt = (i: MaterialIssuance) => Math.min(Math.max(Number(faDiaReturnedCt[i.id]) || 0, 0), i.quantityIssued);
-    const usedDiaCt = dias.reduce((s, i) => {
+    const usedDiaCtRaw = dias.reduce((s, i) => {
       if (i.diamondKind === "certified") return s + ((faDia[i.id] ?? "used") === "used" ? i.quantityIssued : 0);
       return s + (i.quantityIssued - looseReturnedCt(i));
     }, 0);
+    // The factory weighs on its own scale and bills handling on ITS total, so
+    // this adjustment is carried into every figure that follows.
+    const diaAdjust = Number(faDiaAdjust) || 0;
+    const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
     const labour = {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
@@ -1064,6 +1080,13 @@ export function OrderDetailPage() {
         o.otherMetal = faOtherMetal.trim() || undefined;
         o.otherMetalWeight = faOtherMetal.trim() && !isNaN(otherW) && otherW > 0 ? otherW : undefined;
         o.otherMetalPurity = faOtherMetal.trim() && !isNaN(otherP) && otherP > 0 ? otherP : undefined;
+
+        // The diamond figure the factory’s bill is based on, and the difference
+        // from what we issued, so the two ledgers can be reconciled later.
+        o.actualDiamondWeight = usedDiaCt > 0 ? usedDiaCt : undefined;
+        o.diamondWeightAdjust = diaAdjust !== 0 ? diaAdjust : undefined;
+        const diaPcsN = Math.round(Number(faDiaPcs) || 0);
+        o.actualDiamondPcs = diaPcsN > 0 ? diaPcsN : undefined;
 
         // Client billing.
         if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
@@ -3054,7 +3077,7 @@ export function OrderDetailPage() {
                     <p className="text-sm font-semibold text-brand-dark">Rework / Alteration</p>
                     <button onClick={() => setShowRework(false)} className="text-xs text-muted-foreground underline">cancel</button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Add or remove gold/diamond and record the factory's rework charge. Added material is drawn from stock; removed material returns to stock — factory ledger &amp; stock update automatically.</p>
+                  <p className="text-xs text-muted-foreground">Add or remove gold/diamond and record the factory’s rework charge. Added gold normally comes out of the gold the factory already holds of ours; removed material returns to stock — the factory ledger &amp; stock update automatically.</p>
                   <div>
                     <Label className="text-xs">Factory</Label>
                     <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={setRwFactoryId}>
@@ -3075,6 +3098,24 @@ export function OrderDetailPage() {
                       <div className="grid grid-cols-2 gap-2">
                         <div><Label className="text-xs">Grams to {rwGoldDir}</Label><Input type="number" step="0.001" min={0} value={rwGoldG} onChange={e => setRwGoldG(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 1.5" /></div>
                         <div><Label className="text-xs">Karat</Label><Select value={rwGoldKarat} onValueChange={setRwGoldKarat}><SelectTrigger className="rounded-xl mt-1 h-9"><SelectValue /></SelectTrigger><SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+                      </div>
+                    )}
+                    {rwGoldDir === "add" && (
+                      <div>
+                        <Label className="text-xs">Gold taken from</Label>
+                        <div className="inline-flex rounded-lg bg-white border border-border p-0.5 mt-1 w-full">
+                          {([["factory", "Factory’s holding"], ["stock", "Our stock"]] as const).map(([v, lbl]) => (
+                            <button key={v} onClick={() => setRwGoldFrom(v)}
+                              className={`flex-1 px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwGoldFrom === v ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>
+                              {lbl}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="text-[11px] text-muted-foreground mt-1">
+                          {rwGoldFrom === "factory"
+                            ? "The factory uses gold it already holds of ours — their gold ledger drops by the pure (24KT) equivalent and our stock is untouched."
+                            : "Drawn from our own stock and sent to the factory — their gold ledger is unchanged."}
+                        </p>
                       </div>
                     )}
                   </div>
@@ -3228,11 +3269,15 @@ export function OrderDetailPage() {
         const needsGold = orderMaterialRequirements(order).needsGold;
         // All of the order's diamonds (open on first approval, closed on a re-edit) so they stay editable.
         const faOpenDia = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
-        const usedDiaCt = faOpenDia.reduce((s, i) => {
+        const usedDiaCtRaw = faOpenDia.reduce((s, i) => {
           if (i.diamondKind === "certified") return s + ((faDia[i.id] ?? "used") === "used" ? i.quantityIssued : 0);
           const ret = Math.min(Math.max(Number(faDiaReturnedCt[i.id]) || 0, 0), i.quantityIssued);
           return s + (i.quantityIssued - ret);
         }, 0);
+        // The factory bills on ITS weight, so the adjustment is part of the total
+        // everything downstream uses — handling charges included.
+        const diaAdjust = Number(faDiaAdjust) || 0;
+        const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
         const faLive = labourValue({
           perGramRate: faPerGram ? Number(faPerGram) : undefined,
           diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
@@ -3346,6 +3391,26 @@ export function OrderDetailPage() {
                     })}
                   </div>
                   <p className="text-[11px] text-muted-foreground mt-1">For a loose diamond, enter how many carats came back (e.g. issued 1ct, 0.50ct returned) and how many stones (pcs). Returned carats go back to stock; the rest is used in the piece.</p>
+                  {/* The factory weighs on its own scale and bills handling on ITS
+                      figure. Without a way to match it, our ledger and their bill
+                      can never agree over a 0.02ct difference. */}
+                  <div className="grid grid-cols-2 gap-2.5 mb-4">
+                    <div>
+                      <Label className="text-xs">Weight adjustment (ct)</Label>
+                      <Input type="number" step="0.001" value={faDiaAdjust} onChange={e => setFaDiaAdjust(e.target.value)}
+                        className="rounded-xl mt-1 h-9" placeholder="e.g. 0.02 or -0.01" />
+                    </div>
+                    <div>
+                      <Label className="text-xs">Total diamond pcs</Label>
+                      <Input type="number" min={0} step="1" value={faDiaPcs} onChange={e => setFaDiaPcs(e.target.value)}
+                        className="rounded-xl mt-1 h-9" placeholder="stones on the bill" />
+                    </div>
+                    <p className="text-[11px] text-muted-foreground col-span-2 -mt-1">
+                      Use the adjustment when the factory’s scale reads differently from ours — issued 6.58ct, their
+                      bill says 6.60ct, so enter 0.02. It goes into the total diamond weight, which is what their
+                      handling charge is calculated on, so both ledgers land on the same figure.
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -3357,7 +3422,14 @@ export function OrderDetailPage() {
                 const gross = Math.round((netG + otherG + diaG) * 1000) / 1000;
                 return (
                   <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
-                    <div className="flex justify-between"><span className="text-muted-foreground">Total diamond used</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({diaG} g)</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Issued to the factory</span><span className="font-semibold text-foreground">{usedDiaCtRaw} ct</span></div>
+                    {diaAdjust !== 0 && (
+                      <div className="flex justify-between"><span className="text-muted-foreground">Scale adjustment</span><span className={`font-semibold ${diaAdjust > 0 ? "text-warning" : "text-destructive"}`}>{diaAdjust > 0 ? "+" : ""}{diaAdjust} ct</span></div>
+                    )}
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total diamond weight</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({diaG} g)</span></div>
+                    {Number(faDiaPcs) > 0 && (
+                      <div className="flex justify-between"><span className="text-muted-foreground">Total diamond pcs</span><span className="font-semibold text-foreground">{Math.round(Number(faDiaPcs))}</span></div>
+                    )}
                     {needsGold && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
                     {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{otherG} g</span></div>}
                     <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
