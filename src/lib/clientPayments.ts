@@ -11,7 +11,7 @@
 // the two can never disagree.
 import {
   loadDb, updateDb, totalAdvance, balanceDue, invoiceOrderIds,
-  allocateToInvoice, reconcileClientAccount,
+  settleClientAccount,
   type DB, type LockerTransaction, type Order,
 } from "./db";
 
@@ -78,13 +78,7 @@ export function applyIncomeToClient(args: {
     const c = d.clients.find(x => x.id === args.clientId);
     if (!t || !c || t.refType === "clientPayment") return;
     const before = advancesOf(d);
-    const pool = billed + (c.creditBalance || 0);
-    const leftover = args.invoiceId
-      ? allocateToInvoice(d, args.invoiceId, pool, args.userId, now, t.note)
-      : reconcileClientAccount(
-          d.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"),
-          billed, c.creditBalance || 0, args.userId, now, t.note);
-    c.creditBalance = leftover > 0 ? leftover : undefined;
+    settleClientAccount(d, c.id, billed, args.userId, now, t.note, args.invoiceId);
     settled = Math.round((advancesOf(d) - before) * 100) / 100;
     t.refType = "clientPayment";
     t.refId = c.id;

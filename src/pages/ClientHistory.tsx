@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, reconcileClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
@@ -105,8 +105,7 @@ export function ClientHistoryPage() {
       const now = new Date().toISOString();
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
-      const leftover = reconcileClientAccount(clientOrders, amt, c.creditBalance || 0, user!.id, now, note);
-      c.creditBalance = leftover > 0 ? leftover : undefined;
+      settleClientAccount(d, id!, amt, user!.id, now, note);
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
       // across whichever orders the FIFO allocation above happened to touch.
@@ -140,8 +139,7 @@ export function ClientHistoryPage() {
       if (!c) return;
       const clientOrders = d.orders.filter(o => o.clientId === id && o.status !== "Rejected");
       // Reclaim any per-order over-payment + stored credit, re-allocate oldest first.
-      const leftover = reconcileClientAccount(clientOrders, 0, c.creditBalance || 0, user!.id, new Date().toISOString());
-      c.creditBalance = leftover > 0 ? leftover : undefined;
+      settleClientAccount(d, id!, 0, user!.id, new Date().toISOString());
     });
     toast.success("Credit applied to oldest outstanding bills");
   };

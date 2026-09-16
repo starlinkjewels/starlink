@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, reconcileClientAccount, allocateToInvoice, type LockerType, type Order } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
 import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -77,6 +77,15 @@ export function LockerPage() {
         .map(i => ({ inv: i, bal: invLiveBalance(invoiceOrderIds(i)) }))
         .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
     : [];
+
+  // One outstanding invoice for that client → that is what the money is for.
+  // Preselect it so a deposit settles the bill they actually paid.
+  const clientOpenUnpaid = clientInvoices.filter(x => x.bal > 0);
+  useEffect(() => {
+    setTxnInvoiceId(clientOpenUnpaid.length === 1 ? clientOpenUnpaid[0].inv.id : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [txnClientId]);
+
 
 
   const createLocker = () => {
@@ -197,12 +206,7 @@ export function LockerPage() {
           // currency, so an INR locker converts back through the entered rate.
           const billed = currency === "USD" ? amt : (rate > 0 ? Math.round((amt / rate) * 100) / 100 : 0);
           const noteText = txnNote.trim() || undefined;
-          const leftover = txnInvoiceId
-            ? allocateToInvoice(d, txnInvoiceId, billed + (payClient.creditBalance || 0), user!.id, now, noteText)
-            : reconcileClientAccount(
-                d.orders.filter(o => o.clientId === payClient.id && o.status !== "Rejected"),
-                billed, payClient.creditBalance || 0, user!.id, now, noteText);
-          payClient.creditBalance = leftover > 0 ? leftover : undefined;
+          const leftover = settleClientAccount(d, payClient.id, billed, user!.id, now, noteText, txnInvoiceId || undefined);
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: "income", amountInr: amt, currency,
             category: `Client Payment — ${payClient.companyName}`,

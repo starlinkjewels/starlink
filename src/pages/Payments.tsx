@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
-  reconcileClientAccount, allocateToInvoice, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
+  settleClientAccount, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import {
@@ -119,6 +119,17 @@ function ReceiveFromClient() {
         }))
         .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
     : [];
+
+  // When the client has exactly ONE invoice still outstanding, a transfer from
+  // them is almost always for that invoice — preselect it so the money settles
+  // the bill they actually paid instead of scattering onto older orders.
+  // Anything less clear-cut stays on oldest-bills-first for staff to choose.
+  const openUnpaid = openInvoices.filter(x => x.bal > 0);
+  useEffect(() => {
+    setInvoiceId(openUnpaid.length === 1 ? openUnpaid[0].inv.id : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId]);
+
   const locker = db.lockers.find(l => l.id === lockerId);
   const lockerCurrency = locker?.currency || "INR";
   // A client always pays in USD (that's what the order is billed in) — only
@@ -141,12 +152,9 @@ function ReceiveFromClient() {
       updateDb(d => {
         const client = d.clients.find(x => x.id === clientId);
         if (!client) return;
-        const leftover = invoiceId
-          ? allocateToInvoice(d, invoiceId, amt + (client.creditBalance || 0), user!.id, now, noteText)
-          : reconcileClientAccount(
-              d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected"),
-              amt, client.creditBalance || 0, user!.id, now, noteText);
-        client.creditBalance = leftover > 0 ? leftover : undefined;
+        // One place decides how a client’s money settles their bills — invoice by
+        // invoice, the one they paid for first.
+        const leftover = settleClientAccount(d, clientId, amt, user!.id, now, noteText, invoiceId || undefined);
         const locker = d.lockers.find(l => l.id === lockerId);
         if (locker) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
@@ -181,7 +189,7 @@ function ReceiveFromClient() {
         </Select>
           {clientId && openInvoices.length > 0 && (
             <div>
-              <Label className="text-xs">Against</Label>
+              <Label className="text-xs">Against {invoiceId ? <span className="text-success">(auto-selected)</span> : ""}</Label>
               <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
                 <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -193,6 +201,11 @@ function ReceiveFromClient() {
                   ))}
                 </SelectContent>
               </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {invoiceId
+                  ? "Clears that invoice first. Anything left over rolls on to their next invoice, then to credit."
+                  : "Oldest bills first — pick an invoice if the client sent this for one in particular."}
+              </p>
             </div>
           )}
       </div>

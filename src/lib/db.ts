@@ -1170,9 +1170,25 @@ export function allocatePaymentFIFO(
   at: string,
   note = "Payment received",
 ): number {
-  let remaining = amount;
   const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  for (const o of oldestFirst) {
+  return allocateInOrder(oldestFirst, amount, recordedBy, at, note);
+}
+
+/**
+ * Fill the given orders IN THE ORDER GIVEN, each up to its balance. Separate
+ * from allocatePaymentFIFO because that one re-sorts by date — which is right
+ * for "oldest bill first" and wrong when the caller has deliberately put one
+ * invoice at the front. Returns the leftover.
+ */
+export function allocateInOrder(
+  orders: Order[],
+  amount: number,
+  recordedBy: string,
+  at: string,
+  note = "Payment received",
+): number {
+  let remaining = amount;
+  for (const o of orders) {
     if (remaining <= 0) break;
     const bal = balanceDue(o);
     if (bal <= 0) continue;
@@ -1209,14 +1225,46 @@ export function capOrderAdvances(o: Order): number {
 }
 
 /**
- * Apply money the client has sent AGAINST ONE INVOICE. Its own orders are
- * cleared first (oldest first), and only what is left over spills onto their
- * other unpaid orders and finally to credit.
+ * The order a client's money should settle their bills in.
+ *
+ * Invoice by invoice, oldest invoice first, then anything not yet invoiced —
+ * because that is how the client thinks about it. `firstInvoiceId` jumps one
+ * invoice to the front: the one this particular transfer was sent for.
+ */
+function billingOrder(d: DB, clientId: string, firstInvoiceId?: string): Order[] {
+  const invoices = (d.invoices ?? [])
+    .filter(i => i.clientId === clientId)
+    .sort((a, b) => {
+      if (a.id === firstInvoiceId) return -1;
+      if (b.id === firstInvoiceId) return 1;
+      return +new Date(a.createdAt) - +new Date(b.createdAt);
+    });
+  const out: Order[] = [];
+  const seen = new Set<string>();
+  for (const inv of invoices) {
+    for (const oid of invoiceOrderIds(inv)) {
+      if (seen.has(oid)) continue;
+      const o = d.orders.find(x => x.id === oid);
+      if (o && o.status !== "Rejected") { out.push(o); seen.add(oid); }
+    }
+  }
+  // Orders that are not on any invoice yet come last — a client pays the bills
+  // they have been sent, not work that has not been billed to them.
+  const rest = d.orders
+    .filter(o => o.clientId === clientId && o.status !== "Rejected" && !seen.has(o.id))
+    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+  return [...out, ...rest];
+}
+
+/**
+ * Apply money the client has sent AGAINST ONE INVOICE. That invoice is cleared
+ * first; whatever is left rolls on to their NEXT invoice, then the one after
+ * that, then any uninvoiced work, and only then to credit.
  *
  * Plain FIFO across every order is right for "here is some money"; it is wrong
- * for "here is the payment for invoice 0001", which would land on older unbilled
- * work and leave the invoice the client just paid still showing as pending.
- * Returns the leftover, for the caller to store as client credit.
+ * for "here is the payment for invoice 0001", which would land on older
+ * unbilled work and leave the invoice the client just paid still showing as
+ * pending. Returns the leftover, for the caller to store as client credit.
  */
 export function allocateToInvoice(
   d: DB,
@@ -1228,17 +1276,9 @@ export function allocateToInvoice(
 ): number {
   const inv = (d.invoices ?? []).find(i => i.id === invoiceId);
   if (!inv) return amount;
-  const ids = invoiceOrderIds(inv);
-  const invOrders = ids
-    .map(id => d.orders.find(o => o.id === id))
-    .filter((o): o is Order => !!o && o.status !== "Rejected");
-  let left = allocatePaymentFIFO(invOrders, amount, recordedBy, at, note ?? `Payment — invoice ${inv.number}`);
-  if (left > 0.009) {
-    const others = d.orders.filter(o =>
-      o.clientId === inv.clientId && o.status !== "Rejected" && !ids.includes(o.id));
-    left = allocatePaymentFIFO(others, left, recordedBy, at, note ?? `Payment — invoice ${inv.number}`);
-  }
-  return Math.round(left * 100) / 100;
+  const label = note ?? `Payment — invoice ${inv.number}`;
+  const targets = billingOrder(d, inv.clientId, invoiceId);
+  return allocateInOrder(targets, amount, recordedBy, at, label);
 }
 
 /**
@@ -1280,13 +1320,13 @@ export function reallocateClientPayments(
     });
   }
 
-  // 2. The named invoice's orders come first; everything else stays oldest-first.
+  // 2. Bills are refilled invoice by invoice with the chosen one at the front,
+  //    so what the first invoice cannot absorb rolls on to the next invoice
+  //    rather than scattering across unbilled orders.
   const firstIds = invoiceFirstId
-    ? invoiceOrderIds((d.invoices ?? []).find(i => i.id === invoiceFirstId) ?? { orderId: "" } as Invoice)
+    ? invoiceOrderIds((d.invoices ?? []).find(i => i.id === invoiceFirstId) ?? ({ orderId: "" } as Invoice))
     : [];
-  const rank = (o: Order) => (firstIds.includes(o.id) ? 0 : 1);
-  const targets = [...orders].sort((a, b) =>
-    rank(a) - rank(b) || +new Date(a.createdAt) - +new Date(b.createdAt));
+  const targets = billingOrder(d, clientId, invoiceFirstId);
 
   // 3. Lay the pool back down, splitting a payment across orders when needed.
   let toInvoice = 0;
@@ -1313,23 +1353,38 @@ export function reallocateClientPayments(
 
 
 /**
- * Reconcile a client's account: reclaim any per-order overpayment, add carried
- * credit and any `extra` new payment, then re-allocate oldest-bill-first.
- * Mutates the given orders; returns the leftover to store as client credit.
+ * Settle a client's account from one place: reclaim any over-payment, fold in
+ * carried credit and whatever they have just sent, then pay their bills off
+ * INVOICE BY INVOICE — oldest invoice first, or `firstInvoiceId` first when the
+ * transfer was sent for a particular one. What an invoice cannot absorb rolls
+ * on to the next invoice, then to work not yet invoiced, and only what is left
+ * after all of that becomes credit against their next bill.
+ *
+ * This is what the client sees on their side: the invoice they paid reads as
+ * cleared, and the remainder shows up against the next one.
+ * Writes the leftover back to the client record and returns it.
  */
-export function reconcileClientAccount(
-  orders: Order[],
+export function settleClientAccount(
+  d: DB,
+  clientId: string,
   extra: number,
-  creditBalance: number,
   recordedBy: string,
   at: string,
   note?: string,
+  firstInvoiceId?: string,
 ): number {
-  let pool = (extra || 0) + (creditBalance || 0);
+  const client = d.clients.find(c => c.id === clientId);
+  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
+  let pool = (extra || 0) + (client?.creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
-  return allocatePaymentFIFO(orders, pool, recordedBy, at, note);
+  const leftover = allocateInOrder(
+    billingOrder(d, clientId, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received",
+  );
+  if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
+  return leftover;
 }
+
 
 /**
  * Record a payment against ONE specific order (order-wise collection from the
