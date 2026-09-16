@@ -103,6 +103,9 @@ export function StatementLedger({
   const active = !!q.trim() || !!from || !!to || kind !== "all";
   const totalDebit = filtered.reduce((s, r) => s + r.debit, 0);
   const totalCredit = filtered.reduce((s, r) => s + r.credit, 0);
+  // A salary ledger only ever pays out — an empty credit label drops the column
+  // rather than printing a blank one next to every row.
+  const showCredit = creditLabel !== "";
 
   return (
     <div className="card-luxe overflow-hidden">
@@ -163,8 +166,8 @@ export function StatementLedger({
       {active && filtered.length > 0 && (
         <div className="px-5 pb-2 text-[11px] text-muted-foreground">
           {filtered.length} of {rows.length} shown ·
-          <span className="text-destructive font-medium"> {debitLabel} {fmt(totalDebit)}</span> ·
-          <span className="text-success font-medium"> {creditLabel} {fmt(totalCredit)}</span>
+          <span className="text-destructive font-medium"> {debitLabel} {fmt(totalDebit)}</span>
+          {showCredit && <span className="text-success font-medium"> · {creditLabel} {fmt(totalCredit)}</span>}
         </div>
       )}
 
@@ -173,7 +176,7 @@ export function StatementLedger({
           <div className="h-8 w-8 shrink-0" />
           <div className="flex-1 min-w-0">Particulars</div>
           <div className="w-24 text-right shrink-0">{debitLabel}</div>
-          <div className="w-24 text-right shrink-0">{creditLabel}</div>
+          {showCredit && <div className="w-24 text-right shrink-0">{creditLabel}</div>}
           <div className="w-24 text-right shrink-0">Balance</div>
         </div>
       )}
@@ -198,9 +201,9 @@ export function StatementLedger({
             <div className="w-24 text-right shrink-0 hidden sm:block">
               {r.debit > 0 && <span className="text-sm font-semibold text-destructive">{fmt(r.debit)}</span>}
             </div>
-            <div className="w-24 text-right shrink-0 hidden sm:block">
+            {showCredit && <div className="w-24 text-right shrink-0 hidden sm:block">
               {r.credit > 0 && <span className="text-sm font-semibold text-success">{fmt(r.credit)}</span>}
-            </div>
+            </div>}
             <div className="w-24 text-right shrink-0">
               <p className="text-sm font-semibold text-foreground sm:hidden">
                 <span className={r.debit > 0 ? "text-destructive" : "text-success"}>

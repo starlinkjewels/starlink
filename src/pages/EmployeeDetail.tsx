@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 
 export function EmployeeDetailPage() {
   const { id } = useParams();
@@ -70,6 +71,30 @@ export function EmployeeDetailPage() {
     ...(opening > 0 ? [{ date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur }] : []),
     ...salaryLedger.map(e => ({ date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: (e.currency ?? "INR") as "INR" | "USD" })),
   ];
+  // Salary rows as a proper statement: oldest first with a running total of
+  // everything paid to this person, opening included.
+  const salaryStatement: StatementRow[] = (() => {
+    let running = 0;
+    return salaryRows
+      .slice()
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date))
+      .map((r, i) => {
+        running = Math.round((running + r.amount) * 100) / 100;
+        return {
+          id: `${r.date}-${i}`,
+          date: r.date,
+          particulars: r.particulars,
+          kind: r.category,
+          debit: r.amount,
+          credit: 0,
+          balance: running,
+          pinned: r.category === "Opening",
+        };
+      })
+      .reverse();
+  })();
+
+
   // jsPDF's built-in font can't render ₹ — use a plain-text prefix in the PDF.
   const pdfAmt = (a: number, c: "INR" | "USD") => (c === "USD" ? "$" : "Rs. ") + Math.round(a).toLocaleString(c === "USD" ? "en-US" : "en-IN");
   const exportSalaryCsv = () => downloadCsv(
@@ -198,36 +223,24 @@ export function EmployeeDetailPage() {
             <p className="text-xs mt-1">Record one from <span className="font-medium">Payments → Pay Expense</span> or the Expenses page, and tag it to this member.</p>
           </div>
         ) : (
-          <div className="divide-y divide-border/40">
-            {opening > 0 && (
-              <div className="flex items-center gap-3 px-5 py-3 bg-amber-500/5">
-                <div className="h-9 w-9 rounded-xl bg-amber-500/10 text-amber-600 grid place-items-center shrink-0">
-                  <Wallet className="h-4 w-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">Opening — paid before this app (brought forward)</p>
-                  <p className="text-xs text-muted-foreground">{employee.openingPaidDate ? fmtDate(employee.openingPaidDate) : "opening balance"}</p>
-                </div>
-                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtExpenseAmount(opening, openingCur)}</p>
-              </div>
-            )}
-            {salaryLedger.map(exp => (
-              <div key={exp.id} className="flex items-center gap-3 px-5 py-3">
-                <div className="h-9 w-9 rounded-xl bg-emerald-500/10 text-emerald-600 grid place-items-center shrink-0">
-                  <Receipt className="h-4 w-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{exp.title}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {exp.category}{exp.note ? ` · ${exp.note}` : ""} · {fmtDate(exp.createdAt)}
-                  </p>
-                </div>
-                <p className="font-semibold text-sm text-brand-dark shrink-0 tabular-nums">{fmtExpenseAmount(exp.amount, exp.currency)}</p>
-              </div>
-            ))}
-          </div>
+          /* Same ledger shape as every other account: search, a date range, a
+             type filter and a running total paid. */
+          <StatementLedger
+            title="Salary & Payments"
+            caption={`${salaryTotals.count} payment${salaryTotals.count !== 1 ? "s" : ""}${opening > 0 ? " (incl. opening)" : ""} · running total paid`}
+            rows={salaryStatement}
+            fmt={(n: number) => fmtExpenseAmount(n, salaryCur)}
+            debitLabel="Paid"
+            creditLabel=""
+            summary={[
+              { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear, salaryCur) },
+              { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total, salaryCur), tone: "in" },
+              { label: "Payments", value: String(salaryTotals.count) },
+            ]}
+          />
         )}
       </div>
+
 
       {/* Task progress bar */}
       {tasks.length > 0 && (

@@ -22,6 +22,7 @@ import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { FullLedgerTable } from "@/components/FullLedgerTable";
+import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -441,10 +442,10 @@ export function FactoryHistoryPage() {
   // all issuances, chronological, with a running balance — the money ledger,
   // separate from the material (gold/diamond quantity) tracking above.
   const buildStatement = (iss: MaterialIssuance[], includeOpening = false) => {
-    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    const rows: StatementRow[] = [];
     // Opening making-charge balance (factory-wide) — debit here = we owe them.
     if (includeOpening && hasOpeningBalance(factory)) {
-      rows.push({ id: "opening", date: factory.openingDate || factory.createdAt, particulars: "Opening Balance (brought forward)", debit: openingCreditAmt(factory), credit: openingDebitAmt(factory) });
+      rows.push({ id: "opening", date: factory.openingDate || factory.createdAt, particulars: "Opening Balance (brought forward)", debit: openingCreditAmt(factory), credit: openingDebitAmt(factory), balance: 0, kind: "Opening", pinned: true });
     }
     for (const mi of iss) {
       const order = db.orders.find(o => o.id === mi.orderId);
@@ -452,12 +453,12 @@ export function FactoryHistoryPage() {
       if (mi.makingCharges.amountInr > 0) {
         rows.push({
           id: mi.id, date: mi.issuedAt,
-          particulars: `Making Charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality} (${order?.orderNumber || "order"})`,
-          debit: mi.makingCharges.amountInr, credit: 0,
+          particulars: `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`,
+          ref: order?.orderNumber, debit: mi.makingCharges.amountInr, credit: 0, balance: 0, kind: "Making charges",
         });
       }
       for (const pay of mi.makingCharges.payments || []) {
-        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
+        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, ref: order?.orderNumber, debit: 0, credit: pay.amountInr, balance: 0, kind: "Payment" });
       }
     }
     let running = 0;
@@ -886,35 +887,24 @@ export function FactoryHistoryPage() {
           </div>
         )}
       </div>
+      {/* Account Statement — the money side on its own, in the same ledger shape
+          as every other account in the app. */}
+      <StatementLedger
+        title="Account Statement"
+        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · making charges and payments, running balance in INR`}
+        rows={statement}
+        fmt={fmtMoneyInr}
+        debitLabel="Charged"
+        creditLabel="Paid"
+        onExport={() => setShowExport(true)}
+        summary={[
+          { label: "Charges billed", value: fmtMoneyInr(account.chargesTotal), tone: "out" },
+          { label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in" },
+          { label: "Pending", value: fmtMoneyInr(account.chargesPending), tone: account.chargesPending > 0 ? "due" : "in" },
+          { label: "Fine gold held", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold).toLocaleString()} g` },
+        ]}
+      />
 
-      {/* Account Statement — making charges and payments interleaved
-          chronologically with a running balance, like a bank/vendor statement. */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in INR</p>
-        </div>
-        <div className="divide-y divide-border/40">
-          {statement.map(r => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                {r.debit > 0 ? <Coins className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{r.particulars}</p>
-                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
-                  {r.debit > 0 ? `+${fmtMoneyInr(r.debit)}` : `−${fmtMoneyInr(r.credit)}`}
-                </p>
-                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(r.balance)}</p>
-              </div>
-            </div>
-          ))}
-          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
-        </div>
-      </div>
 
       {/* ── The whole account on one sheet — gold, silver, diamond, other metal
              and money together, instead of three separate ledgers ── */}
