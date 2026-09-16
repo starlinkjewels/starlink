@@ -63,6 +63,18 @@ export async function reserveInvoiceNumber(invoices: { number?: string }[]): Pro
   return String(seq).padStart(4, "0");
 }
 
+/**
+ * Reserve a globally-unique receipt number for money received from a client.
+ * Awaited BEFORE the receipt is written, so two people banking a payment at the
+ * same moment can never be handed the same number.
+ */
+export async function reserveReceiptNumber(receipts: { receiptNo?: string }[]): Promise<string> {
+  const floor = highestSuffix(receipts.map((r) => r.receiptNo), 0) + 1;
+  const seq = await reserveSequence("clientReceiptNo", floor);
+  return String(seq).padStart(4, "0");
+}
+
+
 /** Reserve a globally-unique certified-diamond stock number ("DP-0007"). */
 export async function reserveDiamondStockNumber(packets: { stockNumber?: string }[]): Promise<string> {
   const floor = highestSuffix(packets.map((p) => p.stockNumber), 0) + 1;

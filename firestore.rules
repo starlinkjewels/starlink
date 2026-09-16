@@ -123,6 +123,8 @@ service cloud.firestore {
     match /suppliers/{id}          { allow read, write: if isStaff(); }
     match /purchases/{id}          { allow read, write: if isStaff(); }
     match /supplierReceipts/{id}   { allow read, write: if isStaff(); }
+    // Money received from a client, one numbered receipt per payment.
+    match /clientReceipts/{id}     { allow read, write: if isStaff(); }
     match /factories/{id}          { allow read, write: if isStaff(); }
     match /materialIssuances/{id}  { allow read, write: if isStaff(); }
     match /diamondPackets/{id}     { allow read, write: if isStaff(); }

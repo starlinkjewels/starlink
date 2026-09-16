@@ -5,6 +5,8 @@ import {
   settleClientAccount, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { createReceipt } from "@/lib/receipts";
+import { ReceiptLedger } from "@/components/ReceiptLedger";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
@@ -149,30 +151,26 @@ function ReceiveFromClient() {
     try {
       const noteText = note.trim() ? `${method} · ${note.trim()}` : method;
       const now = new Date().toISOString();
+      // Recorded as a numbered receipt, so this payment can be looked up,
+      // corrected or cancelled later as one entry.
+      const receipt = await createReceipt({
+        clientId, amountUsd: amt, date: now, method,
+        remarks: note.trim() || undefined,
+        lockerId, lockerAmount: depositAmt,
+        lockerCurrency: lockerCurrency as "INR" | "USD",
+        exchangeRate: needsRate ? rate : undefined,
+        invoiceId: invoiceId || undefined,
+        userId: user!.id,
+      });
       updateDb(d => {
-        const client = d.clients.find(x => x.id === clientId);
-        if (!client) return;
-        // One place decides how a client’s money settles their bills — invoice by
-        // invoice, the one they paid for first.
-        const leftover = settleClientAccount(d, clientId, amt, user!.id, now, noteText, invoiceId || undefined);
-        const locker = d.lockers.find(l => l.id === lockerId);
-        if (locker) {
-          if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "income", amountInr: depositAmt,
-            currency: locker.currency || "INR", category: `Client Payment — ${client.companyName}`,
-            refType: "clientPayment", refId: client.id, note: noteText, recordedBy: user!.id, createdAt: now,
-            exchangeRate: needsRate ? rate : undefined,
-          });
-        }
         const clientUser = d.users.find(u => u.clientId === clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id, title: "Payment Received",
-          body: `${fmtMoney(amt)} received via ${method} and applied to your oldest pending orders.`,
+          body: `${fmtMoney(amt)} received via ${method} and applied to your pending bills.`,
           type: "info", read: false, createdAt: now,
         });
       });
-      toast.success(`${fmtMoney(amt)} received from ${c.companyName}`);
+      toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
       setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId("");
     } finally { setSaving(false); }
   };
@@ -180,6 +178,7 @@ function ReceiveFromClient() {
   const depositPreview = amount && needsRate && rate > 0 ? Number(amount) * rate : amount ? Number(amount) : null;
 
   return (
+    <>
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Client</Label>
@@ -261,6 +260,8 @@ function ReceiveFromClient() {
       )}
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
     </div>
+      <ReceiptLedger />
+    </>
   );
 }
 

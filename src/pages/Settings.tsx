@@ -4,6 +4,7 @@ import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } f
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
 import { unappliedIncome, invoiceBalance, applyIncomeToClient } from "@/lib/clientPayments";
+import { legacyPayments, backfillReceipts } from "@/lib/receipts";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -37,6 +38,7 @@ import {
   Hash,
   Receipt,
   Banknote,
+  ReceiptText,
   Trash2,
 } from "lucide-react";
 
@@ -305,6 +307,31 @@ export function SettingsPage() {
     toast.success(`${fmtMoney(res.settled)} applied to ${client.companyName}'s bills`);
     setFixTxnId(null); setFixClientId(""); setFixInvoiceId(""); setFixRate("");
   }
+
+  // ── Receipt numbers for payments taken before the receipt book existed ─────
+  const [numbering, setNumbering] = useState(false);
+  const unnumberedPayments = useMemo(() => legacyPayments(liveDb), [liveDb]);
+
+  async function numberPastPayments() {
+    const n = unnumberedPayments.length;
+    if (!n) return;
+    if (!confirm(
+      `Give receipt numbers to ${n} past payment${n !== 1 ? "s" : ""}, oldest first?
+
+`
+      + "This only labels them. Not one amount, date or balance changes — each payment keeps exactly the money "
+      + "it already put on the orders, and an existing deposit is linked rather than recorded again. "
+      + "Afterwards they can be corrected or cancelled like any new receipt."
+    )) return;
+    setNumbering(true);
+    try {
+      const done = await backfillReceipts(user!.id);
+      toast.success(`${done} payment${done !== 1 ? "s" : ""} numbered`);
+    } catch {
+      toast.error("Couldn't finish numbering — nothing was lost, try again.");
+    } finally { setNumbering(false); }
+  }
+
 
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
@@ -1164,6 +1191,59 @@ export function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ── Receipt numbers for past payments (admin only) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${unnumberedPayments.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
+                <ReceiptText className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Receipt Numbers</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {unnumberedPayments.length === 0
+                    ? "Every payment received has a receipt number."
+                    : `${unnumberedPayments.length} payment${unnumberedPayments.length !== 1 ? "s were" : " was"} taken before receipts were numbered.`}
+                </p>
+              </div>
+            </div>
+
+            {unnumberedPayments.length > 0 && (
+              <>
+                <p className="mt-3 text-[11px] text-muted-foreground">
+                  Payments recorded earlier exist only as entries on the orders they settled, so they can&rsquo;t be
+                  looked up or corrected as one thing. Numbering them is pure labelling —
+                  <span className="font-medium text-foreground"> not one amount, date or balance changes</span>.
+                  Each payment keeps exactly the money it already put on the orders, an existing deposit is linked
+                  rather than recorded again, and afterwards they can be corrected or cancelled like any new receipt.
+                </p>
+                <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
+                  {unnumberedPayments.slice(0, 8).map((g, i) => {
+                    const client = liveDb.clients.find(c => c.id === g.clientId);
+                    return (
+                      <p key={i} className="text-[11px] text-muted-foreground">
+                        {new Date(g.at).toLocaleDateString()} · {client?.companyName ?? "Client"} · {fmtMoney(g.amount)}
+                        {g.orders.length > 1 ? ` · across ${g.orders.length} orders` : ""}
+                      </p>
+                    );
+                  })}
+                  {unnumberedPayments.length > 8 && (
+                    <p className="text-[11px] text-muted-foreground">…and {unnumberedPayments.length - 8} more.</p>
+                  )}
+                </div>
+                <AsyncButton
+                  size="sm" variant="outline" disabled={numbering}
+                  onClick={numberPastPayments}
+                  className="rounded-xl h-9 mt-3"
+                >
+                  {numbering ? "Numbering…" : `Number ${unnumberedPayments.length} past payment${unnumberedPayments.length !== 1 ? "s" : ""}`}
+                </AsyncButton>
+              </>
+            )}
+          </div>
+        )}
+
 
         {/* ── Client payments that never reached their orders (admin only) ── */}
         {isAdminUser && (

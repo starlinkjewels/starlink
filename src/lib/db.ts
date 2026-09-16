@@ -206,6 +206,9 @@ export interface AdvancePayment {
   // without changing `amount` (always USD, drives orderTotal/balanceDue).
   lockerId?: string;
   lockerAmount?: number;
+  /** The receipt this money came in on. One receipt can land on several orders,
+   *  so this is what lets a receipt be edited or deleted as a single event. */
+  receiptId?: string;
 }
 
 // Manufacturing events shown alongside (but never mixed into) the fixed,
@@ -651,6 +654,7 @@ export interface LockerTransaction {
   note?: string;
   recordedBy: string; // userId
   createdAt: string;
+  receiptId?: string; // the ClientReceipt this deposit belongs to
 }
 
 export interface Supplier {
@@ -761,6 +765,34 @@ export interface PurchasePayment {
   recordedBy: string;
   createdAt: string;
   note?: string;
+}
+
+
+/**
+ * ONE payment received from a client — the thing a receipt book records.
+ *
+ * The money itself lands on their orders as advances (a single payment can
+ * settle several) and in a locker as a deposit. Those are the accounting
+ * effects; THIS is the event, with its own receipt number, so it can be looked
+ * up, corrected or cancelled as one entry instead of hunting down the pieces it
+ * turned into. Every advance and locker row it created carries its `receiptId`.
+ */
+export interface ClientReceipt {
+  id: string;
+  receiptNo: string;      // sequential, reserved atomically — "0871"
+  clientId: string;
+  date: string;           // ISO — the date the money was received (editable)
+  amountUsd: number;      // what it settles of their billing (orders are billed in USD)
+  lockerId?: string;
+  lockerAmount?: number;  // what landed in the locker, in the locker's own currency
+  lockerCurrency?: "INR" | "USD";
+  exchangeRate?: number;  // Rs per $1, when the locker isn't USD
+  method: string;         // Cash / Bank Transfer / UPI / Cheque …
+  remarks?: string;
+  invoiceId?: string;     // the invoice it was sent for, when one was named
+  recordedBy: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 /** Money RECEIVED FROM a supplier (a refund, a return credit, an overpayment
@@ -959,6 +991,7 @@ export interface DB {
   suppliers: Supplier[];
   purchases: Purchase[];
   supplierReceipts: SupplierReceipt[];
+  clientReceipts: ClientReceipt[];
   factories: Factory[];
   materialIssuances: MaterialIssuance[];
   stockMovements: StockMovement[];
@@ -1011,6 +1044,7 @@ function emptyDb(): DB {
     suppliers: [],
     purchases: [],
     supplierReceipts: [],
+    clientReceipts: [],
     factories: [],
     materialIssuances: [],
     stockMovements: [],
@@ -1520,6 +1554,7 @@ type ArrayCol =
   | "suppliers"
   | "purchases"
   | "supplierReceipts"
+  | "clientReceipts"
   | "factories"
   | "materialIssuances"
   | "stockMovements"
@@ -1546,6 +1581,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "suppliers",
   "purchases",
   "supplierReceipts",
+  "clientReceipts",
   "factories",
   "materialIssuances",
   "stockMovements",
@@ -2016,6 +2052,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "suppliers" ||
         col === "purchases" ||
         col === "supplierReceipts" ||
+        col === "clientReceipts" ||
         col === "factories" ||
         col === "materialIssuances" ||
         col === "stockMovements"
