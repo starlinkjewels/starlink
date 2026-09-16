@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import jsPDF from "jspdf";
 import { useAuth } from "@/lib/auth";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
@@ -276,54 +275,65 @@ export function ClientHistoryPage() {
   const PAGE_SIZE = 10;
   const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, PAGE_SIZE);
 
+  /**
+   * Client order report. This was hand-drawn onto a jsPDF page and cut every
+   * field to a fixed length — orderNumber.slice(-10) turned SLJ-2026-1025 into
+   * "-2026-1025" and "In Production" into "In Productio". It now goes through
+   * the same exporter as every other ledger: branded, landscape, paginated, and
+   * wide enough that nothing is cut.
+   */
   const downloadClientReport = () => {
-    const doc = new jsPDF();
-    doc.setFont("helvetica", "bold"); doc.setFontSize(20);
-    doc.text("STARLINK JEWELS", 20, 20);
-    doc.setFontSize(11); doc.setFont("helvetica", "normal");
-    doc.text("Client Order History Report", 20, 28);
-    doc.setLineWidth(0.4); doc.line(20, 33, 190, 33);
-
-    doc.setFontSize(13); doc.setFont("helvetica", "bold");
-    doc.text(client.companyName, 20, 43);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    doc.text(`Owner: ${client.ownerName}`, 20, 50);
-    doc.text(`Email: ${client.email}   Phone: ${client.phone}`, 20, 56);
-    doc.text(`Country: ${client.country}   GST/VAT: ${client.gstVat}`, 20, 62);
-    doc.text(`Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`, 20, 68);
-    doc.line(20, 73, 190, 73);
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-    doc.text("Summary", 20, 81);
-    doc.setFont("helvetica", "normal"); doc.setFontSize(10);
-    doc.text(`Total Orders: ${allOrders.length}`, 20, 89);
-    doc.text(`Delivered: ${deliveredOrders}   Active: ${activeOrders}`, 20, 95);
-    doc.text(`Total Order Value: ${fmtMoney(totalValue)}`, 20, 101);
-    doc.text(`Paid: ${fmtMoney(paidAmount)}   Outstanding: ${fmtMoney(pendingAmount)}`, 20, 107);
-    doc.line(20, 113, 190, 113);
-
-    doc.setFont("helvetica", "bold"); doc.setFontSize(11);
-    doc.text("Order History", 20, 121);
-    doc.setFontSize(9);
-    const headers = ["Order #", "Type", "Metal", "Status", "Qty", "Amount", "Date"];
-    const colX =     [20,        65,      100,     130,      158,   170,      188];
-    let y = 129;
-    headers.forEach((h, i) => { doc.text(h, colX[i], y); });
-    doc.line(20, y + 3, 190, y + 3);
-    doc.setFont("helvetica", "normal");
-    allOrders.forEach(o => {
-      y += 9;
-      if (y > 270) { doc.addPage(); y = 20; }
-      doc.text(o.orderNumber.slice(-10), colX[0], y);
-      doc.text(o.jewelleryType.slice(0, 10), colX[1], y);
-      doc.text(o.metal.slice(0, 10), colX[2], y);
-      doc.text(o.status.slice(0, 12), colX[3], y);
-      doc.text(String(o.quantity), colX[4], y);
-      doc.text(fmtMoney(o.amount).replace("$", "$"), colX[5], y);
-      doc.text(fmtDate(o.createdAt), colX[6], y);
+    const rows = allOrders
+      .slice()
+      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    const value = rows.reduce((s, o) => s + orderTotal(o), 0);
+    const paid = rows.reduce((s, o) => s + totalAdvance(o), 0);
+    downloadLedgerPdf({
+      title: "Client Order Report",
+      subjectLines: [
+        client.companyName,
+        [client.ownerName, client.country].filter(Boolean).join(" · "),
+        [client.email, client.phone].filter(Boolean).join("   "),
+        client.gstVat ? `GST/VAT: ${client.gstVat}` : "",
+        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      ].filter(Boolean),
+      summary: [
+        { label: "Total Orders", value: String(rows.length) },
+        { label: "Delivered / Active", value: `${deliveredOrders} / ${activeOrders}` },
+        { label: "Total Order Value", value: fmtMoney(value) },
+        { label: "Received", value: fmtMoney(paid) },
+        { label: "Outstanding", value: fmtMoney(Math.max(0, value - paid)) },
+      ],
+      landscape: true,
+      columns: [
+        { header: "Order #", x: 14 },
+        { header: "Date", x: 52 },
+        { header: "Item", x: 80 },
+        { header: "Metal", x: 118 },
+        { header: "Design #", x: 156 },
+        { header: "Qty", x: 186 },
+        { header: "Order Value", x: 200 },
+        { header: "Received", x: 228 },
+        { header: "Balance", x: 252 },
+      ],
+      align: ["left", "left", "left", "left", "left", "right", "right", "right", "right"],
+      rows: rows.map(o => [
+        o.orderNumber,
+        fmtDate(o.createdAt),
+        fit(o.jewelleryType, 36),
+        fit(o.metal, 36),
+        fit(o.designNumber || "", 28),
+        String(o.quantity),
+        fmtMoney(orderTotal(o)),
+        totalAdvance(o) ? fmtMoney(totalAdvance(o)) : "",
+        balanceDue(o) > 0 ? fmtMoney(balanceDue(o)) : "Cleared",
+      ]),
+      totalsRow: [
+        "", "", "", "", "Totals", "",
+        fmtMoney(value), fmtMoney(paid), fmtMoney(Math.max(0, value - paid)),
+      ],
+      filename: `ClientReport-${client.companyName.replace(/\s+/g, "_")}`,
     });
-
-    doc.save(`ClientReport-${client.companyName.replace(/\s+/g, "_")}.pdf`);
   };
 
   return (
