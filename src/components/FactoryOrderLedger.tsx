@@ -58,15 +58,18 @@ export function buildFactoryOrderRows(
 ): FactoryOrderRow[] {
   const byOrder = new Map<string, FactoryOrderRow>();
   for (const mi of issuances) {
-    const key = mi.orderId || "__pool";
+    // Material handed over in BULK has no order. Each delivery is its own row —
+    // lumping them into a single "pool" line hid when each one was given and how
+    // much, which is the whole point of a ledger.
+    const key = mi.orderId || mi.id;
     const order = orders.find(o => o.id === mi.orderId);
     let row = byOrder.get(key);
     if (!row) {
       row = {
         orderId: mi.orderId || "",
-        orderNo: order?.orderNumber || (mi.orderId ? "—" : "Bulk / pool"),
+        orderNo: order?.orderNumber || (mi.orderId ? "—" : "Bulk delivery"),
         date: mi.issuedAt,
-        jewellery: order?.jewelleryType || "",
+        jewellery: order?.jewelleryType || `${mi.material === "gold" ? "Gold" : "Diamond"} ${mi.purityOrQuality}`,
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
@@ -101,7 +104,7 @@ export function buildFactoryOrderRows(
       if (mi.source !== "factoryPool") {
         row.entries.push({
           id: mi.id + "-gin", date: mi.issuedAt, kind: "out",
-          text: `Gold given — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
+          text: `Gold given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
           qty: `${toPureGold(mi.quantityIssued, mi.purityOrQuality).toFixed(3)} g fine`,
         });
       }
@@ -119,7 +122,7 @@ export function buildFactoryOrderRows(
     if (mi.material === "diamond") {
       row.entries.push({
         id: mi.id + "-din", date: mi.issuedAt, kind: "out",
-        text: `Diamond given — ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`,
+        text: `Diamond given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`,
         qty: `${mi.quantityIssued} ct`,
       });
       if (mi.status === "closed") {
@@ -359,7 +362,7 @@ export function FactoryOrderLedger({
                   <td className="px-3 py-2 whitespace-nowrap">
                     {r.orderId
                       ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
-                      : <span className="text-muted-foreground">{r.orderNo}</span>}
+                      : <span className="font-medium text-amber-700">{r.orderNo}</span>}
                   </td>
                   <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">{fmtDate(r.date)}</td>
                   <td className="px-2 py-2 min-w-[150px]">
@@ -438,6 +441,8 @@ export function FactoryOrderLedger({
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
         Tap a row to see every entry behind it — gold and diamond given, what came back, labour billed and each
         payment made against it.
+        A <span className="font-medium text-amber-700">Bulk delivery</span> is material handed over without an order;
+        the orders that draw from it consume it on their own rows, so the totals at the foot still net out.
         Gold is in fine (24KT) grams so every karat compares. &ldquo;With factory&rdquo; is what they still hold of
         ours; &ldquo;Open&rdquo; diamond is issued but not yet accounted for. A figure written <span className="italic">~like this</span>
         is the estimate from order creation — that order has not reached Final Approval, so no real weight exists yet.
