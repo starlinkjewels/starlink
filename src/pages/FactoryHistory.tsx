@@ -749,8 +749,8 @@ export function FactoryHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        ...(hasGold ? [{ label: "Gold still at factory", value: `${q3(T.goldOut - T.goldIn)} g fine` }] : []),
-        ...(hasDia ? [{ label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` }] : []),
+        { label: "Gold still at factory", value: `${q3(T.goldOut - T.goldIn)} g fine` },
+        { label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` },
         { label: "Labour billed", value: fmtInrPlain(T.labour) },
         { label: "Labour pending", value: fmtInrPlain(Math.max(0, T.labour - T.paid)) },
       ],
@@ -759,8 +759,8 @@ export function FactoryHistoryPage() {
       align,
       rows: rows.map(r => [
         r.orderNo, fmtDate(r.date), fit([r.jewellery, r.metalNote].filter(Boolean).join(" · "), 40 * scale),
-        ...(hasGold ? [q3(r.goldOut) || "", q3(r.goldIn) || "", q3(r.goldOut - r.goldIn) || "0"] : []),
-        ...(hasDia ? [r.diaOut ? r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
+        ...(hasGold ? [(r.goldEstimated ? "~" : "") + (q3(r.goldOut) || ""), q3(r.goldIn) || "", q3(r.goldOut - r.goldIn) || "0"] : []),
+        ...(hasDia ? [r.diaOut ? (r.diaEstimated ? "~" : "") + r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [q3(r.silverIn) || ""] : []),
         ...(hasOther ? [q3(r.otherIn) || ""] : []),
         r.labour ? rs(r.labour) : "", r.paid ? rs(r.paid) : "",
@@ -785,13 +785,15 @@ export function FactoryHistoryPage() {
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
       ["Order", "Date", "Item", "Gold issued (g fine)", "Gold returned (g fine)", "Gold with factory (g fine)",
        "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)",
-       "Labour billed (INR)", "Labour paid (INR)", "Labour pending (INR)", "Status"],
+       "Labour billed (INR)", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
       rows.map(r => [
         r.orderNo, fmtDate(r.date), r.jewellery,
         q3(r.goldOut), q3(r.goldIn), q3(r.goldOut - r.goldIn),
         q3(r.diaOut), q3(r.diaIn), q3(r.diaOut - r.diaIn),
         q3(r.silverIn), q3(r.otherIn),
         Math.round(r.labour), Math.round(r.paid), Math.round(Math.max(0, r.labour - r.paid)),
+        Math.round(r.quotedUsd),
+        r.goldEstimated || r.diaEstimated ? "estimate — not yet finally approved" : "",
         r.open > 0 ? `${r.open} still with factory` : "Done",
       ]),
     );

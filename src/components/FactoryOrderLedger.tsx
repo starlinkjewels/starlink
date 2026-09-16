@@ -7,6 +7,8 @@ import { Search, Download } from "lucide-react";
 
 const g3 = (n: number) => (Math.abs(n) < 0.0005 ? "" : n.toFixed(3));
 const rs = (n: number) => (Math.abs(n) < 0.5 ? "" : Math.round(n).toLocaleString("en-IN"));
+/** An estimate prints with a ~ so it is never mistaken for a real weight. */
+const est = (v: string) => (v ? `~${v}` : "");
 
 export interface FactoryOrderRow {
   orderId: string;
@@ -26,6 +28,15 @@ export interface FactoryOrderRow {
   orderStatus: string;
   /** "14K White Gold" — what the piece is made of, for the Item column. */
   metalNote?: string;
+  /** True when the gold figure is the ESTIMATE taken at order creation rather
+   *  than a weight actually issued. An order still in production has no real
+   *  weight yet, and showing nothing left the ledger looking broken. */
+  goldEstimated?: boolean;
+  /** Same, for a diamond figure that came from the order rather than an issue. */
+  diaEstimated?: boolean;
+  /** Making charge quoted in USD when the factory was assigned, before the piece
+   *  exists. Kept apart from the rupee labour so the two currencies never mix. */
+  quotedUsd: number;
 }
 
 /**
@@ -55,6 +66,7 @@ export function buildFactoryOrderRows(
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
+        quotedUsd: 0,
         metalNote: undefined,
       };
       byOrder.set(key, row);
@@ -84,19 +96,33 @@ export function buildFactoryOrderRows(
     row.paid += (mi.makingCharges?.payments || []).reduce((s, p) => s + p.amountInr, 0);
   }
 
-  // Metal in the finished piece. It normally rides on the gold issuance created
-  // at Final Approval, but an order that never went through that step still has
-  // its real net weight and karat on the ORDER — a factory ledger with no metal
-  // column is no use to a jeweller, so read it from there when it is missing.
+  // What the ORDER knows, for anything the issuances do not. Before Final
+  // Approval there is no real weight at all, so a ledger built only from
+  // issuances showed blank rows for every job still in production. The estimate
+  // taken at order creation goes in instead, flagged so it can never be read as
+  // an actual figure.
   for (const row of byOrder.values()) {
     const order = orders.find(o => o.id === row.orderId);
     if (!order) continue;
-    if (row.goldIn === 0 && order.actualNetWeight && /gold/i.test(order.metal)) {
+    row.quotedUsd = order.estimatedMakingCharges || 0;
+    row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
+
+    const isMetal = /gold|platinum/i.test(order.metal);
+    if (row.goldIn === 0 && order.actualNetWeight && isMetal) {
       row.goldIn = order.productKarats
         ? toPureGold(order.actualNetWeight, order.productKarats)
         : order.actualNetWeight;
-      row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
     }
+    const estNet = order.estimatedNetWeight || order.metalWeight || 0;
+    if (row.goldOut === 0 && row.goldIn === 0 && estNet > 0 && isMetal) {
+      row.goldOut = order.productKarats ? toPureGold(estNet, order.productKarats) : estNet;
+      row.goldEstimated = true;
+    }
+    if (row.diaOut === 0 && order.diamondWeight > 0) {
+      row.diaOut = order.diamondWeight;
+      row.diaEstimated = true;
+    }
+
     if (order.metal === "Silver" && order.actualNetWeight && row.silverIn === 0) {
       row.silverIn = order.actualNetWeight;
     }
@@ -105,8 +131,8 @@ export function buildFactoryOrderRows(
     if (om && w > 0) {
       if (/silver/i.test(om)) row.silverIn += w; else row.otherIn += w;
     }
-    if (!row.metalNote) row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
   }
+
 
   return [...byOrder.values()].sort((a, b) => +new Date(a.date) - +new Date(b.date));
 }
@@ -147,11 +173,15 @@ export function FactoryOrderLedger({
 
   // Metal and diamond are what a jewellery factory holds, so those columns are
   // always there even at zero — a factory ledger with no metal column tells a
-  // jeweller nothing. Silver and the second metal only appear when used.
+  // Gold, diamond and labour show for EVERY factory, at zero if need be. Hiding
+  // a group when it happened to be empty meant one factory had a "Gold still at
+  // factory" card and the next did not — two pages that should read the same way
+  // looking like different reports.
   const hasGold = true;
   const hasDia = true;
   const hasSilver = rows.some(r => r.silverIn);
   const hasOther = rows.some(r => r.otherIn);
+  const hasQuote = rows.some(r => r.quotedUsd > 0);
   const active = !!q.trim() || !!from || !!to || only !== "all";
 
   const num = "px-2 py-2 text-right whitespace-nowrap";
@@ -231,6 +261,7 @@ export function FactoryOrderLedger({
               {hasSilver && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Silver g</th>}
               {hasOther && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Other g</th>}
               <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Labour (₹)</th>
+              {hasQuote && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Quoted $</th>}
               <th className="px-3 py-2 text-left font-semibold border-l border-border/60" rowSpan={2}>Status</th>
             </tr>
             <tr className="bg-secondary/40 text-muted-foreground text-[11px]">
@@ -263,12 +294,12 @@ export function FactoryOrderLedger({
                     {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
                   </td>
                   {hasGold && (<>
-                    <td className={`${num} border-l border-border/60`}>{g3(r.goldOut)}</td>
+                    <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
                     <td className={num}>{g3(r.goldIn)}</td>
                     <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : "text-success"}`}>{g3(goldBal) || "0"}</td>
                   </>)}
                   {hasDia && (<>
-                    <td className={`${num} border-l border-border/60`}>{r.diaOut ? r.diaOut.toFixed(2) : ""}</td>
+                    <td className={`${num} border-l border-border/60${r.diaEstimated ? " italic text-muted-foreground" : ""}`}>{r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : ""}</td>
                     <td className={num}>{r.diaIn ? r.diaIn.toFixed(2) : ""}</td>
                     <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-success"}`}>{diaBal > 0.005 ? diaBal.toFixed(2) : "0"}</td>
                   </>)}
@@ -277,6 +308,7 @@ export function FactoryOrderLedger({
                   <td className={`${num} border-l border-border/60`}>{rs(r.labour)}</td>
                   <td className={`${num} text-success`}>{rs(r.paid)}</td>
                   <td className={`${num} font-semibold ${pending > 0.5 ? "text-destructive" : "text-success"}`}>{pending > 0.5 ? rs(pending) : "—"}</td>
+                  {hasQuote && <td className={`${num} border-l border-border/60 text-muted-foreground`}>{r.quotedUsd ? `$${Math.round(r.quotedUsd).toLocaleString()}` : ""}</td>}
                   <td className="px-3 py-2 whitespace-nowrap border-l border-border/60">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                       r.open > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
@@ -306,6 +338,7 @@ export function FactoryOrderLedger({
                 <td className={`${num} border-l border-border/60`}>{rs(T.labour)}</td>
                 <td className={num}>{rs(T.paid)}</td>
                 <td className={num}>{rs(Math.max(0, T.labour - T.paid))}</td>
+                {hasQuote && <td className={`${num} border-l border-border/60`}>${Math.round(filtered.reduce((s, r) => s + r.quotedUsd, 0)).toLocaleString()}</td>}
                 <td className="border-l border-border/60" />
               </tr>
             </tfoot>
@@ -313,8 +346,11 @@ export function FactoryOrderLedger({
         </table>
       </div>
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
-        Gold is in fine (24KT) grams so every karat compares. "With factory" is what they still hold of ours;
-        "Open" diamond is issued but not yet accounted for in a finished piece or returned.
+        Gold is in fine (24KT) grams so every karat compares. &ldquo;With factory&rdquo; is what they still hold of
+        ours; &ldquo;Open&rdquo; diamond is issued but not yet accounted for. A figure written <span className="italic">~like this</span>
+        is the estimate from order creation — that order has not reached Final Approval, so no real weight exists yet.
+        &ldquo;Quoted&rdquo; is the making charge agreed in USD when the factory was assigned; the rupee labour columns
+        are what has actually been billed.
       </p>
     </div>
   );
