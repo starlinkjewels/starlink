@@ -7,6 +7,7 @@ import {
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
+import { MoneyLedger } from "@/components/MoneyLedger";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
@@ -52,7 +53,7 @@ export function PaymentsPage() {
   const activeLockers = db.lockers.filter(l => l.active !== false);
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <div>
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Payments</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Receive from a client, or pay a supplier, factory, or expense — all in one place</p>
@@ -81,12 +82,24 @@ export function PaymentsPage() {
         </div>
       )}
 
-      <div className="card-luxe p-6">
-        {mode === "client" && <ReceiveFromClient />}
-        {mode === "supplier" && <PaySupplier />}
-        {mode === "factory" && <PayFactory />}
-        {mode === "expense" && <PayExpense />}
-        {mode === "locker" && <LockerActions />}
+      {/* The form is a narrow column; the ledger beside it fills the rest of the
+          page, so both sides of a wide screen are doing something. They stack on
+          a phone. */}
+      <div className="grid grid-cols-1 xl:grid-cols-[minmax(320px,380px)_1fr] gap-5 items-start">
+        <div className="card-luxe p-6 xl:sticky xl:top-4">
+            {mode === "client" && <ReceiveFromClient />}
+            {mode === "supplier" && <PaySupplier />}
+            {mode === "factory" && <PayFactory />}
+            {mode === "expense" && <PayExpense />}
+            {mode === "locker" && <LockerActions />}
+        </div>
+        <div className="min-w-0">
+          {mode === "client" && <ReceiptLedger />}
+          {mode === "supplier" && <MoneyLedger kind="supplier" />}
+          {mode === "factory" && <MoneyLedger kind="factory" />}
+          {mode === "expense" && <MoneyLedger kind="expense" />}
+          {mode === "locker" && <MoneyLedger kind="locker" />}
+        </div>
       </div>
     </div>
   );
@@ -178,7 +191,6 @@ function ReceiveFromClient() {
   const depositPreview = amount && needsRate && rate > 0 ? Number(amount) * rate : amount ? Number(amount) : null;
 
   return (
-    <>
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Client</Label>
@@ -260,8 +272,6 @@ function ReceiveFromClient() {
       )}
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
     </div>
-      <ReceiptLedger />
-    </>
   );
 }
 

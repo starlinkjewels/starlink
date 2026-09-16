@@ -655,6 +655,9 @@ export interface LockerTransaction {
   recordedBy: string; // userId
   createdAt: string;
   receiptId?: string; // the ClientReceipt this deposit belongs to
+  /** The payment entry (supplier/factory payment, expense) this movement was
+   *  created by, so correcting that entry can find and move this row with it. */
+  paymentId?: string;
 }
 
 export interface Supplier {

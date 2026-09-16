@@ -99,7 +99,7 @@ export function ReceiptLedger() {
   };
 
   return (
-    <div className="card-luxe p-5 mt-5">
+    <div className="card-luxe p-5">
       <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
         <div>
           <p className="font-display text-lg text-brand-dark leading-tight">Payments Received</p>
