@@ -5,8 +5,10 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { Input } from "@/components/ui/input";
 import { Search, Download } from "lucide-react";
 
-const g3 = (n: number) => (Math.abs(n) < 0.0005 ? "" : n.toFixed(3));
-const rs = (n: number) => (Math.abs(n) < 0.5 ? "" : Math.round(n).toLocaleString("en-IN"));
+// A zero prints as a dash, never as an empty cell. A blank reads as missing
+// data; "—" says plainly that nothing moved.
+const g3 = (n: number) => (Math.abs(n) < 0.0005 ? "—" : n.toFixed(3));
+const rs = (n: number) => (Math.abs(n) < 0.5 ? "—" : Math.round(n).toLocaleString("en-IN"));
 /** An estimate prints with a ~ so it is never mistaken for a real weight. */
 const est = (v: string) => (v ? `~${v}` : "");
 
@@ -278,8 +280,8 @@ export function FactoryOrderLedger({
       <div className="px-5 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
         {hasGold && (
           <div className="rounded-xl p-3 text-center bg-amber-500/10 text-amber-700">
-            <p className="text-[10px] uppercase tracking-wider opacity-80">Gold still at factory</p>
-            <p className="text-base font-semibold mt-0.5">{goldAtFactory.toFixed(3)} g fine</p>
+            <p className="text-[10px] uppercase tracking-wider opacity-80">{goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory"}</p>
+            <p className="text-base font-semibold mt-0.5">{Math.abs(goldAtFactory).toFixed(3)} g fine</p>
             {openingFineGold > 0 && <p className="text-[10px] opacity-70">includes {openingFineGold.toFixed(3)} g opening</p>}
           </div>
         )}
@@ -337,7 +339,7 @@ export function FactoryOrderLedger({
               <th className="px-3 py-2 text-left font-semibold border-l border-border/60" rowSpan={2}>Status</th>
             </tr>
             <tr className="bg-secondary/40 text-muted-foreground text-[11px]">
-              {hasGold && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
+              {hasGold && <><th className={`${head} border-l border-border/60`}>Given by us</th><th className={head}>In the piece</th><th className={head}>Balance</th></>}
               {hasDia && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
               <th className={`${head} border-l border-border/60`}>Billed</th>
               <th className={head}>Paid</th>
@@ -372,7 +374,10 @@ export function FactoryOrderLedger({
                   {hasGold && (<>
                     <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
                     <td className={num}>{g3(r.goldIn)}</td>
-                    <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : "text-success"}`}>{r.goldEstimated ? "—" : (g3(goldBal) || "0")}</td>
+                    <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-success"}`}
+                      title={goldBal < 0 ? "The factory supplied this gold — we owe it back" : goldBal > 0 ? "Our gold still with the factory" : ""}>
+                      {r.goldEstimated ? "—" : g3(goldBal)}
+                    </td>
                   </>)}
                   {hasDia && (<>
                     <td className={`${num} border-l border-border/60${r.diaEstimated ? " italic text-muted-foreground" : ""}`}>{r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : ""}</td>
@@ -443,11 +448,12 @@ export function FactoryOrderLedger({
         payment made against it.
         A <span className="font-medium text-amber-700">Bulk delivery</span> is material handed over without an order;
         the orders that draw from it consume it on their own rows, so the totals at the foot still net out.
-        Gold is in fine (24KT) grams so every karat compares. &ldquo;With factory&rdquo; is what they still hold of
-        ours; &ldquo;Open&rdquo; diamond is issued but not yet accounted for. A figure written <span className="italic">~like this</span>
-        is the estimate from order creation — that order has not reached Final Approval, so no real weight exists yet.
-        &ldquo;Quoted&rdquo; is the making charge agreed in USD when the factory was assigned; the rupee labour columns
-        are what has actually been billed.
+        Gold is in fine (24KT) grams so every karat compares. A gold balance is positive when the factory still
+        holds our metal and <span className="text-destructive">negative when they supplied it themselves</span> —
+        that much fine gold is owed back to them. A dash means nothing moved.
+        A figure written <span className="italic">~like this</span> is the estimate from order creation, because that
+        order has not reached Final Approval yet. &ldquo;Quoted&rdquo; is the making charge agreed in USD when the
+        factory was assigned; the rupee labour columns are what has actually been billed.
       </p>
     </div>
   );

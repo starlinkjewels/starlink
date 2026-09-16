@@ -608,9 +608,9 @@ export function FactoryHistoryPage() {
       { header: "Date", w: 22 },
       { header: "Item", w: 40 },
       ...(hasGold ? [
-        { header: "Gold out", w: 20, right: true },
-        { header: "Gold back", w: 20, right: true },
-        { header: "With fact.", w: 20, right: true },
+        { header: "Gold given", w: 20, right: true },
+        { header: "In piece", w: 20, right: true },
+        { header: "Balance", w: 20, right: true },
       ] : []),
       ...(hasDia ? [
         { header: "Dia out", w: 18, right: true },
@@ -638,7 +638,7 @@ export function FactoryHistoryPage() {
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
-        { label: "Gold still at factory", value: `${q3((factory.openingFineGold || 0) + T.goldOut - T.goldIn)} g fine` },
+        { label: (factory.openingFineGold || 0) + T.goldOut - T.goldIn < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${q3(Math.abs((factory.openingFineGold || 0) + T.goldOut - T.goldIn))} g fine` },
         { label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` },
         { label: "Labour billed", value: fmtInrPlain(T.labour) },
         { label: "Labour pending", value: fmtInrPlain(Math.max(0, T.labour - T.paid)) },
@@ -672,7 +672,7 @@ export function FactoryHistoryPage() {
     const rows = orderRowsFor(from, to, orderNo);
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
-      ["Order", "Date", "Item", "Gold issued (g fine)", "Gold returned (g fine)", "Gold with factory (g fine)",
+      ["Order", "Date", "Item", "Gold given by us (g fine)", "Gold in the piece (g fine)", "Gold balance (g fine)",
        "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)",
        "Labour billed (INR)", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
       rows.map(r => [
