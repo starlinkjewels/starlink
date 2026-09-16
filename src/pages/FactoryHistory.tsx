@@ -21,6 +21,7 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
+import { FullLedgerTable } from "@/components/FullLedgerTable";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -571,12 +572,12 @@ export function FactoryHistoryPage() {
   const rs = (n: number) => Math.round(n).toLocaleString("en-IN"); // plain INR (jsPDF can't render ₹)
   const q3 = (n: number) => Math.round(n * 1000) / 1000;
 
-  type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drDia: number; drAmount: number; crGold: number; crDia: number; crAmount: number };
+  type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drSilver: number; drDia: number; drOther: number; drAmount: number; crGold: number; crSilver: number; crDia: number; crOther: number; crAmount: number; otherLabel?: string };
   // Debit  = value we GAVE the factory (gold/diamond issued) + money we PAID them.
   // Credit = value the factory RETURNED (finished gold, diamond used/returned) + charges they BILLED.
   const buildUnifiedLedger = (iss: MaterialIssuance[], includeOpening = false): UniRow[] => {
     const rows: UniRow[] = [];
-    const zero = () => ({ drGold: 0, drDia: 0, drAmount: 0, crGold: 0, crDia: 0, crAmount: 0 });
+    const zero = () => ({ drGold: 0, drSilver: 0, drDia: 0, drOther: 0, drAmount: 0, crGold: 0, crSilver: 0, crDia: 0, crOther: 0, crAmount: 0 });
     // Factory-wide opening balances brought forward: fine gold given (debit gold),
     // charges we owe (credit amount) / factory owes us (debit amount).
     if (includeOpening && (hasOpeningBalance(factory) || factory.openingFineGold)) {
@@ -593,6 +594,15 @@ export function FactoryHistoryPage() {
       if (mi.material === "gold" && mi.finishedNetWeight != null) {
         const fine = mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity) : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
         rows.push({ ...zero(), id: mi.id + "-gout", date: mi.issuedAt, ref, particular: `Finished piece — net ${mi.finishedNetWeight}g`, crGold: fine });
+        // A two-tone piece comes back with a second metal in it. Silver gets its
+        // own column because it is the common one; anything else (platinum, etc.)
+        // shares the Other Metal column and is named in the row.
+        const om = (order?.otherMetal || "").trim();
+        const omW = order?.otherMetalWeight || 0;
+        if (om && omW > 0) {
+          const isSilver = /silver/i.test(om);
+          rows.push({ ...zero(), id: mi.id + "-om", date: mi.issuedAt, ref, particular: `${om} in finished piece — ${omW}g`, crSilver: isSilver ? omW : 0, crOther: isSilver ? 0 : omW, otherLabel: isSilver ? undefined : om });
+        }
       }
       // Diamond issued in / used-in-piece + returned out.
       if (mi.material === "diamond") {
@@ -617,8 +627,8 @@ export function FactoryHistoryPage() {
   };
 
   const uniTotals = (rows: UniRow[]) => rows.reduce(
-    (t, r) => ({ drGold: t.drGold + r.drGold, drDia: t.drDia + r.drDia, drAmount: t.drAmount + r.drAmount, crGold: t.crGold + r.crGold, crDia: t.crDia + r.crDia, crAmount: t.crAmount + r.crAmount }),
-    { drGold: 0, drDia: 0, drAmount: 0, crGold: 0, crDia: 0, crAmount: 0 },
+    (t, r) => ({ drGold: t.drGold + r.drGold, drSilver: t.drSilver + r.drSilver, drDia: t.drDia + r.drDia, drOther: t.drOther + r.drOther, drAmount: t.drAmount + r.drAmount, crGold: t.crGold + r.crGold, crSilver: t.crSilver + r.crSilver, crDia: t.crDia + r.crDia, crOther: t.crOther + r.crOther, crAmount: t.crAmount + r.crAmount }),
+    { drGold: 0, drSilver: 0, drDia: 0, drOther: 0, drAmount: 0, crGold: 0, crSilver: 0, crDia: 0, crOther: 0, crAmount: 0 },
   );
 
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
@@ -641,24 +651,24 @@ export function FactoryHistoryPage() {
       ],
       landscape: true,
       groupHeaders: [
-        { label: "DEBIT  (issued to factory / paid)", startX: 14, endX: 84 },
-        { label: "CREDIT  (returned / billed)", startX: 205, endX: 283 },
+        { label: "DEBIT  (issued to factory / paid)", startX: 14, endX: 100 },
+        { label: "CREDIT  (returned / billed)", startX: 192, endX: 283 },
       ],
       columns: [
-        { header: "Gold(g)", x: 16 }, { header: "Dia(ct)", x: 38 }, { header: "Amount", x: 60 },
-        { header: "Date", x: 88 }, { header: "Inv/Ref", x: 116 }, { header: "Particular", x: 140 },
-        { header: "Gold(g)", x: 210 }, { header: "Dia(ct)", x: 233 }, { header: "Amount", x: 256 },
+        { header: "Gold g", x: 16 }, { header: "Silver g", x: 33 }, { header: "Dia ct", x: 50 }, { header: "Other g", x: 67 }, { header: "Amount", x: 84 },
+        { header: "Date", x: 104 }, { header: "Inv/Ref", x: 126 }, { header: "Particular", x: 148 },
+        { header: "Gold g", x: 194 }, { header: "Silver g", x: 211 }, { header: "Dia ct", x: 228 }, { header: "Other g", x: 245 }, { header: "Amount", x: 262 },
       ],
-      align: ["right", "right", "right", "left", "left", "left", "right", "right", "right"],
+      align: ["right", "right", "right", "right", "right", "left", "left", "left", "right", "right", "right", "right", "right"],
       rows: rows.map(r => [
-        r.drGold ? String(q3(r.drGold)) : "", r.drDia ? String(q3(r.drDia)) : "", r.drAmount ? rs(r.drAmount) : "",
-        fmtDate(r.date), r.ref || "", r.particular.slice(0, 40),
-        r.crGold ? String(q3(r.crGold)) : "", r.crDia ? String(q3(r.crDia)) : "", r.crAmount ? rs(r.crAmount) : "",
+        r.drGold ? String(q3(r.drGold)) : "", r.drSilver ? String(q3(r.drSilver)) : "", r.drDia ? String(q3(r.drDia)) : "", r.drOther ? String(q3(r.drOther)) : "", r.drAmount ? rs(r.drAmount) : "",
+        fmtDate(r.date), r.ref || "", (r.particular + (r.otherLabel ? ` (${r.otherLabel})` : "")).slice(0, 28),
+        r.crGold ? String(q3(r.crGold)) : "", r.crSilver ? String(q3(r.crSilver)) : "", r.crDia ? String(q3(r.crDia)) : "", r.crOther ? String(q3(r.crOther)) : "", r.crAmount ? rs(r.crAmount) : "",
       ]),
       totalsRow: [
-        String(q3(T.drGold)), String(q3(T.drDia)), rs(T.drAmount),
+        String(q3(T.drGold)), String(q3(T.drSilver)), String(q3(T.drDia)), String(q3(T.drOther)), rs(T.drAmount),
         "", "", "Totals",
-        String(q3(T.crGold)), String(q3(T.crDia)), rs(T.crAmount),
+        String(q3(T.crGold)), String(q3(T.crSilver)), String(q3(T.crDia)), String(q3(T.crOther)), rs(T.crAmount),
       ],
       filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
     });
@@ -670,13 +680,13 @@ export function FactoryHistoryPage() {
     const T = uniTotals(rows);
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Ledger`,
-      ["Date", "Inv/Ref", "Particular", "Debit Gold (g)", "Debit Diamond (ct)", "Debit Amount (Rs)", "Credit Gold (g)", "Credit Diamond (ct)", "Credit Amount (Rs)"],
+      ["Date", "Inv/Ref", "Particular", "Debit Gold (g fine)", "Debit Silver (g)", "Debit Diamond (ct)", "Debit Other Metal (g)", "Debit Amount (Rs)", "Credit Gold (g fine)", "Credit Silver (g)", "Credit Diamond (ct)", "Credit Other Metal (g)", "Credit Amount (Rs)"],
       [
-        ...rows.map(r => [fmtDate(r.date), r.ref, r.particular, r.drGold ? q3(r.drGold) : "", r.drDia ? q3(r.drDia) : "", r.drAmount ? Math.round(r.drAmount) : "", r.crGold ? q3(r.crGold) : "", r.crDia ? q3(r.crDia) : "", r.crAmount ? Math.round(r.crAmount) : ""] as (string | number)[]),
-        ["", "", "TOTALS", q3(T.drGold), q3(T.drDia), Math.round(T.drAmount), q3(T.crGold), q3(T.crDia), Math.round(T.crAmount)],
-        ["", "", "Fine Gold at Factory (24KT)", q3(T.drGold - T.crGold), "", "", "", "", ""],
-        ["", "", "Diamond net (ct)", q3(T.drDia - T.crDia), "", "", "", "", ""],
-        ["", "", "Charges Pending (Rs)", Math.round(T.crAmount - T.drAmount), "", "", "", "", ""],
+        ...rows.map(r => [fmtDate(r.date), r.ref, r.particular + (r.otherLabel ? ` (${r.otherLabel})` : ""), r.drGold ? q3(r.drGold) : "", r.drSilver ? q3(r.drSilver) : "", r.drDia ? q3(r.drDia) : "", r.drOther ? q3(r.drOther) : "", r.drAmount ? Math.round(r.drAmount) : "", r.crGold ? q3(r.crGold) : "", r.crSilver ? q3(r.crSilver) : "", r.crDia ? q3(r.crDia) : "", r.crOther ? q3(r.crOther) : "", r.crAmount ? Math.round(r.crAmount) : ""] as (string | number)[]),
+        ["", "", "TOTALS", q3(T.drGold), q3(T.drSilver), q3(T.drDia), q3(T.drOther), Math.round(T.drAmount), q3(T.crGold), q3(T.crSilver), q3(T.crDia), q3(T.crOther), Math.round(T.crAmount)],
+        ["", "", "Fine Gold at Factory (24KT)", q3(T.drGold - T.crGold), "", "", "", "", "", "", "", "", ""],
+        ["", "", "Diamond net (ct)", "", "", q3(T.drDia - T.crDia), "", "", "", "", "", "", ""],
+        ["", "", "Charges Pending (Rs)", "", "", "", "", Math.round(T.crAmount - T.drAmount), "", "", "", "", ""],
       ],
     );
   };
@@ -906,47 +916,16 @@ export function FactoryHistoryPage() {
         </div>
       </div>
 
-      {/* ── Gold ledger (fine 24KT) ── */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center gap-2">
-          <Coins className="h-4 w-4 text-amber-600" />
-          <div>
-            <h2 className="font-display text-xl text-brand-dark">Gold Ledger</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">In fine (24KT) grams · balance = gold held at factory</p>
-          </div>
-        </div>
-        <div className="divide-y divide-border/40">
-          {goldLedger.map(r => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.inQ > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{r.inQ > 0 ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}</div>
-              <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{r.particulars}</p><p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p></div>
-              <div className="text-right shrink-0"><p className={`text-sm font-semibold ${r.inQ > 0 ? "text-success" : "text-destructive"}`}>{r.inQ > 0 ? `+${r.inQ}` : `−${r.outQ}`} g</p><p className="text-[11px] text-muted-foreground">Bal: {r.balance} g</p></div>
-            </div>
-          ))}
-          {goldLedger.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No gold movements yet.</div>}
-        </div>
-      </div>
+      {/* ── The whole account on one sheet — gold, silver, diamond, other metal
+             and money together, instead of three separate ledgers ── */}
+      <FullLedgerTable
+        title="Factory Ledger"
+        caption="Everything with this factory in one place — issued on the left, received on the right"
+        /* A ledger book reads oldest first, so the totals at the foot mean something. */
+        rows={buildUnifiedLedger(issuances, true)}
+        onExport={() => setShowExport(true)}
+      />
 
-      {/* ── Diamond ledger (ct) ── */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center gap-2">
-          <Gem className="h-4 w-4 text-blue-500" />
-          <div>
-            <h2 className="font-display text-xl text-brand-dark">Diamond Ledger</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">In carats · issued in, used/returned out</p>
-          </div>
-        </div>
-        <div className="divide-y divide-border/40">
-          {diamondLedger.map(r => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.inQ > 0 ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>{r.inQ > 0 ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}</div>
-              <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate">{r.particulars}</p><p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p></div>
-              <div className="text-right shrink-0"><p className={`text-sm font-semibold ${r.inQ > 0 ? "text-success" : "text-destructive"}`}>{r.inQ > 0 ? `+${r.inQ}` : `−${r.outQ}`} ct</p><p className="text-[11px] text-muted-foreground">Bal: {r.balance} ct</p></div>
-            </div>
-          ))}
-          {diamondLedger.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No diamond movements yet.</div>}
-        </div>
-      </div>
 
       <div className="space-y-3">
         <h2 className="font-display text-xl text-brand-dark px-1">Material Issuances</h2>

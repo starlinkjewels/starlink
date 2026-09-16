@@ -48,7 +48,9 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
 
   return (
     <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={onClose}>
-      <div className="card-luxe w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+      {/* Capped and scrollable: a factory offers eight download options and the
+          last of them were off the bottom of the screen with no way to reach them. */}
+      <div className="card-luxe w-full max-w-md p-5 max-h-[85vh] overflow-y-auto overscroll-contain" onClick={e => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-1">
           <h3 className="font-display text-lg text-brand-dark">Export{title ? ` — ${title}` : ""}</h3>
           <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-secondary" aria-label="Close"><X className="h-4 w-4" /></button>

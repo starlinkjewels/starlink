@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
+import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
 import { Button } from "@/components/ui/button";
@@ -177,20 +178,20 @@ export function ClientHistoryPage() {
   // chronological, with a running balance — the "professional ledger" view,
   // separate from the Order History table below (which is order-by-order).
   const statement = (() => {
-    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    const rows: StatementRow[] = [];
     // Opening balance carried in from a previous system — always the first line.
     if (hasOpeningBalance(client)) {
-      rows.push({ id: "opening", date: client.openingDate || client.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(client), credit: openingCreditAmt(client) });
+      rows.push({ id: "opening", date: client.openingDate || client.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(client), credit: openingCreditAmt(client), balance: 0, kind: "Opening", pinned: true });
     }
     for (const o of billableOrders) {
       // Bill the GROSS value, then show any gift-card redemption as its own
       // discount line — so the ledger explains why the balance is lower.
-      rows.push({ id: o.id, date: o.createdAt, particulars: `Order ${o.orderNumber} — ${o.jewelleryType}`, debit: orderGrossTotal(o), credit: 0 });
+      rows.push({ id: o.id, date: o.createdAt, particulars: `${o.jewelleryType}${o.designNumber ? ` · #${o.designNumber}` : ""}`, ref: o.orderNumber, debit: orderGrossTotal(o), credit: 0, balance: 0, kind: "Order billed" });
       if (o.giftCardRedeemed && o.giftCardRedeemed > 0) {
-        rows.push({ id: o.id + "-gift", date: o.createdAt, particulars: `Gift card redeemed (${o.orderNumber})`, debit: 0, credit: o.giftCardRedeemed });
+        rows.push({ id: o.id + "-gift", date: o.createdAt, particulars: "Gift card redeemed", ref: o.orderNumber, debit: 0, credit: o.giftCardRedeemed, balance: 0, kind: "Gift card" });
       }
       for (const adv of o.advances || []) {
-        rows.push({ id: adv.id, date: adv.createdAt, particulars: `${adv.note || "Payment"} (${o.orderNumber})`, debit: 0, credit: adv.amount });
+        rows.push({ id: adv.id, date: adv.createdAt, particulars: adv.note || "Payment received", ref: o.orderNumber, debit: 0, credit: adv.amount, balance: 0, kind: "Payment" });
       }
     }
     let running = 0;
@@ -516,44 +517,30 @@ export function ClientHistoryPage() {
           );
         })()}
       </div>
+      {/* Account Statement — same ledger as Stock and Locker: summary, filters,
+          then every entry with a running balance. */}
+      <StatementLedger
+        title="Account Statement"
+        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · orders billed and payments received, running balance in USD`}
+        rows={statement}
+        fmt={fmtMoney}
+        debitLabel="Billed"
+        creditLabel="Received"
+        onExport={() => setShowExport(true)}
+        summary={[
+          { label: "Total billed", value: fmtMoney(totalValue), tone: "out" },
+          { label: "Received", value: fmtMoney(paidAmount), tone: "in" },
+          { label: "Outstanding", value: fmtMoney(pendingAmount), tone: pendingAmount > 0 ? "due" : "in" },
+          { label: "Orders", value: String(billableOrders.length) },
+        ]}
+        rowAction={r => (r.credit > 0 && !r.pinned && user?.role === "admin" ? (
+          <button onClick={() => reversePayment(r.date)} title="Reverse this payment"
+            className="shrink-0 text-muted-foreground hover:text-destructive p-1">
+            <Undo2 className="h-4 w-4" />
+          </button>
+        ) : null)}
+      />
 
-      {/* Account Statement — orders billed and payments received, interleaved
-          chronologically with a running balance, like a bank/vendor statement. */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in USD</p>
-        </div>
-        <div className="divide-y divide-border/40">
-          {statement.map(r => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                {r.debit > 0 ? <Package className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{r.particulars}</p>
-                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
-                  {r.debit > 0 ? `+${fmtMoney(r.debit)}` : `−${fmtMoney(r.credit)}`}
-                </p>
-                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoney(r.balance)}</p>
-              </div>
-              {r.credit > 0 && r.id !== "opening" && user?.role === "admin" && (
-                <button
-                  onClick={() => reversePayment(r.date)}
-                  title="Reverse this payment"
-                  className="shrink-0 text-muted-foreground hover:text-destructive p-1"
-                >
-                  <Undo2 className="h-4 w-4" />
-                </button>
-              )}
-            </div>
-          ))}
-          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
-        </div>
-      </div>
 
       {/* Order History */}
       <div className="card-luxe overflow-hidden">

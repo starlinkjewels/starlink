@@ -21,6 +21,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -384,22 +385,22 @@ export function SupplierHistoryPage() {
   // across all purchases, chronological, with a running balance. This is the
   // "professional ledger" view, not just a purchase-by-purchase list.
   const statement = (() => {
-    const rows: { id: string; date: string; particulars: string; debit: number; credit: number }[] = [];
+    const rows: StatementRow[] = [];
     // Opening balance carried in from a previous system — always the first line.
     if (hasOpeningBalance(supplier)) {
-      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier) });
+      rows.push({ id: "opening", date: supplier.openingDate || supplier.createdAt, particulars: "Opening Balance (brought forward)", debit: openingDebitAmt(supplier), credit: openingCreditAmt(supplier), balance: 0, kind: "Opening", pinned: true });
     }
     for (const p of purchases) {
       // Show the order number when this purchase was bought for a specific order.
       const orderNo = p.orderId ? db.orders.find(o => o.id === p.orderId)?.orderNumber : undefined;
-      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}${p.invoiceNumber ? ` (Inv ${p.invoiceNumber})` : ""}${orderNo ? ` · Order ${orderNo}` : ""}`, debit: p.totalInr, credit: 0 });
+      rows.push({ id: p.id, date: p.createdAt, particulars: `Purchase — ${purchaseDesc(p)}`, ref: [p.invoiceNumber ? `Inv ${p.invoiceNumber}` : "", orderNo ? `Order ${orderNo}` : ""].filter(Boolean).join(" · ") || undefined, debit: p.totalInr, credit: 0, balance: 0, kind: "Purchase" });
       for (const pay of p.payments || []) {
-        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, debit: 0, credit: pay.amountInr });
+        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, ref: p.invoiceNumber ? `Inv ${p.invoiceNumber}` : undefined, debit: 0, credit: pay.amountInr, balance: 0, kind: "Payment" });
       }
     }
     // Money received back from the supplier — a credit, like a payment.
     for (const r of receipts) {
-      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: 0, credit: r.amountInr });
+      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: 0, credit: r.amountInr, balance: 0, kind: "Received" });
     }
     let running = 0;
     const withBalance = [...rows]
@@ -717,35 +718,24 @@ export function SupplierHistoryPage() {
           )}
         </div>
       )}
+      {/* Account Statement — the same ledger people read on Stock and Locker:
+          summary, filters, then every entry with a running balance. */}
+      <StatementLedger
+        title="Account Statement"
+        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · purchases and payments, running balance in INR`}
+        rows={statement}
+        fmt={fmtMoneyInr}
+        debitLabel="Purchased"
+        creditLabel="Paid"
+        onExport={() => setShowExport(true)}
+        summary={[
+          { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
+          { label: "Total paid", value: fmtMoneyInr(account.totalPaid), tone: "in" },
+          { label: "Outstanding", value: fmtMoneyInr(account.balanceOwed), tone: account.balanceOwed > 0 ? "due" : "in" },
+          { label: "Purchases", value: String(purchases.length) },
+        ]}
+      />
 
-      {/* Account Statement — full chronological ledger with a running balance,
-          purchases and payments interleaved, like a bank/vendor statement. */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Account Statement</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{statement.length} entr{statement.length !== 1 ? "ies" : "y"} · running balance in INR</p>
-        </div>
-        <div className="divide-y divide-border/40">
-          {statement.map(r => (
-            <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-                {r.debit > 0 ? <TrendingUp className="h-4 w-4" /> : <CreditCard className="h-4 w-4" />}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium truncate">{r.particulars}</p>
-                <p className="text-xs text-muted-foreground">{fmtDate(r.date)}</p>
-              </div>
-              <div className="text-right shrink-0">
-                <p className={`text-sm font-semibold ${r.debit > 0 ? "text-destructive" : "text-success"}`}>
-                  {r.debit > 0 ? `+${fmtMoneyInr(r.debit)}` : `−${fmtMoneyInr(r.credit)}`}
-                </p>
-                <p className="text-[11px] text-muted-foreground">Bal: {fmtMoneyInr(r.balance)}</p>
-              </div>
-            </div>
-          ))}
-          {statement.length === 0 && <div className="px-5 py-8 text-center text-sm text-muted-foreground">No entries yet.</div>}
-        </div>
-      </div>
 
       {/* Purchase history */}
       <div className="card-luxe overflow-hidden">
