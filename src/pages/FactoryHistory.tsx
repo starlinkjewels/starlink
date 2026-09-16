@@ -23,7 +23,6 @@ import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } f
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { FullLedgerTable, type MovementRow } from "@/components/FullLedgerTable";
 import { FactoryOrderLedger, buildFactoryOrderRows } from "@/components/FactoryOrderLedger";
-import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -439,39 +438,6 @@ export function FactoryHistoryPage() {
     }
   };
 
-  // Full account statement — making charges (owed) and payments (paid) across
-  // all issuances, chronological, with a running balance — the money ledger,
-  // separate from the material (gold/diamond quantity) tracking above.
-  const buildStatement = (iss: MaterialIssuance[], includeOpening = false) => {
-    const rows: StatementRow[] = [];
-    // Opening making-charge balance (factory-wide) — debit here = we owe them.
-    if (includeOpening && hasOpeningBalance(factory)) {
-      rows.push({ id: "opening", date: factory.openingDate || factory.createdAt, particulars: "Opening Balance (brought forward)", debit: openingCreditAmt(factory), credit: openingDebitAmt(factory), balance: 0, kind: "Opening", pinned: true });
-    }
-    for (const mi of iss) {
-      const order = db.orders.find(o => o.id === mi.orderId);
-      const unit = mi.material === "gold" ? "g" : "ct";
-      if (mi.makingCharges.amountInr > 0) {
-        rows.push({
-          id: mi.id, date: mi.issuedAt,
-          particulars: `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`,
-          ref: order?.orderNumber, debit: mi.makingCharges.amountInr, credit: 0, balance: 0, kind: "Making charges",
-        });
-      }
-      for (const pay of mi.makingCharges.payments || []) {
-        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, ref: order?.orderNumber, debit: 0, credit: pay.amountInr, balance: 0, kind: "Payment" });
-      }
-    }
-    let running = 0;
-    const withBalance = [...rows]
-      .sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date)))
-      .map(r => { running += r.debit - r.credit; return { ...r, balance: running }; });
-    // Chronological: a balance is the balance AFTER its row, so a download read
-    // newest-first ran the running total backwards. The screen flips it.
-    return withBalance;
-  };
-  const statementAsc = buildStatement(issuances, true);
-  const statement = [...statementAsc].reverse(); // newest first, for the screen
   const orderRows = buildFactoryOrderRows(issuances, db.orders);
 
   /** Trim only when the text genuinely cannot fit (8.5pt Helvetica is about
@@ -482,47 +448,8 @@ export function FactoryHistoryPage() {
   };
 
 
-  // ── Gold ledger (in fine 24KT grams, so the running balance matches the
-  //    "Fine Gold at Factory" card): gold received in, finished piece out. ──
-  const buildGoldLedger = (iss: MaterialIssuance[], includeOpening = false) => {
-    const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
-    // Fine gold already at the factory at migration — the ledger's opening "in".
-    if (includeOpening && factory.openingFineGold) {
-      rows.push({ id: "opening", date: factory.openingFineGoldDate || factory.createdAt, particulars: "Opening gold stock (brought forward)", inQ: factory.openingFineGold, outQ: 0 });
-    }
-    for (const mi of iss) {
-      if (mi.material !== "gold") continue;
-      const order = db.orders.find(o => o.id === mi.orderId);
-      if (mi.source !== "factoryPool") {
-        rows.push({ id: mi.id + "-in", date: mi.issuedAt, particulars: `Gold received — ${mi.quantityIssued}g ${mi.purityOrQuality}${order ? ` (${order.orderNumber})` : mi.orderId ? "" : " · bulk"}`, inQ: toPureGold(mi.quantityIssued, mi.purityOrQuality), outQ: 0 });
-      }
-      if (mi.finishedNetWeight != null) {
-        const fine = mi.finishedPurity != null ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity) : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
-        rows.push({ id: mi.id + "-out", date: mi.issuedAt, particulars: `Finished piece — net ${mi.finishedNetWeight}g${order ? ` (${order.orderNumber})` : ""}`, inQ: 0, outQ: fine });
-      }
-    }
-    let running = 0;
-    return [...rows].sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; });  // chronological — the running balance only reads correctly oldest-first
-  };
 
 
-  // ── Diamond ledger (carats): issued in; once finished, used-in-piece + returned out. ──
-  const buildDiamondLedger = (iss: MaterialIssuance[]) => {
-    const rows: { id: string; date: string; particulars: string; inQ: number; outQ: number }[] = [];
-    for (const mi of iss) {
-      if (mi.material !== "diamond") continue;
-      const order = db.orders.find(o => o.id === mi.orderId);
-      rows.push({ id: mi.id + "-in", date: mi.issuedAt, particulars: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}${order ? ` (${order.orderNumber})` : ""}`, inQ: mi.quantityIssued, outQ: 0 });
-      if (mi.status === "closed") {
-        const returned = mi.diamondKind === "certified" ? (mi.finishDisposition === "returned" ? mi.quantityIssued : 0) : (mi.finishReturnedCt || 0);
-        const used = Math.round((mi.quantityIssued - returned) * 1000) / 1000;
-        if (used > 0) rows.push({ id: mi.id + "-used", date: mi.issuedAt, particulars: `Used in piece${order ? ` (${order.orderNumber})` : ""}`, inQ: 0, outQ: used });
-        if (returned > 0) rows.push({ id: mi.id + "-ret", date: mi.issuedAt, particulars: `Returned to stock`, inQ: 0, outQ: returned });
-      }
-    }
-    let running = 0;
-    return [...rows].sort((a, b) => +new Date(a.date) - +new Date(b.date)).map(r => { running = Math.round((running + r.inQ - r.outQ) * 1000) / 1000; return { ...r, balance: running }; });  // chronological — the running balance only reads correctly oldest-first
-  };
 
 
   // Limit the export to a single order's issuances (matched on order number,
@@ -534,52 +461,8 @@ export function FactoryHistoryPage() {
   };
 
   const ordSuffix = (o?: string) => (o ? `-Order-${o.replace(/[^\w.-]+/g, "_")}` : "");
-  const exportGoldCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Gold`, ["Date", "Particulars", "In (g fine)", "Out (g fine)", "Balance (g fine)"], buildGoldLedger(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
-  const exportDiamondCsv = (from: Date | null, to: Date | null, orderNo?: string) => downloadCsv(`Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Diamond`, ["Date", "Particulars", "In (ct)", "Out (ct)", "Balance (ct)"], buildDiamondLedger(issuancesForOrder(orderNo)).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.particulars, r.inQ || "", r.outQ || "", r.balance]));
 
-  const exportCsv = (from: Date | null, to: Date | null, orderNo?: string) => {
-    downloadCsv(
-      `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
-      ["Date", "Order / Ref", "Particulars", "Charged (INR)", "Paid (INR)", "Balance (INR)"],
-      buildStatement(issuancesForOrder(orderNo), !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [r.id === "opening" ? "Opening" : fmtDate(r.date), r.ref ?? "", r.particulars, r.debit || "", r.credit || "", r.balance]),
-    );
-  };
 
-  const exportPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
-    const iss = issuancesForOrder(orderNo);
-    const acct = factoryAccount(iss, orderNo ? undefined : factory);
-    downloadLedgerPdf({
-      title: `Factory Account Statement${orderNo ? ` · Order ${orderNo}` : ""}`,
-      subjectLines: [
-        `Factory: ${factory.name}`,
-        factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
-        orderNo ? `Filtered to order: ${orderNo}` : "",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
-      ].filter(Boolean),
-      summary: [
-        { label: "Charges Total", value: fmtInrPlain(acct.chargesTotal) },
-        { label: "Charges Paid", value: fmtInrPlain(acct.chargesPaid) },
-        { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
-        { label: "Charges Overpaid", value: fmtInrPlain(acct.chargesOverpaid) },
-      ],
-      columns: [
-        { header: "Date", x: 20 },
-        { header: "Particulars", x: 46 },
-        { header: "Charged", x: 118 },
-        { header: "Paid", x: 145 },
-        { header: "Balance", x: 170 },
-      ],
-      align: ["left", "left", "right", "right", "right"],
-      rows: buildStatement(iss, !orderNo).filter(r => inDateRange(r.date, from, to)).map(r => [
-        r.id === "opening" ? "Opening" : fmtDate(r.date),
-        fit(r.particulars + (r.ref ? ` (${r.ref})` : ""), 70),
-        r.debit ? rs(r.debit) : "",
-        r.credit ? rs(r.credit) : "",
-        rs(r.balance),
-      ]),
-      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}`,
-    });
-  };
 
   // ── Combined: ONE two-sided Debit | Credit ledger (Gold + Diamond + Amount on
   //    each side, one row per transaction) — the format the client uses in their
@@ -698,135 +581,6 @@ export function FactoryHistoryPage() {
     buildFactoryOrderRows(issuancesForOrder(orderNo), db.orders)
       .filter(r => inDateRange(r.date, from, to));
 
-  /**
-   * ONE complete statement for a factory: the position at the top, then every
-   * side of the relationship in its own section — order by order, gold in and
-   * out, diamond in and out, and the labour account. Everything a factory
-   * settlement meeting needs, in a single document, instead of five downloads
-   * that have to be laid side by side.
-   */
-  const exportFullStatementPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
-    const iss = issuancesForOrder(orderNo);
-    const acct = factoryAccount(iss, orderNo ? undefined : factory);
-    const orders = orderRowsFor(from, to, orderNo);
-    const moves = flattenMovements(
-      buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
-    );
-    const opening = orderNo ? 0 : (factory.openingFineGold || 0);
-    // Estimates are shown but never totalled — same rule as the screen.
-    const A = orders.reduce((t, r) => ({
-      goldOut: t.goldOut + (r.goldEstimated ? 0 : r.goldOut),
-      goldIn: t.goldIn + (r.goldEstimated ? 0 : r.goldIn),
-      diaOut: t.diaOut + (r.diaEstimated ? 0 : r.diaOut),
-      diaIn: t.diaIn + r.diaIn,
-      labour: t.labour + r.labour, paid: t.paid + r.paid,
-      quoted: t.quoted + r.quotedUsd,
-    }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, labour: 0, paid: 0, quoted: 0 });
-
-    const movesOf = (material: RegExp) => moves.filter(m => material.test(m.material));
-    const moveSection = (heading: string, rows: typeof moves, unit: string) => ({
-      heading,
-      columns: [
-        { header: "Date", x: 14 },
-        { header: "Order / Ref", x: 44 },
-        { header: "Particular", x: 88 },
-        { header: `Out (${unit})`, x: 196 },
-        { header: `In (${unit})`, x: 226 },
-        { header: "Balance", x: 254 },
-      ],
-      align: ["left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
-      rows: rows.map(m => [
-        m.id.startsWith("opening") ? "Opening" : fmtDate(m.date),
-        fit(m.ref || "", 42),
-        fit(m.particular, 104),
-        m.out ? (m.money ? rs(m.out) : String(q3(m.out))) : "",
-        m.in ? (m.money ? rs(m.in) : String(q3(m.in))) : "",
-        m.money ? rs(m.balance) : String(q3(m.balance)),
-      ]),
-    });
-
-    downloadLedgerPdfMulti({
-      title: `Complete Factory Statement — ${factory.name}${orderNo ? ` · Order ${orderNo}` : ""}`,
-      subjectLines: [
-        factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
-        factory.phone ? `Phone: ${factory.phone}` : "",
-        from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
-      ].filter(Boolean),
-      summary: [
-        { label: "Gold issued / returned", value: `${q3(A.goldOut)} / ${q3(A.goldIn)} g fine` },
-        { label: "Gold still at factory", value: `${q3(opening + A.goldOut - A.goldIn)} g fine${opening ? ` (incl. ${q3(opening)} opening)` : ""}` },
-        { label: "Diamond issued / accounted", value: `${q3(A.diaOut)} / ${q3(A.diaIn)} ct` },
-        { label: "Diamond not accounted", value: `${q3(A.diaOut - A.diaIn)} ct` },
-        { label: "Labour billed / paid", value: `${fmtInrPlain(A.labour)} / ${fmtInrPlain(A.paid)}` },
-        { label: "Labour pending", value: fmtInrPlain(acct.chargesPending) },
-        ...(A.quoted > 0 ? [{ label: "Quoted (USD)", value: `$${Math.round(A.quoted).toLocaleString()}` }] : []),
-        { label: "Orders with this factory", value: `${orders.length} (${orders.filter(o => o.open > 0).length} still open)` },
-      ],
-      landscape: true,
-      sections: [
-        {
-          heading: "1. Order by order — what went out, what came back, what is owed",
-          columns: [
-            { header: "Order", x: 14 }, { header: "Date", x: 44 }, { header: "Item", x: 68 },
-            { header: "Gold out", x: 112 }, { header: "Gold back", x: 134 }, { header: "With fact.", x: 156 },
-            { header: "Dia out", x: 178 }, { header: "Dia back", x: 198 }, { header: "Open", x: 216 },
-            { header: "Labour", x: 234 }, { header: "Paid", x: 252 }, { header: "Status", x: 268 },
-          ],
-          align: ["left", "left", "left", "right", "right", "right", "right", "right", "right", "right", "right", "left"],
-          rows: orders.map(r => [
-            r.orderNo, fmtDate(r.date), fit([r.jewellery, r.metalNote].filter(Boolean).join(" · "), 42),
-            (r.goldEstimated ? "~" : "") + (q3(r.goldOut) || ""),
-            r.goldEstimated ? "" : (q3(r.goldIn) || ""),
-            r.goldEstimated ? "-" : (q3(r.goldOut - r.goldIn) || "0"),
-            r.diaOut ? (r.diaEstimated ? "~" : "") + r.diaOut.toFixed(2) : "",
-            r.diaIn ? r.diaIn.toFixed(2) : "",
-            r.diaEstimated ? "-" : (r.diaOut - r.diaIn).toFixed(2),
-            r.labour ? rs(r.labour) : "", r.paid ? rs(r.paid) : "",
-            r.open > 0 ? `${r.open} open` : "Done",
-          ].map(String)),
-          totalsRow: [
-            "", "", "Totals",
-            String(q3(A.goldOut)), String(q3(A.goldIn)), String(q3(opening + A.goldOut - A.goldIn)),
-            A.diaOut.toFixed(2), A.diaIn.toFixed(2), (A.diaOut - A.diaIn).toFixed(2),
-            rs(A.labour), rs(A.paid), "",
-          ],
-        },
-        moveSection("2. Gold — every issue and return (fine 24KT grams)", movesOf(/gold/i), "g"),
-        moveSection("3. Diamond — every issue and return (carats)", movesOf(/diamond/i), "ct"),
-        ...(movesOf(/silver|other metal/i).length
-          ? [moveSection("4. Silver & other metal", movesOf(/silver|other metal/i), "g")]
-          : []),
-        {
-          heading: `${movesOf(/silver|other metal/i).length ? "5" : "4"}. Labour account — charges billed and payments made`,
-          columns: [
-            { header: "Date", x: 14 },
-            { header: "Order / Ref", x: 44 },
-            { header: "Particular", x: 88 },
-            { header: "Charged", x: 200 },
-            { header: "Paid", x: 230 },
-            { header: "Balance", x: 256 },
-          ],
-          align: ["left", "left", "left", "right", "right", "right"] as ("left" | "right")[],
-          rows: statementAsc
-            .filter(r => inDateRange(r.date, from, to))
-            .map(r => [
-              r.id === "opening" ? "Opening" : fmtDate(r.date),
-              fit(r.ref ?? "", 42),
-              fit(r.particulars, 108),
-              r.debit ? rs(r.debit) : "",
-              r.credit ? rs(r.credit) : "",
-              rs(r.balance),
-            ]),
-          // The Balance column closes on billed minus paid. chargesPending clamps
-          // each issue at zero, so an overpaid one would leave the column not
-          // adding up to the figure printed under it.
-          totalsRow: ["", "", "Totals", rs(acct.chargesTotal), rs(acct.chargesPaid), rs(acct.chargesTotal - acct.chargesPaid)],
-        },
-      ],
-      filename: `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Complete-Statement`,
-    });
-  };
 
 
   const exportOrdersPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
@@ -1032,15 +786,10 @@ export function FactoryHistoryPage() {
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
               extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
               options={[
-                { label: "Complete Statement — PDF", sublabel: "Everything in one document: orders, gold, diamond and labour", kind: "pdf", run: exportFullStatementPdf },
-                { label: "Order Ledger — PDF", sublabel: "Order by order: material out/back, labour, pending", kind: "pdf", run: exportOrdersPdf },
-                { label: "Order Ledger — Excel", sublabel: "Order by order: material out/back, labour, pending", kind: "excel", run: exportOrdersCsv },
-                { label: "Movement Sheet — PDF", sublabel: "Every issue and return, with a running balance", kind: "pdf", run: exportCombinedPdf },
-                { label: "Movement Sheet — Excel", sublabel: "Every issue and return, with a running balance", kind: "excel", run: exportCombinedCsv },
-                { label: "Account Statement — PDF", sublabel: "Making charges & payments only", kind: "pdf", run: exportPdf },
-                { label: "Account Statement — Excel", sublabel: "Making charges & payments only", kind: "excel", run: exportCsv },
-                { label: "Gold Ledger — Excel", sublabel: "Fine (24KT) gold in / out", kind: "excel", run: exportGoldCsv },
-                { label: "Diamond Ledger — Excel", sublabel: "Carats in / out", kind: "excel", run: exportDiamondCsv },
+                { label: "Factory Ledger — PDF", sublabel: "One table: gold, diamond, other metal and labour, order by order", kind: "pdf", run: exportOrdersPdf },
+                { label: "Factory Ledger — Excel", sublabel: "One table: gold, diamond, other metal and labour, order by order", kind: "excel", run: exportOrdersCsv },
+                { label: "Movement Sheet — PDF", sublabel: "Every issue and return line by line, if a figure needs checking", kind: "pdf", run: exportCombinedPdf },
+                { label: "Movement Sheet — Excel", sublabel: "Every issue and return line by line, if a figure needs checking", kind: "excel", run: exportCombinedCsv },
               ]} />
             {user?.role === "admin" && (
               <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
@@ -1194,37 +943,15 @@ export function FactoryHistoryPage() {
           </div>
         )}
       </div>
-      {/* Account Statement — the money side on its own, in the same ledger shape
-          as every other account in the app. */}
-      {/* No summary cards on this one: the Factory Account block directly above
-          already carries the same four figures, and two copies of a number on one
-          page is how they end up disagreeing. */}
-      <StatementLedger
-        title="Account Statement"
-        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · making charges and payments, running balance in INR`}
-        rows={statement}
-        fmt={fmtMoneyInr}
-        debitLabel="Charged"
-        creditLabel="Paid"
-        onExport={() => setShowExport(true)}
-      />
-
-
-      {/* ── The whole account on one sheet — gold, silver, diamond, other metal
-             and money together, instead of three separate ledgers ── */}
-      {/* Order by order: what went out, what came back, the labour and what is
-          still open. The movement-level detail is the sheet below. */}
+      {/* ONE ledger for this factory: gold given and used, diamond given and
+          used, the other metals, and the labour billed, paid and pending — all
+          on the same row as the order they belong to. It replaced a separate
+          account statement, gold ledger, diamond ledger and movement sheet,
+          which meant four tables to cross-reference for one job. */}
       <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}
         openingFineGold={factory.openingFineGold || 0}
-        onExport={() => setShowExport(true)}
-      />
-
-      <FullLedgerTable
-        title="Movement sheet"
-        caption="Every issue and return in date order, each with its own running balance"
-        rows={flattenMovements(buildUnifiedLedger(issuances, true))}
         onExport={() => setShowExport(true)}
       />
 

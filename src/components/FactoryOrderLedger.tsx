@@ -202,9 +202,9 @@ export function FactoryOrderLedger({
     <div className="card-luxe overflow-hidden">
       <div className="px-5 py-4 border-b border-border/60 flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h2 className="font-display text-xl text-brand-dark">Factory Ledger — order by order</h2>
+          <h2 className="font-display text-xl text-brand-dark">Factory Ledger</h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            What went to {factoryName}, what came back, the labour and what is still open
+            Everything with {factoryName} on one row per order — gold, diamond, other metal and labour
           </p>
         </div>
         {onExport && (
@@ -277,8 +277,8 @@ export function FactoryOrderLedger({
               <th className="px-3 py-2 text-left font-semibold border-l border-border/60" rowSpan={2}>Status</th>
             </tr>
             <tr className="bg-secondary/40 text-muted-foreground text-[11px]">
-              {hasGold && <><th className={`${head} border-l border-border/60`}>Issued</th><th className={head}>Returned</th><th className={head}>With factory</th></>}
-              {hasDia && <><th className={`${head} border-l border-border/60`}>Issued</th><th className={head}>Accounted</th><th className={head}>Open</th></>}
+              {hasGold && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
+              {hasDia && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
               <th className={`${head} border-l border-border/60`}>Billed</th>
               <th className={head}>Paid</th>
               <th className={head}>Pending</th>
