@@ -231,24 +231,24 @@ export function ClientHistoryPage() {
     const sections = blocks.map(b => ({
       heading: `Invoice ${b.number} · ${fmtDate(b.date)} · ${fmtMoney(b.gross)}${b.balance > 0.009 ? ` · ${fmtMoney(b.balance)} outstanding` : " · settled"}`,
       columns: [
-        { header: "Order", x: 14 },
-        { header: "Description", x: 46 },
-        { header: "Qty", x: 150 },
-        { header: "Billed", x: 176 },
-        { header: "Gift card", x: 206 },
-        { header: "Received", x: 236 },
-        { header: "Balance", x: 262 },
+        { header: "Order / Date", x: 14 },
+        { header: "Description", x: 52 },
+        { header: "Qty", x: 172 },
+        { header: "Billed", x: 192 },
+        { header: "Gift card", x: 218 },
+        { header: "Received", x: 244 },
+        { header: "Balance", x: 266 },
       ],
       align: ["left", "left", "right", "right", "right", "right", "right"] as ("left" | "right")[],
       rows: [
         ...b.items.map(i => [
-          i.orderNo, fit(i.description || "—", 100), String(i.qty),
+          i.orderNo, fit(i.description || "—", 116), String(i.qty),
           fmtMoney(i.gross), i.gift ? `-${fmtMoney(i.gift)}` : "",
           i.received ? fmtMoney(i.received) : "",
           i.balance > 0.009 ? fmtMoney(i.balance) : "Cleared",
         ]),
         ...b.payments.map(p => [
-          fmtDate(p.date), fit(p.note, 100), "", "", "", fmtMoney(p.amount), "",
+          fmtDate(p.date), fit(`Payment received — ${p.note}`, 116), "", "", "", fmtMoney(p.amount), "",
         ]),
       ],
       totalsRow: ["", "Invoice total", "", fmtMoney(b.gross), b.gift ? `-${fmtMoney(b.gift)}` : "",

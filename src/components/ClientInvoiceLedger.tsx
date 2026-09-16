@@ -39,7 +39,7 @@ function describe(o: Order): string {
     o.productColor,
     o.jewelleryType,
     o.designNumber ? `#${o.designNumber}` : "",
-    o.productSize ? `size ${o.productSize}` : "",
+    o.productSize || "",
     o.actualDiamondWeight ? `${o.actualDiamondWeight}ct` : (o.diamondWeight ? `${o.diamondWeight}ct est` : ""),
   ].filter(Boolean).join(" · ");
 }
@@ -78,10 +78,32 @@ export function buildInvoiceBlocks(
     received: items.reduce((s, i) => s + i.received, 0),
     balance: items.reduce((s, i) => s + i.balance, 0),
   });
-  const paymentsOf = (os: Order[]) =>
-    os.flatMap(o => (o.advances || []).map(a => ({
-      id: a.id, date: a.createdAt, note: `${a.note || "Payment"} · ${o.orderNumber}`, amount: a.amount,
-    }))).sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  // ONE line per payment, not one per order it touched. A single transfer is
+  // spread across whichever orders it settles, so listing the advances raw
+  // turned $7,820 received into nine "Bank Transfer" fragments. Advances from
+  // the same receipt are added back together; older ones with no receipt are
+  // grouped by the moment and note they were written with, which is what a
+  // single save produced.
+  const paymentsOf = (os: Order[]) => {
+    const byReceipt = new Map<string, { id: string; date: string; note: string; amount: number; orders: Set<string> }>();
+    for (const o of os) {
+      for (const a of o.advances || []) {
+        const key = a.receiptId || `${a.createdAt}|${a.note}|${a.recordedBy}`;
+        const g = byReceipt.get(key);
+        if (g) { g.amount = Math.round((g.amount + a.amount) * 100) / 100; g.orders.add(o.orderNumber); }
+        else byReceipt.set(key, {
+          id: key, date: a.createdAt, note: a.note || "Payment",
+          amount: a.amount, orders: new Set([o.orderNumber]),
+        });
+      }
+    }
+    return [...byReceipt.values()]
+      .map(g => ({
+        id: g.id, date: g.date, amount: g.amount,
+        note: g.orders.size > 1 ? `${g.note} · ${g.orders.size} orders` : `${g.note} · ${[...g.orders][0]}`,
+      }))
+      .sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  };
 
   for (const inv of invoices.filter(i => i.clientId === clientId)) {
     const os = invoiceOrderIds(inv)
@@ -258,7 +280,7 @@ export function ClientInvoiceLedger({
                   <tr key={`${b.id}-${p.id}`} className="bg-success/5 text-xs">
                     <td />
                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(p.date)}</td>
-                    <td colSpan={4} className="px-2 py-1.5 text-muted-foreground">{p.note}</td>
+                    <td colSpan={4} className="px-2 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
                     <td className="px-2 py-1.5 text-right text-success font-medium">{fmtMoney(p.amount)}</td>
                     <td className="px-2 py-1.5 text-right">
                       {onReversePayment && (
