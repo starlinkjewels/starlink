@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb,
-  invoiceOrderIds, orderInvoiced, createInvoiceFromOrders, recordOrderPayment,
+  invoiceOrderIds, orderInvoiced, orderIsDispatched, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, reallocateClientPayments,
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
@@ -81,12 +81,16 @@ export function InvoicesPage() {
     return { orders, amount, adv, bal, gift, paid };
   };
 
-  // ── Create invoice: this client's priced, non-rejected, not-yet-invoiced orders. ──
+  // ── Create invoice: DISPATCHED, priced, not-yet-invoiced orders only. ──
+  // Undispatched work used to be listed here too, just sorted lower, so it could
+  // be ticked by mistake — which is how a bill went out for a piece that had not
+  // shipped. createInvoiceFromOrders() refuses them now as well; this keeps them
+  // off the screen so the refusal never has to fire.
   const eligible = clientFilter === "all" || !isStaff ? [] : db.orders
-    .filter(o => o.clientId === clientFilter && o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(db.invoices, o.id))
+    .filter(o => o.clientId === clientFilter && o.amount > 0 && o.status !== "Rejected"
+      && orderIsDispatched(o) && !orderInvoiced(db.invoices, o.id))
     .map(o => ({ o, disp: dispatchInfo(o) }))
     .sort((a, b) => {
-      if (a.disp.dispatched !== b.disp.dispatched) return a.disp.dispatched ? -1 : 1;
       const ad = a.disp.date || a.o.createdAt, bd = b.disp.date || b.o.createdAt;
       return +new Date(bd) - +new Date(ad);
     });

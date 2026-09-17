@@ -272,6 +272,44 @@ export function SettingsPage() {
     toast.success(`Invoice ${number} deleted`);
   }
 
+  // ── Invoice numbers: close a gap left by a cancelled invoice ───────────────
+  // Deleting an invoice leaves a hole (0001, 0003) and the atomic counter never
+  // hands a number back, so the book reads wrong for good unless it is renumbered.
+  const invoiceGaps = useMemo(() => {
+    const nums = (liveDb.invoices ?? [])
+      .map(i => parseInt(i.number, 10))
+      .filter(n => Number.isFinite(n))
+      .sort((a, b) => a - b);
+    const gaps: number[] = [];
+    for (let want = 1, k2 = 0; k2 < nums.length; k2++, want++) {
+      while (want < nums[k2]) { gaps.push(want); want++; }
+    }
+    return gaps;
+  }, [liveDb.invoices]);
+
+  function renumberInvoices() {
+    const list = [...(liveDb.invoices ?? [])].sort(
+      (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) || a.number.localeCompare(b.number));
+    if (!list.length) return;
+    if (!confirm(
+      `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?
+
+`
+      + "Only the numbers change — every amount, order link and payment stays exactly as it is. "
+      + "Do this only if an invoice has been cancelled and the sequence has a hole in it; anything already "
+      + "sent to a client will no longer match the copy they hold."
+    )) return;
+    updateDb(d => {
+      const byId = new Map(list.map((inv, i) => [inv.id, String(i + 1).padStart(4, "0")]));
+      for (const inv of d.invoices ?? []) {
+        const n = byId.get(inv.id);
+        if (n) inv.number = n;
+      }
+    });
+    toast.success(`Renumbered ${list.length} invoice${list.length !== 1 ? "s" : ""}`);
+  }
+
+
   // ── Client money that never reached their orders ───────────────────────────
   // A payment typed into the Locker as a plain entry sits there as cash while
   // the client's invoice still reads unpaid. These are every such row, so the
@@ -370,45 +408,12 @@ export function SettingsPage() {
   const canEditRates = user?.role === "admin" || user?.role === "employee";
   const isAdmin = user?.role === "admin";
 
-  // Orders that have been priced but never had an invoice number assigned —
-  // lets admin backfill all of them at once instead of opening each order to print.
-  const ordersNeedingInvoice = loadDb()
-    .orders.filter((o) => o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(loadDb().invoices, o.id))
-    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-
-  const [generatingInvoices, setGeneratingInvoices] = useState(false);
-  const generateInvoiceNumbers = () => {
-    const fresh = loadDb();
-    const missing = fresh.orders
-      .filter((o) => o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(fresh.invoices, o.id))
-      .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-    if (!missing.length) return;
-    if (
-      !confirm(
-        `Generate invoice numbers for ${missing.length} order${missing.length !== 1 ? "s" : ""}, oldest first? This cannot be undone.`,
-      )
-    )
-      return;
-    setGeneratingInvoices(true);
-    updateDb((d) => {
-      let n = d.invoices.length;
-      for (const o of missing) {
-        n++;
-        d.invoices.push({
-          id: uid("inv_"),
-          orderId: o.id,
-          orderIds: [o.id],
-          clientId: o.clientId,
-          number: String(n).padStart(4, "0"),
-          amount: orderTotal(o),
-          paid: balanceDue(o) <= 0,
-          createdAt: o.createdAt,
-        });
-      }
-    });
-    toast.success(`Generated ${missing.length} invoice number${missing.length !== 1 ? "s" : ""}`);
-    setGeneratingInvoices(false);
-  };
+  // The "generate invoice numbers for every order missing one" button used to
+  // live here. It billed work that had never shipped — that is where invoice
+  // 0002 for an undispatched order came from — and numbered by invoices.length,
+  // which repeats a number the moment one is deleted. Invoices are raised only
+  // from Invoices → Create invoice from dispatched orders, which is now the one
+  // path createInvoiceFromOrders() allows.
 
   // Users created under the previous model (password in Firestore, no Auth
   // account). Admin can provision Firebase Auth logins for them in one click.
@@ -1342,6 +1347,38 @@ export function SettingsPage() {
                   <Button onClick={applyLooseIncome} disabled={!fixClientId} className="btn-hero rounded-xl flex-1 h-9">Apply</Button>
                 </div>
               </div>
+            )}
+          </div>
+        )}
+
+
+        {/* ── Invoice numbering (admin only) ── */}
+        {isAdminUser && (
+          <div className="rounded-xl border border-border/70 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${invoiceGaps.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
+                <Hash className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Invoice Numbers</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {invoiceGaps.length === 0
+                    ? "The sequence runs straight through with no gaps."
+                    : `Missing: ${invoiceGaps.map(n => String(n).padStart(4, "0")).join(", ")} — an invoice was cancelled.`}
+                </p>
+              </div>
+            </div>
+            {invoiceGaps.length > 0 && (
+              <>
+                <p className="mt-3 text-[11px] text-muted-foreground">
+                  Renumbering puts every invoice back in date order starting at 0001. Only the numbers change —
+                  amounts, order links and payments stay exactly as they are. Do not do this if a client already
+                  holds a copy of an invoice, because their number will no longer match yours.
+                </p>
+                <Button size="sm" variant="outline" onClick={renumberInvoices} className="rounded-xl h-9 mt-3">
+                  Renumber invoices in date order
+                </Button>
+              </>
             )}
           </div>
         )}

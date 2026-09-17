@@ -446,16 +446,29 @@ export function nextOrderNumber(orders: Order[]): string {
   return `SLJ-${new Date().getFullYear()}-${String(max + 1).padStart(4, "0")}`;
 }
 
+/** An order is DISPATCHED once its Dispatch step is done, or it has moved past
+ *  dispatch. Nothing else counts, whatever a screen thinks. */
+export function orderIsDispatched(o: Order): boolean {
+  return o.status === "Dispatched" || o.status === "Delivered"
+    || o.timeline.some(t => t.step === "Dispatch" && t.status === "done");
+}
+
 /**
- * Create ONE invoice covering the given orders (dispatch-batch invoicing). Skips
- * any order already invoiced, and any that isn't priced. Returns the new invoice,
- * or null if nothing eligible. Call inside updateDb().
+ * Create ONE invoice covering the given orders (dispatch-batch invoicing).
+ *
+ * THE ONLY WAY AN INVOICE IS EVER CREATED. It refuses any order that is not
+ * dispatched, not priced, rejected, or already invoiced — the guard lives here
+ * rather than in a screen, because screens kept finding new ways around it: a
+ * bill printed on demand minted one, and a "generate missing invoice numbers"
+ * button in Settings minted one for every priced order whether it had shipped
+ * or not. Returns null when nothing is eligible. Call inside updateDb().
  */
 export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: string[], at: string, number?: string): Invoice | null {
   if (!d.invoices) d.invoices = [];
   const eligible = orderIds.filter(oid => {
     const o = d.orders.find(x => x.id === oid);
-    return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected" && !orderInvoiced(d.invoices, oid);
+    return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected"
+      && orderIsDispatched(o) && !orderInvoiced(d.invoices, oid);
   });
   if (!eligible.length) return null;
   const amount = eligible.reduce((s, oid) => {
