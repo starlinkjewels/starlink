@@ -27,6 +27,10 @@ export function EmployeesPage() {
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState({ name: "", email: "", password: "", phone: "", department: "Sales" });
+  // Someone who is only on the books for wages does not need to sign in. Forcing
+  // an email and password on them meant inventing a fake address, which then
+  // occupies a login and cannot be reused for a real one.
+  const [needsLogin, setNeedsLogin] = useState(true);
   // Opening salary already paid before the app (migration) — optional.
   const [openingPaid, setOpeningPaid] = useState("");
   const [openingCurrency, setOpeningCurrency] = useState<"INR" | "USD">("INR");
@@ -48,13 +52,21 @@ export function EmployeesPage() {
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(emps, PAGE_SIZE);
 
   const create = async () => {
-    if (!f.name || !f.email || !f.password) { toast.error("Fill name, email and password"); return; }
+    if (!f.name.trim()) { toast.error("Enter a name"); return; }
     const email = f.email.trim().toLowerCase();
-    if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    if (needsLogin) {
+      if (!email || !f.password) { toast.error("Enter an email and password, or turn off the login"); return; }
+      if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    } else if (email && loadDb().users.some(u => u.email.toLowerCase() === email)) {
+      toast.error("That email is already in use"); return;
+    }
+
     setSaving(true);
     try {
-      // Create the Firebase Auth account (password lives in Auth, not Firestore).
-      const authUid = await createAuthUser(email, f.password);
+      // Only create a sign-in account when they actually need one. A
+      // salary-only record has no Auth user, no email and no password — it exists
+      // to be paid and to appear in the salary ledger, nothing more.
+      const authUid = needsLogin ? await createAuthUser(email, f.password) : undefined;
       const opAmt = Number(openingPaid);
       updateDb(d => d.users.push({
         id: uid("u_"), role: "employee", status: "active", createdAt: new Date().toISOString(),
@@ -64,9 +76,10 @@ export function EmployeesPage() {
         openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
         openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
       } as User));
-      toast.success("Employee created — they can sign in with their email & password");
+      toast.success(needsLogin ? "Employee created — they can sign in with their email & password" : "Employee added for salary — no login created");
       setOpen(false);
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
+      setNeedsLogin(true);
       setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
     } catch (e) {
       toast.error(authErrorMessage(e));
@@ -111,15 +124,35 @@ export function EmployeesPage() {
           <DialogContent className="max-w-md rounded-2xl">
             <DialogHeader><DialogTitle className="font-display text-2xl">Create Employee</DialogTitle></DialogHeader>
             <div className="space-y-3">
-              {(["name","email","password","phone"] as const).map(k => (
-                <div key={k}>
-                  <Label className="text-xs capitalize">{k === "email" ? "Email (login ID)" : k}</Label>
-                  <Input
-                    type={k === "password" ? "password" : k === "email" ? "email" : "text"}
-                    value={(f as Record<string,string>)[k]}
-                    onChange={e => setF({ ...f, [k]: e.target.value })}
-                    className="rounded-xl mt-1"
-                  />
+              {(["name", "phone"] as const).map(key => (
+                <div key={key}>
+                  <Label className="text-xs capitalize">{key}</Label>
+                  <Input value={f[key]} onChange={e => setF({ ...f, [key]: e.target.value })}
+                    className="rounded-xl mt-1" />
+                </div>
+              ))}
+
+              {/* Wages-only staff never sign in, so nothing about a login is asked
+                  of them. It used to be compulsory, which meant inventing an email
+                  that then blocks that address from ever being a real login. */}
+              <label className="flex items-start gap-2.5 rounded-xl border border-border/70 p-3 cursor-pointer">
+                <input type="checkbox" checked={needsLogin} onChange={e => setNeedsLogin(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 accent-[hsl(var(--primary))]" />
+                <span>
+                  <span className="text-sm font-medium text-brand-dark block">Give them a login</span>
+                  <span className="text-[11px] text-muted-foreground">
+                    Leave this off for someone who is only on the books for wages — they are paid and appear in the
+                    salary ledger without an email or password.
+                  </span>
+                </span>
+              </label>
+
+              {needsLogin && (["email", "password"] as const).map(key => (
+                <div key={key}>
+                  <Label className="text-xs">{key === "email" ? "Email (login ID)" : "Password"}</Label>
+                  <Input type={key === "password" ? "password" : "email"}
+                    value={f[key]} onChange={e => setF({ ...f, [key]: e.target.value })}
+                    className="rounded-xl mt-1" />
                 </div>
               ))}
               <div>
@@ -183,7 +216,9 @@ export function EmployeesPage() {
                     <p className="font-semibold text-[15px] leading-tight truncate">{u.name}</p>
                     <StatusBadge status={u.status} />
                   </div>
-                  <p className="text-xs text-muted-foreground truncate mt-0.5">{u.email}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-0.5">
+                    {u.email || <span className="italic">Salary only — no login</span>}
+                  </p>
                   <div className="flex items-center gap-2 mt-2.5">
                     <span className={`text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{u.role === "admin" ? "Owner / Admin" : (u.department || "—")}</span>
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -223,9 +258,12 @@ export function EmployeesPage() {
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
                     {u.status === "active" ? "Deactivate" : "Activate"}
                   </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
-                    <KeyRound className="h-3.5 w-3.5" />
-                  </AsyncButton>
+                  {/* No login, nothing to reset. */}
+                  {!!u.email && (
+                    <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
+                      <KeyRound className="h-3.5 w-3.5" />
+                    </AsyncButton>
+                  )}
                   <AsyncButton size="sm" variant="outline" onClick={() => del(u.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Remove access">
                     <Trash2 className="h-3.5 w-3.5" />
                   </AsyncButton>
