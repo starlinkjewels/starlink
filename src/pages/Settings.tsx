@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
@@ -103,6 +103,27 @@ export function SettingsPage() {
   const removeCategory = (name: string) => {
     setCategories(expenseCategories.filter(c => c !== name));
   };
+
+  // Account (Locker) categories — the same editor, for money in and out of an
+  // account. These are compulsory on an entry, so the list has to be managed
+  // somewhere rather than typed fresh each time.
+  const [newLockerCategory, setNewLockerCategory] = useState("");
+  const lockerCategories = db.settings.lockerCategories?.length
+    ? db.settings.lockerCategories
+    : DEFAULT_LOCKER_CATEGORIES;
+  const setLockerCategories = (list: string[]) => {
+    updateDb(d => { d.settings.lockerCategories = list; });
+    setDb(prev => ({ ...prev, settings: { ...prev.settings, lockerCategories: list } }));
+  };
+  const addLockerCategory = () => {
+    const name = newLockerCategory.trim();
+    if (!name) return;
+    if (lockerCategories.some(c => c.toLowerCase() === name.toLowerCase())) { toast.error("That category already exists"); return; }
+    setLockerCategories([...lockerCategories, name]);
+    setNewLockerCategory("");
+  };
+  const removeLockerCategory = (name: string) => setLockerCategories(lockerCategories.filter(c => c !== name));
+
 
   const exp = () => {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
@@ -522,7 +543,7 @@ export function SettingsPage() {
     { id: "invoice", label: "Invoice & Bill", icon: FileText, show: true },
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates },
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
-    { id: "expenses", label: "Expense Categories", icon: SlidersHorizontal, show: isAdmin },
+    { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
     { id: "data", label: "Data & Backup", icon: Database, show: true },
   ].filter((s) => s.show);
@@ -1049,6 +1070,43 @@ export function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* Account Categories — admin only */}
+      {activeId === "expenses" && (
+        <div className="card-luxe p-6 space-y-4">
+          <div className="flex items-center gap-2">
+            <Landmark className="h-4 w-4 text-primary" />
+            <div>
+              <h3 className="font-semibold">Account Categories</h3>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Required on every entry in and out of an account, on the Locker and Payments pages
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {lockerCategories.map(c => (
+              <span key={c} className="inline-flex items-center gap-1.5 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-foreground">
+                {c}
+                <button onClick={() => removeLockerCategory(c)} className="h-4 w-4 rounded-full grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                  <X className="h-3 w-3" />
+                </button>
+              </span>
+            ))}
+          </div>
+          <div className="flex gap-2">
+            <Input
+              value={newLockerCategory} onChange={e => setNewLockerCategory(e.target.value)}
+              onKeyDown={e => e.key === "Enter" && addLockerCategory()}
+              className="rounded-xl h-10" placeholder="New account category"
+            />
+            <Button onClick={addLockerCategory} variant="outline" className="rounded-xl gap-2 shrink-0"><Plus className="h-4 w-4" /> Add</Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground">
+            Removing one here does not change entries already filed under it — it only stops appearing for new ones.
+          </p>
+        </div>
+      )}
+
 
       {/* Invoice numbers are now assigned automatically when an order is priced
           (and back-filled on the Invoices page) — no manual step needed. */}

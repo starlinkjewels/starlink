@@ -43,6 +43,11 @@ function stampFor(day: string): string {
 type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
+/** Fallback only — the real list is managed in Settings → Categories. */
+const DEFAULT_LOCKER_CATEGORIES = [
+  "Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
+  "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other",
+];
 
 /** Warn before a payment takes a locker's balance negative (money it doesn't hold).
  *  Returns true to proceed, false to cancel. `amt` is in the locker's own currency. */
@@ -683,6 +688,9 @@ function LockerActions() {
   const [lockerId, setLockerId] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
+  const lockerCats = db.settings.lockerCategories?.length
+    ? db.settings.lockerCategories
+    : DEFAULT_LOCKER_CATEGORIES;
   const [note, setNote] = useState("");
   const [targetLocker, setTargetLocker] = useState("");
   const [exchangeRate, setExchangeRate] = useState("");
@@ -701,6 +709,9 @@ function LockerActions() {
     if (!selected) { toast.error("Choose a locker"); return; }
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    // Every entry has to be filed under a category, so the account ledger can be
+    // grouped and totalled instead of holding free text nobody can report on.
+    if (action !== "transfer_out" && !category) { toast.error("Choose a category"); return; }
     if (action === "transfer_out" && !targetLocker) { toast.error("Choose a destination locker"); return; }
     if (action === "transfer_out" && targetLocker === lockerId) { toast.error("Choose a different destination locker"); return; }
     const rate = Number(exchangeRate);
@@ -745,7 +756,7 @@ function LockerActions() {
         } else {
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: action, amountInr: amt, currency: cur,
-            category: category.trim() || undefined, refType: "manual",
+            category: category || undefined, refType: "manual",
             note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
           });
         }
@@ -822,8 +833,11 @@ function LockerActions() {
           </div>
         ) : action !== "transfer_out" ? (
           <div>
-            <Label className="text-xs">Category (optional)</Label>
-            <Input value={category} onChange={e => setCategory(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. Owner deposit" />
+            <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
+            <Select value={category} onValueChange={setCategory}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose a category" /></SelectTrigger>
+              <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
           </div>
         ) : <div />}
       </div>

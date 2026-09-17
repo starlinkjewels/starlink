@@ -487,6 +487,13 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
 // Categories are user-managed from Settings (Settings.expenseCategories) —
 // this is just the fallback list for a settings doc that predates that field.
 export const DEFAULT_EXPENSE_CATEGORIES = ["Salary", "Travel", "Food", "Tools", "Office", "Communication", "Other"];
+
+/** Fallback account categories for a settings doc written before the field
+ *  existed — Settings is where they are actually managed. */
+export const DEFAULT_LOCKER_CATEGORIES = [
+  "Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
+  "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other",
+];
 export type ExpenseCategory = string;
 
 export interface Expense {
@@ -622,6 +629,10 @@ export interface Settings {
   // User-managed expense categories (Settings page) — falls back to
   // DEFAULT_EXPENSE_CATEGORIES when unset (a settings doc from before this existed).
   expenseCategories?: string[];
+  /** Categories for money in and out of an account (Locker / Payments). Managed
+   *  from Settings so every entry is filed under a name the books recognise,
+   *  instead of free text that never groups or totals. */
+  lockerCategories?: string[];
   // Monotonic counter behind nextDiamondStockNumber() — never reused even if
   // a packet is later deleted, unset = no certified packet has been numbered yet.
   nextDiamondStockNo?: number;

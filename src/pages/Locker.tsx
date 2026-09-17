@@ -46,6 +46,12 @@ export function LockerPage() {
   const [txnType, setTxnType] = useState<"income" | "expense" | "transfer_out">("expense");
   const [txnAmount, setTxnAmount] = useState("");
   const [txnCategory, setTxnCategory] = useState("");
+  // Managed in Settings → Categories, and required on every entry so the ledger
+  // can be grouped and totalled rather than holding free text.
+  const lockerCats = db.settings.lockerCategories?.length
+    ? db.settings.lockerCategories
+    : ["Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
+       "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other"];
   const [txnNote, setTxnNote] = useState("");
   const [txnTargetLocker, setTxnTargetLocker] = useState("");
   const [txnExchangeRate, setTxnExchangeRate] = useState("");
@@ -142,6 +148,7 @@ export function LockerPage() {
     if (!selected) return;
     const amt = Number(txnAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
+    if (txnType !== "transfer_out" && !txnCategory) { toast.error("Choose a category"); return; }
     if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
     const target = txnType === "transfer_out" ? lockers.find(l => l.id === txnTargetLocker) : undefined;
     const crossCurrency = !!target && (target.currency || "INR") !== (selected.currency || "INR");
@@ -217,7 +224,7 @@ export function LockerPage() {
         } else {
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
-            category: txnCategory.trim() || undefined, refType: "manual",
+            category: txnCategory || undefined, refType: "manual",
             note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
           });
         }
@@ -507,7 +514,10 @@ export function LockerPage() {
                     </SelectContent>
                   </Select>
                 ) : (
-                  <Input value={txnCategory} onChange={e => setTxnCategory(e.target.value)} className="rounded-xl h-10" placeholder="Category (optional)" />
+                  <Select value={txnCategory} onValueChange={setTxnCategory}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Category *" /></SelectTrigger>
+                    <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                  </Select>
                 )}
                 <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
               </div>
