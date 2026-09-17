@@ -21,6 +21,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark } from "lucide-react";
 import { toast } from "sonner";
 
+/** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
+ *  roll back a day for anyone east of UTC after midday. */
+function todayLocal(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The chosen day, carrying the current time of day so entries made on the same
+ *  date still sort in the order they were recorded. */
+function stampFor(day: string): string {
+  const now = new Date();
+  if (!day) return now.toISOString();
+  const [y, m, d] = day.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds());
+  return dt.toISOString();
+}
+
+
 type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
@@ -117,6 +136,9 @@ function ReceiveFromClient() {
   // still read as pending.
   const [invoiceId, setInvoiceId] = useState("");
   const [saving, setSaving] = useState(false);
+  // Entries are often written up a day or two later, so the date is chosen
+  // rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
 
   const clients = db.clients.filter(c => c.status === "active").sort((a, b) => a.companyName.localeCompare(b.companyName));
   const openInvoices = clientId
@@ -160,7 +182,7 @@ function ReceiveFromClient() {
     setSaving(true);
     try {
       const noteText = note.trim() ? `${method} · ${note.trim()}` : method;
-      const now = new Date().toISOString();
+      const now = stampFor(date);
       // Recorded as a numbered receipt, so this payment can be looked up,
       // corrected or cancelled later as one entry.
       const receipt = await createReceipt({
@@ -181,7 +203,7 @@ function ReceiveFromClient() {
         });
       });
       toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
-      setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId("");
+      setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId(""); setDate(todayLocal());
     } finally { setSaving(false); }
   };
 
@@ -217,6 +239,10 @@ function ReceiveFromClient() {
           </div>
         )}
 
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
         <div>
           <Label className="text-xs">Amount Received ($)</Label>
           <div className="relative mt-1">
@@ -298,6 +324,9 @@ function PaySupplier() {
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
   const [saving, setSaving] = useState(false);
+  // Entries are often written up a day or two later, so the date is chosen
+  // rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const purchases = db.purchases.filter(p => p.supplierId === supplierId);
@@ -314,7 +343,7 @@ function PaySupplier() {
     if (dir === "receive") {
       setSaving(true);
       try {
-        const now = new Date().toISOString();
+        const now = stampFor(date);
         updateDb(d => {
           if (!d.supplierReceipts) d.supplierReceipts = [];
           d.supplierReceipts.push({ id: uid("srcpt_"), supplierId, amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
@@ -322,7 +351,7 @@ function PaySupplier() {
           d.lockerTransactions.push({ id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${s.name}`, refType: "manual", note: note.trim() || undefined, recordedBy: user!.id, createdAt: now });
         });
         toast.success(`${fmtMoneyInr(amt)} received from ${s.name}`);
-        setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId("");
+        setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
       } finally { setSaving(false); }
       return;
     }
@@ -332,7 +361,7 @@ function PaySupplier() {
     if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      const now = stampFor(date);
       updateDb(d => {
         const supplierPurchases = d.purchases.filter(p => p.supplierId === supplierId);
         if (target === "__fifo") {
@@ -360,7 +389,7 @@ function PaySupplier() {
         });
       });
       toast.success(`${fmtMoneyInr(amt)} paid to ${s.name}`);
-      setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId("");
+      setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
     } finally { setSaving(false); }
   };
 
@@ -390,7 +419,11 @@ function PaySupplier() {
             : <>Balance owed: <span className="font-semibold text-foreground">{fmtMoneyInr(account.net)}</span></>}
         </p>
       )}
-      <div className={`grid gap-3 ${dir === "pay" ? "grid-cols-2" : "grid-cols-1"}`}>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
         <div>
           <Label className="text-xs">Amount (₹)</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
@@ -431,6 +464,9 @@ function PayFactory() {
   const [note, setNote] = useState("");
   const [lockerId, setLockerId] = useState("");
   const [saving, setSaving] = useState(false);
+  // Entries are often written up a day or two later, so the date is chosen
+  // rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
 
   const factories = db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const issuances = db.materialIssuances.filter(i => i.factoryId === factoryId);
@@ -448,7 +484,7 @@ function PayFactory() {
     if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      const now = stampFor(date);
       updateDb(d => {
         const factoryIssuances = d.materialIssuances.filter(i => i.factoryId === factoryId);
         if (target === "__fifo") {
@@ -477,7 +513,7 @@ function PayFactory() {
         });
       });
       toast.success(`${fmtMoneyInr(amt)} paid to ${f.name}`);
-      setFactoryId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId("");
+      setFactoryId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
     } finally { setSaving(false); }
   };
 
@@ -494,6 +530,10 @@ function PayFactory() {
         <p className="text-xs text-muted-foreground">Charges pending: <span className="font-semibold text-foreground">{fmtMoneyInr(account.chargesPending)}</span></p>
       )}
       <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
         <div>
           <Label className="text-xs">Amount (₹)</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
@@ -533,6 +573,9 @@ function PayExpense() {
   const [lockerId, setLockerId] = useState("");
   const [paidToEmployeeId, setPaidToEmployeeId] = useState("");
   const [saving, setSaving] = useState(false);
+  // Entries are often written up a day or two later, so the date is chosen
+  // rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
 
   const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
   const categories = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
@@ -550,7 +593,7 @@ function PayExpense() {
     if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      const now = stampFor(date);
       const expense: Expense = {
         id: uid("exp_"), title: title.trim(), amount: amt, category,
         note: note.trim() || undefined, employeeId: user!.id,
@@ -570,7 +613,7 @@ function PayExpense() {
         }
       });
       toast.success("Expense recorded");
-      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId("");
+      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(""); setDate(todayLocal());
     } finally { setSaving(false); }
   };
 
@@ -585,6 +628,11 @@ function PayExpense() {
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
           <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
         </Select>
+      </div>
+      {/* Date first: an expense is often written up after the fact. */}
+      <div>
+        <Label className="text-xs">Date</Label>
+        <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
       </div>
       {/* 2. Amount — in the selected account's currency */}
       <div>
@@ -639,6 +687,9 @@ function LockerActions() {
   const [targetLocker, setTargetLocker] = useState("");
   const [exchangeRate, setExchangeRate] = useState("");
   const [saving, setSaving] = useState(false);
+  // Entries are often written up a day or two later, so the date is chosen
+  // rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
 
   const lockers = db.lockers.filter(l => l.active !== false);
   const selected = lockers.find(l => l.id === lockerId) ?? null;
@@ -670,7 +721,7 @@ function LockerActions() {
     }
     setSaving(true);
     try {
-      const now = new Date().toISOString();
+      const now = stampFor(date);
       updateDb(d => {
         if (!d.lockerTransactions) d.lockerTransactions = [];
         if (action === "transfer_out") {
@@ -704,7 +755,7 @@ function LockerActions() {
           : action === "expense" ? `${fmtLockerAmount(amt, selected.currency)} withdrawn from ${selected.name}`
           : `${fmtLockerAmount(amt, selected.currency)} transferred to ${target?.name}`,
       );
-      setAmount(""); setCategory(""); setNote(""); setTargetLocker(""); setExchangeRate("");
+      setAmount(""); setCategory(""); setNote(""); setTargetLocker(""); setExchangeRate(""); setDate(todayLocal());
     } finally { setSaving(false); }
   };
 
@@ -756,6 +807,10 @@ function LockerActions() {
       )}
 
       <div className="grid grid-cols-2 gap-3">
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
         <div>
           <Label className="text-xs">Amount ({cur === "USD" ? "$" : "₹"})</Label>
           <Input type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
