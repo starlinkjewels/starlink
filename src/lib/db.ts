@@ -735,7 +735,7 @@ export interface GoldPurchaseDetail {
 // Standard diamond shapes for the loose-stock "bag" and packet records.
 export const DIAMOND_SHAPES = [
   "Round", "Oval", "Pear", "Princess", "Emerald", "Marquise",
-  "Cushion", "Radiant", "Heart", "Asscher", "Baguette", "Other",
+  "Cushion", "Radiant", "Heart", "Asscher", "Baguette", "Mix", "Other",
 ] as const;
 
 export interface DiamondPurchaseDetail {
