@@ -882,6 +882,27 @@ export interface SupplierReceipt {
   note?: string;
 }
 
+/**
+ * Money paid to a supplier that is not settling any particular bill — an
+ * advance, or a loan between two businesses that trade with each other.
+ *
+ * A payment normally lives inside the Purchase it settles, which works right up
+ * until there is no purchase to put it in: a supplier you have only ever lent
+ * money to has no bills at all. Those payments used to be dropped on the floor,
+ * leaving the money gone from the account but absent from the supplier's books.
+ * This is the mirror of SupplierReceipt, which already records money coming the
+ * other way for the same reason.
+ */
+export interface SupplierPayment {
+  id: string;
+  supplierId: string;
+  amountInr: number;
+  lockerId: string; // which Locker the money came out of
+  recordedBy: string;
+  createdAt: string;
+  note?: string;
+}
+
 export interface Purchase {
   id: string;
   supplierId: string;
@@ -1064,6 +1085,7 @@ export interface DB {
   suppliers: Supplier[];
   purchases: Purchase[];
   supplierReceipts: SupplierReceipt[];
+  supplierPayments: SupplierPayment[];
   clientReceipts: ClientReceipt[];
   factories: Factory[];
   materialIssuances: MaterialIssuance[];
@@ -1117,6 +1139,7 @@ function emptyDb(): DB {
     suppliers: [],
     purchases: [],
     supplierReceipts: [],
+    supplierPayments: [],
     clientReceipts: [],
     factories: [],
     materialIssuances: [],
@@ -1627,6 +1650,7 @@ type ArrayCol =
   | "suppliers"
   | "purchases"
   | "supplierReceipts"
+  | "supplierPayments"
   | "clientReceipts"
   | "factories"
   | "materialIssuances"
@@ -1654,6 +1678,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "suppliers",
   "purchases",
   "supplierReceipts",
+  "supplierPayments",
   "clientReceipts",
   "factories",
   "materialIssuances",
@@ -2125,6 +2150,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "suppliers" ||
         col === "purchases" ||
         col === "supplierReceipts" ||
+        col === "supplierPayments" ||
         col === "clientReceipts" ||
         col === "factories" ||
         col === "materialIssuances" ||

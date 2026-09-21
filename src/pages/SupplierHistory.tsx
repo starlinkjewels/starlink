@@ -101,7 +101,9 @@ export function SupplierHistoryPage() {
     .filter(p => p.supplierId === id)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const receipts = (db.supplierReceipts ?? []).filter(r => r.supplierId === id);
-  const account = supplierAccount(purchases, receipts, supplier);
+  // Advances and loans — paid to this supplier but settling no particular bill.
+  const advances = (db.supplierPayments ?? []).filter(x => x.supplierId === id);
+  const account = supplierAccount(purchases, receipts, supplier, advances);
 
   // ── Opening balance (migration) ──
   const [obOpen, setObOpen] = useState(false);
@@ -295,13 +297,23 @@ export function SupplierHistoryPage() {
 
     updateDb(d => {
       const supplierPurchases = d.purchases.filter(p => p.supplierId === id);
-      if (payTargetPurchase === "__fifo") {
+      const asAdvance = (sum: number) => {
+        if (!d.supplierPayments) d.supplierPayments = [];
+        d.supplierPayments.push({ id: uid("spay_"), supplierId: id!, amountInr: sum, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
+      };
+      if (payTargetPurchase === "__advance") {
+        asAdvance(amt);
+      } else if (payTargetPurchase === "__fifo") {
         const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, payLockerId, user!.id, now, payNote.trim() || undefined);
         if (leftover > 0) {
           const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
           if (newest) {
             if (!newest.payments) newest.payments = [];
             newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
+          } else {
+            // Nothing to settle — a supplier with no bills at all. Standing on
+            // its own is the only place this money can go; it used to vanish.
+            asAdvance(leftover);
           }
         }
       } else {
@@ -315,7 +327,7 @@ export function SupplierHistoryPage() {
       d.lockerTransactions.push({
         id: uid("ltx_"), lockerId: payLockerId, type: "expense", amountInr: amt,
         category: `Supplier Payment — ${supplier.name}`, refType: "purchase",
-        refId: payTargetPurchase === "__fifo" ? undefined : payTargetPurchase,
+        refId: payTargetPurchase === "__fifo" || payTargetPurchase === "__advance" ? undefined : payTargetPurchase,
         note: payNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
       });
     });
@@ -447,6 +459,12 @@ export function SupplierHistoryPage() {
     // Money received back from the supplier — a credit, like a payment.
     for (const r of receipts) {
       rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: 0, credit: r.amountInr, balance: 0, kind: "Received" });
+    }
+    // Advances and loans — money out against no bill, so a credit like any
+    // other payment. Without these the statement would not add up to the
+    // balance shown above it.
+    for (const a of advances) {
+      rows.push({ id: a.id, date: a.createdAt, particulars: `Advance / loan paid${a.note ? ` — ${a.note}` : ""}`, debit: 0, credit: a.amountInr, balance: 0, kind: "Advance" });
     }
     let running = 0;
     const withBalance = [...rows]
@@ -737,6 +755,7 @@ export function SupplierHistoryPage() {
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__fifo">Oldest pending first (unspecified)</SelectItem>
+                  <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
                   {pendingPurchases.map(p => (
                     <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>
                   ))}

@@ -17,6 +17,7 @@ import {
   type OpeningBalanceInfo,
   type Purchase,
   type SupplierReceipt,
+  type SupplierPayment,
   type MaterialIssuance,
   type Locker,
   type LockerTransaction,
@@ -94,7 +95,13 @@ export function purchasePending(p: Purchase): number {
 }
 
 /** Supplier account summary across all their purchases. */
-export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt[] = [], opening?: OpeningBalanceInfo) {
+export function supplierAccount(
+  purchases: Purchase[],
+  receipts: SupplierReceipt[] = [],
+  opening?: OpeningBalanceInfo,
+  /** Payments that settle no particular bill — advances and loans. */
+  standalonePayments: SupplierPayment[] = [],
+) {
   let totalPurchased = 0,
     totalPaid = 0,
     balanceOwed = 0,
@@ -113,11 +120,16 @@ export function supplierAccount(purchases: Purchase[], receipts: SupplierReceipt
   balanceOwed += oCredit;
   // Money received back from the supplier (refunds/returns) offsets what we owe.
   const received = receipts.reduce((s, r) => s + r.amountInr, 0) + oDebit;
+  // An advance or loan settles no bill, so it cannot reduce any one purchase's
+  // balance — it reduces the net position. Pay a supplier you owe nothing and
+  // the net goes negative: they are now holding your money.
+  const advanced = standalonePayments.reduce((s, p) => s + p.amountInr, 0);
+  totalPaid += advanced;
   // Net position: > 0 we still owe them; < 0 they owe us (or we hold their credit).
-  const net = Math.round((balanceOwed - received) * 100) / 100;
+  const net = Math.round((balanceOwed - received - advanced) * 100) / 100;
   return {
     totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed),
-    overpaid: r0(overpaid), received: r0(received), net: r0(net),
+    overpaid: r0(overpaid), received: r0(received), advanced: r0(advanced), net: r0(net),
   };
 }
 

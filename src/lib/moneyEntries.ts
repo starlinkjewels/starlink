@@ -69,6 +69,16 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         lockerId: r.lockerId, note: r.note, direction: "in",
       });
     }
+    // Advances and loans — paid to the supplier against no particular bill.
+    for (const a of db.supplierPayments ?? []) {
+      const supplier = db.suppliers.find(s => s.id === a.supplierId);
+      out.push({
+        id: a.id, kind, date: a.createdAt,
+        party: supplier?.name ?? "Supplier", against: "Advance / loan",
+        amount: a.amountInr, currency: "INR",
+        lockerId: a.lockerId, note: a.note, direction: "out",
+      });
+    }
   }
 
   if (kind === "factory") {
@@ -218,7 +228,8 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
           return;
         }
       }
-      const rec = (d.supplierReceipts ?? []).find(x => x.id === entry.id);
+      const rec = (d.supplierReceipts ?? []).find(x => x.id === entry.id)
+        ?? (d.supplierPayments ?? []).find(x => x.id === entry.id);
       if (rec) {
         if (patch.amount !== undefined) rec.amountInr = r2(patch.amount);
         if (patch.date !== undefined) rec.createdAt = patch.date;
@@ -348,6 +359,11 @@ export function deleteEntry(entry: MoneyEntry): void {
       }
       if ((d.supplierReceipts ?? []).some(x => x.id === entry.id)) {
         d.supplierReceipts = d.supplierReceipts.filter(x => x.id !== entry.id);
+        dropTxn(d, entry);
+        return;
+      }
+      if ((d.supplierPayments ?? []).some(x => x.id === entry.id)) {
+        d.supplierPayments = d.supplierPayments.filter(x => x.id !== entry.id);
         dropTxn(d, entry);
       }
       return;

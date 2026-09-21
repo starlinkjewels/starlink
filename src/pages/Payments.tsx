@@ -336,7 +336,12 @@ function PaySupplier() {
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const purchases = db.purchases.filter(p => p.supplierId === supplierId);
-  const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId), db.suppliers.find(s => s.id === supplierId));
+  const account = supplierAccount(
+    purchases,
+    (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId),
+    db.suppliers.find(s => s.id === supplierId),
+    (db.supplierPayments ?? []).filter(x => x.supplierId === supplierId),
+  );
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
   const submit = () => {
@@ -370,13 +375,23 @@ function PaySupplier() {
       const now = stampFor(date);
       updateDb(d => {
         const supplierPurchases = d.purchases.filter(p => p.supplierId === supplierId);
-        if (target === "__fifo") {
+        const asAdvance = (sum: number) => {
+          if (!d.supplierPayments) d.supplierPayments = [];
+          d.supplierPayments.push({ id: uid("spay_"), supplierId, amountInr: sum, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+        };
+        if (target === "__advance") {
+          asAdvance(amt);
+        } else if (target === "__fifo") {
           const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, lockerId, user!.id, now, note.trim() || undefined);
           if (leftover > 0) {
             const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
             if (newest) {
               if (!newest.payments) newest.payments = [];
               newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+            } else {
+              // Nothing to settle — a supplier with no bills at all. Standing on
+              // its own is the only place this money can go; it used to vanish.
+              asAdvance(leftover);
             }
           }
         } else {
@@ -390,7 +405,7 @@ function PaySupplier() {
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId, type: "expense", amountInr: amt,
           category: `Supplier Payment — ${s.name}`, refType: "purchase",
-          refId: target === "__fifo" ? undefined : target,
+          refId: target === "__fifo" || target === "__advance" ? undefined : target,
           note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
         });
       });
@@ -441,6 +456,7 @@ function PaySupplier() {
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__fifo">Oldest pending first</SelectItem>
+                <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
                 {pendingPurchases.map(p => <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>)}
               </SelectContent>
             </Select>

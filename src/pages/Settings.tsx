@@ -5,6 +5,8 @@ import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
 import { unappliedIncome, invoiceBalance, applyIncomeToClient } from "@/lib/clientPayments";
 import { legacyPayments, backfillReceipts } from "@/lib/receipts";
+import { orphanSupplierPayments, repairSupplierPayments } from "@/lib/supplierRepair";
+import { fmtMoneyInr } from "@/lib/manufacturing";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -391,6 +393,31 @@ export function SettingsPage() {
     } finally { setNumbering(false); }
   }
 
+
+  // ── Supplier payments that never reached the supplier's books ───────────
+  const [fixingSupplier, setFixingSupplier] = useState(false);
+  const lostSupplierPayments = useMemo(() => orphanSupplierPayments(liveDb), [liveDb]);
+  const lostSupplierTotal = lostSupplierPayments.reduce((s, o) => s + o.amountInr, 0);
+
+  async function restoreSupplierPayments() {
+    const n = lostSupplierPayments.length;
+    if (!n) return;
+    if (!confirm(
+      `Put ${n} payment${n !== 1 ? "s" : ""} back on the supplier books?
+
+`
+      + "These left an account but were never recorded against the supplier, so the supplier reads ₹0 and "
+      + "\"Settled\". Each one is added back as an advance on its original date, from the same account, for the "
+      + "same amount. No money moves — it already left; this only records where it went."
+    )) return;
+    setFixingSupplier(true);
+    try {
+      const done = repairSupplierPayments(user!.id);
+      toast.success(`${done} payment${done !== 1 ? "s" : ""} restored to the supplier books`);
+    } catch {
+      toast.error("Couldn't finish — nothing was lost, try again.");
+    } finally { setFixingSupplier(false); }
+  }
 
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
@@ -1304,6 +1331,54 @@ export function SettingsPage() {
                 </AsyncButton>
               </>
             )}
+          </div>
+        )}
+
+
+        {/* ── Supplier payments that never reached the supplier's books (admin only) ── */}
+        {isAdminUser && lostSupplierPayments.length > 0 && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-destructive/10 text-destructive">
+                <Truck className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Supplier Payments Missing From Their Books</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {lostSupplierPayments.length} payment{lostSupplierPayments.length !== 1 ? "s" : ""} totalling {fmtMoneyInr(lostSupplierTotal)} left an account but never reached the supplier.
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              A payment used to be written inside the bill it settled. When the supplier had no bills — a first
+              advance, or a supplier you only lend money to — there was nowhere to put it, so only the account
+              movement was written. The money shows as gone, while the supplier reads
+              <span className="font-medium text-foreground"> ₹0 and &ldquo;Settled&rdquo;</span>.
+              Restoring adds each one back as an advance on its own date, from its own account, for its own amount.
+              <span className="font-medium text-foreground"> No money moves</span> — it already left; this only
+              records where it went.
+            </p>
+
+            <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
+              {lostSupplierPayments.slice(0, 8).map(o => (
+                <p key={o.txnId} className="text-[11px] text-muted-foreground">
+                  {new Date(o.at).toLocaleDateString()} · {o.supplierName} · {fmtMoneyInr(o.amountInr)}
+                  {" · "}{liveDb.lockers.find(l => l.id === o.lockerId)?.name ?? "account"}
+                </p>
+              ))}
+              {lostSupplierPayments.length > 8 && (
+                <p className="text-[11px] text-muted-foreground">…and {lostSupplierPayments.length - 8} more.</p>
+              )}
+            </div>
+
+            <AsyncButton
+              size="sm" variant="outline" disabled={fixingSupplier}
+              onClick={restoreSupplierPayments}
+              className="rounded-xl h-9 mt-3"
+            >
+              {fixingSupplier ? "Restoring…" : `Restore ${lostSupplierPayments.length} payment${lostSupplierPayments.length !== 1 ? "s" : ""}`}
+            </AsyncButton>
           </div>
         )}
 

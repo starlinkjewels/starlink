@@ -36,7 +36,12 @@ export function Dashboard() {
   const makingChargesPending = db.factories.reduce(
     (s, f) => s + factoryAccount(db.materialIssuances.filter(i => i.factoryId === f.id), f).chargesPending, 0);
   const supplierPaymentsPending = db.suppliers.reduce(
-    (s, sup) => s + supplierAccount(db.purchases.filter(p => p.supplierId === sup.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id), sup).balanceOwed, 0);
+    (s, sup) => s + supplierAccount(
+      db.purchases.filter(p => p.supplierId === sup.id),
+      (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id),
+      sup,
+      (db.supplierPayments ?? []).filter(x => x.supplierId === sup.id),
+    ).balanceOwed, 0);
 
   // Cash Position & Profit — every payment in/out (client payments, supplier/
   // factory payments, expenses) that was tagged to a Locker rolls up here.

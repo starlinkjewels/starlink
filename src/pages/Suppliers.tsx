@@ -35,7 +35,12 @@ export function SuppliersPage() {
   // totals all read the same figures instead of each recomputing their own.
   const accounts = new Map(db.suppliers.map(s => [
     s.id,
-    supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s),
+    supplierAccount(
+      db.purchases.filter(p => p.supplierId === s.id),
+      (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id),
+      s,
+      (db.supplierPayments ?? []).filter(x => x.supplierId === s.id),
+    ),
   ]));
   const netOf = (s: Supplier) => accounts.get(s.id)?.net ?? 0;
 
