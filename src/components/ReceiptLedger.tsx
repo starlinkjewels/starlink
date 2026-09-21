@@ -11,8 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { FileText, FileSpreadsheet } from "lucide-react";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { toast } from "sonner";
 
 const PAGE = 12;
@@ -29,11 +29,21 @@ export function ReceiptLedger() {
   const { user } = useAuth();
   const db = useDb();
   const [q, setQ] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [clientId, setClientId] = useState("");
+  const [acct, setAcct] = useState("");
+  const [mode, setMode] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
   const [ef, setEf] = useState({ amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "" });
 
+  const allReceipts = listReceipts(db);
   const ql = q.trim().toLowerCase();
-  const rows = listReceipts(db).filter(r => {
+  const rows = allReceipts.filter(r => {
+    if (!inDateRange(r.date, from, to)) return false;
+    if (clientId && r.clientId !== clientId) return false;
+    if (acct && (r.lockerId ?? "") !== acct) return false;
+    if (mode && r.method !== mode) return false;
     if (!ql) return true;
     const client = db.clients.find(c => c.id === r.clientId)?.companyName ?? "";
     return r.receiptNo.includes(ql)
@@ -41,8 +51,15 @@ export function ReceiptLedger() {
       || (r.remarks ?? "").toLowerCase().includes(ql)
       || r.method.toLowerCase().includes(ql);
   });
+  const filtered = !!(ql || from || to || clientId || acct || mode);
   const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE);
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setClientId(""); setAcct(""); setMode(""); setPage(1); };
   const totalReceived = rows.reduce((s, r) => s + r.amountUsd, 0);
+  // Only clients who actually have a receipt — a list of every client would be
+  // mostly dead options.
+  const payers = [...new Set(allReceipts.map(r => r.clientId))]
+    .map(id => ({ value: id, label: db.clients.find(c => c.id === id)?.companyName ?? "Client" }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 
   const editing = editId ? db.clientReceipts?.find(x => x.id === editId) : undefined;
   const editLocker = db.lockers.find(l => l.id === ef.lockerId);
@@ -106,7 +123,11 @@ export function ReceiptLedger() {
   const exportPdf = () => downloadLedgerPdf({
     title: "Payments Received",
     subjectLines: [
-      `${rows.length} receipt${rows.length !== 1 ? "s" : ""}${ql ? " (filtered)" : ""}`,
+      `${rows.length} receipt${rows.length !== 1 ? "s" : ""} · ${rangeLabel(from, to)}`,
+      [clientId && `Client: ${db.clients.find(c => c.id === clientId)?.companyName ?? ""}`,
+        acct && `Account: ${db.lockers.find(l => l.id === acct)?.name ?? acct}`,
+        mode && `Mode: ${mode}`,
+        ql && `Search: "${q.trim()}"`].filter(Boolean).join(" · ") || "All receipts",
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [{ label: "Total received", value: fmtMoney(totalReceived) }],
@@ -142,30 +163,29 @@ export function ReceiptLedger() {
 
   return (
     <div className="card-luxe p-5">
-      <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
-        <div>
-          <p className="font-display text-lg text-brand-dark leading-tight">Payments Received</p>
-          <p className="text-xs text-muted-foreground">
-            {rows.length} receipt{rows.length !== 1 ? "s" : ""} · total {fmtMoney(totalReceived)}
-          </p>
-        </div>
-        <Input
-          value={q}
-          onChange={e => { setQ(e.target.value); setPage(1); }}
-          placeholder="Search receipt #, client, remark…"
-          className="rounded-xl h-9 w-full sm:w-64"
-        />
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={exportPdf}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-            <FileText className="h-4 w-4" /> PDF
-          </button>
-          <button onClick={exportCsv}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-            <FileSpreadsheet className="h-4 w-4" /> Excel
-          </button>
-        </div>
+      <div className="mb-3">
+        <p className="font-display text-lg text-brand-dark leading-tight">Payments Received</p>
+        <p className="text-xs text-muted-foreground">
+          {rows.length} receipt{rows.length !== 1 ? "s" : ""}{filtered ? ` of ${allReceipts.length}` : ""} · total {fmtMoney(totalReceived)}
+          {(from || to) && <> · {rangeLabel(from, to)}</>}
+        </p>
       </div>
+
+      <LedgerFilters
+        q={q} onQ={v => { setQ(v); setPage(1); }}
+        placeholder="Search receipt #, client, remark…"
+        from={from} to={to}
+        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        selects={[
+          { label: "Clients", value: clientId, onChange: v => { setClientId(v); setPage(1); }, options: payers },
+          { label: "Accounts", value: acct, onChange: v => { setAcct(v); setPage(1); },
+            options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
+          { label: "Modes", value: mode, onChange: v => { setMode(v); setPage(1); },
+            options: METHODS.map(m => ({ value: m, label: m })) },
+        ]}
+        active={filtered} onReset={reset}
+        onPdf={exportPdf} onCsv={exportCsv}
+      />
 
       <div className="overflow-x-auto -mx-5">
         <table className="w-full text-sm min-w-[860px]">
@@ -188,7 +208,7 @@ export function ReceiptLedger() {
             {paged.length === 0 ? (
               <tr>
                 <td colSpan={11} className="px-5 py-10 text-center text-muted-foreground">
-                  {ql ? "No receipt matches that search." : "No payments recorded yet."}
+                  {filtered ? "Nothing matches these filters." : "No payments recorded yet."}
                 </td>
               </tr>
             ) : paged.map((r, i) => {

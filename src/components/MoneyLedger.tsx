@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { FileText, FileSpreadsheet } from "lucide-react";
+import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { toast } from "sonner";
 
 const PAGE = 12;
@@ -22,6 +22,15 @@ const TITLES: Record<EntryKind, string> = {
   factory: "Factory Payments",
   expense: "Expenses",
   locker: "Account Entries",
+};
+
+/** What the party column holds, per tab — so its filter is named for what it
+ *  actually lists rather than a generic "Party". */
+const PARTY_LABEL: Record<EntryKind, string> = {
+  supplier: "Supplier",
+  factory: "Factory",
+  expense: "Expense",
+  locker: "Category",
 };
 
 /**
@@ -34,15 +43,33 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const { user } = useAuth();
   const db = useDb();
   const [q, setQ] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [party, setParty] = useState("");
+  const [acct, setAcct] = useState("");
+  const [dir, setDir] = useState("");
   const [editing, setEditing] = useState<MoneyEntry | null>(null);
   const [ef, setEf] = useState({ amount: "", date: "", note: "", lockerId: "", toLockerId: "", rate: "" });
 
+  const all = listEntries(db, kind);
+  // The party list is built from the entries themselves, so it only ever offers
+  // names that will actually match something.
+  const parties = [...new Set(all.map(e => e.party).filter(Boolean))].sort();
+
   const ql = q.trim().toLowerCase();
-  const rows = listEntries(db, kind).filter(e =>
-    !ql || e.party.toLowerCase().includes(ql)
-    || (e.against ?? "").toLowerCase().includes(ql)
-    || (e.note ?? "").toLowerCase().includes(ql));
+  const rows = all.filter(e => {
+    if (!inDateRange(e.date, from, to)) return false;
+    if (party && e.party !== party) return false;
+    if (acct && (e.lockerId ?? "") !== acct) return false;
+    if (dir && e.direction !== dir) return false;
+    return !ql || e.party.toLowerCase().includes(ql)
+      || (e.against ?? "").toLowerCase().includes(ql)
+      || (e.voucherNo ?? "").toLowerCase().includes(ql)
+      || (e.note ?? "").toLowerCase().includes(ql);
+  });
+  const filtered = !!(ql || from || to || party || acct || dir);
   const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE);
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); setPage(1); };
 
   const totalOut = rows.filter(r => r.direction === "out").reduce((s, r) => s + r.amount, 0);
   const totalIn = rows.filter(r => r.direction === "in").reduce((s, r) => s + r.amount, 0);
@@ -100,7 +127,11 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const exportPdf = () => downloadLedgerPdf({
     title: TITLES[kind],
     subjectLines: [
-      `${rows.length} entr${rows.length !== 1 ? "ies" : "y"}${ql ? " (filtered)" : ""}`,
+      `${rows.length} entr${rows.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)}`,
+      [party && `${PARTY_LABEL[kind]}: ${party}`,
+        acct && `Account: ${db.lockers.find(l => l.id === acct)?.name ?? acct}`,
+        dir && (dir === "out" ? "Money out only" : "Money in only"),
+        ql && `Search: "${q.trim()}"`].filter(Boolean).join(" · ") || "All entries",
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
@@ -138,28 +169,32 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
 
   return (
     <div className="card-luxe p-5">
-      <div className="flex items-end justify-between gap-3 flex-wrap mb-3">
-        <div>
-          <p className="font-display text-lg text-brand-dark leading-tight">{TITLES[kind]}</p>
-          <p className="text-xs text-muted-foreground">
-            {rows.length} entr{rows.length !== 1 ? "ies" : "y"}
-            {totalOut > 0 && <> · out {fmtLockerAmount(totalOut, anyUsd ? undefined : "INR")}</>}
-            {totalIn > 0 && <> · in {fmtLockerAmount(totalIn, anyUsd ? undefined : "INR")}</>}
-          </p>
-        </div>
-        <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }}
-          placeholder="Search party, bill, remark…" className="rounded-xl h-9 w-full sm:w-64" />
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={exportPdf}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-            <FileText className="h-4 w-4" /> PDF
-          </button>
-          <button onClick={exportCsv}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-            <FileSpreadsheet className="h-4 w-4" /> Excel
-          </button>
-        </div>
+      <div className="mb-3">
+        <p className="font-display text-lg text-brand-dark leading-tight">{TITLES[kind]}</p>
+        <p className="text-xs text-muted-foreground">
+          {rows.length} entr{rows.length !== 1 ? "ies" : "y"}{filtered ? ` of ${all.length}` : ""}
+          {totalOut > 0 && <> · out {fmtLockerAmount(totalOut, anyUsd ? undefined : "INR")}</>}
+          {totalIn > 0 && <> · in {fmtLockerAmount(totalIn, anyUsd ? undefined : "INR")}</>}
+          {(from || to) && <> · {rangeLabel(from, to)}</>}
+        </p>
       </div>
+
+      <LedgerFilters
+        q={q} onQ={v => { setQ(v); setPage(1); }}
+        placeholder="Search party, voucher, bill, remark…"
+        from={from} to={to}
+        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        selects={[
+          { label: PARTY_LABEL[kind], value: party, onChange: v => { setParty(v); setPage(1); },
+            options: parties.map(p => ({ value: p, label: p })) },
+          { label: "Accounts", value: acct, onChange: v => { setAcct(v); setPage(1); },
+            options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
+          { label: "Directions", value: dir, onChange: v => { setDir(v); setPage(1); },
+            options: [{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }] },
+        ]}
+        active={filtered} onReset={reset}
+        onPdf={exportPdf} onCsv={exportCsv}
+      />
 
       <div className="overflow-x-auto -mx-5">
         <table className="w-full text-sm min-w-[760px]">
@@ -180,7 +215,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           <tbody>
             {paged.length === 0 ? (
               <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
-                {ql ? "Nothing matches that search." : "No entries yet."}
+                {filtered ? "Nothing matches these filters." : "No entries yet."}
               </td></tr>
             ) : paged.map((e, i) => {
               const locker = db.lockers.find(l => l.id === e.lockerId);
