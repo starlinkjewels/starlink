@@ -225,7 +225,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
                   <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(e.date)}</td>
                   <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{e.voucherNo ?? "—"}</td>
                   <td className="px-3 py-2.5 font-medium max-w-[180px] truncate">{e.party}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[150px] truncate">{e.against ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[150px] truncate" title={e.against ?? ""}>{e.against ?? "—"}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-destructive">
                     {e.direction === "out" ? fmtLockerAmount(e.amount, e.currency) : ""}
                   </td>
@@ -233,7 +233,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
                     {e.direction === "in" ? fmtLockerAmount(e.amount, e.currency) : ""}
                   </td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{locker?.name ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate">{e.note ?? "—"}</td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={e.note ?? ""}>{e.note ?? "—"}</td>
                   <td className="px-5 py-2.5 text-right whitespace-nowrap">
                     {e.locked ? (
                       <span className="text-[11px] text-muted-foreground" title={e.locked}>locked</span>
@@ -260,11 +260,20 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
             {editing?.party}{editing?.against ? ` · ${editing.against}` : ""}. The account it came from moves with it,
             so the balance and what is owed stay in step.
           </p>
+          {editing?.legIds && (
+            <p className="text-[11px] text-muted-foreground rounded-xl bg-secondary/60 p-2.5">
+              This one payment settled {editing.legLabels?.length} bills — {editing.legLabels?.join(", ")}.
+              The date, account and remarks can be corrected and all of them move together.
+              <span className="font-medium text-foreground"> The total cannot be changed here</span>, because there
+              is no saying which bill should get more or less — cancel it and enter it again instead.
+            </p>
+          )}
           <div className="grid grid-cols-2 gap-3 mt-1">
             <div>
               <Label className="text-xs">Amount ({editing?.currency === "USD" ? "$" : "₹"})</Label>
-              <Input type="number" min={0} step="0.01" value={ef.amount}
-                onChange={e => setEf({ ...ef, amount: e.target.value })} className="rounded-xl h-10 mt-1" />
+              <Input type="number" min={0} step="0.01" value={ef.amount} disabled={!!editing?.legIds}
+                onChange={e => setEf({ ...ef, amount: e.target.value })}
+                className="rounded-xl h-10 mt-1 disabled:opacity-60" />
             </div>
             <div>
               <Label className="text-xs">Date</Label>

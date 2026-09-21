@@ -30,6 +30,43 @@ export interface MoneyEntry {
   voucherNo?: string;
   /** True for a locker-to-locker transfer: editing it moves both legs. */
   transfer?: boolean;
+  /** When one payment was split across several bills, the id of every part.
+   *  The row is the payment as it was made; these are where it landed. */
+  legIds?: string[];
+  /** The bills that payment covered, for the dialog to spell out. */
+  legLabels?: string[];
+}
+
+/**
+ * One payment, however many bills it settled.
+ *
+ * Paying ₹2,41,200 against six bills used to draw six rows, because the money
+ * was stored as six allocations. Nobody hands over six amounts — the day book
+ * has one line, and a ledger that cannot be laid beside the day book is no use
+ * for checking the day's cash. Parts written in the same save, to the same
+ * account, for the same party are that one payment; the split stays inside the
+ * bills, where the allocation belongs, and is named in Against.
+ */
+function groupLegs<T>(
+  legs: { key: string; at: string; lockerId?: string; note?: string; amount: number; id: string; label?: string; party: string }[],
+): { ids: string[]; labels: string[]; at: string; lockerId?: string; note?: string; amount: number; party: string }[] {
+  const byKey = new Map<string, { ids: string[]; labels: string[]; at: string; lockerId?: string; note?: string; amount: number; party: string }>();
+  for (const l of legs) {
+    const g = byKey.get(l.key);
+    if (!g) {
+      byKey.set(l.key, {
+        ids: [l.id], labels: l.label ? [l.label] : [], at: l.at,
+        lockerId: l.lockerId, note: l.note, amount: l.amount, party: l.party,
+      });
+    } else {
+      g.ids.push(l.id);
+      if (l.label && !g.labels.includes(l.label)) g.labels.push(l.label);
+      g.amount = Math.round((g.amount + l.amount) * 100) / 100;
+      // A note typed once is attached to every part; keep the first non-empty.
+      if (!g.note && l.note) g.note = l.note;
+    }
+  }
+  return [...byKey.values()];
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -48,17 +85,27 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
   const out: MoneyEntry[] = [];
 
   if (kind === "supplier") {
+    const legs = [];
     for (const p of db.purchases ?? []) {
       const supplier = db.suppliers.find(s => s.id === p.supplierId);
       for (const pay of p.payments ?? []) {
-        out.push({
-          id: pay.id, kind, date: pay.createdAt,
-          party: supplier?.name ?? "Supplier",
-          against: p.invoiceNumber ? `Invoice ${p.invoiceNumber}` : `Purchase ${p.id.slice(-6)}`,
-          amount: pay.amountInr, currency: "INR",
-          lockerId: pay.lockerId, note: pay.note, direction: "out",
+        legs.push({
+          key: `${p.supplierId}|${pay.lockerId ?? ""}|${pay.createdAt}`,
+          id: pay.id, at: pay.createdAt, lockerId: pay.lockerId, note: pay.note,
+          amount: pay.amountInr, party: supplier?.name ?? "Supplier",
+          label: p.invoiceNumber || `Purchase ${p.id.slice(-6)}`,
         });
       }
+    }
+    for (const g of groupLegs(legs)) {
+      out.push({
+        id: g.ids[0], kind, date: g.at, party: g.party,
+        against: g.labels.length > 1 ? `Invoices ${g.labels.join(", ")}` : `Invoice ${g.labels[0] ?? ""}`.trim(),
+        amount: g.amount, currency: "INR",
+        lockerId: g.lockerId, note: g.note, direction: "out",
+        legIds: g.ids.length > 1 ? g.ids : undefined,
+        legLabels: g.ids.length > 1 ? g.labels : undefined,
+      });
     }
     for (const r of db.supplierReceipts ?? []) {
       const supplier = db.suppliers.find(s => s.id === r.supplierId);
@@ -92,18 +139,28 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         lockerId: a.lockerId, note: a.note, direction: "out",
       });
     }
+    const legs = [];
     for (const mi of db.materialIssuances ?? []) {
       const factory = db.factories.find(f => f.id === mi.factoryId);
       const order = db.orders.find(o => o.id === mi.orderId);
       for (const pay of mi.makingCharges?.payments ?? []) {
-        out.push({
-          id: pay.id, kind, date: pay.createdAt,
-          party: factory?.name ?? "Factory",
-          against: order ? `Order ${order.orderNumber}` : "Making charges",
-          amount: pay.amountInr, currency: "INR",
-          lockerId: pay.lockerId, note: pay.note, direction: "out",
+        legs.push({
+          key: `${mi.factoryId}|${pay.lockerId ?? ""}|${pay.createdAt}`,
+          id: pay.id, at: pay.createdAt, lockerId: pay.lockerId, note: pay.note,
+          amount: pay.amountInr, party: factory?.name ?? "Factory",
+          label: order?.orderNumber,
         });
       }
+    }
+    for (const g of groupLegs(legs)) {
+      out.push({
+        id: g.ids[0], kind, date: g.at, party: g.party,
+        against: g.labels.length ? `Order${g.labels.length > 1 ? "s" : ""} ${g.labels.join(", ")}` : "Making charges",
+        amount: g.amount, currency: "INR",
+        lockerId: g.lockerId, note: g.note, direction: "out",
+        legIds: g.ids.length > 1 ? g.ids : undefined,
+        legLabels: g.ids.length > 1 ? g.labels : undefined,
+      });
     }
   }
 
@@ -227,16 +284,26 @@ function dropTxn(d: DB, entry: MoneyEntry) {
 export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
   updateDb(d => {
     if (entry.kind === "supplier") {
+      // One payment split across several bills moves as one: the date, the
+      // account and the remark belong to the payment, not to any one bill.
+      const ids = entry.legIds ?? [entry.id];
+      let touched = false;
       for (const p of d.purchases ?? []) {
-        const pay = (p.payments ?? []).find(x => x.id === entry.id);
-        if (pay) {
-          if (patch.amount !== undefined) pay.amountInr = r2(patch.amount);
+        for (const pay of p.payments ?? []) {
+          if (!ids.includes(pay.id)) continue;
+          touched = true;
+          // The total can only be changed on a payment that settled one bill —
+          // otherwise there is no saying which bill got more or less. The
+          // ledger disables the field and says to cancel and re-enter instead.
+          if (patch.amount !== undefined && ids.length === 1) pay.amountInr = r2(patch.amount);
           if (patch.date !== undefined) pay.createdAt = patch.date;
           if (patch.note !== undefined) pay.note = patch.note || undefined;
           if (patch.lockerId !== undefined) pay.lockerId = patch.lockerId;
-          syncTxn(d, entry, patch);
-          return;
         }
+      }
+      if (touched) {
+        syncTxn(d, entry, ids.length === 1 ? patch : { ...patch, amount: undefined });
+        return;
       }
       const rec = (d.supplierReceipts ?? []).find(x => x.id === entry.id)
         ?? (d.supplierPayments ?? []).find(x => x.id === entry.id);
@@ -251,6 +318,22 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
     }
 
     if (entry.kind === "factory") {
+      const ids = entry.legIds ?? [entry.id];
+      let touched = false;
+      for (const mi of d.materialIssuances ?? []) {
+        for (const pay of mi.makingCharges?.payments ?? []) {
+          if (!ids.includes(pay.id)) continue;
+          touched = true;
+          if (patch.amount !== undefined && ids.length === 1) pay.amountInr = r2(patch.amount);
+          if (patch.date !== undefined) pay.createdAt = patch.date;
+          if (patch.note !== undefined) pay.note = patch.note || undefined;
+          if (patch.lockerId !== undefined) pay.lockerId = patch.lockerId;
+        }
+      }
+      if (touched) {
+        syncTxn(d, entry, ids.length === 1 ? patch : { ...patch, amount: undefined });
+        return;
+      }
       const adv = (d.factoryPayments ?? []).find(x => x.id === entry.id);
       if (adv) {
         if (patch.amount !== undefined) adv.amountInr = r2(patch.amount);
@@ -350,6 +433,9 @@ export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
       : `• ${money} is removed from what ${entry.party} refunded`);
   }
   if (entry.kind === "factory") out.push(`• ${money} goes back onto ${entry.party}'s making charges`);
+  if (entry.legLabels?.length) {
+    out.push(`• all ${entry.legLabels.length} parts of this payment go — ${entry.legLabels.join(", ")}`);
+  }
   if (entry.kind === "expense") out.push(`• the expense is removed from the books and every expense report`);
   if (entry.kind === "locker") {
     out.push(entry.transfer
@@ -369,13 +455,15 @@ export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
 export function deleteEntry(entry: MoneyEntry): void {
   updateDb(d => {
     if (entry.kind === "supplier") {
+      const ids = new Set(entry.legIds ?? [entry.id]);
+      let touched = false;
       for (const p of d.purchases ?? []) {
-        if ((p.payments ?? []).some(x => x.id === entry.id)) {
-          p.payments = p.payments.filter(x => x.id !== entry.id);
-          dropTxn(d, entry);
-          return;
+        if ((p.payments ?? []).some(x => ids.has(x.id))) {
+          p.payments = p.payments.filter(x => !ids.has(x.id));
+          touched = true;
         }
       }
+      if (touched) { dropTxn(d, entry); return; }
       if ((d.supplierReceipts ?? []).some(x => x.id === entry.id)) {
         d.supplierReceipts = d.supplierReceipts.filter(x => x.id !== entry.id);
         dropTxn(d, entry);
@@ -393,13 +481,15 @@ export function deleteEntry(entry: MoneyEntry): void {
         dropTxn(d, entry);
         return;
       }
+      const ids = new Set(entry.legIds ?? [entry.id]);
+      let touched = false;
       for (const mi of d.materialIssuances ?? []) {
-        if ((mi.makingCharges?.payments ?? []).some(x => x.id === entry.id)) {
-          mi.makingCharges.payments = mi.makingCharges.payments.filter(x => x.id !== entry.id);
-          dropTxn(d, entry);
-          return;
+        if ((mi.makingCharges?.payments ?? []).some(x => ids.has(x.id))) {
+          mi.makingCharges.payments = mi.makingCharges.payments.filter(x => !ids.has(x.id));
+          touched = true;
         }
       }
+      if (touched) dropTxn(d, entry);
       return;
     }
     if (entry.kind === "expense") {
