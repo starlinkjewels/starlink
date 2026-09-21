@@ -14,13 +14,32 @@ import {
   settleClientAccount,
   type DB, type LockerTransaction, type Order,
 } from "./db";
+import { receiptForAdvance } from "./receipts";
 
 /** Income rows that are not tagged as a client payment — the ones that may be
  *  sitting in a locker without ever having settled anybody's bill. */
 export function unappliedIncome(db: DB): LockerTransaction[] {
   return (db.lockerTransactions ?? [])
-    .filter(t => t.type === "income" && t.refType !== "clientPayment")
+    // Not every rupee coming in is a client paying a bill — capital, interest
+    // and profit from elsewhere are income too, and always will be. Marking one
+    // settles the question for good instead of asking again every time.
+    .filter(t => t.type === "income" && t.refType !== "clientPayment" && !t.notClientPayment)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+}
+
+/** Money in that staff have said is not a client payment — so it can be undone. */
+export function markedNotClientPayment(db: DB): LockerTransaction[] {
+  return (db.lockerTransactions ?? [])
+    .filter(t => t.notClientPayment)
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+}
+
+/** Mark (or unmark) an income row as not a client payment. Moves no money. */
+export function setNotClientPayment(txnId: string, value: boolean): void {
+  updateDb(d => {
+    const t = (d.lockerTransactions ?? []).find(x => x.id === txnId);
+    if (t) t.notClientPayment = value || undefined;
+  });
 }
 
 /** What an invoice still has outstanding, read live from its orders. */
@@ -44,13 +63,13 @@ export function invoiceBalance(db: DB, invoiceId: string): number {
  * billed in USD and we need to know how much of the bill this actually settles.
  * Returns how much of the client's billing it cleared.
  */
-export function applyIncomeToClient(args: {
+export async function applyIncomeToClient(args: {
   txnId: string;
   clientId: string;
   invoiceId?: string;
   exchangeRate?: number;
   userId: string;
-}): { ok: true; settled: number; billed: number } | { ok: false; error: string } {
+}): Promise<{ ok: true; settled: number; billed: number } | { ok: false; error: string }> {
   const db = loadDb();
   const txn = (db.lockerTransactions ?? []).find(t => t.id === args.txnId);
   if (!txn) return { ok: false, error: "That locker entry couldn't be found." };
@@ -70,20 +89,38 @@ export function applyIncomeToClient(args: {
 
   const advancesOf = (d: DB) =>
     d.orders.filter(o => o.clientId === client.id).reduce((s, o) => s + totalAdvance(o), 0);
+  const advanceIdsOf = (d: DB) => new Set(
+    d.orders.filter(o => o.clientId === client.id).flatMap(o => (o.advances ?? []).map(a => a.id)),
+  );
 
   const now = new Date().toISOString();
   let settled = 0;
+  let newAdvanceIds: string[] = [];
   updateDb(d => {
     const t = (d.lockerTransactions ?? []).find(x => x.id === args.txnId);
     const c = d.clients.find(x => x.id === args.clientId);
     if (!t || !c || t.refType === "clientPayment") return;
     const before = advancesOf(d);
+    const beforeIds = advanceIdsOf(d);
     settleClientAccount(d, c.id, billed, args.userId, now, t.note, args.invoiceId);
     settled = Math.round((advancesOf(d) - before) * 100) / 100;
+    newAdvanceIds = [...advanceIdsOf(d)].filter(id => !beforeIds.has(id));
     t.refType = "clientPayment";
     t.refId = c.id;
     t.category = `Client Payment — ${c.companyName}`;
     if (!isUsd) t.exchangeRate = rate;
   });
+  // This is a client payment now, so it gets a receipt number like every other
+  // one — otherwise applying money here would put it straight back on the list
+  // of payments waiting to be numbered.
+  if (newAdvanceIds.length) {
+    try {
+      await receiptForAdvance({
+        clientId: client.id, advanceIds: newAdvanceIds, amountUsd: billed,
+        date: now, method: txn.note || txn.category || "Payment received",
+        lockerTxnId: args.txnId, userId: args.userId,
+      });
+    } catch { /* the money is applied either way; Settings can still number it */ }
+  }
   return { ok: true, settled, billed };
 }

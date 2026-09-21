@@ -96,6 +96,38 @@ export function purchasePending(p: Purchase): number {
 }
 
 /** Supplier account summary across all their purchases. */
+/**
+ * One payment, however many bills it settled.
+ *
+ * A payment entered once is stored as an allocation per bill, so a single
+ * ₹2,41,200 handed over against six bills reads as six rows. The day book has
+ * one line for it, and a statement that cannot be laid beside the day book is
+ * no use for checking the day's cash. Parts written in the same save, into the
+ * same account, are that one payment; the split stays inside the bills, where
+ * the allocation belongs, and the bills are named instead.
+ */
+export function groupPaymentsAsMade<T extends { id: string; lockerId?: string; createdAt: string; amountInr: number; note?: string }>(
+  legs: { pay: T; label?: string }[],
+): { ids: string[]; labels: string[]; at: string; amountInr: number; note?: string; lockerId?: string }[] {
+  const byKey = new Map<string, { ids: string[]; labels: string[]; at: string; amountInr: number; note?: string; lockerId?: string }>();
+  for (const { pay, label } of legs) {
+    const key = `${pay.lockerId ?? ""}|${pay.createdAt}`;
+    const g = byKey.get(key);
+    if (!g) {
+      byKey.set(key, {
+        ids: [pay.id], labels: label ? [label] : [], at: pay.createdAt,
+        amountInr: pay.amountInr, note: pay.note, lockerId: pay.lockerId,
+      });
+    } else {
+      g.ids.push(pay.id);
+      if (label && !g.labels.includes(label)) g.labels.push(label);
+      g.amountInr = Math.round((g.amountInr + pay.amountInr) * 100) / 100;
+      if (!g.note && pay.note) g.note = pay.note;
+    }
+  }
+  return [...byKey.values()];
+}
+
 export function supplierAccount(
   purchases: Purchase[],
   receipts: SupplierReceipt[] = [],

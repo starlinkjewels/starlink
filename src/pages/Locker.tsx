@@ -240,11 +240,11 @@ export function LockerPage() {
   };
 
   // Shared with Settings' sweep of old entries — see src/lib/clientPayments.ts.
-  const applyIncome = () => {
+  const applyIncome = async () => {
     const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
     const client = db.clients.find(c => c.id === fixClientId);
     if (!txn || !client) { toast.error("Choose the client this money came from"); return; }
-    const res = applyIncomeToClient({
+    const res = await applyIncomeToClient({
       txnId: txn.id, clientId: client.id,
       invoiceId: fixInvoiceId || undefined,
       exchangeRate: Number(fixRate) || undefined,

@@ -242,6 +242,10 @@ export interface AdvancePayment {
   /** The receipt this money came in on. One receipt can land on several orders,
    *  so this is what lets a receipt be edited or deleted as a single event. */
   receiptId?: string;
+  /** Credit the client already had, moved onto a bill. It is not a fresh
+   *  payment, so it has no receipt of its own and never needs one — the
+   *  receipt that brought the money in still carries it. */
+  fromCredit?: boolean;
 }
 
 // Manufacturing events shown alongside (but never mixed into) the fixed,
@@ -721,6 +725,10 @@ export interface LockerTransaction {
   /** The payment entry (supplier/factory payment, expense) this movement was
    *  created by, so correcting that entry can find and move this row with it. */
   paymentId?: string;
+  /** Marked by staff as money that is not a client payment at all — capital
+   *  put in, interest, profit from elsewhere. It stops being offered for
+   *  matching to a client, which is why it can be turned back off. */
+  notClientPayment?: boolean;
   /** Sequential voucher number ("V-0042") — what a person quotes when they refer
    *  to a cash entry. Reserved atomically, so two people banking at once cannot
    *  be handed the same one. */
@@ -1317,9 +1325,10 @@ export function allocatePaymentFIFO(
   recordedBy: string,
   at: string,
   note = "Payment received",
+  fromCredit = false,
 ): number {
   const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  return allocateInOrder(oldestFirst, amount, recordedBy, at, note);
+  return allocateInOrder(oldestFirst, amount, recordedBy, at, note, fromCredit);
 }
 
 /**
@@ -1334,6 +1343,7 @@ export function allocateInOrder(
   recordedBy: string,
   at: string,
   note = "Payment received",
+  fromCredit = false,
 ): number {
   let remaining = amount;
   for (const o of orders) {
@@ -1342,7 +1352,7 @@ export function allocateInOrder(
     if (bal <= 0) continue;
     const pay = Math.min(remaining, bal);
     if (!o.advances) o.advances = [];
-    o.advances.push({ id: uid("adv_"), amount: pay, note, recordedBy, createdAt: at });
+    o.advances.push({ id: uid("adv_"), amount: pay, note, recordedBy, createdAt: at, fromCredit: fromCredit || undefined });
     remaining -= pay;
   }
   return Math.round(remaining * 100) / 100; // leftover → credit
@@ -1464,7 +1474,7 @@ export function reallocateClientPayments(
   if (client?.creditBalance && client.creditBalance > 0) {
     pool.push({
       id: uid("adv_"), amount: client.creditBalance, note: "Credit carried forward",
-      recordedBy: "system", createdAt: new Date().toISOString(),
+      recordedBy: "system", createdAt: new Date().toISOString(), fromCredit: true,
     });
   }
 

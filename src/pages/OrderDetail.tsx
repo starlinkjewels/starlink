@@ -34,6 +34,7 @@ import {
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
+import { receiptForAdvance } from "@/lib/receipts";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -1329,7 +1330,7 @@ export function OrderDetailPage() {
     } finally { setCancelling(false); }
   };
 
-  const addAdvance = () => {
+  const addAdvance = async () => {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!advLockerId) { toast.error("Choose which locker this was deposited into"); return; }
@@ -1337,13 +1338,20 @@ export function OrderDetailPage() {
     let paidInFull = false;
     let isFirst = false;
     let toCredit = 0;
+    // Ids are minted up front so the payment can be given its receipt number
+    // straight after. Every payment is a numbered receipt from the moment it is
+    // taken — nothing is left for a repair tool to pick up later.
+    const advanceId = uid("adv_");
+    const txnId = uid("ltx_");
+    let applied = 0;
+    const at = new Date().toISOString();
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (!o.advances) o.advances = [];
       // Never let a single order be paid beyond its balance — cap at the balance
       // and send the excess to the client's credit so it can clear other bills.
       const bal = balanceDue(o);
-      const applied = Math.min(amt, bal);
+      applied = Math.min(amt, bal);
       toCredit = Math.round((amt - applied) * 100) / 100;
       isFirst = o.advances.length === 0;
       if (applied > 0) {
@@ -1352,7 +1360,7 @@ export function OrderDetailPage() {
         paidInFull = totalAdvance(o) + applied >= orderTotal(o);
         const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
         o.advances.push({
-          id: uid("adv_"), amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: new Date().toISOString(),
+          id: advanceId, amount: applied, note: advNote || defaultNote, recordedBy: user!.id, createdAt: at,
           lockerId: advLockerId || undefined, lockerAmount: advLockerId ? Number(advLockerAmount) : undefined,
         });
         if (advLockerId) {
@@ -1360,9 +1368,9 @@ export function OrderDetailPage() {
           if (locker) {
             if (!d.lockerTransactions) d.lockerTransactions = [];
             d.lockerTransactions.push({
-              id: uid("ltx_"), lockerId: advLockerId, type: "income", amountInr: Number(advLockerAmount),
+              id: txnId, lockerId: advLockerId, type: "income", amountInr: Number(advLockerAmount),
               currency: locker.currency || "INR", category: `Client Payment — ${o.orderNumber}`,
-              refType: "clientPayment", refId: o.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
+              refType: "clientPayment", refId: o.id, recordedBy: user!.id, createdAt: at,
             });
           }
         }
@@ -1383,11 +1391,26 @@ export function OrderDetailPage() {
         type: "info", read: false, createdAt: new Date().toISOString(),
       });
     });
+    let receiptNo = "";
+    if (applied > 0) {
+      try {
+        const r = await receiptForAdvance({
+          clientId: order.clientId, advanceIds: [advanceId], amountUsd: applied,
+          date: at, method: advNote || "Payment received",
+          lockerTxnId: advLockerId ? txnId : undefined, userId: user!.id,
+        });
+        receiptNo = ` · ${r.receiptNo}`;
+      } catch {
+        // The money is recorded either way; only the number is missing, and
+        // Settings can still hand it one.
+        toast.error("Payment saved, but its receipt number could not be reserved");
+      }
+    }
     toast.success(
       toCredit > 0
-        ? `Payment recorded — ${fmtMoney(toCredit)} added to client credit`
-        : paidInFull ? "Final payment recorded — order paid in full"
-        : isFirst ? "Advance payment recorded" : "Payment recorded"
+        ? `Payment recorded${receiptNo} — ${fmtMoney(toCredit)} added to client credit`
+        : paidInFull ? `Final payment recorded${receiptNo} — order paid in full`
+        : isFirst ? `Advance payment recorded${receiptNo}` : `Payment recorded${receiptNo}`
     );
     setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); setShowAdvForm(false);
   };

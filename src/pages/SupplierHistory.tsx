@@ -5,7 +5,7 @@ import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
-  supplierAccount, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
+  supplierAccount, groupPaymentsAsMade, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { increaseStock } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact } from "@/lib/purchaseVoid";
@@ -456,9 +456,18 @@ export function SupplierHistoryPage() {
         qty: qty || undefined, unit, rate: qty > 0 ? Math.round((p.totalInr / qty) * 100) / 100 : undefined,
         debit: p.totalInr, credit: 0, balance: 0, kind: "Purchase",
       });
-      for (const pay of p.payments || []) {
-        rows.push({ id: pay.id, date: pay.createdAt, particulars: `Payment${pay.note ? ` — ${pay.note}` : ""}`, ref: p.invoiceNumber || undefined, invoiceNo: p.invoiceNumber || undefined, debit: 0, credit: pay.amountInr, balance: 0, kind: "Payment" });
-      }
+    }
+    // Payments are shown as they were made, not as they were split across bills.
+    for (const g of groupPaymentsAsMade(
+      purchases.flatMap(p => (p.payments || []).map(pay => ({ pay, label: p.invoiceNumber || undefined }))),
+    )) {
+      const bills = g.labels.join(", ");
+      rows.push({
+        id: g.ids[0], date: g.at,
+        particulars: `Payment${bills ? ` — ${bills}` : ""}${g.note ? ` · ${g.note}` : ""}`,
+        ref: g.labels[0], invoiceNo: g.labels.length === 1 ? g.labels[0] : undefined,
+        debit: 0, credit: g.amountInr, balance: 0, kind: "Payment",
+      });
     }
     // Money received back from the supplier — a credit, like a payment.
     for (const r of receipts) {

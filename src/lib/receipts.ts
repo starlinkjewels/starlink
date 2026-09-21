@@ -145,6 +145,59 @@ export async function createReceipt(input: ReceiptInput): Promise<ClientReceipt>
 }
 
 /**
+ * Number a payment that was recorded straight onto one order — the advance
+ * taken while raising the order, or a payment entered on the order page.
+ *
+ * Those two screens write the advance themselves, so they cannot go through
+ * createReceipt() without re-running the allocation and moving money that is
+ * already where it belongs. This gives that payment its receipt number and
+ * tags the pieces it already created, so it reads like every other receipt and
+ * can be corrected or cancelled the same way. Not one figure moves.
+ */
+export async function receiptForAdvance(args: {
+  clientId: string;
+  /** The advance rows this payment created — usually one. */
+  advanceIds: string[];
+  amountUsd: number;
+  date: string;
+  method: string;
+  remarks?: string;
+  /** The locker deposit it landed in, when there was one. */
+  lockerTxnId?: string;
+  userId: string;
+}): Promise<ClientReceipt> {
+  const receiptNo = await reserveReceiptNumber(loadDb().clientReceipts ?? []);
+  const id = uid("rcpt_");
+  const ids = new Set(args.advanceIds);
+  let receipt!: ClientReceipt;
+  updateDb(d => {
+    const txn = args.lockerTxnId ? (d.lockerTransactions ?? []).find(t => t.id === args.lockerTxnId) : undefined;
+    receipt = {
+      id, receiptNo,
+      clientId: args.clientId,
+      date: args.date,
+      amountUsd: r2(args.amountUsd),
+      lockerId: txn?.lockerId,
+      lockerAmount: txn?.amountInr,
+      lockerCurrency: txn?.currency,
+      exchangeRate: txn?.exchangeRate,
+      method: args.method,
+      remarks: args.remarks?.trim() || undefined,
+      recordedBy: args.userId,
+      createdAt: new Date().toISOString(),
+    };
+    if (!d.clientReceipts) d.clientReceipts = [];
+    d.clientReceipts.push(receipt);
+    for (const o of d.orders) {
+      if (o.clientId !== args.clientId) continue;
+      for (const a of o.advances ?? []) if (ids.has(a.id)) a.receiptId = id;
+    }
+    if (txn) txn.receiptId = id;
+  });
+  return receipt;
+}
+
+/**
  * Correct a receipt. The old allocation and deposit are taken back out first,
  * then the corrected figures are settled exactly as a new receipt would be —
  * so a changed amount can never leave half of the old one behind. The receipt
@@ -251,7 +304,10 @@ export function legacyPayments(db: DB): LegacyGroup[] {
   const groups = new Map<string, LegacyGroup>();
   for (const o of db.orders) {
     for (const a of o.advances ?? []) {
-      if (a.receiptId) continue;
+      // Credit already receipted once and then moved onto a bill is not a
+      // payment waiting for a number — offering it again would number the same
+      // money twice.
+      if (a.receiptId || a.fromCredit) continue;
       const key = `${o.clientId}|${a.createdAt}|${a.note}|${a.recordedBy}`;
       const g = groups.get(key);
       if (g) { g.amount = r2(g.amount + a.amount); if (!g.orders.includes(o)) g.orders.push(o); }

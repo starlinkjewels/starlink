@@ -3,7 +3,7 @@ import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderI
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
-import { unappliedIncome, invoiceBalance, applyIncomeToClient } from "@/lib/clientPayments";
+import { unappliedIncome, invoiceBalance, applyIncomeToClient, markedNotClientPayment, setNotClientPayment } from "@/lib/clientPayments";
 import { legacyPayments, backfillReceipts } from "@/lib/receipts";
 import { orphanSupplierPayments, repairSupplierPayments } from "@/lib/supplierRepair";
 import { fmtMoneyInr } from "@/lib/manufacturing";
@@ -343,6 +343,7 @@ export function SettingsPage() {
   const [fixInvoiceId, setFixInvoiceId] = useState("");
   const [fixRate, setFixRate] = useState("");
   const looseIncome = useMemo(() => unappliedIncome(liveDb), [liveDb]);
+  const notClientRows = useMemo(() => markedNotClientPayment(liveDb), [liveDb]);
   const fixTxn = looseIncome.find(t => t.id === fixTxnId) ?? null;
   const fixInvoices = useMemo(
     () => (fixClientId
@@ -354,11 +355,11 @@ export function SettingsPage() {
     [liveDb, fixClientId],
   );
 
-  function applyLooseIncome() {
+  async function applyLooseIncome() {
     if (!fixTxn) return;
     const client = liveDb.clients.find(c => c.id === fixClientId);
     if (!client) { toast.error("Choose the client this money came from"); return; }
-    const res = applyIncomeToClient({
+    const res = await applyIncomeToClient({
       txnId: fixTxn.id, clientId: client.id,
       invoiceId: fixInvoiceId || undefined,
       exchangeRate: Number(fixRate) || undefined,
@@ -1406,7 +1407,10 @@ export function SettingsPage() {
                   Money typed into a locker as a plain entry is counted as cash but never settles a bill,
                   so the client&rsquo;s invoice keeps reading as pending. Applying one runs only the missing
                   allocation — the locker amount and its balance do not change, and nothing is counted twice.
-                  Leave anything that genuinely is not a client payment (capital, interest, a refund) alone.
+                  Anything that is genuinely not a client payment — capital put in, interest, profit from
+                  elsewhere — belongs here forever, so mark it
+                  <span className="font-medium text-foreground"> Not a client payment</span> and it stops being
+                  asked about. That moves no money and can be undone below.
                 </p>
                 <div className="mt-3 space-y-1.5">
                   {looseIncome.slice(0, 30).map(t => {
@@ -1421,13 +1425,22 @@ export function SettingsPage() {
                             {locker?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
                           </p>
                         </div>
-                        <Button
-                          size="sm" variant="outline"
-                          onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
-                          className="rounded-lg h-8 shrink-0"
-                        >
-                          Apply to a client
-                        </Button>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <Button
+                            size="sm" variant="ghost"
+                            onClick={() => setNotClientPayment(t.id, true)}
+                            className="rounded-lg h-8 text-muted-foreground hover:text-foreground"
+                          >
+                            Not a client payment
+                          </Button>
+                          <Button
+                            size="sm" variant="outline"
+                            onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
+                            className="rounded-lg h-8"
+                          >
+                            Apply to a client
+                          </Button>
+                        </div>
                       </div>
                     );
                   })}
@@ -1436,6 +1449,32 @@ export function SettingsPage() {
                   )}
                 </div>
               </>
+            )}
+
+            {notClientRows.length > 0 && (
+              <details className="mt-3">
+                <summary className="text-[11px] text-muted-foreground cursor-pointer hover:text-foreground">
+                  {notClientRows.length} entr{notClientRows.length !== 1 ? "ies" : "y"} marked as not a client payment
+                </summary>
+                <div className="mt-2 space-y-1.5">
+                  {notClientRows.map(t => (
+                    <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-white px-3 py-2">
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium truncate">
+                          {(t.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(t.amountInr).toLocaleString("en-IN")} · {t.category || t.note || "Money in"}
+                        </p>
+                        <p className="text-[11px] text-muted-foreground truncate">
+                          {liveDb.lockers.find(l => l.id === t.lockerId)?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <Button size="sm" variant="ghost" onClick={() => setNotClientPayment(t.id, false)}
+                        className="rounded-lg h-8 shrink-0 text-muted-foreground hover:text-foreground">
+                        Undo
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </details>
             )}
 
             {fixTxn && (

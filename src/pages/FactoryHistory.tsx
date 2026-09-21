@@ -7,6 +7,7 @@ import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance, lockerBalance, fmtLockerAmount,
+  groupPaymentsAsMade,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -519,9 +520,19 @@ export function FactoryHistoryPage() {
         const unit = mi.material === "gold" ? "g" : "ct";
         rows.push({ ...zero(), id: mi.id + "-chg", date: mi.issuedAt, ref, particular: `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`, crAmount: mi.makingCharges.amountInr });
       }
-      for (const pay of mi.makingCharges.payments || []) {
-        rows.push({ ...zero(), id: pay.id, date: pay.createdAt, ref, particular: `Payment${pay.note ? ` — ${pay.note}` : ""}`, drAmount: pay.amountInr });
-      }
+    }
+    // Payments are shown as they were made, not as they were split across jobs.
+    for (const g of groupPaymentsAsMade(
+      iss.flatMap(mi => (mi.makingCharges.payments || []).map(pay => ({
+        pay, label: db.orders.find(o => o.id === mi.orderId)?.orderNumber,
+      }))),
+    )) {
+      const jobs = g.labels.join(", ");
+      rows.push({
+        ...zero(), id: g.ids[0], date: g.at, ref: g.labels.length === 1 ? g.labels[0] ?? "" : jobs,
+        particular: `Payment${jobs ? ` — ${jobs}` : ""}${g.note ? ` · ${g.note}` : ""}`,
+        drAmount: g.amountInr,
+      });
     }
     // Advances and loans — money out against no particular job. Without these
     // the statement would not add up to the balance shown above it.

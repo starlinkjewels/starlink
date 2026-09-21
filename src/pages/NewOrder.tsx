@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
+import { receiptForAdvance } from "@/lib/receipts";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -251,9 +252,14 @@ export function NewOrderPage() {
     // it from the in-memory list (max + 1) let two people creating an order at
     // the same moment mint the SAME number — a real duplicate in production.
     const reservedNumber = await reserveOrderNumber(loadDb().orders);
+    // Minted before the write so the advance, its deposit and its receipt can
+    // all be tied together afterwards.
+    const advanceId = uid("adv_");
+    const advTxnId = uid("ltx_");
+    const advAt = new Date().toISOString();
+    const advance = Number(f.advanceAmount) || 0;
     updateDb(d => {
       const num = reservedNumber;
-      const advance = Number(f.advanceAmount) || 0;
 
       // Assign the order to an employee so it shows in their views: the creating
       // employee, otherwise the client's account manager (if any).
@@ -297,7 +303,7 @@ export function NewOrderPage() {
         giftCardRedeemed: willRedeem ? giftMax : undefined,
         shippingCharge: Number(f.shippingCharge) || 0,
         advances: advance > 0 ? [{
-          id: uid("adv_"),
+          id: advanceId,
           amount: advance,
           note: f.advanceNote || "Initial advance",
           recordedBy: user!.id,
@@ -345,7 +351,7 @@ export function NewOrderPage() {
         if (locker) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: f.advanceLockerId, type: "income", amountInr: Number(f.advanceLockerAmount),
+            id: advTxnId, lockerId: f.advanceLockerId, type: "income", amountInr: Number(f.advanceLockerAmount),
             currency: locker.currency || "INR", category: `Client Payment — ${order.orderNumber}`,
             refType: "clientPayment", refId: order.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
           });
@@ -376,11 +382,25 @@ export function NewOrderPage() {
         const c = d.clients.find(cl => cl.id === clientId);
         if (c && (c.creditBalance || 0) > 0) {
           const clientOrders = d.orders.filter(o => o.clientId === clientId);
-          const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance || 0, user!.id, new Date().toISOString());
+          const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance || 0, user!.id, new Date().toISOString(), "Credit applied", true);
           c.creditBalance = leftover > 0 ? leftover : undefined;
         }
       }
     });
+
+    // Every payment is a numbered receipt from the moment it is taken, so
+    // nothing is left behind for a repair tool to find later.
+    if (advance > 0) {
+      try {
+        await receiptForAdvance({
+          clientId, advanceIds: [advanceId], amountUsd: advance,
+          date: advAt, method: f.advanceNote || "Initial advance",
+          lockerTxnId: f.advanceLockerId ? advTxnId : undefined, userId: user!.id,
+        });
+      } catch {
+        toast.error("Order saved, but the advance's receipt number could not be reserved");
+      }
+    }
 
     // Notify the marketing inbox that a new order came in (fire-and-forget).
     if (mailInfo) {
