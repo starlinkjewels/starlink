@@ -321,6 +321,10 @@ export function SupplierHistoryPage() {
         if (p) {
           if (!p.payments) p.payments = [];
           p.payments.push({ id: uid("ppay_"), amountInr: amt, lockerId: payLockerId, recordedBy: user!.id, createdAt: now, note: payNote.trim() || undefined });
+        } else {
+          // The bill went while the form was open. The money still left the
+          // account, so it is booked as an advance rather than discarded.
+          asAdvance(amt);
         }
       }
       if (!d.lockerTransactions) d.lockerTransactions = [];

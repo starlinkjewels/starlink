@@ -34,7 +34,11 @@ export function FactoriesPage() {
   // Every factory's account, worked out once — rows, sort and totals share it.
   const accounts = new Map(db.factories.map(fac => [
     fac.id,
-    factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id), fac),
+    factoryAccount(
+      db.materialIssuances.filter(i => i.factoryId === fac.id),
+      fac,
+      (db.factoryPayments ?? []).filter(x => x.factoryId === fac.id),
+    ),
   ]));
   // The largest labour bill outstanding comes first, whichever way it runs.
   const weight = (fac: Factory) => {

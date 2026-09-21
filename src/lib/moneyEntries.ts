@@ -82,6 +82,16 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
   }
 
   if (kind === "factory") {
+    // Advances and loans — paid to the factory against no particular job.
+    for (const a of db.factoryPayments ?? []) {
+      const factory = db.factories.find(f => f.id === a.factoryId);
+      out.push({
+        id: a.id, kind, date: a.createdAt,
+        party: factory?.name ?? "Factory", against: "Advance / loan",
+        amount: a.amountInr, currency: "INR",
+        lockerId: a.lockerId, note: a.note, direction: "out",
+      });
+    }
     for (const mi of db.materialIssuances ?? []) {
       const factory = db.factories.find(f => f.id === mi.factoryId);
       const order = db.orders.find(o => o.id === mi.orderId);
@@ -241,6 +251,15 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
     }
 
     if (entry.kind === "factory") {
+      const adv = (d.factoryPayments ?? []).find(x => x.id === entry.id);
+      if (adv) {
+        if (patch.amount !== undefined) adv.amountInr = r2(patch.amount);
+        if (patch.date !== undefined) adv.createdAt = patch.date;
+        if (patch.note !== undefined) adv.note = patch.note || undefined;
+        if (patch.lockerId !== undefined) adv.lockerId = patch.lockerId;
+        syncTxn(d, entry, patch);
+        return;
+      }
       for (const mi of d.materialIssuances ?? []) {
         const pay = (mi.makingCharges?.payments ?? []).find(x => x.id === entry.id);
         if (pay) {
@@ -369,6 +388,11 @@ export function deleteEntry(entry: MoneyEntry): void {
       return;
     }
     if (entry.kind === "factory") {
+      if ((d.factoryPayments ?? []).some(x => x.id === entry.id)) {
+        d.factoryPayments = d.factoryPayments.filter(x => x.id !== entry.id);
+        dropTxn(d, entry);
+        return;
+      }
       for (const mi of d.materialIssuances ?? []) {
         if ((mi.makingCharges?.payments ?? []).some(x => x.id === entry.id)) {
           mi.makingCharges.payments = mi.makingCharges.payments.filter(x => x.id !== entry.id);

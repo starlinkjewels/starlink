@@ -34,7 +34,11 @@ export function Dashboard() {
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
   // Summed per-entity so each one's migration opening balance is included.
   const makingChargesPending = db.factories.reduce(
-    (s, f) => s + factoryAccount(db.materialIssuances.filter(i => i.factoryId === f.id), f).chargesPending, 0);
+    (s, f) => s + factoryAccount(
+      db.materialIssuances.filter(i => i.factoryId === f.id),
+      f,
+      (db.factoryPayments ?? []).filter(x => x.factoryId === f.id),
+    ).chargesPending, 0);
   const supplierPaymentsPending = db.suppliers.reduce(
     (s, sup) => s + supplierAccount(
       db.purchases.filter(p => p.supplierId === sup.id),

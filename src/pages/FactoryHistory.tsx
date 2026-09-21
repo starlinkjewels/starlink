@@ -49,7 +49,9 @@ export function FactoryHistoryPage() {
   const issuances = db.materialIssuances
     .filter(i => i.factoryId === id)
     .sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
-  const account = factoryAccount(issuances, factory);
+  // Advances and loans — paid to this factory but settling no particular job.
+  const advances = (db.factoryPayments ?? []).filter(x => x.factoryId === id);
+  const account = factoryAccount(issuances, factory, advances);
 
   // ── Opening balance (migration) ──
   const [obOpen, setObOpen] = useState(false);
@@ -520,6 +522,11 @@ export function FactoryHistoryPage() {
       for (const pay of mi.makingCharges.payments || []) {
         rows.push({ ...zero(), id: pay.id, date: pay.createdAt, ref, particular: `Payment${pay.note ? ` — ${pay.note}` : ""}`, drAmount: pay.amountInr });
       }
+    }
+    // Advances and loans — money out against no particular job. Without these
+    // the statement would not add up to the balance shown above it.
+    for (const a of advances) {
+      rows.push({ ...zero(), id: a.id, date: a.createdAt, ref: "", particular: `Advance / loan paid${a.note ? ` — ${a.note}` : ""}`, drAmount: a.amountInr });
     }
     return rows.sort((a, b) => (a.id === "opening" ? -1 : b.id === "opening" ? 1 : +new Date(a.date) - +new Date(b.date))); // chronological (oldest first), opening pinned
   };

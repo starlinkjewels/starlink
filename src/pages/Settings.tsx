@@ -1343,9 +1343,9 @@ export function SettingsPage() {
                 <Truck className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-semibold text-brand-dark text-sm">Supplier Payments Missing From Their Books</h3>
+                <h3 className="font-semibold text-brand-dark text-sm">Payments Missing From The Party's Books</h3>
                 <p className="text-[11px] text-muted-foreground">
-                  {lostSupplierPayments.length} payment{lostSupplierPayments.length !== 1 ? "s" : ""} totalling {fmtMoneyInr(lostSupplierTotal)} left an account but never reached the supplier.
+                  {lostSupplierPayments.length} payment{lostSupplierPayments.length !== 1 ? "s" : ""} totalling {fmtMoneyInr(lostSupplierTotal)} left an account but never reached the supplier or factory.
                 </p>
               </div>
             </div>
@@ -1363,7 +1363,7 @@ export function SettingsPage() {
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
               {lostSupplierPayments.slice(0, 8).map(o => (
                 <p key={o.txnId} className="text-[11px] text-muted-foreground">
-                  {new Date(o.at).toLocaleDateString()} · {o.supplierName} · {fmtMoneyInr(o.amountInr)}
+                  {new Date(o.at).toLocaleDateString()} · {o.partyName} · {fmtMoneyInr(o.amountInr)}
                   {" · "}{liveDb.lockers.find(l => l.id === o.lockerId)?.name ?? "account"}
                 </p>
               ))}

@@ -18,6 +18,7 @@ import {
   type Purchase,
   type SupplierReceipt,
   type SupplierPayment,
+  type FactoryPayment,
   type MaterialIssuance,
   type Locker,
   type LockerTransaction,
@@ -300,7 +301,12 @@ export function estimatedPureGoldNeeded(
  *  already counted when it was bulk-delivered) — only its actual consumption
  *  (finishedPieces) counts toward goldUsed/diamondUsed, or goldOutstanding
  *  would double-count the moment any order draws from a factory's pool. */
-export function factoryAccount(issuances: MaterialIssuance[], opening?: OpeningBalanceInfo) {
+export function factoryAccount(
+  issuances: MaterialIssuance[],
+  opening?: OpeningBalanceInfo,
+  /** Payments that settle no particular job — advances and loans. */
+  standalonePayments: FactoryPayment[] = [],
+) {
   let goldIssued = 0,
     goldUsed = 0,
     diamondIssued = 0,
@@ -329,6 +335,15 @@ export function factoryAccount(issuances: MaterialIssuance[], opening?: OpeningB
     const applied = Math.min(oDebit, chargesPending);
     chargesPending -= applied;
     chargesOverpaid += oDebit - applied;
+  }
+  // An advance settles no one job, so it comes off what is still due; pay more
+  // than is due and the rest stands as money the factory is holding for us.
+  const advanced = standalonePayments.reduce((s, p) => s + p.amountInr, 0);
+  if (advanced) {
+    chargesPaid += advanced;
+    const applied = Math.min(advanced, chargesPending);
+    chargesPending -= applied;
+    chargesOverpaid += advanced - applied;
   }
   return {
     goldIssued,

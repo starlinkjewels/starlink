@@ -124,6 +124,7 @@ service cloud.firestore {
     match /purchases/{id}          { allow read, write: if isStaff(); }
     match /supplierReceipts/{id}   { allow read, write: if isStaff(); }
     match /supplierPayments/{id}   { allow read, write: if isStaff(); }
+    match /factoryPayments/{id}    { allow read, write: if isStaff(); }
     // Money received from a client, one numbered receipt per payment.
     match /clientReceipts/{id}     { allow read, write: if isStaff(); }
     match /factories/{id}          { allow read, write: if isStaff(); }

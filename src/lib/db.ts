@@ -903,6 +903,22 @@ export interface SupplierPayment {
   note?: string;
 }
 
+/**
+ * Money paid to a factory that settles no particular job — an advance against
+ * work to come, or a loan. The mirror of SupplierPayment, and there for the
+ * same reason: a making-charge payment normally lives inside the issuance it
+ * pays for, which leaves nowhere to put one when there is no job yet.
+ */
+export interface FactoryPayment {
+  id: string;
+  factoryId: string;
+  amountInr: number;
+  lockerId: string; // which Locker the money came out of
+  recordedBy: string;
+  createdAt: string;
+  note?: string;
+}
+
 export interface Purchase {
   id: string;
   supplierId: string;
@@ -1086,6 +1102,7 @@ export interface DB {
   purchases: Purchase[];
   supplierReceipts: SupplierReceipt[];
   supplierPayments: SupplierPayment[];
+  factoryPayments: FactoryPayment[];
   clientReceipts: ClientReceipt[];
   factories: Factory[];
   materialIssuances: MaterialIssuance[];
@@ -1140,6 +1157,7 @@ function emptyDb(): DB {
     purchases: [],
     supplierReceipts: [],
     supplierPayments: [],
+    factoryPayments: [],
     clientReceipts: [],
     factories: [],
     materialIssuances: [],
@@ -1651,6 +1669,7 @@ type ArrayCol =
   | "purchases"
   | "supplierReceipts"
   | "supplierPayments"
+  | "factoryPayments"
   | "clientReceipts"
   | "factories"
   | "materialIssuances"
@@ -1679,6 +1698,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "purchases",
   "supplierReceipts",
   "supplierPayments",
+  "factoryPayments",
   "clientReceipts",
   "factories",
   "materialIssuances",
@@ -2151,6 +2171,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "purchases" ||
         col === "supplierReceipts" ||
         col === "supplierPayments" ||
+        col === "factoryPayments" ||
         col === "clientReceipts" ||
         col === "factories" ||
         col === "materialIssuances" ||
