@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
+import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -145,6 +146,9 @@ export function LockerPage() {
     } finally { setEditSaving(false); }
   };
 
+  /** A client payment entered here, waiting for its receipt number. */
+  type ClientReceiptDraft = { clientId: string; amountUsd: number; method: string; advanceIds: string[] };
+
   const recordTxn = async () => {
     if (!selected) return;
     const amt = Number(txnAmount);
@@ -179,6 +183,10 @@ export function LockerPage() {
     // A voucher number is what a person quotes when they refer to a cash entry.
     // Reserved in the database, so two people banking at once cannot share one.
     const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
+    const clientTxnId = uid("ltx_");
+    // A holder rather than a plain variable: it is filled inside updateDb's
+    // callback, which TypeScript's flow analysis cannot follow.
+    const receiptFor: { draft: ClientReceiptDraft | null } = { draft: null };
     const xferId = uid("xfer_");
     const currency = selected.currency || "INR";
     if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
@@ -218,9 +226,15 @@ export function LockerPage() {
           // currency, so an INR locker converts back through the entered rate.
           const billed = currency === "USD" ? amt : (rate > 0 ? Math.round((amt / rate) * 100) / 100 : 0);
           const noteText = txnNote.trim() || undefined;
+          const beforeIds = advanceIds(d, payClient.id);
           const leftover = settleClientAccount(d, payClient.id, billed, user!.id, now, noteText, txnInvoiceId || undefined);
+          // A client payment is a numbered receipt wherever it is entered.
+          receiptFor.draft = {
+            clientId: payClient.id, amountUsd: billed, method: noteText || "Payment received",
+            advanceIds: [...advanceIds(d, payClient.id)].filter(x => !beforeIds.has(x)),
+          };
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: selected.id, type: "income", amountInr: amt, currency,
+            id: clientTxnId, lockerId: selected.id, type: "income", amountInr: amt, currency,
             category: `Client Payment — ${payClient.companyName}`,
             refType: "clientPayment", refId: payClient.id,
             note: noteText, recordedBy: user!.id, createdAt: now,
@@ -235,7 +249,21 @@ export function LockerPage() {
         }
       }
     });
-    toast.success("Transaction recorded");
+    let receiptNo = "";
+    const rf = receiptFor.draft;
+    if (rf) {
+      try {
+        const r = await receiptForAdvance({
+          clientId: rf.clientId, advanceIds: rf.advanceIds,
+          amountUsd: rf.amountUsd, date: now, method: rf.method,
+          lockerTxnId: clientTxnId, userId: user!.id,
+        });
+        receiptNo = ` · ${r.receiptNo}`;
+      } catch {
+        toast.error("Entry saved, but its receipt number could not be reserved");
+      }
+    }
+    toast.success(`Transaction recorded${receiptNo}`);
     setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnClientId(""); setTxnInvoiceId(""); setTxnMode(false);
   };
 

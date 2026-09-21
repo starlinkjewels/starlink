@@ -1553,7 +1553,7 @@ export function settleClientAccount(
 export function recordOrderPayment(
   d: DB,
   orderId: string,
-  opts: { amount: number; recordedBy: string; at: string; note?: string; lockerId?: string; lockerAmount?: number; exchangeRate?: number },
+  opts: { amount: number; recordedBy: string; at: string; note?: string; lockerId?: string; lockerAmount?: number; exchangeRate?: number; advanceId?: string; lockerTxnId?: string },
 ): { applied: number; toCredit: number; paidInFull: boolean } {
   const o = d.orders.find(x => x.id === orderId);
   if (!o) return { applied: 0, toCredit: 0, paidInFull: false };
@@ -1567,7 +1567,7 @@ export function recordOrderPayment(
     const isFirst = o.advances.length === 0;
     const defaultNote = paidInFull ? "Final Payment" : isFirst ? "Advance payment" : "Payment received";
     o.advances.push({
-      id: uid("adv_"), amount: applied, note: opts.note || defaultNote, recordedBy: opts.recordedBy, createdAt: opts.at,
+      id: opts.advanceId ?? uid("adv_"), amount: applied, note: opts.note || defaultNote, recordedBy: opts.recordedBy, createdAt: opts.at,
       lockerId: opts.lockerId || undefined, lockerAmount: opts.lockerId ? opts.lockerAmount : undefined,
     });
     if (opts.lockerId) {
@@ -1575,7 +1575,7 @@ export function recordOrderPayment(
       if (locker) {
         if (!d.lockerTransactions) d.lockerTransactions = [];
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: opts.lockerId, type: "income", amountInr: Number(opts.lockerAmount || 0),
+          id: opts.lockerTxnId ?? uid("ltx_"), lockerId: opts.lockerId, type: "income", amountInr: Number(opts.lockerAmount || 0),
           currency: locker.currency || "INR", category: `Client Payment — ${o.orderNumber}`,
           refType: "clientPayment", refId: o.id, recordedBy: opts.recordedBy, createdAt: opts.at,
           exchangeRate: opts.exchangeRate,

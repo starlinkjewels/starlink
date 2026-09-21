@@ -57,7 +57,7 @@ function unapply(d: DB, receipt: ClientReceipt): void {
 }
 
 /** Ids of every advance a client has right now — the "before" picture. */
-function advanceIds(d: DB, clientId: string): Set<string> {
+export function advanceIds(d: DB, clientId: string): Set<string> {
   const ids = new Set<string>();
   for (const o of d.orders) {
     if (o.clientId !== clientId) continue;

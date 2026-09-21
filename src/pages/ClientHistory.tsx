@@ -1,3 +1,4 @@
+import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
@@ -97,7 +98,7 @@ export function ClientHistoryPage() {
   const payNeedsRate = !!payLocker && payLockerCurrency !== "USD";
   const payRate = Number(payExchangeRate);
 
-  const recordPayment = () => {
+  const recordPayment = async () => {
     const amt = parseFloat(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
@@ -105,14 +106,20 @@ export function ClientHistoryPage() {
     const depositAmt = payNeedsRate ? Math.round(amt * payRate * 100) / 100 : amt;
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
+    // The advances this payment creates are noted so it can be given its
+    // receipt number straight after — every payment is a numbered receipt.
+    const txnId = uid("ltx_");
+    const at = new Date().toISOString();
+    let newAdvanceIds: string[] = [];
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
-      const clientOrders = d.orders.filter(o => o.clientId === id && o.status !== "Rejected");
-      const now = new Date().toISOString();
+      const now = at;
+      const beforeIds = advanceIds(d, id!);
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
       settleClientAccount(d, id!, amt, user!.id, now, note);
+      newAdvanceIds = [...advanceIds(d, id!)].filter(x => !beforeIds.has(x));
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
       // across whichever orders the FIFO allocation above happened to touch.
@@ -121,7 +128,7 @@ export function ClientHistoryPage() {
         if (locker) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: payLockerId, type: "income", amountInr: depositAmt,
+            id: txnId, lockerId: payLockerId, type: "income", amountInr: depositAmt,
             currency: locker.currency || "INR", category: `Client Payment — ${c.companyName}`,
             refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
             exchangeRate: payNeedsRate ? payRate : undefined,
@@ -136,7 +143,20 @@ export function ClientHistoryPage() {
         type: "info", read: false, createdAt: now,
       });
     });
-    toast.success(`Payment recorded (${payMethod}) & allocated to oldest bills`);
+    let receiptNo = "";
+    if (newAdvanceIds.length || amt > 0) {
+      try {
+        const r = await receiptForAdvance({
+          clientId: id!, advanceIds: newAdvanceIds, amountUsd: amt,
+          date: at, method: payMethod, remarks: payRemark.trim() || undefined,
+          lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
+        });
+        receiptNo = ` · ${r.receiptNo}`;
+      } catch {
+        toast.error("Payment saved, but its receipt number could not be reserved");
+      }
+    }
+    toast.success(`Payment recorded${receiptNo} (${payMethod}) & allocated to oldest bills`);
     setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setShowPayForm(false);
   };
 
@@ -144,9 +164,16 @@ export function ClientHistoryPage() {
     updateDb(d => {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
-      const clientOrders = d.orders.filter(o => o.clientId === id && o.status !== "Rejected");
+      const before = advanceIds(d, id!);
       // Reclaim any per-order over-payment + stored credit, re-allocate oldest first.
       settleClientAccount(d, id!, 0, user!.id, new Date().toISOString());
+      // No new money came in — this is credit the client already had being put
+      // against bills. Marking it keeps it off the list of payments waiting for
+      // a receipt number, which would otherwise number the same money twice.
+      for (const o of d.orders) {
+        if (o.clientId !== id) continue;
+        for (const a of o.advances ?? []) if (!before.has(a.id) && !a.receiptId) a.fromCredit = true;
+      }
     });
     toast.success("Credit applied to oldest outstanding bills");
   };

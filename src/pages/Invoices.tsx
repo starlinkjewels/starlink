@@ -1,7 +1,8 @@
 import { useState } from "react";
+import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
 import {
-  fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb,
+  fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid,
   invoiceOrderIds, orderInvoiced, orderIsDispatched, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, reallocateClientPayments,
 } from "@/lib/db";
@@ -122,7 +123,7 @@ export function InvoicesPage() {
   const payLocker = db.lockers.find(l => l.id === payLockerId);
   const payNeedsRate = !!payLocker && (payLocker.currency || "INR") !== "USD";
 
-  const submitPayment = (orderId: string) => {
+  const submitPayment = async (orderId: string) => {
     const o = db.orders.find(x => x.id === orderId);
     if (!o) return;
     const amt = parseFloat(payAmount);
@@ -131,16 +132,35 @@ export function InvoicesPage() {
     const rate = Number(payRate);
     if (payNeedsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate"); return; }
     const depositAmt = payNeedsRate ? Math.round(amt * rate * 100) / 100 : amt;
+    // Minted here so the payment can be given its receipt number afterwards.
+    const advanceId = uid("adv_");
+    const txnId = uid("ltx_");
+    const at = new Date().toISOString();
+    let applied = 0;
     updateDb(d => {
-      recordOrderPayment(d, orderId, {
-        amount: amt, recordedBy: user!.id, at: new Date().toISOString(),
+      applied = recordOrderPayment(d, orderId, {
+        amount: amt, recordedBy: user!.id, at,
         note: payNote.trim() || undefined, lockerId: payLockerId, lockerAmount: depositAmt,
         exchangeRate: payNeedsRate ? rate : undefined,
-      });
+        advanceId, lockerTxnId: txnId,
+      }).applied;
       const inv = d.invoices.find(i => i.id === detailInvId);
       if (inv) inv.paid = invoiceOrderIds(inv).every(oid => { const oo = d.orders.find(x => x.id === oid); return !oo || balanceDue(oo) <= 0; });
     });
-    toast.success(`${fmtMoney(amt)} received for ${o.orderNumber}`);
+    let receiptNo = "";
+    if (applied > 0) {
+      try {
+        const r = await receiptForAdvance({
+          clientId: o.clientId, advanceIds: [advanceId], amountUsd: applied,
+          date: at, method: payNote.trim() || "Payment received",
+          lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
+        });
+        receiptNo = ` · ${r.receiptNo}`;
+      } catch {
+        toast.error("Payment saved, but its receipt number could not be reserved");
+      }
+    }
+    toast.success(`${fmtMoney(amt)} received for ${o.orderNumber}${receiptNo}`);
     setPayOrderId(null); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote("");
   };
 
