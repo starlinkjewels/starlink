@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { FileText, FileSpreadsheet } from "lucide-react";
 import { toast } from "sonner";
 
 const PAGE = 12;
@@ -33,7 +35,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const db = useDb();
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<MoneyEntry | null>(null);
-  const [ef, setEf] = useState({ amount: "", date: "", note: "", lockerId: "" });
+  const [ef, setEf] = useState({ amount: "", date: "", note: "", lockerId: "", toLockerId: "", rate: "" });
 
   const ql = q.trim().toLowerCase();
   const rows = listEntries(db, kind).filter(e =>
@@ -49,7 +51,15 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const open = (e: MoneyEntry) => {
     if (e.locked) { toast.error(e.locked); return; }
     setEditing(e);
-    setEf({ amount: String(e.amount), date: e.date.slice(0, 10), note: e.note ?? "", lockerId: e.lockerId ?? "" });
+    // A transfer opens with both sides, so the destination can be corrected —
+    // sending money to the wrong account is the single most common slip.
+    const pair = e.transfer ? db.lockerTransactions.find(t => t.id === e.id) : undefined;
+    setEf({
+      amount: String(e.amount), date: e.date.slice(0, 10), note: e.note ?? "",
+      lockerId: e.lockerId ?? "",
+      toLockerId: pair?.pairedLockerId ?? "",
+      rate: pair?.exchangeRate ? String(pair.exchangeRate) : "",
+    });
   };
 
   const save = () => {
@@ -62,10 +72,60 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       note: ef.note,
       lockerId: ef.lockerId || undefined,
       userId: user!.id,
+      toLockerId: ef.toLockerId || undefined,
+      exchangeRate: Number(ef.rate) || undefined,
     });
     toast.success("Entry corrected");
     setEditing(null);
   };
+
+  // Both downloads carry exactly what is on screen — the same filter, the same
+  // order — so a printed copy can be checked against the page it came from.
+  const exportRows = () => rows.map((e, i) => [
+    i + 1,
+    e.voucherNo ?? "",
+    fmtDate(e.date),
+    e.party,
+    e.against ?? "",
+    e.direction === "out" ? e.amount : "",
+    e.direction === "in" ? e.amount : "",
+    e.currency,
+    db.lockers.find(l => l.id === e.lockerId)?.name ?? "",
+    e.note ?? "",
+  ]);
+  const HEAD = ["Sr", "Voucher", "Date", kind === "expense" ? "Expense" : "Party", "Against", "Out", "In", "Currency", "Account", "Remarks"];
+
+  const exportCsv = () => downloadCsv(`${TITLES[kind].replace(/\s+/g, "-")}`, HEAD, exportRows());
+
+  const exportPdf = () => downloadLedgerPdf({
+    title: TITLES[kind],
+    subjectLines: [
+      `${rows.length} entr${rows.length !== 1 ? "ies" : "y"}${ql ? " (filtered)" : ""}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+    ],
+    summary: [
+      { label: "Total out", value: fmtLockerAmount(totalOut, anyUsd ? undefined : "INR") },
+      { label: "Total in", value: fmtLockerAmount(totalIn, anyUsd ? undefined : "INR") },
+    ],
+    landscape: true,
+    columns: [
+      { header: "Sr", x: 14 }, { header: "Voucher", x: 26 }, { header: "Date", x: 52 },
+      { header: kind === "expense" ? "Expense" : "Party", x: 80 }, { header: "Against", x: 130 },
+      { header: "Out", x: 186 }, { header: "In", x: 214 }, { header: "Account", x: 238 },
+      { header: "Remarks", x: 268 },
+    ],
+    align: ["left", "left", "left", "left", "left", "right", "right", "left", "left"],
+    rows: rows.map((e, i) => [
+      String(i + 1), e.voucherNo ?? "", fmtDate(e.date),
+      (e.party || "").slice(0, 30), (e.against ?? "").slice(0, 32),
+      e.direction === "out" ? fmtLockerAmount(e.amount, e.currency) : "",
+      e.direction === "in" ? fmtLockerAmount(e.amount, e.currency) : "",
+      (db.lockers.find(l => l.id === e.lockerId)?.name ?? "").slice(0, 16),
+      (e.note ?? "").slice(0, 16),
+    ]),
+    filename: TITLES[kind].replace(/\s+/g, "-"),
+  });
+
 
   const remove = (e: MoneyEntry) => {
     if (e.locked) { toast.error(e.locked); return; }
@@ -89,6 +149,16 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         </div>
         <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }}
           placeholder="Search party, bill, remark…" className="rounded-xl h-9 w-full sm:w-64" />
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={exportPdf}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+            <FileText className="h-4 w-4" /> PDF
+          </button>
+          <button onClick={exportCsv}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+            <FileSpreadsheet className="h-4 w-4" /> Excel
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto -mx-5">
@@ -97,6 +167,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
             <tr>
               <th className="text-left px-5 py-2.5">Sr</th>
               <th className="text-left px-3 py-2.5">Date</th>
+              <th className="text-left px-3 py-2.5">Voucher</th>
               <th className="text-left px-3 py-2.5">{kind === "expense" ? "Expense" : "Party"}</th>
               <th className="text-left px-3 py-2.5">Against</th>
               <th className="text-right px-3 py-2.5">Out</th>
@@ -108,7 +179,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           </thead>
           <tbody>
             {paged.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
                 {ql ? "Nothing matches that search." : "No entries yet."}
               </td></tr>
             ) : paged.map((e, i) => {
@@ -117,6 +188,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
                 <tr key={e.id} className="border-t border-border/40 hover:bg-secondary/30">
                   <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(e.date)}</td>
+                  <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{e.voucherNo ?? "—"}</td>
                   <td className="px-3 py-2.5 font-medium max-w-[180px] truncate">{e.party}</td>
                   <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[150px] truncate">{e.against ?? "—"}</td>
                   <td className="px-3 py-2.5 text-right font-semibold text-destructive">
@@ -166,7 +238,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
             </div>
           </div>
           <div>
-            <Label className="text-xs">Account</Label>
+            <Label className="text-xs">{editing?.transfer ? "From account" : "Account"}</Label>
             <Select value={ef.lockerId || "none"} onValueChange={v => setEf({ ...ef, lockerId: v === "none" ? "" : v })}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -177,6 +249,39 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
               </SelectContent>
             </Select>
           </div>
+          {editing?.transfer && (
+            <>
+              <div>
+                <Label className="text-xs">To account</Label>
+                <Select value={ef.toLockerId} onValueChange={v => setEf({ ...ef, toLockerId: v })}>
+                  <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose the destination" /></SelectTrigger>
+                  <SelectContent>
+                    {db.lockers.filter(l => l.active !== false && l.id !== ef.lockerId).map(l => (
+                      <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {(() => {
+                const from = db.lockers.find(l => l.id === ef.lockerId);
+                const to = db.lockers.find(l => l.id === ef.toLockerId);
+                if (!from || !to || (from.currency || "INR") === (to.currency || "INR")) return null;
+                return (
+                  <div>
+                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
+                    <Input type="number" min={0} step="0.01" value={ef.rate}
+                      onChange={e => setEf({ ...ef, rate: e.target.value })}
+                      className="rounded-xl h-10 mt-1" placeholder="e.g. 101.15" />
+                  </div>
+                );
+              })()}
+              <p className="text-[11px] text-muted-foreground">
+                Both sides move together — the money leaves the first account and arrives in the second, converted at
+                this rate when the two are in different currencies.
+              </p>
+            </>
+          )}
+
           <div>
             <Label className="text-xs">Remarks</Label>
             <Input value={ef.note} onChange={e => setEf({ ...ef, note: e.target.value })} className="rounded-xl h-10 mt-1" />

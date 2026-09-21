@@ -703,6 +703,13 @@ export interface LockerTransaction {
   /** The payment entry (supplier/factory payment, expense) this movement was
    *  created by, so correcting that entry can find and move this row with it. */
   paymentId?: string;
+  /** Sequential voucher number ("V-0042") — what a person quotes when they refer
+   *  to a cash entry. Reserved atomically, so two people banking at once cannot
+   *  be handed the same one. */
+  voucherNo?: string;
+  /** Both legs of a locker-to-locker transfer carry the same id, so correcting
+   *  one can move the other with it instead of leaving the pair disagreeing. */
+  transferId?: string;
 }
 
 export interface Supplier {

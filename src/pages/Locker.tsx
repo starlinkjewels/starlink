@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
+import { reserveVoucherNumber } from "@/lib/counters";
 import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -144,7 +145,7 @@ export function LockerPage() {
     } finally { setEditSaving(false); }
   };
 
-  const recordTxn = () => {
+  const recordTxn = async () => {
     if (!selected) return;
     const amt = Number(txnAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
@@ -175,6 +176,10 @@ export function LockerPage() {
       }
     }
     const now = new Date().toISOString();
+    // A voucher number is what a person quotes when they refer to a cash entry.
+    // Reserved in the database, so two people banking at once cannot share one.
+    const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
+    const xferId = uid("xfer_");
     const currency = selected.currency || "INR";
     if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
       toast.error("That destination locker couldn't be found — pick it again and retry.");
@@ -190,13 +195,13 @@ export function LockerPage() {
           : amt;
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency,
-          category: "Transfer", pairedLockerId: target.id, note: txnNote.trim() || undefined,
+          category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: target.id, note: txnNote.trim() || undefined,
           exchangeRate: crossCurrency ? rate : undefined,
           recordedBy: user!.id, createdAt: now,
         });
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: destAmount, currency: target.currency || "INR",
-          category: "Transfer", pairedLockerId: selected.id, note: txnNote.trim() || undefined,
+          category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: selected.id, note: txnNote.trim() || undefined,
           exchangeRate: crossCurrency ? rate : undefined,
           recordedBy: user!.id, createdAt: now,
         });
@@ -224,7 +229,7 @@ export function LockerPage() {
         } else {
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
-            category: txnCategory || undefined, refType: "manual",
+            category: txnCategory || undefined, refType: "manual", voucherNo: voucher,
             note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
           });
         }

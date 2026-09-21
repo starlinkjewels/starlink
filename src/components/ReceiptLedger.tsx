@@ -11,6 +11,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { FileText, FileSpreadsheet } from "lucide-react";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { toast } from "sonner";
 
 const PAGE = 12;
@@ -87,6 +89,46 @@ export function ReceiptLedger() {
     setEditId(null);
   };
 
+  // What is on screen is what downloads — same search, same order.
+  const exportCsv = () => downloadCsv(
+    "Payments-Received",
+    ["Sr", "Receipt", "Date", "Client", "Amount (USD)", "Rate", "Deposited", "Currency", "Account", "Mode", "Remarks", "Held as credit"],
+    rows.map((r, i) => {
+      const client = db.clients.find(c => c.id === r.clientId)?.companyName ?? "";
+      const locker = db.lockers.find(l => l.id === r.lockerId)?.name ?? "";
+      const asCredit = Math.round((r.amountUsd - receiptApplied(db, r.id)) * 100) / 100;
+      return [i + 1, r.receiptNo, fmtDate(r.date), client, r.amountUsd, r.exchangeRate ?? "",
+        r.lockerAmount ?? r.amountUsd, r.lockerCurrency ?? "", locker, r.method, r.remarks ?? "",
+        asCredit > 0.009 ? asCredit : ""];
+    }),
+  );
+
+  const exportPdf = () => downloadLedgerPdf({
+    title: "Payments Received",
+    subjectLines: [
+      `${rows.length} receipt${rows.length !== 1 ? "s" : ""}${ql ? " (filtered)" : ""}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+    ],
+    summary: [{ label: "Total received", value: fmtMoney(totalReceived) }],
+    landscape: true,
+    columns: [
+      { header: "Sr", x: 14 }, { header: "Receipt", x: 26 }, { header: "Date", x: 52 },
+      { header: "Client", x: 82 }, { header: "Amount", x: 150 }, { header: "Rate", x: 176 },
+      { header: "Deposited", x: 200 }, { header: "Account", x: 230 }, { header: "Mode", x: 258 },
+    ],
+    align: ["left", "left", "left", "left", "right", "right", "right", "left", "left"],
+    rows: rows.map((r, i) => [
+      String(i + 1), r.receiptNo, fmtDate(r.date),
+      (db.clients.find(c => c.id === r.clientId)?.companyName ?? "").slice(0, 40),
+      fmtMoney(r.amountUsd), r.exchangeRate ? String(r.exchangeRate) : "",
+      r.lockerId ? fmtLockerAmount(r.lockerAmount ?? r.amountUsd, r.lockerCurrency) : "",
+      (db.lockers.find(l => l.id === r.lockerId)?.name ?? "").slice(0, 16),
+      r.method.slice(0, 14),
+    ]),
+    filename: "Payments-Received",
+  });
+
+
   const remove = (id: string) => {
     const rec = db.clientReceipts?.find(x => x.id === id);
     if (!rec) return;
@@ -113,6 +155,16 @@ export function ReceiptLedger() {
           placeholder="Search receipt #, client, remark…"
           className="rounded-xl h-9 w-full sm:w-64"
         />
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={exportPdf}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+            <FileText className="h-4 w-4" /> PDF
+          </button>
+          <button onClick={exportCsv}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+            <FileSpreadsheet className="h-4 w-4" /> Excel
+          </button>
+        </div>
       </div>
 
       <div className="overflow-x-auto -mx-5">

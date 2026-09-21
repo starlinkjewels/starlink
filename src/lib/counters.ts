@@ -75,6 +75,14 @@ export async function reserveReceiptNumber(receipts: { receiptNo?: string }[]): 
 }
 
 
+/** Reserve a voucher number for a cash entry — "V-0042". */
+export async function reserveVoucherNumber(txns: { voucherNo?: string }[]): Promise<string> {
+  const floor = highestSuffix(txns.map((t) => t.voucherNo), 0) + 1;
+  const seq = await reserveSequence("voucherNo", floor);
+  return `V-${String(seq).padStart(4, "0")}`;
+}
+
+
 /** Reserve a globally-unique certified-diamond stock number ("DP-0007"). */
 export async function reserveDiamondStockNumber(packets: { stockNumber?: string }[]): Promise<string> {
   const floor = highestSuffix(packets.map((p) => p.stockNumber), 0) + 1;

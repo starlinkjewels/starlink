@@ -6,6 +6,7 @@ import {
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
+import { reserveVoucherNumber } from "@/lib/counters";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { MoneyLedger } from "@/components/MoneyLedger";
 import {
@@ -705,7 +706,7 @@ function LockerActions() {
   const crossCurrency = !!selected && !!target && (target.currency || "INR") !== (selected.currency || "INR");
   const cur = selected?.currency || "INR";
 
-  const submit = () => {
+  const submit = async () => {
     if (!selected) { toast.error("Choose a locker"); return; }
     const amt = Number(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
@@ -733,6 +734,8 @@ function LockerActions() {
     setSaving(true);
     try {
       const now = stampFor(date);
+      const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
+      const xferId = uid("xfer_");
       updateDb(d => {
         if (!d.lockerTransactions) d.lockerTransactions = [];
         if (action === "transfer_out") {
@@ -743,20 +746,20 @@ function LockerActions() {
             : amt;
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency: cur,
-            category: "Transfer", pairedLockerId: dest.id, note: note.trim() || undefined,
+            category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: dest.id, note: note.trim() || undefined,
             exchangeRate: crossCurrency ? rate : undefined,
             recordedBy: user!.id, createdAt: now,
           });
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: dest.id, type: "transfer_in", amountInr: destAmount, currency: dest.currency || "INR",
-            category: "Transfer", pairedLockerId: selected.id, note: note.trim() || undefined,
+            category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: selected.id, note: note.trim() || undefined,
             exchangeRate: crossCurrency ? rate : undefined,
             recordedBy: user!.id, createdAt: now,
           });
         } else {
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId: selected.id, type: action, amountInr: amt, currency: cur,
-            category: category || undefined, refType: "manual",
+            category: category || undefined, refType: "manual", voucherNo: voucher,
             note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
           });
         }
