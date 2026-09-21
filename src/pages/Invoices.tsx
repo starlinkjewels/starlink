@@ -193,8 +193,8 @@ export function InvoicesPage() {
   const totalOutstanding = invOrders.reduce((s, o) => s + balanceDue(o), 0);
 
   const PAGE_SIZE = 10;
-  const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE);
-  const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE);
+  const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE, "inv");
+  const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE, "led");
 
 
   /** What this client has paid that is sitting on orders OUTSIDE this invoice —

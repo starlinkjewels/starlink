@@ -3,6 +3,7 @@ import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
   settleClientAccount, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
+  DEFAULT_LOCKER_CATEGORIES,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
@@ -44,11 +45,9 @@ function stampFor(day: string): string {
 type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
-/** Fallback only — the real list is managed in Settings → Categories. */
-const DEFAULT_LOCKER_CATEGORIES = [
-  "Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
-  "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other",
-];
+// The fallback list is the one in db.ts, shared with Settings → Categories.
+// This file used to keep its own copy, so a category added to the shared list
+// never appeared here until someone edited the list in Settings.
 
 /** Warn before a payment takes a locker's balance negative (money it doesn't hold).
  *  Returns true to proceed, false to cancel. `amt` is in the locker's own currency. */

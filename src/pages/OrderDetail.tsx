@@ -13,6 +13,7 @@ import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email"
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -34,6 +35,7 @@ import {
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
+import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance } from "@/lib/receipts";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
@@ -294,6 +296,63 @@ export function OrderDetailPage() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't remove this purchase.");
     } finally { setRemovingPurchaseId(null); }
+  };
+
+  // Correct material taken from our own stock. The purchase row beside it could
+  // always be corrected; this one could not, so a wrong carat stayed wrong and
+  // the stones stayed out of stock. See src/lib/issuanceEdit.ts.
+  const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
+  const [isf, setIsf] = useState({ qty: "", bucket: "", charge: "", notes: "" });
+  const [savingIssuance, setSavingIssuance] = useState(false);
+  const [removingIssuanceId, setRemovingIssuanceId] = useState<string | null>(null);
+
+  const openEditIssuance = (mi: MaterialIssuance) => {
+    const check = canEditIssuance(db, mi);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    setEditingIssuance(mi);
+    setIsf({
+      qty: String(mi.quantityIssued), bucket: mi.purityOrQuality,
+      charge: mi.makingCharges.amountInr ? String(mi.makingCharges.amountInr) : "",
+      notes: mi.notes ?? "",
+    });
+  };
+
+  const saveIssuance = async () => {
+    if (!editingIssuance) return;
+    setSavingIssuance(true);
+    try {
+      await editIssuance(db, editingIssuance, {
+        quantity: Number(isf.qty) || undefined,
+        purityOrQuality: isf.bucket,
+        chargeAmount: isf.charge === "" ? undefined : Number(isf.charge) || 0,
+        notes: isf.notes,
+      }, user!.id);
+      toast.success("Corrected — stock moved by the difference");
+      setEditingIssuance(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't correct this.");
+    } finally { setSavingIssuance(false); }
+  };
+
+  const removeIssuance = async (mi: MaterialIssuance) => {
+    const check = canEditIssuance(db, mi);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    const unit = mi.material === "gold" ? "g" : "ct";
+    if (!confirm([
+      `Cancel this issue of ${mi.quantityIssued}${unit} ${mi.purityOrQuality}?`,
+      "",
+      ...issuanceVoidImpact(db, mi),
+      "",
+      "This cannot be undone.",
+    ].join("\n"))) return;
+    setRemovingIssuanceId(mi.id);
+    try {
+      await deleteIssuance(db, mi, user!.id);
+      toast.success("Issue cancelled — material returned to stock");
+      setEditingIssuance(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't cancel this.");
+    } finally { setRemovingIssuanceId(null); }
   };
 
   // Correct a purchase entered wrong (carat/rate/certificate). The change is
@@ -3183,6 +3242,23 @@ export function OrderDetailPage() {
                       <span className="flex items-center gap-2 shrink-0">
                         {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
+                        {!srcPurchase && isStockIssuance(mi) && canEditStage() && (
+                          <>
+                          <button
+                            onClick={() => openEditIssuance(mi)}
+                            title="Correct what was taken from stock (wrong carat / shape)"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button
+                            onClick={() => removeIssuance(mi)}
+                            disabled={removingIssuanceId === mi.id}
+                            title="Cancel this issue — the material goes back into stock"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                          </>
+                        )}
                         {srcPurchase && user!.role === "admin" && (
                           <>
                           <button
@@ -3642,6 +3718,65 @@ export function OrderDetailPage() {
       showPrice={db.settings.barcodeBandShowPrice !== false}
       onGenerate={(preset, mode, copies) => generateBand(order, db.settings, { style: preset.style, width: preset.widthMm, height: preset.heightMm, mode, copies })}
     />
+
+    {/* ── Correct material taken from our own stock ── */}
+    <Dialog open={!!editingIssuance} onOpenChange={o => { if (!o) setEditingIssuance(null); }}>
+      <DialogContent className="max-w-md rounded-2xl">
+        <DialogHeader><DialogTitle className="font-display text-xl">Correct what was taken from stock</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground -mt-1">
+          {editingIssuance?.diamondKind === "certified"
+            ? "These are specific certified stones, so the weight is the stones' own — only the charge and the note can change here. To swap the stones, cancel this and issue again."
+            : "Stock moves by the difference only: correcting 0.2ct to 0.13ct puts 0.07ct back, it does not re-issue the lot."}
+        </p>
+        <div className="grid grid-cols-2 gap-3 mt-1">
+          <div>
+            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Weight (g)" : "Carat (ct)"}</Label>
+            <Input type="number" min={0} step="0.001" value={isf.qty}
+              disabled={editingIssuance?.diamondKind === "certified"}
+              onChange={e => setIsf({ ...isf, qty: e.target.value })}
+              className="rounded-xl h-10 mt-1 disabled:opacity-60" />
+          </div>
+          <div>
+            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Purity" : "Shape"}</Label>
+            {editingIssuance?.material === "gold" ? (
+              <Select value={isf.bucket} onValueChange={v => setIsf({ ...isf, bucket: v })}>
+                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>{GOLD_PURITIES.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+              </Select>
+            ) : editingIssuance?.diamondKind === "certified" ? (
+              <div className="rounded-xl h-10 px-3 mt-1 flex items-center bg-secondary/60 text-sm text-muted-foreground">Certified</div>
+            ) : (
+              <Select value={isf.bucket} onValueChange={v => setIsf({ ...isf, bucket: v })}>
+                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>{DIAMOND_SHAPES.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+              </Select>
+            )}
+          </div>
+        </div>
+        <div>
+          <Label className="text-xs">Making charge (₹)</Label>
+          <Input type="number" min={0} step="0.01" value={isf.charge}
+            onChange={e => setIsf({ ...isf, charge: e.target.value })}
+            className="rounded-xl h-10 mt-1" placeholder="0" />
+        </div>
+        <div>
+          <Label className="text-xs">Note</Label>
+          <Input value={isf.notes} onChange={e => setIsf({ ...isf, notes: e.target.value })}
+            className="rounded-xl h-10 mt-1" placeholder="Optional" />
+        </div>
+        <div className="flex gap-2 mt-3 flex-wrap">
+          <Button variant="outline" onClick={() => editingIssuance && removeIssuance(editingIssuance)}
+            disabled={!!removingIssuanceId}
+            className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
+            Cancel this issue
+          </Button>
+          <Button variant="outline" onClick={() => setEditingIssuance(null)} className="rounded-xl ml-auto">Close</Button>
+          <AsyncButton onClick={saveIssuance} disabled={savingIssuance} className="btn-hero rounded-xl">
+            {savingIssuance ? "Saving…" : "Save"}
+          </AsyncButton>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     {/* ── Correct a purchase entered wrong ── */}
     <EditPurchaseDialog

@@ -514,7 +514,11 @@ export const DEFAULT_EXPENSE_CATEGORIES = ["Salary", "Travel", "Food", "Tools", 
  *  existed — Settings is where they are actually managed. */
 export const DEFAULT_LOCKER_CATEGORIES = [
   "Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
-  "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other",
+  "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer",
+  // Money in that is not a client settling a bill: what the exchange rate
+  // gained or lost, income from elsewhere, and freight billed on.
+  "$ Difference", "Extra Income", "Shipping Service",
+  "Other",
 ];
 export type ExpenseCategory = string;
 
