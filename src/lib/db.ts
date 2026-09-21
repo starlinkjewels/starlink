@@ -179,9 +179,27 @@ export function pureFromPurity(grams: number, purityPerMille: number): number {
 /** 1 carat = 0.2 grams — for gross-weight (gold + diamond) maths. */
 export const CARAT_TO_GRAM = 0.2;
 
-export function buildTimelineSteps(hasCertificate: boolean): string[] {
+/** The "metal" picked when the client is buying loose or certified stones and
+ *  no jewellery is made. Nothing is designed, cast or set, so these orders have
+ *  no production stages and never go to a factory — the diamond is bought (or
+ *  already held) and dispatched. */
+export const DIAMOND_ONLY_METAL = "None (Diamond only)";
+
+export function isDiamondOnlyOrder(o: { metal: string }): boolean {
+  return o.metal === DIAMOND_ONLY_METAL;
+}
+
+/** Stages that exist only because a piece is being MADE. A diamond-only order
+ *  has none of them — there is nothing to design, produce or sign off. */
+const PRODUCTION_ONLY_STEPS = new Set(["CAD Designing", "In Production", "Final Approval"]);
+
+export function isProductionStep(step: string): boolean {
+  return PRODUCTION_ONLY_STEPS.has(step);
+}
+
+export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false): string[] {
   return (TIMELINE_STEPS as readonly string[]).filter(
-    (s) => s !== "Certification" || hasCertificate,
+    (s) => (s !== "Certification" || hasCertificate) && !(diamondOnly && isProductionStep(s)),
   );
 }
 

@@ -26,6 +26,7 @@ import {
   type StockMovement,
   type DiamondSale,
   type Client,
+  isDiamondOnlyOrder,
 } from "./db";
 
 const r0 = (n: number) => Math.round(n);
@@ -45,7 +46,9 @@ export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondW
 } {
   return {
     needsGold: !GOLDLESS_METALS.has(order.metal),
-    needsDiamond: order.diamondWeight > 0,
+    // A diamond-only order is FOR the stones, so it needs them whatever the
+    // estimated weight says — an estimate of 0 ct is missing, not "no diamond".
+    needsDiamond: order.diamondWeight > 0 || isDiamondOnlyOrder(order),
   };
 }
 

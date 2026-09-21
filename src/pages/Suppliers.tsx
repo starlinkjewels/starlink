@@ -31,16 +31,29 @@ export function SuppliersPage() {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Supplier>>({ name: "", contactPerson: "", phone: "", email: "", address: "", gstin: "" });
 
-  const list = db.suppliers.filter(s =>
-    s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
-  );
+  // Every supplier's account, worked out once: the rows, the sort and the grand
+  // totals all read the same figures instead of each recomputing their own.
+  const accounts = new Map(db.suppliers.map(s => [
+    s.id,
+    supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s),
+  ]));
+  const netOf = (s: Supplier) => accounts.get(s.id)?.net ?? 0;
+
+  // Whoever there is most money to settle with comes first — either way round,
+  // since an overpaid supplier needs chasing as much as an unpaid one. Settled
+  // suppliers fall to the bottom, alphabetically.
+  const list = db.suppliers
+    .filter(s =>
+      s.name.toLowerCase().includes(q.toLowerCase()) || (s.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
+    )
+    .sort((a, b) => Math.abs(netOf(b)) - Math.abs(netOf(a)) || a.name.localeCompare(b.name));
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
   // Grand totals across ALL suppliers (not just the search/current page):
   // net > 0 → we still owe them (payable); net < 0 → they owe us (receivable).
   const totals = db.suppliers.reduce((acc, s) => {
-    const a = supplierAccount(db.purchases.filter(p => p.supplierId === s.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s);
-    if (a.net > 0) acc.payable += a.net; else acc.receivable += -a.net;
+    const net = netOf(s);
+    if (net > 0) acc.payable += net; else acc.receivable += -net;
     return acc;
   }, { payable: 0, receivable: 0 });
 
@@ -143,8 +156,7 @@ export function SuppliersPage() {
       {view === "list" && (
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(s => {
-            const purchases = db.purchases.filter(p => p.supplierId === s.id);
-            const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s);
+            const account = accounts.get(s.id)!;
             return (
               <Link key={s.id} to={`/suppliers/${s.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
                 <div className="h-10 w-10 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4.5 w-4.5" /></div>
@@ -190,8 +202,7 @@ export function SuppliersPage() {
       {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(s => {
-          const purchases = db.purchases.filter(p => p.supplierId === s.id);
-          const account = supplierAccount(purchases, (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id));
+          const account = accounts.get(s.id)!;
           return (
             <div key={s.id} className="card-luxe card-hover p-5 flex flex-col">
               <div className="flex items-start gap-3">

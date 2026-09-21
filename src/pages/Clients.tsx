@@ -187,10 +187,25 @@ export function ClientsPage() {
     ? db.clients.filter(c => c.accountManagerId === user!.id)
     : db.clients;
 
-  const list = scoped.filter(c =>
-    c.companyName.toLowerCase().includes(q.toLowerCase()) ||
-    c.ownerName.toLowerCase().includes(q.toLowerCase())
-  );
+  // Every client's account, worked out once — the rows, the sort and the grand
+  // totals all read the same figures.
+  const accounts = new Map(scoped.map(c => [
+    c.id,
+    clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c),
+  ]));
+  // The biggest account to settle comes first, whichever way it runs: money a
+  // client owes us, or credit we are holding for them. Square accounts sink to
+  // the bottom, alphabetically.
+  const weight = (c: Client) => {
+    const a = accounts.get(c.id);
+    return a ? Math.max(a.outstanding, a.credit) : 0;
+  };
+  const list = scoped
+    .filter(c =>
+      c.companyName.toLowerCase().includes(q.toLowerCase()) ||
+      c.ownerName.toLowerCase().includes(q.toLowerCase())
+    )
+    .sort((a, b) => weight(b) - weight(a) || a.companyName.localeCompare(b.companyName));
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
@@ -198,7 +213,7 @@ export function ClientsPage() {
   // clients owe us (receivable · ughrani); credit = advances we hold for them,
   // i.e. money we'd owe back (payable · chukavni). Rejected orders aren't billed.
   const totals = scoped.reduce((acc, c) => {
-    const a = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
+    const a = accounts.get(c.id)!;
     acc.receivable += a.outstanding;
     acc.payable += a.credit;
     return acc;
@@ -418,7 +433,7 @@ export function ClientsPage() {
           {paged.map(c => {
             const orderCount = db.orders.filter(o => o.clientId === c.id).length;
             const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
-            const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
+            const acc = accounts.get(c.id)!;
             const clientUser = db.users.find(u => u.clientId === c.id);
             return (
               <Link key={c.id} to={`/clients/${c.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
@@ -477,7 +492,7 @@ export function ClientsPage() {
         {paged.map(c => {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
-          const acc = clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c);
+          const acc = accounts.get(c.id)!;
           const manager = employees.find(e => e.id === c.accountManagerId);
           const clientUser = db.users.find(u => u.clientId === c.id);
           const online = isOnline(clientUser?.lastActiveAt);

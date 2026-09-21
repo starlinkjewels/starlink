@@ -5,6 +5,7 @@ import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
+  isDiamondOnlyOrder, isProductionStep,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
@@ -144,7 +145,9 @@ function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false, 
   if (done >= total) return "Delivered";
   if (dispatchIdx >= 0 && done >= dispatchIdx + 1) return "Dispatched";
   if (finalApprovalIdx >= 0 && done >= finalApprovalIdx + 1) return "Ready";
-  if (done >= 3) return "In Production";
+  // A diamond-only order has no production stages at all, so counting steps
+  // must never label it "In Production" — nothing is being made.
+  if (done >= 3) return timeline.some(x => x.step === "In Production") ? "In Production" : "Ready";
   if (done >= 2) return "Approved";
   return "Waiting";
 }
@@ -337,8 +340,9 @@ export function OrderDetailPage() {
   const recordPurchaseForOrder = async () => {
     if (!buySupplierId) { toast.error("Choose a supplier"); return; }
     // Client's flow: assign the factory first, then buy — the purchased material
-    // goes STRAIGHT to that factory, no separate "issue" step.
-    if (!order.assignedFactoryId) { toast.error("Assign a factory first (Stage ① above) — the material goes straight to it."); return; }
+    // goes STRAIGHT to that factory, no separate "issue" step. A diamond-only
+    // order has no factory: the stones are bought for the client, not to be set.
+    if (!order.assignedFactoryId && !isDiamondOnlyOrder(order)) { toast.error("Assign a factory first (Stage ① above) — the material goes straight to it."); return; }
     for (const line of buyLines) {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
@@ -393,7 +397,7 @@ export function OrderDetailPage() {
 
     setBuying(true);
     try {
-      const factoryId = order.assignedFactoryId!;
+      const factoryId = order.assignedFactoryId || "";
       const factory = db.factories.find(f => f.id === factoryId);
 
       // Material bought for this order goes straight to the factory and never
@@ -458,6 +462,9 @@ export function OrderDetailPage() {
           // Auto-issue straight to the assigned factory (source "purchase" — the
           // pooled stockLevels balance is untouched, though it's now logged in
           // stockMovements for reporting; see logOrderDirectPurchase above). One step.
+          // Skipped when there is no factory: a diamond-only order's stones are
+          // bought for the client and dispatched, never sent out to be set.
+          if (!factoryId) continue;
           const issuanceId = uid("mi_");
           d.materialIssuances.unshift({
             id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
@@ -478,7 +485,9 @@ export function OrderDetailPage() {
           });
         }
       });
-      toast.success(`${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded (${fmtMoneyInr(buyGrandTotalInr)}) & sent to ${factory?.name || "the factory"}`);
+      toast.success(factoryId
+        ? `${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded (${fmtMoneyInr(buyGrandTotalInr)}) & sent to ${factory?.name || "the factory"}`
+        : `${newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase"} recorded (${fmtMoneyInr(buyGrandTotalInr)}) against ${order.orderNumber}`);
       setShowBuyForm(false);
       resetBuyForm();
     } catch (e) {
@@ -923,6 +932,13 @@ export function OrderDetailPage() {
   // force it through (e.g. material sourced outside this system) so a
   // legacy or edge-case order can never get permanently stuck.
   const readiness = manufacturingReadiness(order, db.materialIssuances);
+  // Loose/certified stones sold on their own: nothing is designed, cast or set,
+  // so there is no production timeline, no factory and no final approval —
+  // the diamond is bought for the order and dispatched.
+  const diamondOnly = isDiamondOnlyOrder(order);
+  const shownSteps = order.timeline
+    .map((t, i) => ({ t, i }))
+    .filter(({ t }) => !(diamondOnly && isProductionStep(t.step)));
   const faStepIdx = order.timeline.findIndex(t => t.step === "Final Approval");
   const faDone = faStepIdx >= 0 && order.timeline[faStepIdx].status === "done";
 
@@ -938,6 +954,16 @@ export function OrderDetailPage() {
     }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
+      // Diamond-only orders created before the production stages were dropped
+      // still carry them. They are hidden, so close them along with the step
+      // actually being marked — otherwise the order can never reach Dispatch.
+      if (diamondOnly) {
+        for (let i = 0; i < idx; i++) {
+          if (o.timeline[i].status !== "done" && isProductionStep(o.timeline[i].step)) {
+            o.timeline[i] = { ...o.timeline[i], status: "done", date: new Date().toISOString(), remarks: "Not applicable — diamond only" };
+          }
+        }
+      }
       o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
       o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
@@ -1587,7 +1613,9 @@ export function OrderDetailPage() {
   // Conditions for CAD and Dispatch sections
   const cadStepIdx   = order.timeline.findIndex(t => t.step === "CAD Designing");
   const dispStepIdx  = order.timeline.findIndex(t => t.step === "Dispatch");
-  const showCadSection  = cadStepIdx >= 0 && order.timeline[cadStepIdx].status !== "pending";
+  // Nothing is designed for a diamond-only order, so no CAD panel — even on an
+  // older one whose stored timeline still has the stage.
+  const showCadSection  = !diamondOnly && cadStepIdx >= 0 && order.timeline[cadStepIdx].status !== "pending";
   const showDispSection = !!order.courierName || (
     canEditStage() && dispStepIdx >= 0 && order.timeline[dispStepIdx].status !== "pending"
   );
@@ -2614,14 +2642,20 @@ export function OrderDetailPage() {
         )}
       </div>
 
-      {/* Production Timeline */}
+      {/* Production Timeline. A diamond-only order is not produced, so it shows
+          only the stages it really has — order, dispatch, delivery. */}
       <div className="card-luxe p-6">
-        <h3 className="font-display text-xl text-brand-dark mb-5">Production Timeline</h3>
+        <h3 className="font-display text-xl text-brand-dark mb-5">{diamondOnly ? "Order Progress" : "Production Timeline"}</h3>
         <div className="relative pl-8 space-y-4">
           <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
-          {order.timeline.map((t, idx) => {
+          {shownSteps.map(({ t, i: idx }, n) => {
             const isDone = t.status === "done";
-            const isActive = t.status === "in_progress";
+            // With the production stages hidden, the stored in_progress flag can
+            // be sitting on one of them — so the active stage is simply the
+            // first one still to do.
+            const isActive = !isDone && (diamondOnly
+              ? shownSteps.findIndex(s => s.t.status !== "done") === n
+              : t.status === "in_progress");
             const emp = db.users.find(u => u.id === t.employeeId);
             return (
               <motion.div key={idx} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: idx * 0.03 }} className="relative">
@@ -2681,16 +2715,28 @@ export function OrderDetailPage() {
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div>
-              <h3 className="font-display text-xl text-brand-dark">Manufacturing</h3>
+              <h3 className="font-display text-xl text-brand-dark">{diamondOnly ? "Diamond" : "Manufacturing"}</h3>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
+                {diamondOnly ? "Bought for this order and dispatched — no factory, nothing is made"
+                  : order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
                   : order.materialSourcing === "purchase" ? "Sourcing plan: Buy New for this order"
                   : "No sourcing plan set at order creation"}
               </p>
             </div>
           </div>
 
+          {/* Diamond-only: nothing to assign, estimate or approve — just buy
+              the stones the order is for. */}
+          {diamondOnly && canEditStage() && !showBuyForm && (
+            <Button variant="outline"
+              onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); setBuyLines(ls => ls.map(l => ({ ...l, material: "diamond" }))); }}
+              className="rounded-xl h-10 gap-2 w-full sm:w-auto">
+              <Plus className="h-4 w-4" /> Buy Diamond for this order
+            </Button>
+          )}
+
           {/* Stage ① — Assign the factory and quote an estimate before the piece is made. */}
+          {!diamondOnly && (
           <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 space-y-3">
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
@@ -2822,18 +2868,25 @@ export function OrderDetailPage() {
               </div>
             )}
           </div>
+          )}
 
+          {!diamondOnly && (
           <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
             {readiness.ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
             {readiness.ready
               ? "Ready for Final Approval — factory assigned and diamond sourced"
               : `Final Approval blocked — ${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && readiness.missing.includes("diamond") ? " and " : ""}${readiness.missing.includes("diamond") ? "add the diamond (from stock or buy)" : ""} first`}
           </div>
+          )}
 
           {showBuyForm && (
             <div className="pt-2 border-t border-border/60 space-y-3">
               <p className="text-sm font-medium text-brand-dark">Buy for {order.orderNumber}</p>
-              <p className="text-xs text-muted-foreground -mt-1">Goes straight to {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.</p>
+              <p className="text-xs text-muted-foreground -mt-1">
+                {diamondOnly
+                  ? "Held against this order and billed to the supplier — no factory involved."
+                  : `Goes straight to ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.`}
+              </p>
               <Select value={buySupplierId} onValueChange={setBuySupplierId}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
                 <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
@@ -3133,7 +3186,7 @@ export function OrderDetailPage() {
           )}
 
           {/* Rework / Alteration — a delivered piece came back for changes */}
-          {canEditStage() && (
+          {!diamondOnly && canEditStage() && (
             <div className="pt-3 border-t border-border/60">
               {!showRework ? (
                 <button onClick={() => { setRwFactoryId(order.assignedFactoryId || ""); setShowRework(true); }}

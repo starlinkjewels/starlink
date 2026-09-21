@@ -31,15 +31,27 @@ export function FactoriesPage() {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Factory>>({ name: "", contactPerson: "", phone: "", address: "" });
 
-  const list = db.factories.filter(fac =>
-    fac.name.toLowerCase().includes(q.toLowerCase()) || (fac.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
-  );
+  // Every factory's account, worked out once — rows, sort and totals share it.
+  const accounts = new Map(db.factories.map(fac => [
+    fac.id,
+    factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id), fac),
+  ]));
+  // The largest labour bill outstanding comes first, whichever way it runs.
+  const weight = (fac: Factory) => {
+    const a = accounts.get(fac.id);
+    return a ? Math.max(a.chargesPending, a.chargesOverpaid) : 0;
+  };
+  const list = db.factories
+    .filter(fac =>
+      fac.name.toLowerCase().includes(q.toLowerCase()) || (fac.contactPerson || "").toLowerCase().includes(q.toLowerCase()),
+    )
+    .sort((a, b) => weight(b) - weight(a) || a.name.localeCompare(b.name));
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
   // Grand totals across ALL factories: charges we still owe (payable) vs charges
   // we overpaid and the factory owes us back (receivable).
   const totals = db.factories.reduce((acc, fac) => {
-    const a = factoryAccount(db.materialIssuances.filter(i => i.factoryId === fac.id), fac);
+    const a = accounts.get(fac.id)!;
     acc.payable += a.chargesPending;
     acc.receivable += a.chargesOverpaid;
     return acc;
@@ -157,8 +169,7 @@ export function FactoriesPage() {
       {view === "list" && (
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(fac => {
-            const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
-            const account = factoryAccount(issuances, fac);
+            const account = accounts.get(fac.id)!;
             const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id, fac.openingFineGold);
             return (
               <Link key={fac.id} to={`/factories/${fac.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
@@ -209,7 +220,7 @@ export function FactoriesPage() {
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {paged.map(fac => {
           const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
-          const account = factoryAccount(issuances);
+          const account = accounts.get(fac.id)!;
           const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
           const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
           return (

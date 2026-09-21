@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
@@ -305,7 +305,7 @@ export function NewOrderPage() {
           lockerId: f.advanceLockerId || undefined,
           lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
-        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes")).map((s, i) => ({
+        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes", f.metal === DIAMOND_ONLY_METAL)).map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,
