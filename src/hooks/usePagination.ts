@@ -19,15 +19,26 @@ export function usePagination<T>(items: T[], pageSize = 10, paramKey = "page") {
   const fromUrl = Math.max(1, Math.floor(Number(params.get(paramKey))) || 1);
   const [page, setPageState] = useState(fromUrl);
 
+  // react-router returns a NEW setter on every render. Holding it in a ref keeps
+  // it out of dependency arrays: an effect that depended on it re-ran on every
+  // render, and the one below reset the page to 1 each time, so clicking a page
+  // number appeared to do nothing at all.
+  const setParamsRef = useRef(setParams);
+  setParamsRef.current = setParams;
+
+  const writeParam = useCallback((n: number) => {
+    setParamsRef.current(prev => {
+      const q = new URLSearchParams(prev);
+      if (n <= 1) q.delete(paramKey); else q.set(paramKey, String(n));
+      return q;
+    }, { replace: true });
+  }, [paramKey]);
+
   const setPage = useCallback((n: number) => {
     const next = Math.max(1, Math.floor(n) || 1);
     setPageState(next);
-    setParams(prev => {
-      const q = new URLSearchParams(prev);
-      if (next <= 1) q.delete(paramKey); else q.set(paramKey, String(next));
-      return q;
-    }, { replace: true });
-  }, [setParams, paramKey]);
+    writeParam(next);
+  }, [writeParam]);
 
   // Follow the address when the browser moves through history.
   useEffect(() => { setPageState(fromUrl); }, [fromUrl]);
@@ -37,8 +48,9 @@ export function usePagination<T>(items: T[], pageSize = 10, paramKey = "page") {
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    setPage(1);
-  }, [items.length, setPage]);
+    setPageState(1);
+    writeParam(1);
+  }, [items.length, writeParam]);
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, totalPages);
