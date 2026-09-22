@@ -1228,7 +1228,9 @@ export function OrderDetailPage() {
           remarks: `${alreadyDone ? "Final details updated" : "Final approval"} — ${hasNet ? `net ${netW}g @ ${purity || "?"} purity (${purity > 0 ? pureFromPurity(netW, purity) : 0}g fine gold)` : "no gold used"}${labourVal ? ` · labour ${fmtMoneyInr(labourVal)}` : ""}`,
         });
       });
-      if (!alreadyDone) advanceStep(faIdx, true);
+      // A stock build raised before Final Approval existed has no such step, so
+      // the actuals are recorded without one being marked complete.
+      if (!alreadyDone && faIdx >= 0) advanceStep(faIdx, true);
       toast.success(alreadyDone ? "Final details updated" : "Final approval saved");
       setFaIdx(null);
     } catch (e) {
@@ -1741,6 +1743,17 @@ export function OrderDetailPage() {
   // material, so it's entered there, not guessed here).
   const addToReadyStock = () => {
     if (order.readyStockCreatedId) { nav("/ready-stock"); return; }
+    // The piece carries whatever weights it has. Without Final Approval those
+    // are still the estimates it was ordered on, and a stock item is priced off
+    // them — so say so rather than let an estimate pass as the real weight.
+    if (!hasActuals && !confirm([
+      "The factory's actual details have not been recorded for this piece.",
+      "",
+      "It will go into Ready Stock with the ESTIMATED weights, which is what its",
+      "cost and price will then be worked out from.",
+      "",
+      "Record actual details first? Cancel to go back and do that.",
+    ].join("\n"))) return;
     const itemId = uid("rs_");
     const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
     const diaWt = order.actualDiamondWeight ?? (order.diamondWeight || undefined);
@@ -2831,6 +2844,11 @@ export function OrderDetailPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {canEditStage() && faStepIdx < 0 && (
+                <Button size="sm" variant="outline" onClick={() => openFinalApproval(-1)} className="rounded-lg h-8 gap-1.5 text-xs">
+                  {hasActuals ? "Edit actual details" : "Record actual details"}
+                </Button>
+              )}
               {canEditStage() && (faDone ? (
                 <Button size="sm" variant="outline" onClick={() => openFinalApproval(faStepIdx)} className="rounded-lg h-8 gap-1.5 text-xs">Edit actual details</Button>
               ) : (

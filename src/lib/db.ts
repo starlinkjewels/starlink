@@ -204,8 +204,14 @@ export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false)
 }
 
 // A Ready-Stock (in-house) order has no client, so it skips the client-approval
-// and shipping stages — just design, produce, then add the finished piece to stock.
-export const READY_STOCK_TIMELINE_STEPS = ["Order Submitted", "CAD Designing", "In Production", "Ready for Stock"] as const;
+// and shipping stages — just design, produce, sign off what the factory actually
+// used, then add the finished piece to stock.
+//
+// "Final Approval" is where a piece's real gold weight, purity and labour are
+// recorded. A stock build had no such stage, so none of that could be entered
+// and the finished piece reached stock carrying only the estimates it started
+// with. A piece made for stock is made the same way as one made to order.
+export const READY_STOCK_TIMELINE_STEPS = ["Order Submitted", "CAD Designing", "In Production", "Final Approval", "Ready for Stock"] as const;
 export function buildReadyStockTimelineSteps(): string[] {
   return [...READY_STOCK_TIMELINE_STEPS];
 }
