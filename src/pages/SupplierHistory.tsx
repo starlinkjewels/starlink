@@ -352,11 +352,13 @@ export function SupplierHistoryPage() {
     const now = new Date().toISOString();
     updateDb(d => {
       if (!d.supplierReceipts) d.supplierReceipts = [];
-      d.supplierReceipts.push({ id: uid("srcpt_"), supplierId: id!, amountInr: amt, lockerId: rcvLockerId, recordedBy: user!.id, createdAt: now, note: rcvNote.trim() || undefined });
+      const receiptId = uid("srcpt_");
+      d.supplierReceipts.push({ id: receiptId, supplierId: id!, amountInr: amt, lockerId: rcvLockerId, recordedBy: user!.id, createdAt: now, note: rcvNote.trim() || undefined });
       if (!d.lockerTransactions) d.lockerTransactions = [];
       d.lockerTransactions.push({
         id: uid("ltx_"), lockerId: rcvLockerId, type: "income", amountInr: amt,
-        category: `Received from ${supplier.name}`, refType: "manual",
+        category: `Received from ${supplier.name}`, refType: "supplierReceipt",
+        refId: id!, paymentId: receiptId,
         note: rcvNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
       });
     });
@@ -469,9 +471,12 @@ export function SupplierHistoryPage() {
         debit: 0, credit: g.amountInr, balance: 0, kind: "Payment",
       });
     }
-    // Money received back from the supplier — a credit, like a payment.
+    // Money received back from the supplier is a DEBIT: it moves the account the
+    // same way a bill does. It was sitting in the Paid column, so returning an
+    // advance in full drove the balance twice as far the wrong way instead of
+    // bringing it back to zero.
     for (const r of receipts) {
-      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: 0, credit: r.amountInr, balance: 0, kind: "Received" });
+      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: r.amountInr, credit: 0, balance: 0, kind: "Received" });
     }
     // Advances and loans — money out against no bill, so a credit like any
     // other payment. Without these the statement would not add up to the

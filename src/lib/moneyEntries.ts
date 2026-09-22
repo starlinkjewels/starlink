@@ -13,6 +13,17 @@ import { updateDb, uid, type DB, type Expense, type LockerTransaction } from "./
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
+/** Where an account movement was actually recorded, so a row that cannot be
+ *  corrected here can say where it can be. "locked" on its own told nobody
+ *  anything, and it was not obvious why one row had Edit and the next did not. */
+const RECORDED_IN: Record<string, string> = {
+  purchase: "Supplier Payments",
+  supplierReceipt: "Supplier Payments",
+  materialIssuance: "Factory Payments",
+  expense: "Expenses",
+  clientPayment: "Payments Received",
+};
+
 export interface MoneyEntry {
   id: string;             // the payment/expense/transaction id
   kind: EntryKind;
@@ -26,6 +37,8 @@ export interface MoneyEntry {
   direction: "in" | "out";
   /** False when this row can't be safely corrected from here, with the reason. */
   locked?: string;
+  /** The tab that DOES own this row, when another one does. */
+  lockedWhere?: string;
   /** Voucher number, for a cash entry that has one. */
   voucherNo?: string;
   /** True for a locker-to-locker transfer: editing it moves both legs. */
@@ -184,6 +197,7 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
       // the bill it paid untouched. A transfer is different: both legs are ours,
       // so it is edited here and both move together.
       const fromElsewhere = t.refType && t.refType !== "manual" && t.refType !== "transfer";
+      const where = t.refType ? RECORDED_IN[t.refType] : undefined;
       out.push({
         id: t.id, kind, date: t.createdAt,
         party: db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account",
@@ -194,8 +208,9 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         voucherNo: t.voucherNo,
         transfer: !!t.pairedLockerId,
         locked: fromElsewhere
-          ? "Created by another entry — correct it where it was recorded"
+          ? `This is the account side of an entry recorded in ${where ?? "another tab"}. Correcting it there moves both; correcting it here would leave the two disagreeing.`
           : undefined,
+        lockedWhere: fromElsewhere ? where : undefined,
       });
     }
   }

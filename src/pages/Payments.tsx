@@ -356,9 +356,13 @@ function PaySupplier() {
         const now = stampFor(date);
         updateDb(d => {
           if (!d.supplierReceipts) d.supplierReceipts = [];
-          d.supplierReceipts.push({ id: uid("srcpt_"), supplierId, amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
+          // The account movement is tagged with the receipt it belongs to, so
+          // correcting it from the supplier tab moves both and the Locker tab
+          // sends you there rather than letting the two drift apart.
+          const receiptId = uid("srcpt_");
+          d.supplierReceipts.push({ id: receiptId, supplierId, amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
           if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({ id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${s.name}`, refType: "manual", note: note.trim() || undefined, recordedBy: user!.id, createdAt: now });
+          d.lockerTransactions.push({ id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${s.name}`, refType: "supplierReceipt", refId: supplierId, paymentId: receiptId, note: note.trim() || undefined, recordedBy: user!.id, createdAt: now });
         });
         toast.success(`${fmtMoneyInr(amt)} received from ${s.name}`);
         setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());

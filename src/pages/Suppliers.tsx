@@ -177,7 +177,7 @@ export function SuppliersPage() {
                   </div>
                   <div className="px-3.5 py-1.5 min-w-[80px] border-l border-border/50">
                     <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p>
-                    <p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid + account.received)}</p>
+                    <p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid)}</p>
                   </div>
                   <div className="px-3.5 py-1.5 min-w-[92px] border-l border-border/50">
                     <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>

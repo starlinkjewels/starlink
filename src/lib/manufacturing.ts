@@ -151,15 +151,28 @@ export function supplierAccount(
   const oCredit = openingCreditAmt(opening), oDebit = openingDebitAmt(opening);
   totalPurchased += oCredit;
   balanceOwed += oCredit;
-  // Money received back from the supplier (refunds/returns) offsets what we owe.
-  const received = receipts.reduce((s, r) => s + r.amountInr, 0) + oDebit;
+  // Cash the supplier handed BACK to us. It is money moving the other way, so
+  // it raises the net exactly as a payment out lowers it: pay an advance of
+  // ₹2,00,000 and get all of it back and the account returns to zero.
+  //
+  // This used to be subtracted, and folded the opening debit in with it. The
+  // two run in opposite directions — an opening debit is money the supplier
+  // owes us, cash received is money they have handed over — so a returned
+  // ₹2,00,000 was counted as a second ₹2,00,000 paid out, leaving an account
+  // that should have been square reading −₹4,00,000.
+  const received = receipts.reduce((s, r) => s + r.amountInr, 0);
   // An advance or loan settles no bill, so it cannot reduce any one purchase's
   // balance — it reduces the net position. Pay a supplier you owe nothing and
   // the net goes negative: they are now holding your money.
   const advanced = standalonePayments.reduce((s, p) => s + p.amountInr, 0);
   totalPaid += advanced;
-  // Net position: > 0 we still owe them; < 0 they owe us (or we hold their credit).
-  const net = Math.round((balanceOwed - received - advanced) * 100) / 100;
+  // Net position: > 0 we still owe them; < 0 they hold money of ours.
+  //
+  // Overpaying a bill leaves money with the supplier just as an advance does,
+  // so it belongs in the net for the same reason. It was left out, which made
+  // an overpayment invisible: pay ₹5,00,000 against ₹4,00,000 of bills and the
+  // account still read square.
+  const net = Math.round((balanceOwed - overpaid - oDebit + received - advanced) * 100) / 100;
   return {
     totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed),
     overpaid: r0(overpaid), received: r0(received), advanced: r0(advanced), net: r0(net),

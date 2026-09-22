@@ -236,7 +236,9 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
                   <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={e.note ?? ""}>{e.note ?? "—"}</td>
                   <td className="px-5 py-2.5 text-right whitespace-nowrap">
                     {e.locked ? (
-                      <span className="text-[11px] text-muted-foreground" title={e.locked}>locked</span>
+                      <span className="text-[11px] text-muted-foreground" title={e.locked}>
+                        {e.lockedWhere ? `Edit in ${e.lockedWhere}` : "locked"}
+                      </span>
                     ) : (
                       <>
                         <button onClick={() => open(e)} className="text-primary hover:underline text-xs mr-3">Edit</button>
