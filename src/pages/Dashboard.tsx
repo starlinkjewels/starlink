@@ -40,12 +40,15 @@ export function Dashboard() {
       (db.factoryPayments ?? []).filter(x => x.factoryId === f.id),
     ).chargesPending, 0);
   const supplierPaymentsPending = db.suppliers.reduce(
-    (s, sup) => s + supplierAccount(
+    (s, sup) => s + Math.max(0, supplierAccount(
       db.purchases.filter(p => p.supplierId === sup.id),
       (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id),
       sup,
       (db.supplierPayments ?? []).filter(x => x.supplierId === sup.id),
-    ).balanceOwed, 0);
+      // The NET, floored at zero, which is what the Suppliers page totals. Using
+      // balanceOwed counted every unpaid bill in full and ignored advances,
+      // overpayments and refunds, so the two pages disagreed on the same figure.
+    ).net), 0);
 
   // Cash Position & Profit — every payment in/out (client payments, supplier/
   // factory payments, expenses) that was tagged to a Locker rolls up here.

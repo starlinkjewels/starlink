@@ -191,13 +191,24 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
   }
 
   if (kind === "locker") {
+    // Money received from a supplier only started tagging its account movement
+    // recently. Older ones were written as plain manual entries, so this finds
+    // them the same way pairedTxn does — otherwise they stay editable here,
+    // and editing here would change the account without changing the supplier.
+    const receiptTxnIds = new Set<string>();
+    for (const r of db.supplierReceipts ?? []) {
+      const t = pairedTxn(db, r.id, r.createdAt, r.lockerId, r.amountInr);
+      if (t) receiptTxnIds.add(t.id);
+    }
     for (const t of db.lockerTransactions ?? []) {
       // An entry created BY another record (a supplier payment, an expense) is
       // corrected where it was recorded — editing the movement alone would leave
       // the bill it paid untouched. A transfer is different: both legs are ours,
       // so it is edited here and both move together.
-      const fromElsewhere = t.refType && t.refType !== "manual" && t.refType !== "transfer";
-      const where = t.refType ? RECORDED_IN[t.refType] : undefined;
+      const isLegacyReceipt = receiptTxnIds.has(t.id);
+      const fromElsewhere = isLegacyReceipt
+        || (t.refType && t.refType !== "manual" && t.refType !== "transfer");
+      const where = isLegacyReceipt ? RECORDED_IN.supplierReceipt : (t.refType ? RECORDED_IN[t.refType] : undefined);
       out.push({
         id: t.id, kind, date: t.createdAt,
         party: db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account",
