@@ -1069,6 +1069,12 @@ export interface MaterialIssuance {
   //   + otherCharges + metalByFactoryGrams × metalByFactoryRate
   labour?: {
     perGramRate?: number;
+    /** A floor on the MAKING charge, for a piece too light to be worth making
+     *  at the per-gram rate (a factory's card typically sets one under 2g and a
+     *  lower one under 1g). Entered per order, because every factory's minimum
+     *  and every weight band is its own. Diamond handling, CAD, other charges
+     *  and metal the factory supplied are added on top, unaffected. */
+    minimumLabour?: number;
     diamondHandlingRate?: number;
     cadCharge?: number;
     otherCharges?: number;

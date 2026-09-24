@@ -30,7 +30,7 @@ import { BandDialog } from "@/components/BandDialog";
 import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
-  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, factoryFineGoldBalance,
+  factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
@@ -723,6 +723,7 @@ export function OrderDetailPage() {
   // Two-tone pieces — a second metal alongside the gold (platinum / silver / …).
   const [faOtherMetal, setFaOtherMetal] = useState("");
   const [faOtherNet, setFaOtherNet] = useState("");
+  const [faMinLabour, setFaMinLabour] = useState("");
   const [faOtherPurity, setFaOtherPurity] = useState("");
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
@@ -1075,6 +1076,7 @@ export function OrderDetailPage() {
       : 0;
     setFaGoldPurity(finish?.finishedPurity != null ? String(finish.finishedPurity) : (defaultPurity ? String(defaultPurity) : ""));
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
+    setFaMinLabour(finish?.labour?.minimumLabour != null ? String(finish.labour.minimumLabour) : "");
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
     setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
     setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
@@ -1128,6 +1130,7 @@ export function OrderDetailPage() {
     const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
     const labour = {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
+      minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
       cadCharge: faCad ? Number(faCad) : undefined,
       otherCharges: faOther ? Number(faOther) : undefined,
@@ -3534,15 +3537,19 @@ export function OrderDetailPage() {
         // everything downstream uses — handling charges included.
         const diaAdjust = Number(faDiaAdjust) || 0;
         const usedDiaCt = Math.round((usedDiaCtRaw + diaAdjust) * 1000) / 1000;
-        const faLive = labourValue({
+        const faLabour = {
           perGramRate: faPerGram ? Number(faPerGram) : undefined,
+          minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
           diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
           cadCharge: faCad ? Number(faCad) : undefined,
           otherCharges: faOther ? Number(faOther) : undefined,
           metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
           metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
-        }, Math.round(((needsGold ? (Number(faGoldNet) || 0) : 0)
-          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0)) * 1000) / 1000, usedDiaCt);
+        };
+        const faNetW = Math.round(((needsGold ? (Number(faGoldNet) || 0) : 0)
+          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0)) * 1000) / 1000;
+        const faLive = labourValue(faLabour, faNetW, usedDiaCt);
+        const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
         return (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !faSaving && setFaIdx(null)}>
@@ -3718,12 +3725,28 @@ export function OrderDetailPage() {
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Labour (factory payable, ₹)</p>
                 <div className="grid grid-cols-2 gap-2.5">
                   <div><Label className="text-[11px]">Labour / gram</Label><Input type="number" min={0} step="0.01" value={faPerGram} onChange={e => setFaPerGram(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
+                  <div>
+                    <Label className="text-[11px]">Minimum labour</Label>
+                    <Input type="number" min={0} step="0.01" value={faMinLabour} onChange={e => setFaMinLabour(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ for a light piece" />
+                  </div>
                   <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
                   <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={faDiaHandling} onChange={e => setFaDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
                   <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={faOther} onChange={e => setFaOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
                   <div><Label className="text-[11px]">Metal by factory (g)</Label><Input type="number" min={0} step="0.001" value={faMetalG} onChange={e => setFaMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>
                   <div><Label className="text-[11px]">Metal rate ₹ / g</Label><Input type="number" min={0} step="0.01" value={faMetalRate} onChange={e => setFaMetalRate(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /g" /></div>
                 </div>
+                {/* A light piece is charged the factory's minimum instead of the
+                    per-gram rate, so the total will not equal rate × weight — say
+                    which one is being charged rather than leave it unexplained. */}
+                {faMinInUse ? (
+                  <p className="text-[11px] mt-1.5 text-warning">
+                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}, not {fmtMoneyInr((Number(faPerGram) || 0) * faNetW)} ({faNetW} g × {fmtMoneyInr(Number(faPerGram) || 0)}).
+                  </p>
+                ) : faNetW > 0 && faNetW < 2 && !faMinLabour ? (
+                  <p className="text-[11px] mt-1.5 text-muted-foreground">
+                    This piece is {faNetW} g. If the factory charges a minimum on light pieces, enter it above.
+                  </p>
+                ) : null}
                 <p className="text-sm mt-2">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(faLive)}</span></p>
               </div>
 

@@ -300,12 +300,31 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
 export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number, diamondCt: number): number {
   if (!labour) return 0;
   const v =
-    (labour.perGramRate || 0) * (netWeight || 0) +
+    makingCharge(labour, netWeight) +
     (labour.diamondHandlingRate || 0) * (diamondCt || 0) +
     (labour.cadCharge || 0) +
     (labour.otherCharges || 0) +
     (labour.metalByFactoryGrams || 0) * (labour.metalByFactoryRate || 0);
   return Math.round(v * 100) / 100;
+}
+
+/**
+ * The making charge alone: the per-gram rate on the piece, or the minimum when
+ * the piece is too light to reach it. A factory that charges ₹850/g will still
+ * not make a 1.5g ring for ₹1,275, so its card sets a floor; the floor replaces
+ * the per-gram figure rather than adding to it.
+ */
+export function makingCharge(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): number {
+  if (!labour) return 0;
+  const perGram = (labour.perGramRate || 0) * (netWeight || 0);
+  return Math.round(Math.max(perGram, labour.minimumLabour || 0) * 100) / 100;
+}
+
+/** True when the minimum is what is actually being charged, so the screen can
+ *  say so instead of showing a total that does not match the rate times weight. */
+export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): boolean {
+  if (!labour?.minimumLabour) return false;
+  return labour.minimumLabour > (labour.perGramRate || 0) * (netWeight || 0);
 }
 
 /** Every purity/quality this factory currently holds a positive pool balance
