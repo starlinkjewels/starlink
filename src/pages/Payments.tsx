@@ -3,7 +3,7 @@ import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
   settleClientAccount, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
-  DEFAULT_LOCKER_CATEGORIES,
+  DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
@@ -25,21 +25,7 @@ import { toast } from "sonner";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
-function todayLocal(): string {
-  const d = new Date();
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-
-/** The chosen day, carrying the current time of day so entries made on the same
- *  date still sort in the order they were recorded. */
-function stampFor(day: string): string {
-  const now = new Date();
-  if (!day) return now.toISOString();
-  const [y, m, d] = day.split("-").map(Number);
-  const dt = new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds());
-  return dt.toISOString();
-}
+// todayLocal / stampFor now live in src/lib/db.ts, shared with Buy & Assign.
 
 
 type Mode = "client" | "supplier" | "factory" | "expense" | "locker";

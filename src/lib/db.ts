@@ -197,6 +197,23 @@ export function isProductionStep(step: string): boolean {
   return PRODUCTION_ONLY_STEPS.has(step);
 }
 
+/** Today, as the yyyy-mm-dd an <input type="date"> wants, in LOCAL time —
+ *  toISOString() would hand back yesterday for anyone east of UTC late at night. */
+export function todayLocal(): string {
+  const d = new Date();
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
+/** The chosen day, carrying the current time of day so entries made on the same
+ *  date still sort in the order they were recorded. */
+export function stampFor(day: string): string {
+  const now = new Date();
+  if (!day) return now.toISOString();
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
+}
+
 export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false): string[] {
   return (TIMELINE_STEPS as readonly string[]).filter(
     (s) => (s !== "Certification" || hasCertificate) && !(diamondOnly && isProductionStep(s)),

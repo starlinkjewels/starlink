@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
@@ -69,6 +69,11 @@ function BuyMaterial() {
   const [pcs, setPcs] = useState(""); // loose diamonds are counted as well as weighed
   const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
   const [xrate, setXrate] = useState("");
+  // Stock is often written up a day or two after it arrives, so the date is
+  // chosen rather than assumed to be today.
+  const [date, setDate] = useState(todayLocal());
+  const [discountPct, setDiscountPct] = useState("");
+  const [notes, setNotes] = useState("");
   // certified grading
   const [color, setColor] = useState(""); const [clarity, setClarity] = useState("");
   const [cut, setCut] = useState(""); const [polish, setPolish] = useState(""); const [sym, setSym] = useState("");
@@ -79,7 +84,11 @@ function BuyMaterial() {
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   // Weight × rate, in whichever currency is billed — always the source of
   // truth for the amount, never manually typed.
-  const baseAmount = (Number(qty) || 0) * (Number(rate) || 0);
+  // A supplier discount ("less 5%") comes off before anything else — the stock
+  // value and the supplier's bill both use the discounted figure.
+  const disc = Math.min(Math.max(Number(discountPct) || 0, 0), 100);
+  const grossAmount = (Number(qty) || 0) * (Number(rate) || 0);
+  const baseAmount = grossAmount * (1 - disc / 100);
   const totalInr = currency === "USD" ? Math.round(baseAmount * (Number(xrate) || 0)) : Math.round(baseAmount);
 
   const submit = async () => {
@@ -91,7 +100,7 @@ function BuyMaterial() {
     if (totalInr <= 0) { toast.error("Total comes to ₹0 — check the rate"); return; }
     const supplier = db.suppliers.find(s => s.id === supplierId);
     const purchaseId = uid("pur_");
-    const now = new Date().toISOString();
+    const now = stampFor(date);
     setSaving(true);
     try {
       // Gold + loose pool into Stock; certified never pools (it's a packet).
@@ -117,7 +126,10 @@ function BuyMaterial() {
           purpose: "stock", currency,
           totalUsd: currency === "USD" ? Math.round(baseAmount * 100) / 100 : undefined,
           exchangeRate: currency === "USD" ? Number(xrate) : undefined,
-          totalInr, payments: [], createdBy: user!.id, createdAt: now,
+          totalInr, payments: [],
+          discountPct: disc > 0 ? disc : undefined,
+          notes: notes.trim() || undefined,
+          createdBy: user!.id, createdAt: now,
         };
         d.purchases.unshift(purchase);
         if (kind === "certified") {
@@ -134,7 +146,7 @@ function BuyMaterial() {
         }
       });
       toast.success(`Bought ${q}${kind === "gold" ? "g" : "ct"} → stock · ${fmtMoneyInr(totalInr)} to ${supplier?.name || "supplier"}`);
-      setQty(""); setRate(""); setQuality(""); setPcs(""); setXrate("");
+      setQty(""); setRate(""); setQuality(""); setPcs(""); setXrate(""); setDiscountPct(""); setNotes("");
       setColor(""); setClarity(""); setCut(""); setPolish(""); setSym(""); setFluor(""); setMeasure(""); setLab(""); setCertNo("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
@@ -143,12 +155,18 @@ function BuyMaterial() {
 
   return (
     <div className="space-y-3">
-      <div>
-        <Label className="text-xs">Supplier</Label>
-        <Select value={supplierId} onValueChange={setSupplierId}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-          <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-        </Select>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div className="sm:col-span-2">
+          <Label className="text-xs">Supplier</Label>
+          <Select value={supplierId} onValueChange={setSupplierId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
       </div>
 
       <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl">
@@ -198,6 +216,17 @@ function BuyMaterial() {
         </div>
       )}
 
+      <div className="grid grid-cols-2 gap-2.5">
+        <div>
+          <Label className="text-xs">Discount %</Label>
+          <Input type="number" min={0} max={100} step="0.01" value={discountPct} onChange={e => setDiscountPct(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+        </div>
+        <div>
+          <Label className="text-xs">Remark</Label>
+          <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+        </div>
+      </div>
+
       <div className="grid grid-cols-3 gap-2.5">
         <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
           <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
@@ -214,7 +243,10 @@ function BuyMaterial() {
       </div>
 
       <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-sm">Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span> <span className="text-xs text-muted-foreground">to supplier</span></span>
+        <span className="text-sm">
+          {disc > 0 && <span className="text-xs text-muted-foreground mr-2">less {disc}% of {fmtMoneyInr(currency === "USD" ? grossAmount * (Number(xrate) || 0) : grossAmount)} ·</span>}
+          Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span> <span className="text-xs text-muted-foreground">to supplier</span>
+        </span>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10">{saving ? "Saving…" : "Buy → Stock"}</AsyncButton>
       </div>
     </div>
@@ -231,7 +263,7 @@ function OpeningStock() {
   const [shape, setShape] = useState("Round");
   const [qty, setQty] = useState("");     // grams (gold) / carats (diamond)
   const [value, setValue] = useState(""); // ₹ valuation (optional)
-  const [asOf, setAsOf] = useState("");   // as-of date (optional)
+  const [asOf, setAsOf] = useState(todayLocal()); // as-of date, today unless changed
   const [note, setNote] = useState("");
   // certified grading
   const [quality, setQuality] = useState("");
@@ -248,7 +280,9 @@ function OpeningStock() {
     if (!q || q <= 0) { toast.error(`Enter the opening ${kind === "gold" ? "weight (g)" : "carats"}`); return; }
     if (kind === "certified" && !certNo.trim()) { toast.error("Enter the report / certificate number"); return; }
     const val = Number(value) > 0 ? Math.round(Number(value)) : undefined;
-    const createdAt = asOf ? new Date(`${asOf}T00:00:00`).toISOString() : new Date().toISOString();
+    // Carries the time of day, so several opening entries on one date keep the
+    // order they were typed in rather than all landing at midnight.
+    const createdAt = stampFor(asOf);
     setSaving(true);
     try {
       if (kind === "certified") {
@@ -371,6 +405,8 @@ function AssignGold() {
   const [factoryId, setFactoryId] = useState("");
   const [purity, setPurity] = useState("22K");
   const [grams, setGrams] = useState("");
+  const [date, setDate] = useState(todayLocal());
+  const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
 
   const factories = db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name));
@@ -383,7 +419,7 @@ function AssignGold() {
     if (g > inStock) { toast.error(`Only ${inStock}g of ${purity} in stock`); return; }
     const factory = db.factories.find(f => f.id === factoryId);
     const issuanceId = uid("mi_");
-    const now = new Date().toISOString();
+    const now = stampFor(date);
     setSaving(true);
     try {
       await decreaseStockSelfHealing({
@@ -398,11 +434,12 @@ function AssignGold() {
           purityOrQuality: purity, quantityIssued: g, source: "stock",
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+          notes: notes.trim() || undefined,
         };
         d.materialIssuances.unshift(mi);
       });
       toast.success(`${g}g ${purity} (${toPureGold(g, purity)}g fine) assigned to ${factory?.name || "factory"}`);
-      setGrams("");
+      setGrams(""); setNotes("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to assign");
     } finally { setSaving(false); }
@@ -425,6 +462,8 @@ function AssignGold() {
           <Select value={purity} onValueChange={setPurity}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
         <div><Label className="text-xs">Grams to assign</Label><Input type="number" min={0} step="0.01" value={grams} onChange={e => setGrams(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
+        <div><Label className="text-xs">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
+        <div><Label className="text-xs">Remark</Label><Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" /></div>
       </div>
       <p className="text-xs text-muted-foreground">In stock: <span className="font-semibold text-foreground">{inStock}g of {purity}</span>{Number(grams) > 0 ? ` · ${toPureGold(Number(grams), purity)}g fine gold` : ""}</p>
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Assign to Factory"}</AsyncButton>
@@ -450,6 +489,7 @@ function SellDiamond() {
   const [buyerName, setBuyerName] = useState("");
   const [lockerId, setLockerId] = useState("");
   const [notes, setNotes] = useState("");
+  const [date, setDate] = useState(todayLocal());
   const [saving, setSaving] = useState(false);
 
   const clients = db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
@@ -475,7 +515,7 @@ function SellDiamond() {
     if (totalInr <= 0) { toast.error("Total comes to ₹0 — check the rate"); return; }
 
     const saleId = uid("ds_");
-    const now = new Date().toISOString();
+    const now = stampFor(date);
     const client = buyerMode === "client" ? clients.find(c => c.id === clientId) : undefined;
     const buyerLabel = client?.companyName || buyerName.trim();
     const saleShape = kind === "certified" ? selectedPacket!.shape : shape;
@@ -615,7 +655,16 @@ function SellDiamond() {
         )}
       </div>
 
-      <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+        <div className="sm:col-span-2">
+          <Label className="text-xs">Remark</Label>
+          <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+        </div>
+        <div>
+          <Label className="text-xs">Date</Label>
+          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
+        </div>
+      </div>
 
       <div className="flex items-center justify-between gap-2 pt-1">
         <span className="text-sm">Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span></span>
