@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { ChevronRight } from "lucide-react";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 
@@ -20,6 +21,9 @@ interface Row {
   unit: "g" | "ct";
   amountInr?: number;
   remark?: string;
+  /** A bill's own lines, when this row is a whole bill. */
+  items?: { material: string; qty: number; unit: "g" | "ct"; amountInr: number; discountPct?: number }[];
+  billNo?: string;
 }
 
 /**
@@ -38,22 +42,48 @@ export function StockActivityLedger() {
   const [to, setTo] = useState("");
   const [kind, setKind] = useState("");
   const [material, setMaterial] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
 
   const all: Row[] = [];
 
-  // Bought into stock — the Buy Material tab.
+  // Bought into stock — the Buy Material tab. A supplier's chitthi is ONE bill
+  // with a line per size, and it is checked against its own total, so the lines
+  // saved together in one go are shown as that bill rather than as strangers.
+  // They stay separate purchases underneath, because stock is counted per size.
+  const bills = new Map<string, Row>();
   for (const p of db.purchases ?? []) {
     if (p.purpose !== "stock") continue;
     const isGold = p.material === "gold";
-    all.push({
+    const label = isGold
+      ? `Gold ${p.gold?.purity ?? ""}`.trim()
+      : `${p.diamond?.shape ?? "Diamond"}${p.diamond?.kind === "certified" ? " (certified)" : ""}`;
+    const qty = isGold ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0);
+    const unit: "g" | "ct" = isGold ? "g" : "ct";
+    // A bill number groups a bill outright; without one, the lines written in
+    // the same save share a supplier and the exact moment they were saved.
+    const key = p.invoiceNumber?.trim()
+      ? `${p.supplierId}|no:${p.invoiceNumber.trim()}`
+      : `${p.supplierId}|at:${p.createdAt}`;
+    const existing = bills.get(key);
+    if (existing) {
+      existing.items!.push({ material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
+      existing.qty = Math.round((existing.qty + qty) * 1000) / 1000;
+      existing.amountInr = (existing.amountInr ?? 0) + p.totalInr;
+      if (existing.unit !== unit) existing.unit = unit; // mixed bill — the count is shown per line
+      continue;
+    }
+    bills.set(key, {
       id: p.id, date: p.createdAt, kind: "Purchase",
       party: db.suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier",
-      material: isGold ? `Gold ${p.gold?.purity ?? ""}`.trim() : `${p.diamond?.shape ?? "Diamond"}${p.diamond?.kind === "certified" ? " (certified)" : ""}`,
-      qty: isGold ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0),
-      unit: isGold ? "g" : "ct",
-      amountInr: p.totalInr,
-      remark: [p.discountPct ? `less ${p.discountPct}%` : "", p.notes ?? ""].filter(Boolean).join(" · ") || undefined,
+      material: label, qty, unit, amountInr: p.totalInr,
+      billNo: p.invoiceNumber?.trim() || undefined,
+      remark: p.notes || undefined,
+      items: [{ material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
     });
+  }
+  for (const b of bills.values()) {
+    if (b.items && b.items.length > 1) b.material = `${b.items.length} items`;
+    all.push(b);
   }
 
   // Stock already owned, seeded at migration — the Opening Stock tab.
@@ -97,6 +127,8 @@ export function StockActivityLedger() {
       if (material && !r.material.toLowerCase().startsWith(material.toLowerCase())) return false;
       return !ql || r.party.toLowerCase().includes(ql)
         || r.material.toLowerCase().includes(ql)
+        || (r.billNo ?? "").toLowerCase().includes(ql)
+        || (r.items ?? []).some(it => it.material.toLowerCase().includes(ql))
         || (r.remark ?? "").toLowerCase().includes(ql);
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
@@ -108,10 +140,18 @@ export function StockActivityLedger() {
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
 
-  const HEAD = ["Sr", "Date", "Entry", "Party", "Material", "Quantity", "Unit", "Amount (INR)", "Remark"];
-  const body = rows.map((r, i) => [
-    i + 1, fmtDate(r.date), r.kind, r.party, r.material, r.qty, r.unit, r.amountInr ?? "", r.remark ?? "",
-  ]);
+  const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Quantity", "Unit", "Amount (INR)", "Remark"];
+  const body: (string | number)[][] = [];
+  rows.forEach((r, i) => {
+    body.push([i + 1, fmtDate(r.date), r.kind, r.billNo ?? "", r.party, r.material, r.qty, r.unit, r.amountInr ?? "", r.remark ?? ""]);
+    // A bill's own lines follow it, so a download can be checked against the
+    // chitthi a line at a time and not only on the total.
+    if (r.items && r.items.length > 1) {
+      for (const it of r.items) {
+        body.push(["", "", "  item", "", "", it.material, it.qty, it.unit, it.amountInr, it.discountPct ? `less ${it.discountPct}%` : ""]);
+      }
+    }
+  });
 
   const exportCsv = () => downloadCsv("Stock-Activity", HEAD, body);
 
@@ -130,14 +170,15 @@ export function StockActivityLedger() {
     landscape: true,
     columns: [
       { header: "Sr", x: 14 }, { header: "Date", x: 26 }, { header: "Entry", x: 56 },
-      { header: "Party", x: 100 }, { header: "Material", x: 150 },
-      { header: "Qty", x: 205 }, { header: "Amount", x: 232 }, { header: "Remark", x: 262 },
+      { header: "Bill no.", x: 100 }, { header: "Party", x: 128 }, { header: "Material", x: 172 },
+      { header: "Qty", x: 218 }, { header: "Amount", x: 242 }, { header: "Remark", x: 268 },
     ],
-    align: ["left", "left", "left", "left", "left", "right", "right", "left"],
+    align: ["left", "left", "left", "left", "left", "left", "right", "right", "left"],
     rows: rows.map((r, i) => [
-      String(i + 1), fmtDate(r.date), r.kind, r.party.slice(0, 28), r.material.slice(0, 30),
+      String(i + 1), fmtDate(r.date), r.kind, (r.billNo ?? "").slice(0, 16),
+      r.party.slice(0, 26), r.material.slice(0, 26),
       `${r.qty}${r.unit}`, r.amountInr != null ? fmtMoneyInr(r.amountInr) : "",
-      (r.remark ?? "").slice(0, 18),
+      (r.remark ?? "").slice(0, 16),
     ]),
     filename: "Stock-Activity",
   });
@@ -176,6 +217,7 @@ export function StockActivityLedger() {
               <th className="text-left px-5 py-2.5">Sr</th>
               <th className="text-left px-3 py-2.5">Date</th>
               <th className="text-left px-3 py-2.5">Entry</th>
+              <th className="text-left px-3 py-2.5">Bill no.</th>
               <th className="text-left px-3 py-2.5">Party</th>
               <th className="text-left px-3 py-2.5">Material</th>
               <th className="text-right px-3 py-2.5">Quantity</th>
@@ -185,21 +227,46 @@ export function StockActivityLedger() {
           </thead>
           <tbody>
             {paged.length === 0 ? (
-              <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
                 {filtered ? "Nothing matches these filters." : "Nothing bought, assigned or sold yet."}
               </td></tr>
-            ) : paged.map((r, i) => (
-              <tr key={r.id} className="border-t border-border/40 hover:bg-secondary/30">
-                <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
-                <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
-                <td className="px-3 py-2.5 text-xs whitespace-nowrap">{r.kind}</td>
-                <td className="px-3 py-2.5 font-medium max-w-[160px] truncate" title={r.party}>{r.party}</td>
-                <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>{r.material}</td>
-                <td className="px-3 py-2.5 text-right font-medium whitespace-nowrap">{r.qty}{r.unit}</td>
-                <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{r.amountInr != null ? fmtMoneyInr(r.amountInr) : "—"}</td>
-                <td className="px-5 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</td>
-              </tr>
-            ))}
+            ) : paged.map((r, i) => {
+              // A bill of several sizes opens to show its own lines, so the
+              // chitthi can be checked a line at a time as well as on the total.
+              const multi = (r.items?.length ?? 0) > 1;
+              const isOpen = open === r.id;
+              return (
+                <Fragment key={r.id}>
+                  <tr className={`border-t border-border/40 hover:bg-secondary/30 ${multi ? "cursor-pointer" : ""}`}
+                    onClick={multi ? () => setOpen(isOpen ? null : r.id) : undefined}>
+                    <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
+                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">{r.kind}</td>
+                    <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.billNo ?? "—"}</td>
+                    <td className="px-3 py-2.5 font-medium max-w-[160px] truncate" title={r.party}>{r.party}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>
+                      {multi && <ChevronRight className={`inline h-3 w-3 mr-1 transition-transform ${isOpen ? "rotate-90" : ""}`} />}
+                      {r.material}
+                    </td>
+                    <td className="px-3 py-2.5 text-right font-medium whitespace-nowrap">{r.qty}{r.unit}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{r.amountInr != null ? fmtMoneyInr(r.amountInr) : "—"}</td>
+                    <td className="px-5 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</td>
+                  </tr>
+                  {multi && isOpen && r.items!.map((it, n) => (
+                    <tr key={`${r.id}-${n}`} className="bg-secondary/30 text-xs">
+                      <td className="px-5 py-1.5" />
+                      <td className="px-3 py-1.5" colSpan={5}>
+                        <span className="text-muted-foreground">{it.material}</span>
+                        {it.discountPct ? <span className="text-muted-foreground"> · less {it.discountPct}%</span> : null}
+                      </td>
+                      <td className="px-3 py-1.5 text-right">{it.qty}{it.unit}</td>
+                      <td className="px-3 py-1.5 text-right font-medium">{fmtMoneyInr(it.amountInr)}</td>
+                      <td className="px-5 py-1.5" />
+                    </tr>
+                  ))}
+                </Fragment>
+              );
+            })}
           </tbody>
         </table>
       </div>
