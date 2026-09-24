@@ -823,7 +823,12 @@ export function OrderDetailPage() {
       metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
     };
     const diamondCt = order.actualDiamondWeight || order.diamondWeight || 0;
-    const value = labourValue(labour, hasNet ? netW : (issuance.finishedNetWeight || 0), diamondCt);
+    const otherNet = order.otherMetal ? (order.otherMetalWeight || 0) : 0;
+    const value = labourValue(
+      labour,
+      Math.round(((hasNet ? netW : (issuance.finishedNetWeight || 0)) + otherNet) * 1000) / 1000,
+      diamondCt,
+    );
     const karat = rcvKarat || issuance.purityOrQuality;
     // Gold: what's in the piece = net weight; the rest goes back. Diamonds keep
     // their existing used amount (net weight doesn't apply).
@@ -1089,7 +1094,12 @@ export function OrderDetailPage() {
     setFaDiaReturnedPcs(retPcs);
     setFaDiaAdjust(order.diamondWeightAdjust != null ? String(order.diamondWeightAdjust) : "");
     setFaDiaPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
-    setFaOtherMetal(order.otherMetal ?? "");
+    // A platinum or silver piece IS that metal — it is not a second metal added
+    // to a gold one. The field starts on the order's own metal so its weight can
+    // be entered at once; leaving it blank disabled the weight box, which is
+    // also the weight labour per gram is charged on.
+    const selfMetal = order.metal === "Platinum" || order.metal === "Silver" ? order.metal : "";
+    setFaOtherMetal(order.otherMetal ?? selfMetal);
     setFaOtherNet(order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
     setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
     setFaOrderValue(order.amount ? String(order.amount) : "");
@@ -1124,7 +1134,12 @@ export function OrderDetailPage() {
       metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
       metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
     };
-    const labourVal = labourValue(labour, hasNet ? netW : 0, usedDiaCt);
+    // Labour per gram is charged on the whole piece, not only its gold. A
+    // platinum or silver piece has no gold net weight, so charging on gold
+    // alone silently dropped the per-gram labour from the factory's bill.
+    const faOtherW = faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
+    const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW) * 1000) / 1000;
+    const labourVal = labourValue(labour, labourNet, usedDiaCt);
     const factoryId = order.assignedFactoryId;
     const orderVal = parseFloat(faOrderValue);
     const ship = parseFloat(faShipping);
@@ -3249,7 +3264,9 @@ export function OrderDetailPage() {
                   otherCharges: rcvOther ? Number(rcvOther) : undefined,
                   metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
                   metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
-                }, Number(rcvNetW) || 0, order.actualDiamondWeight || order.diamondWeight || 0);
+                }, Math.round(((Number(rcvNetW) || 0)
+                  + (order.otherMetal ? (order.otherMetalWeight || 0) : 0)) * 1000) / 1000,
+                  order.actualDiamondWeight || order.diamondWeight || 0);
                 return (
                   <div key={mi.id} className="rounded-xl bg-secondary text-sm">
                     <div className="flex items-center justify-between gap-2 p-2.5">
@@ -3524,7 +3541,8 @@ export function OrderDetailPage() {
           otherCharges: faOther ? Number(faOther) : undefined,
           metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
           metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
-        }, needsGold ? (Number(faGoldNet) || 0) : 0, usedDiaCt);
+        }, Math.round(((needsGold ? (Number(faGoldNet) || 0) : 0)
+          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0)) * 1000) / 1000, usedDiaCt);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
         return (
           <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !faSaving && setFaIdx(null)}>

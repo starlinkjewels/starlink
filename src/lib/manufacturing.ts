@@ -288,8 +288,15 @@ export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId:
   return Math.round((inFine - outFine + (openingFineGold || 0)) * 1000) / 1000;
 }
 
-/** Compute the structured labour value (factory payable) from an issuance's
- *  labour breakdown + its finished net weight + the order's diamond carats. */
+/**
+ * The structured labour value (factory payable) from an issuance's labour
+ * breakdown, the finished piece's net weight and the order's diamond carats.
+ *
+ * `netWeight` is the net weight of the PIECE — all of its metal, whatever that
+ * metal is. Callers used to pass only the gold net weight, so on a platinum or
+ * silver piece, which has none, labour per gram came to nothing: a rate of
+ * ₹1,000/g on 7.214g of platinum added ₹0 to the bill.
+ */
 export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number, diamondCt: number): number {
   if (!labour) return 0;
   const v =
