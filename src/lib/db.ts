@@ -972,6 +972,11 @@ export interface Purchase {
   /** Supplier discount already taken off this line, in % ("less 5%"). Stored
    *  for the record only — totalInr/totalUsd are the discounted figures. */
   discountPct?: number;
+  /** What was knocked off (or added) to make the bill a round figure — the few
+   *  rupees nobody actually hands over. Already inside totalInr; kept separately
+   *  so a statement can explain why the total is not weight × rate. Negative
+   *  when the bill was rounded DOWN, which is the usual direction. */
+  roundOffInr?: number;
   invoiceNumber?: string;
   invoiceDate?: string;
   notes?: string;

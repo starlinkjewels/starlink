@@ -218,6 +218,9 @@ export function OrderDetailPage() {
   const [showBuyForm, setShowBuyForm] = useState(false);
   const [buySupplierId, setBuySupplierId] = useState("");
   const [buyLines, setBuyLines] = useState<BuyLine[]>([emptyBuyLine()]);
+  // The odd rupees nobody hands over. One figure for the whole bill, riding on
+  // the first line so the supplier's due matches the cash actually paid.
+  const [buyRoundOff, setBuyRoundOff] = useState("");
   const [buying, setBuying] = useState(false);
 
   const [showIssueForm, setShowIssueForm] = useState(false);
@@ -385,7 +388,9 @@ export function OrderDetailPage() {
   };
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
 
-  const buyGrandTotalInr = buyLines.reduce((s, l) => s + buyLineTotalInr(l), 0);
+  const buyLinesTotalInr = buyLines.reduce((s, l) => s + buyLineTotalInr(l), 0);
+  const buyRoundOffInr = Math.round(Number(buyRoundOff) || 0);
+  const buyGrandTotalInr = buyLinesTotalInr + buyRoundOffInr;
 
   const updateBuyLine = (idx: number, patch: Partial<BuyLine>) =>
     setBuyLines(prev => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
@@ -395,6 +400,7 @@ export function OrderDetailPage() {
   const resetBuyForm = () => {
     setBuySupplierId("");
     setBuyLines([emptyBuyLine()]);
+    setBuyRoundOff("");
   };
 
   const recordPurchaseForOrder = async () => {
@@ -432,12 +438,18 @@ export function OrderDetailPage() {
       exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
       totalInr: buyLineTotalInr(line),
       discountPct: Number(line.discountPct) > 0 ? Number(line.discountPct) : undefined,
+      roundOffInr: undefined as number | undefined,
       payments: [],
       invoiceNumber: line.invoiceNumber.trim() || undefined,
       notes: line.notes.trim() || undefined,
       createdBy: user!.id,
       createdAt: now,
     }));
+    // The bill is rounded once, not per line, so it rides on the first purchase.
+    if (buyRoundOffInr !== 0 && newPurchases.length > 0) {
+      newPurchases[0].totalInr += buyRoundOffInr;
+      newPurchases[0].roundOffInr = buyRoundOffInr;
+    }
 
     // Precompute each line's pooled-stock bucket up front — needed both for the
     // stock-movement logging below (which must happen before updateDb, so a
@@ -3102,8 +3114,25 @@ export function OrderDetailPage() {
                 <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
               </Button>
 
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+                <div>
+                  <Label className="text-[11px]">Round off ₹</Label>
+                  <Input type="number" step="1" value={buyRoundOff} onChange={e => setBuyRoundOff(e.target.value)}
+                    className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
+                </div>
+                {buyLinesTotalInr > 0 && buyRoundOffInr === 0 && buyLinesTotalInr % 10 !== 0 && (
+                  <button type="button" onClick={() => setBuyRoundOff(String(-(buyLinesTotalInr % 10)))}
+                    className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
+                    Round {fmtMoneyInr(buyLinesTotalInr)} down to {fmtMoneyInr(buyLinesTotalInr - (buyLinesTotalInr % 10))}
+                  </button>
+                )}
+              </div>
+
               <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-                <span className="text-sm text-muted-foreground">Grand Total (INR)</span>
+                <span className="text-sm text-muted-foreground">
+                  Grand Total (INR)
+                  {buyRoundOffInr !== 0 && <span className="block text-xs">{fmtMoneyInr(buyLinesTotalInr)} {buyRoundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(buyRoundOffInr))} rounding</span>}
+                </span>
                 <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(buyGrandTotalInr)}</span>
               </div>
 

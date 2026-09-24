@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { StockActivityLedger } from "@/components/StockActivityLedger";
 import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
@@ -25,7 +26,7 @@ type Mode = "buy" | "assign" | "sell" | "opening";
 export function BuyAssignPage() {
   const [mode, setMode] = useState<Mode>("buy");
   return (
-    <div className="max-w-3xl mx-auto space-y-5">
+    <div className="max-w-6xl mx-auto space-y-5">
       <div>
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Buy &amp; Assign</h1>
         <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold to a factory, or sell a diamond directly</p>
@@ -47,9 +48,13 @@ export function BuyAssignPage() {
         ))}
       </div>
 
-      <div className="card-luxe p-6">
+      <div className="card-luxe p-6 max-w-3xl">
         {mode === "buy" ? <BuyMaterial /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
       </div>
+
+      {/* Everything the four tabs above have done, so a day's entries can be
+          checked afterwards instead of disappearing into four different places. */}
+      <StockActivityLedger />
     </div>
   );
 }
@@ -73,6 +78,7 @@ function BuyMaterial() {
   // chosen rather than assumed to be today.
   const [date, setDate] = useState(todayLocal());
   const [discountPct, setDiscountPct] = useState("");
+  const [roundOff, setRoundOff] = useState("");
   const [notes, setNotes] = useState("");
   // certified grading
   const [color, setColor] = useState(""); const [clarity, setClarity] = useState("");
@@ -89,7 +95,11 @@ function BuyMaterial() {
   const disc = Math.min(Math.max(Number(discountPct) || 0, 0), 100);
   const grossAmount = (Number(qty) || 0) * (Number(rate) || 0);
   const baseAmount = grossAmount * (1 - disc / 100);
-  const totalInr = currency === "USD" ? Math.round(baseAmount * (Number(xrate) || 0)) : Math.round(baseAmount);
+  const computedInr = currency === "USD" ? Math.round(baseAmount * (Number(xrate) || 0)) : Math.round(baseAmount);
+  // The odd rupees nobody hands over. Typed as the adjustment, so −3 means the
+  // bill was settled ₹3 short of what the rate works out to.
+  const roundOffInr = Math.round(Number(roundOff) || 0);
+  const totalInr = computedInr + roundOffInr;
 
   const submit = async () => {
     if (!supplierId) { toast.error("Choose a supplier"); return; }
@@ -128,6 +138,7 @@ function BuyMaterial() {
           exchangeRate: currency === "USD" ? Number(xrate) : undefined,
           totalInr, payments: [],
           discountPct: disc > 0 ? disc : undefined,
+          roundOffInr: roundOffInr !== 0 ? roundOffInr : undefined,
           notes: notes.trim() || undefined,
           createdBy: user!.id, createdAt: now,
         };
@@ -146,7 +157,7 @@ function BuyMaterial() {
         }
       });
       toast.success(`Bought ${q}${kind === "gold" ? "g" : "ct"} → stock · ${fmtMoneyInr(totalInr)} to ${supplier?.name || "supplier"}`);
-      setQty(""); setRate(""); setQuality(""); setPcs(""); setXrate(""); setDiscountPct(""); setNotes("");
+      setQty(""); setRate(""); setQuality(""); setPcs(""); setXrate(""); setDiscountPct(""); setRoundOff(""); setNotes("");
       setColor(""); setClarity(""); setCut(""); setPolish(""); setSym(""); setFluor(""); setMeasure(""); setLab(""); setCertNo("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
@@ -216,16 +227,26 @@ function BuyMaterial() {
         </div>
       )}
 
-      <div className="grid grid-cols-2 gap-2.5">
+      <div className="grid grid-cols-3 gap-2.5">
         <div>
           <Label className="text-xs">Discount %</Label>
           <Input type="number" min={0} max={100} step="0.01" value={discountPct} onChange={e => setDiscountPct(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+        </div>
+        <div>
+          <Label className="text-xs">Round off ₹</Label>
+          <Input type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
         </div>
         <div>
           <Label className="text-xs">Remark</Label>
           <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
         </div>
       </div>
+      {computedInr > 0 && roundOffInr === 0 && computedInr % 10 !== 0 && (
+        <button type="button" onClick={() => setRoundOff(String(-(computedInr % 10)))}
+          className="text-xs text-primary hover:underline self-start">
+          Round {fmtMoneyInr(computedInr)} down to {fmtMoneyInr(computedInr - (computedInr % 10))}
+        </button>
+      )}
 
       <div className="grid grid-cols-3 gap-2.5">
         <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
@@ -245,6 +266,7 @@ function BuyMaterial() {
       <div className="flex items-center justify-between gap-2 pt-1">
         <span className="text-sm">
           {disc > 0 && <span className="text-xs text-muted-foreground mr-2">less {disc}% of {fmtMoneyInr(currency === "USD" ? grossAmount * (Number(xrate) || 0) : grossAmount)} ·</span>}
+          {roundOffInr !== 0 && <span className="text-xs text-muted-foreground mr-2">{fmtMoneyInr(computedInr)} {roundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roundOffInr))} rounding ·</span>}
           Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span> <span className="text-xs text-muted-foreground">to supplier</span>
         </span>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10">{saving ? "Saving…" : "Buy → Stock"}</AsyncButton>

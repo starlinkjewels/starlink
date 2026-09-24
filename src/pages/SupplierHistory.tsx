@@ -131,14 +131,20 @@ export function SupplierHistoryPage() {
   const [purchaseLines, setPurchaseLines] = useState<PurchaseLine[]>([emptyPurchaseLine()]);
   const [recordingPurchase, setRecordingPurchase] = useState(false);
 
-  const grandTotalInr = purchaseLines.reduce((s, l) => s + purchaseLineTotalInr(l), 0);
+  const linesTotalInr = purchaseLines.reduce((s, l) => s + purchaseLineTotalInr(l), 0);
+  // The odd rupees nobody hands over. One figure for the whole bill, because
+  // that is what gets rounded — it rides on the first line so the supplier's
+  // due matches the cash, and is stored there so a statement can explain it.
+  const [roundOff, setRoundOff] = useState("");
+  const roundOffInr = Math.round(Number(roundOff) || 0);
+  const grandTotalInr = linesTotalInr + roundOffInr;
 
   const updatePurchaseLine = (idx: number, patch: Partial<PurchaseLine>) =>
     setPurchaseLines(prev => prev.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
   const addPurchaseLine = () => setPurchaseLines(prev => [...prev, emptyPurchaseLine()]);
   const removePurchaseLine = (idx: number) => setPurchaseLines(prev => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
-  const resetPurchaseForm = () => setPurchaseLines([emptyPurchaseLine()]);
+  const resetPurchaseForm = () => { setPurchaseLines([emptyPurchaseLine()]); setRoundOff(""); };
 
   const recordPurchase = async () => {
     for (const line of purchaseLines) {
@@ -166,6 +172,7 @@ export function SupplierHistoryPage() {
     const entries = resolved.map(({ line, linkedOrderId }) => ({
       id: uid("pur_"), line, linkedOrderId, totalInr: purchaseLineTotalInr(line),
     }));
+    if (roundOffInr !== 0 && entries.length > 0) entries[0].totalInr += roundOffInr;
 
     setRecordingPurchase(true);
     try {
@@ -210,6 +217,7 @@ export function SupplierHistoryPage() {
             totalUsd: line.currency === "USD" ? Number(line.totalUsd) : undefined,
             exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
             totalInr,
+            roundOffInr: roundOffInr !== 0 && entry.id === entries[0].id ? roundOffInr : undefined,
             payments: [],
             invoiceNumber: line.invoiceNumber.trim() || undefined,
             notes: line.notes.trim() || undefined,
@@ -748,8 +756,25 @@ export function SupplierHistoryPage() {
               <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
             </Button>
 
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+              <div>
+                <Label className="text-xs">Round off ₹</Label>
+                <Input type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)}
+                  className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
+              </div>
+              {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
+                <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
+                  className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
+                  Round {fmtMoneyInr(linesTotalInr)} down to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
+                </button>
+              )}
+            </div>
+
             <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-              <span className="text-sm text-muted-foreground">Grand Total (INR)</span>
+              <span className="text-sm text-muted-foreground">
+                Grand Total (INR)
+                {roundOffInr !== 0 && <span className="block text-xs">{fmtMoneyInr(linesTotalInr)} {roundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roundOffInr))} rounding</span>}
+              </span>
               <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(grandTotalInr)}</span>
             </div>
 
