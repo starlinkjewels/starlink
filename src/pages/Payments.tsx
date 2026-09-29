@@ -10,6 +10,7 @@ import { createReceipt } from "@/lib/receipts";
 import { reserveVoucherNumber } from "@/lib/counters";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { MoneyLedger } from "@/components/MoneyLedger";
+import { DayBook } from "@/components/DayBook";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
@@ -20,7 +21,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark } from "lucide-react";
+import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen } from "lucide-react";
 import { toast } from "sonner";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
@@ -28,7 +29,7 @@ import { toast } from "sonner";
 // todayLocal / stampFor now live in src/lib/db.ts, shared with Buy & Assign.
 
 
-type Mode = "client" | "supplier" | "factory" | "expense" | "locker";
+type Mode = "daybook" | "client" | "supplier" | "factory" | "expense" | "locker";
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
 // The fallback list is the one in db.ts, shared with Settings → Categories.
@@ -58,7 +59,9 @@ function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], l
  */
 export function PaymentsPage() {
   const db = useDb();
-  const [mode, setMode] = useState<Mode>("client");
+  // The day book opens first: it is the one view that shows the whole day, and
+  // it is what gets checked against the written rojmel.
+  const [mode, setMode] = useState<Mode>("daybook");
 
   const activeLockers = db.lockers.filter(l => l.active !== false);
 
@@ -66,11 +69,12 @@ export function PaymentsPage() {
     <div className="max-w-7xl mx-auto space-y-5">
       <div>
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Payments</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Receive from a client, or pay a supplier, factory, or expense — all in one place</p>
+        <p className="text-sm text-muted-foreground mt-0.5">The day book, and every payment in or out — all in one place</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
         {([
+          { m: "daybook", label: "Day Book", icon: BookOpen },
           { m: "client", label: "Receive from Client", icon: CreditCard },
           { m: "supplier", label: "Supplier", icon: Truck },
           { m: "factory", label: "Pay Factory", icon: FactoryIcon },
@@ -94,6 +98,7 @@ export function PaymentsPage() {
 
       {/* Form first, then the table underneath at full width — the entries are
           what people come back to read, so they get the whole page. */}
+      {mode !== "daybook" && (
       <div className="card-luxe p-6">
         {mode === "client" && <ReceiveFromClient />}
         {mode === "supplier" && <PaySupplier />}
@@ -101,7 +106,9 @@ export function PaymentsPage() {
         {mode === "expense" && <PayExpense />}
         {mode === "locker" && <LockerActions />}
       </div>
+      )}
 
+      {mode === "daybook" && <DayBook />}
       {mode === "client" && <ReceiptLedger />}
       {mode === "supplier" && <MoneyLedger kind="supplier" />}
       {mode === "factory" && <MoneyLedger kind="factory" />}

@@ -16,6 +16,13 @@ export interface FactoryOrderRow {
   orderId: string;
   orderNo: string;
   date: string;
+  /** When the finished piece came back and its real weights were recorded.
+   *  The order date alone said when the job started, never when it landed. */
+  receivedDate?: string;
+  /** True when the gold in the piece was drawn from the gold already sitting
+   *  with this factory, rather than issued for this order. Such an order owes
+   *  nothing on its own — the draw shows against the delivery that supplied it. */
+  goldFromPool?: boolean;
   jewellery: string;
   goldOut: number;   // fine 24KT grams issued to the factory
   goldIn: number;    // fine 24KT grams back in the finished piece
@@ -77,6 +84,7 @@ export function buildFactoryOrderRows(
         orderStatus: order?.status || "",
         quotedUsd: 0, entries: [],
         metalNote: undefined,
+        receivedDate: undefined,
       };
       byOrder.set(key, row);
     }
@@ -85,7 +93,12 @@ export function buildFactoryOrderRows(
     row.total += 1;
     if (mi.status !== "closed") row.open += 1;
 
+    // The latest moment a finished piece was recorded against this order.
+    for (const fp of mi.finishedPieces ?? []) {
+      if (!row.receivedDate || +new Date(fp.recordedAt) > +new Date(row.receivedDate)) row.receivedDate = fp.recordedAt;
+    }
     if (mi.material === "gold") {
+      if (mi.source === "factoryPool") row.goldFromPool = true;
       if (mi.source !== "factoryPool") row.goldOut += toPureGold(mi.quantityIssued, mi.purityOrQuality);
       if (mi.finishedNetWeight != null) {
         row.goldIn += mi.finishedPurity != null
@@ -353,6 +366,7 @@ export function FactoryOrderLedger({
               </td></tr>
             ) : filtered.map(r => {
               const goldBal = r.goldOut - r.goldIn;
+              const drawnFromPool = !!r.goldFromPool && r.goldOut < 0.0005 && r.goldIn > 0.0005;
               const diaBal = r.diaOut - r.diaIn;
               const pending = r.labour - r.paid;
               const key = r.orderId || r.orderNo;
@@ -366,7 +380,14 @@ export function FactoryOrderLedger({
                       ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
                       : <span className="font-medium text-amber-700">{r.orderNo}</span>}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">{fmtDate(r.date)}</td>
+                  <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">
+                    {fmtDate(r.date)}
+                    {r.receivedDate && (
+                      <span className="block text-[10px] text-success" title="When the finished piece came back and its actual details were recorded">
+                        rcv {fmtDate(r.receivedDate)}
+                      </span>
+                    )}
+                  </td>
                   <td className="px-2 py-2 min-w-[150px]">
                     {r.jewellery || "—"}
                     {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
@@ -374,9 +395,15 @@ export function FactoryOrderLedger({
                   {hasGold && (<>
                     <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
                     <td className={num}>{g3(r.goldIn)}</td>
-                    <td className={`${num} font-semibold ${goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-success"}`}
-                      title={goldBal < 0 ? "The factory supplied this gold — we owe it back" : goldBal > 0 ? "Our gold still with the factory" : ""}>
-                      {r.goldEstimated ? "—" : g3(goldBal)}
+                    {/* A piece made from gold already sitting with this factory
+                        owes nothing on its own — the draw belongs to the delivery
+                        that supplied it, which is where it shows. Without this
+                        every order read as a debt of exactly its own weight. */}
+                    <td className={`${num} font-semibold ${drawnFromPool ? "text-muted-foreground" : goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-success"}`}
+                      title={drawnFromPool ? "Made from the gold already with this factory — counted against the delivery that supplied it"
+                        : goldBal < 0 ? "The factory supplied this gold — we owe it back"
+                        : goldBal > 0 ? "Our gold still with the factory" : ""}>
+                      {r.goldEstimated || drawnFromPool ? "—" : g3(goldBal)}
                     </td>
                   </>)}
                   {hasDia && (<>
