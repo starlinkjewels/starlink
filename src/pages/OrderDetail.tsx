@@ -728,6 +728,7 @@ export function OrderDetailPage() {
   // adjustment (+ or −), and the stone count that goes on the same bill.
   const [faDiaAdjust, setFaDiaAdjust] = useState("");
   const [faDiaPcs, setFaDiaPcs] = useState("");
+  const [faBillNo, setFaBillNo] = useState("");
   // The same two figures, editable straight from the Manufacturing card so they
   // can be set from the factory’s bill without reopening Final Approval.
   const [diaTotW, setDiaTotW] = useState("");
@@ -1108,6 +1109,7 @@ export function OrderDetailPage() {
     setFaDiaReturnedPcs(retPcs);
     setFaDiaAdjust(order.diamondWeightAdjust != null ? String(order.diamondWeightAdjust) : "");
     setFaDiaPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
+    setFaBillNo(order.factoryBillNo ?? "");
     // A platinum or silver piece IS that metal — it is not a second metal added
     // to a gold one. The field starts on the order's own metal so its weight can
     // be entered at once; leaving it blank disabled the weight box, which is
@@ -1241,6 +1243,7 @@ export function OrderDetailPage() {
 
         // The diamond figure the factory’s bill is based on, and the difference
         // from what we issued, so the two ledgers can be reconciled later.
+        o.factoryBillNo = faBillNo.trim() || undefined;
         o.actualDiamondWeight = usedDiaCt > 0 ? usedDiaCt : undefined;
         o.diamondWeightAdjust = diaAdjust !== 0 ? diaAdjust : undefined;
         const diaPcsN = Math.round(Number(faDiaPcs) || 0);
@@ -2906,6 +2909,9 @@ export function OrderDetailPage() {
                   <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
                     <span>Gold used: <span className="font-semibold text-foreground">{finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g ${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")}g fine` : "—"}</span></span>
                     <span>Labour: <span className="font-semibold text-foreground">{finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—"}</span></span>
+                    {order.factoryBillNo && (
+                      <span>Factory bill: <span className="font-semibold text-foreground font-mono">{order.factoryBillNo}</span></span>
+                    )}
                   </div>
                   {dias.map(i => {
                     const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
@@ -3585,6 +3591,19 @@ export function OrderDetailPage() {
             <div className="card-luxe w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
               <h3 className="font-display text-lg text-brand-dark mb-1">Final Approval — {order.orderNumber}</h3>
               <p className="text-xs text-muted-foreground mb-4">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</p>
+
+              {/* The factory's own bill number. One of their bills covers several
+                  pieces while each comes back on its own, so this is what ties
+                  our entries to the bill being checked against — and what finds
+                  a single wrong one. */}
+              <div className="mb-4">
+                <Label className="text-[11px]">Factory bill no.</Label>
+                <Input value={faBillNo} onChange={e => setFaBillNo(e.target.value)}
+                  className="rounded-lg h-9 mt-1" placeholder="e.g. JS4677 — from the factory's bill" />
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Put the same number on every piece from one bill; the factory ledger then totals them together.
+                </p>
+              </div>
 
               {needsGold && (
                 <div className="mb-4">

@@ -19,6 +19,9 @@ export interface FactoryOrderRow {
   /** When the finished piece came back and its real weights were recorded.
    *  The order date alone said when the job started, never when it landed. */
   receivedDate?: string;
+  /** The factory's own bill number for this piece. Several pieces share one,
+   *  which is what lets a bill be totalled and checked as the factory sent it. */
+  factoryBillNo?: string;
   /** True when the gold in the piece was drawn from the gold already sitting
    *  with this factory, rather than issued for this order. Such an order owes
    *  nothing on its own — the draw shows against the delivery that supplied it. */
@@ -82,6 +85,7 @@ export function buildFactoryOrderRows(
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
+        factoryBillNo: order?.factoryBillNo || undefined,
         quotedUsd: 0, entries: [],
         metalNote: undefined,
         receivedDate: undefined,
@@ -236,7 +240,11 @@ export function FactoryOrderLedger({
       if (fromD && d < fromD) return false;
       if (toD && d > toD) return false;
       if (!ql) return true;
-      return r.orderNo.toLowerCase().includes(ql) || r.jewellery.toLowerCase().includes(ql);
+      // Searching the factory's bill number pulls up every piece on that bill,
+      // and the totals row then adds up exactly what the bill should say.
+      return r.orderNo.toLowerCase().includes(ql)
+        || r.jewellery.toLowerCase().includes(ql)
+        || (r.factoryBillNo ?? "").toLowerCase().includes(ql);
     });
   }, [rows, q, from, to, only]);
 
@@ -317,7 +325,7 @@ export function FactoryOrderLedger({
       <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order no. or item…" className="rounded-xl h-9 pl-9" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order no., item, or factory bill no…" className="rounded-xl h-9 pl-9" />
         </div>
         <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="rounded-xl h-9 w-auto" />
         <span className="text-xs text-muted-foreground">to</span>
@@ -341,6 +349,7 @@ export function FactoryOrderLedger({
           <thead>
             <tr className="bg-secondary/60 text-muted-foreground">
               <th className="px-3 py-2 text-left font-semibold" rowSpan={2}>Order</th>
+              <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Factory bill</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Date</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Item</th>
               {hasGold && <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Gold (g fine)</th>}
@@ -361,7 +370,7 @@ export function FactoryOrderLedger({
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={14} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={15} className="px-5 py-10 text-center text-muted-foreground">
                 {active ? "No order matches that." : "Nothing issued to this factory yet."}
               </td></tr>
             ) : filtered.map(r => {
@@ -371,7 +380,7 @@ export function FactoryOrderLedger({
               const pending = r.labour - r.paid;
               const key = r.orderId || r.orderNo;
               const isOpen = open.has(key);
-              const cols = 3 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
+              const cols = 4 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
               return (
                 <>
                 <tr key={key} onClick={() => toggle(key)} className="border-t border-border/40 hover:bg-secondary/30 cursor-pointer">
@@ -379,6 +388,14 @@ export function FactoryOrderLedger({
                     {r.orderId
                       ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
                       : <span className="font-medium text-amber-700">{r.orderNo}</span>}
+                  </td>
+                  <td className="px-2 py-2 whitespace-nowrap">
+                    {r.factoryBillNo
+                      ? <button type="button" onClick={e => { e.stopPropagation(); setQ(r.factoryBillNo!); }}
+                          title="Show every piece on this bill" className="font-mono text-[11px] text-primary hover:underline">
+                          {r.factoryBillNo}
+                        </button>
+                      : <span className="text-muted-foreground">—</span>}
                   </td>
                   <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">
                     {fmtDate(r.date)}
@@ -447,7 +464,7 @@ export function FactoryOrderLedger({
           {filtered.length > 0 && (
             <tfoot>
               <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
-                <td className="px-3 py-2" colSpan={3}>Totals{active ? " (filtered)" : ""}</td>
+                <td className="px-3 py-2" colSpan={4}>Totals{active ? " (filtered)" : ""}</td>
                 {hasGold && (<>
                   <td className={`${num} border-l border-border/60`}>{g3(T.goldOut)}</td>
                   <td className={num}>{g3(T.goldIn)}</td>

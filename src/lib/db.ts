@@ -329,6 +329,11 @@ export interface Order {
   diamondWeightAdjust?: number;
   /** How many stones the factory’s bill counts. */
   actualDiamondPcs?: number;
+  /** The factory's OWN bill number for this piece. One of their bills covers
+   *  several pieces, but each comes back on its own, so without this there is
+   *  nothing tying our entries to the bill they are being checked against —
+   *  and a single wrong entry could not be found at all. */
+  factoryBillNo?: string;
   actualMetalRate?: number; // $ per gram
   actualDiamondRate?: number; // $ per carat
   actualMakingCharges?: number; // flat $ making charges
