@@ -55,7 +55,7 @@ export function DayBook() {
   });
 
   const ql = q.trim().toLowerCase();
-  const rows = withBalance.filter(({ t }) => {
+  const matching = withBalance.filter(({ t }) => {
     if (!inDateRange(t.createdAt, from, to)) return false;
     if (dir === "in" && !isIn(t)) return false;
     if (dir === "out" && isIn(t)) return false;
@@ -64,6 +64,12 @@ export function DayBook() {
       || (t.note ?? "").toLowerCase().includes(ql)
       || (t.voucherNo ?? "").toLowerCase().includes(ql);
   });
+
+  // Newest first on screen: today's entries are the ones being checked, and
+  // reaching them meant paging to the end of the book. The balance is worked
+  // out downwards before this, so every line still carries the balance AFTER
+  // it — the top line is simply the closing balance.
+  const rows = [...matching].reverse();
 
   const filtered = !!(ql || from || to || dir);
   const reset = () => { setQ(""); setFrom(""); setTo(""); setDir(""); setPage(1); };
@@ -77,7 +83,9 @@ export function DayBook() {
     [t.category || t.type, t.note].filter(Boolean).join(" · ");
 
   const HEAD = ["Date", "Voucher", "Particulars", `In (${ccy})`, `Out (${ccy})`, `Balance (${ccy})`];
-  const body = rows.map(({ t, balance }) => [
+  // The download keeps the book's own order — oldest first — because a printed
+  // page gets laid beside the written rojmel, which runs that way down the page.
+  const body = matching.map(({ t, balance }) => [
     fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t),
     isIn(t) ? t.amountInr : "", isIn(t) ? "" : t.amountInr, balance,
   ]);
@@ -87,7 +95,7 @@ export function DayBook() {
   const exportPdf = () => downloadLedgerPdf({
     title: `Day Book — ${locker?.name ?? "Account"}`,
     subjectLines: [
-      `${rows.length} entr${rows.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)}`,
+      `${matching.length} entr${matching.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)} · oldest first`,
       `Opening ${money(locker?.openingBalance || 0)} · Closing ${money(closing)}`,
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
@@ -102,7 +110,7 @@ export function DayBook() {
       { header: "In", x: 180 }, { header: "Out", x: 215 }, { header: "Balance", x: 252 },
     ],
     align: ["left", "left", "left", "right", "right", "right"],
-    rows: rows.map(({ t, balance }) => [
+    rows: matching.map(({ t, balance }) => [
       fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t).slice(0, 62),
       isIn(t) ? money(t.amountInr) : "", isIn(t) ? "" : money(t.amountInr), money(balance),
     ]),
@@ -118,7 +126,7 @@ export function DayBook() {
       <div className="mb-3">
         <p className="font-display text-lg text-brand-dark leading-tight">Day Book</p>
         <p className="text-xs text-muted-foreground">
-          Every movement on one account, oldest first, the way the rojmel is written
+          Every movement on one account, newest first — the balance on each line is the balance after it
         </p>
       </div>
 
