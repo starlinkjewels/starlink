@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
+import { usePageSizePref } from "@/hooks/usePageSize";
 
 /**
  * Paging that survives leaving the page and coming back.
@@ -14,7 +15,10 @@ import { useSearchParams } from "react-router-dom";
  *
  * `paramKey` names the query parameter; give one per list when a page shows two.
  */
-export function usePagination<T>(items: T[], pageSize = 10, paramKey = "page") {
+export function usePagination<T>(items: T[], defaultPageSize = 10, paramKey = "page") {
+  // How many rows a page holds is the reader's choice, kept across visits. The
+  // number passed in is only the fallback for someone who has never set one.
+  const pageSize = usePageSizePref(defaultPageSize);
   const [params, setParams] = useSearchParams();
   const fromUrl = Math.max(1, Math.floor(Number(params.get(paramKey))) || 1);
   const [page, setPageState] = useState(fromUrl);
@@ -45,12 +49,13 @@ export function usePagination<T>(items: T[], pageSize = 10, paramKey = "page") {
 
   // A changed search or filter is a different list, so go back to the top — but
   // not on the first render, which would throw away the page just restored.
+  // Changing the rows per page reshuffles every page boundary, so it counts too.
   const first = useRef(true);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
     setPageState(1);
     writeParam(1);
-  }, [items.length, writeParam]);
+  }, [items.length, pageSize, writeParam]);
 
   const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
   const safePage = Math.min(page, totalPages);

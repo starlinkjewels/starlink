@@ -3,6 +3,63 @@ import {
   PaginationLink, PaginationPrevious, PaginationNext, PaginationEllipsis,
 } from "@/components/ui/pagination";
 import { ChevronLeft, ChevronRight } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { usePageSizePref, setPageSizePref } from "@/hooks/usePageSize";
+
+const CHOICES = [25, 50, 100, 500];
+
+/**
+ * How many rows a page holds. The choice is remembered and applies to every
+ * list, because it is a decision about how someone likes to read rather than
+ * twenty separate settings. "Custom" is there for the numbers in between.
+ */
+function RowsPerPage() {
+  const current = usePageSizePref(0); // 0 only while nothing has been chosen
+  const [custom, setCustom] = useState(false);
+  const [draft, setDraft] = useState("");
+
+  // Picking a listed size from somewhere else closes the custom box.
+  useEffect(() => { if (CHOICES.includes(current)) setCustom(false); }, [current]);
+
+  const commit = () => {
+    const n = Number(draft);
+    if (n > 0) setPageSizePref(Math.floor(n));
+    setCustom(false);
+  };
+
+  return (
+    <div className="flex items-center gap-1.5 shrink-0">
+      <span className="text-xs text-muted-foreground hidden sm:inline">Rows</span>
+      {custom ? (
+        <Input
+          type="number" min={1} autoFocus value={draft}
+          onChange={e => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={e => { if (e.key === "Enter") commit(); if (e.key === "Escape") setCustom(false); }}
+          className="h-9 w-20 rounded-xl text-xs" placeholder="e.g. 75"
+        />
+      ) : (
+        <Select
+          value={current && CHOICES.includes(current) ? String(current) : current ? "current" : "default"}
+          onValueChange={v => {
+            if (v === "custom") { setDraft(current ? String(current) : ""); setCustom(true); return; }
+            if (v === "default" || v === "current") return;
+            setPageSizePref(Number(v));
+          }}>
+          <SelectTrigger className="h-9 w-[84px] rounded-xl text-xs"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {!current && <SelectItem value="default">Default</SelectItem>}
+            {!!current && !CHOICES.includes(current) && <SelectItem value="current">{current}</SelectItem>}
+            {CHOICES.map(n => <SelectItem key={n} value={String(n)}>{n}</SelectItem>)}
+            <SelectItem value="custom">Custom…</SelectItem>
+          </SelectContent>
+        </Select>
+      )}
+    </div>
+  );
+}
 
 interface Props {
   page: number;
@@ -14,7 +71,9 @@ interface Props {
 }
 
 export function PaginationBar({ page, totalPages, onPageChange, label, className = "" }: Props) {
-  if (totalPages <= 1) return null;
+  // One page still shows the bar when there is anything in the list, or the
+  // control that made the page that big could not be reached to make it smaller.
+  if (totalPages <= 1 && !label) return null;
 
   /** Build the visible page numbers with ellipsis logic */
   const pages: (number | "…")[] = [];
@@ -30,11 +89,16 @@ export function PaginationBar({ page, totalPages, onPageChange, label, className
 
   return (
     <div className={`flex items-center justify-between gap-3 flex-wrap py-3 px-1 ${className}`}>
-      {/* left label */}
-      {label && (
-        <p className="text-xs sm:text-sm text-muted-foreground shrink-0">{label}</p>
-      )}
+      {/* What is on screen, and how much of it fits — together on the left, with
+          the page numbers on the right. */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {label && (
+          <p className="text-xs sm:text-sm text-muted-foreground shrink-0">{label}</p>
+        )}
+        <RowsPerPage />
+      </div>
 
+      {totalPages > 1 && (<>
       {/* ── Mobile: compact Prev · Page X of Y · Next (never overflows) ── */}
       <div className="flex sm:hidden items-center gap-2 ml-auto">
         <button
@@ -99,6 +163,7 @@ export function PaginationBar({ page, totalPages, onPageChange, label, className
           </PaginationItem>
         </PaginationContent>
       </Pagination>
+      </>)}
     </div>
   );
 }
