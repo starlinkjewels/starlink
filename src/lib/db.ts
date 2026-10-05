@@ -2250,12 +2250,35 @@ function subscribeAll(scope: Scope): Promise<void> {
   names.push(SETTINGS_COL);
   const pending = new Set<string>(names);
 
+  // Opening the app waits for EVERY collection to arrive in full before it can
+  // render, and several of them grow without limit, so a cold open gets slower
+  // every week. This measures it rather than leaving it to guesswork: how long
+  // each one took, how many documents it carried, and what the slowest was.
+  // Read it in the browser console as "[db] startup".
+  const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+  const timing: { col: string; ms: number; docs: number }[] = [];
+  const mark = (col: string, docs: number) => {
+    const now = typeof performance !== "undefined" ? performance.now() : Date.now();
+    timing.push({ col, ms: Math.round(now - t0), docs });
+  };
+
   return new Promise((resolve) => {
     let done = false;
     const first = (name: string) => {
       pending.delete(name);
       if (!done && pending.size === 0) {
         done = true;
+        const total = timing.length ? Math.max(...timing.map((t) => t.ms)) : 0;
+        const docs = timing.reduce((s, t) => s + t.docs, 0);
+        const slowest = [...timing].sort((a, b) => b.ms - a.ms).slice(0, 6);
+        const biggest = [...timing].sort((a, b) => b.docs - a.docs).slice(0, 6);
+        console.info(
+          `[db] startup: ${timing.length} collections, ${docs} documents, ${total}ms before the app could render`
+          + `
+      slowest: ${slowest.map((t) => `${t.col} ${t.ms}ms`).join(", ")}`
+          + `
+      biggest: ${biggest.map((t) => `${t.col} ${t.docs} docs`).join(", ")}`,
+        );
         resolve();
       }
     };
@@ -2273,6 +2296,7 @@ function subscribeAll(scope: Scope): Promise<void> {
               col,
               snap.docs.map((d) => d.data() as Record<string, unknown>),
             );
+            if (pending.has(col)) mark(col, snap.docs.length);
             first(col);
             if (seeded) emit();
           },
