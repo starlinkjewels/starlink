@@ -1872,6 +1872,13 @@ async function persist() {
   const committedDeletes: { col: ArrayCol; id: string }[] = [];
 
   for (const col of ARRAY_COLS) {
+    // A collection the server refuses is not worth attempting again. A failed
+    // write is never reconciled against the mirror, so the same documents are
+    // regenerated on EVERY later save: one rejected collection made every save
+    // for the rest of the session slow, pending and doomed, with a permanent
+    // "Saving…" and no clue which collection. The data stays in the cache and
+    // goes up on the next reload once the rules allow it.
+    if (deniedCols.has(col)) continue;
     const cur = (snap[col] as unknown as Record<string, unknown>[]) || [];
     const prev = (remote[col] as unknown as Record<string, unknown>[]) || [];
     const curMap = new Map(cur.map((i) => [docId(col, i), i]));
@@ -2033,12 +2040,14 @@ async function persist() {
     console.error(`[db] Firestore write failed (${[...touched].join(", ")}):`, err);
     if (code === "permission-denied") {
       for (const c of touched) {
+        deniedCols.add(c);
         if (deniedReported.has(c)) continue;
         deniedReported.add(c);
         console.error(
-          `[db] "${c}" is being rejected by the security rules. Every save from now on will retry it and fail. `
-          + `Deploy the rules (firebase deploy --only firestore:rules) — a collection added in the app but not in `
-          + `firestore.rules does exactly this.`,
+          `[db] "${c}" was rejected by the security rules, so it will not be attempted again this session. `
+          + `Nothing is lost — it stays on this device and goes up once the rules allow it. `
+          + `Run: firebase deploy --only firestore:rules (a collection added in the app but missing from `
+          + `firestore.rules does exactly this), then reload.`,
         );
       }
     }
@@ -2052,6 +2061,10 @@ async function persist() {
   }
 }
 
+/** Collections the rules refuse. Skipped for the rest of the session so one
+ *  rejected collection cannot make every save slow and failing. Cleared by a
+ *  reload, which is when a rules deploy takes effect anyway. */
+const deniedCols = new Set<string>();
 /** Collections already reported as rejected — one message each, not one per save. */
 const deniedReported = new Set<string>();
 
@@ -2271,10 +2284,22 @@ function subscribeAll(scope: Scope): Promise<void> {
   names.push(SETTINGS_COL);
   const pending = new Set<string>(names);
 
-  // Opening the app waits for EVERY collection to arrive in full before it can
-  // render, and several of them grow without limit, so a cold open gets slower
-  // every week. This measures it rather than leaving it to guesswork: how long
-  // each one took, how many documents it carried, and what the slowest was.
+  /**
+   * What the app genuinely cannot render without: who is signed in, and the
+   * orders and clients the first screen is made of.
+   *
+   * It used to wait for ALL of them — every message, notification, stock
+   * movement, purchase and issuance ever recorded — before painting a single
+   * pixel. Several of those grow without limit and are never pruned, so the
+   * wait got longer every week and was worst on a phone. The rest still load,
+   * they just no longer hold the door: each one refreshes the screen as it
+   * lands, which is what the listeners already do for every later change.
+   */
+  const corePending = new Set<string>(
+    names.filter((n) => n === "users" || n === "clients" || n === "orders" || n === SETTINGS_COL),
+  );
+
+  // How long the whole load actually takes, logged once everything is in.
   // Read it in the browser console as "[db] startup".
   const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
   const timing: { col: string; ms: number; docs: number }[] = [];
@@ -2284,23 +2309,32 @@ function subscribeAll(scope: Scope): Promise<void> {
   };
 
   return new Promise((resolve) => {
-    let done = false;
+    let opened = false;
     const first = (name: string) => {
       pending.delete(name);
-      if (!done && pending.size === 0) {
-        done = true;
+      corePending.delete(name);
+      // Open as soon as there is something to show. Everything else arrives
+      // behind it and refreshes the screen as it does.
+      if (!opened && corePending.size === 0) {
+        opened = true;
+        seeded = true;
+        const ms = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
+        console.info(`[db] opened in ${ms}ms — ${pending.size} collection(s) still loading in the background`);
+        resolve();
+      }
+      if (pending.size === 0) {
         const total = timing.length ? Math.max(...timing.map((t) => t.ms)) : 0;
         const docs = timing.reduce((s, t) => s + t.docs, 0);
         const slowest = [...timing].sort((a, b) => b.ms - a.ms).slice(0, 6);
         const biggest = [...timing].sort((a, b) => b.docs - a.docs).slice(0, 6);
         console.info(
-          `[db] startup: ${timing.length} collections, ${docs} documents, ${total}ms before the app could render`
+          `[db] startup: ${timing.length} collections, ${docs} documents, ${total}ms to finish loading`
           + `
       slowest: ${slowest.map((t) => `${t.col} ${t.ms}ms`).join(", ")}`
           + `
       biggest: ${biggest.map((t) => `${t.col} ${t.docs} docs`).join(", ")}`,
         );
-        resolve();
+        emit();
       }
     };
 
