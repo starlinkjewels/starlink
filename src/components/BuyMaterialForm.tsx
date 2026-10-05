@@ -87,6 +87,9 @@ export function BuyMaterialForm() {
 
   const submit = async () => {
     if (!supplierId) { toast.error("Choose a supplier"); return; }
+    // The bill number is how a purchase book is checked against what is entered:
+    // without it there is no telling which chitthis are done and which are not.
+    if (!billNo.trim()) { toast.error("Enter the supplier's bill number"); return; }
     if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
     for (const [i, l] of lines.entries()) {
       const q = Number(l.qty);
@@ -180,7 +183,7 @@ export function BuyMaterialForm() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <div>
-          <Label className="text-xs">Bill no.</Label>
+          <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
           <Input value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="The supplier's bill number" />
         </div>
         <div>

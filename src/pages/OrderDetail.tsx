@@ -37,6 +37,8 @@ import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, vo
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance } from "@/lib/receipts";
+import { compressImage as compressImg, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
+import { downloadAsZip } from "@/lib/zipDownload";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -221,6 +223,10 @@ export function OrderDetailPage() {
   // The odd rupees nobody hands over. One figure for the whole bill, riding on
   // the first line so the supplier's due matches the cash actually paid.
   const [buyRoundOff, setBuyRoundOff] = useState("");
+  // The supplier's bill number for this purchase. One per bill, not per line,
+  // and required — it is how the purchase book is checked against what is in
+  // the software, and what finds a single entry that went in wrong.
+  const [buyBillNo, setBuyBillNo] = useState("");
   const [buying, setBuying] = useState(false);
 
   const [showIssueForm, setShowIssueForm] = useState(false);
@@ -401,10 +407,12 @@ export function OrderDetailPage() {
     setBuySupplierId("");
     setBuyLines([emptyBuyLine()]);
     setBuyRoundOff("");
+    setBuyBillNo("");
   };
 
   const recordPurchaseForOrder = async () => {
     if (!buySupplierId) { toast.error("Choose a supplier"); return; }
+    if (!buyBillNo.trim()) { toast.error("Enter the supplier's bill number"); return; }
     // Client's flow: assign the factory first, then buy — the purchased material
     // goes STRAIGHT to that factory, no separate "issue" step. A diamond-only
     // order has no factory: the stones are bought for the client, not to be set.
@@ -440,7 +448,7 @@ export function OrderDetailPage() {
       discountPct: Number(line.discountPct) > 0 ? Number(line.discountPct) : undefined,
       roundOffInr: undefined as number | undefined,
       payments: [],
-      invoiceNumber: line.invoiceNumber.trim() || undefined,
+      invoiceNumber: buyBillNo.trim(),
       notes: line.notes.trim() || undefined,
       createdBy: user!.id,
       createdAt: now,
@@ -1549,7 +1557,10 @@ export function OrderDetailPage() {
     const batch = incoming.slice(0, room);
     setPhotoUploading(true);
     try {
-      const urls = await Promise.all(batch.map(async f => uploadDataUrl(await compressImage(f), `orders/${order.id}/product`)));
+      // Full size for these: they are what the client downloads, not a thumbnail
+      // for us. Capped at 900px, a 1500×1500 shot came back as 900×900.
+      const urls = await Promise.all(batch.map(async f =>
+        uploadDataUrl(await compressImg(f, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY), `orders/${order.id}/product`)));
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         o.productPhotos = [...(o.productPhotos ?? []), ...urls];
@@ -1571,6 +1582,27 @@ export function OrderDetailPage() {
       toast.success("Product video uploaded");
     } catch { toast.error("Failed to upload the video"); }
     setVideoUploading(false);
+  };
+
+  /**
+   * One picker for the whole shoot. Photos and a clip were two separate buttons,
+   * so every piece meant choosing files twice — and the phone gallery offers
+   * both side by side anyway. Whatever is picked is sorted here by what it is.
+   */
+  const addProductMedia = async (files: FileList) => {
+    const picked = Array.from(files);
+    const images = picked.filter(f => f.type.startsWith("image/"));
+    const videos = picked.filter(f => f.type.startsWith("video/"));
+    const other = picked.length - images.length - videos.length;
+    if (!images.length && !videos.length) { toast.error("Choose photos or a video"); return; }
+    if (other > 0) toast.warning(`${other} file${other !== 1 ? "s" : ""} skipped — only photos and video`);
+    if (videos.length > 1) toast.warning("One video per piece — the first was used");
+    if (images.length) {
+      const dt = new DataTransfer();
+      for (const f of images) dt.items.add(f);
+      await addProductPhotos(dt.files);
+    }
+    if (videos.length) await addProductVideo(videos[0]);
   };
 
   const removeProductPhoto = async (photoUrl: string) => {
@@ -1602,11 +1634,17 @@ export function OrderDetailPage() {
 
   const downloadAllMedia = async () => {
     const design = (order.designNumber || order.orderNumber || "product").replace(/[^\w.-]+/g, "_");
-    const photos = order.productPhotos ?? [];
+    const files = (order.productPhotos ?? []).map((url, i) => ({ url, filename: `${design}-photo-${i + 1}.jpg` }));
+    if (order.productVideo) files.push({ url: order.productVideo, filename: `${design}-video.mp4` });
     setDownloadingAll(true);
     try {
-      for (let i = 0; i < photos.length; i++) await downloadOne(photos[i], `${design}-photo-${i + 1}.jpg`);
-      if (order.productVideo) await downloadOne(order.productVideo, `${design}-video.mp4`);
+      // One archive rather than one save per file: a browser blocks the second
+      // and later downloads as pop-ups, so the client got one photo and assumed
+      // the rest were missing.
+      const r = await downloadAsZip(files, design);
+      if (!r.added) toast.error("Nothing could be downloaded — check the connection and try again");
+      else if (r.failed.length) toast.warning(`${r.added} downloaded, ${r.failed.length} could not be fetched`);
+      else toast.success(`${r.added} file${r.added !== 1 ? "s" : ""} downloaded as ${design}.zip`);
     } finally { setDownloadingAll(false); }
   };
 
@@ -2463,20 +2501,13 @@ export function OrderDetailPage() {
               {canEditStage() && (
                 <>
                   <input
-                    ref={productPhotoRef} type="file" accept="image/*" multiple className="hidden"
-                    onChange={async e => { if (e.target.files?.length) await addProductPhotos(e.target.files); e.target.value = ""; }}
+                    ref={productPhotoRef} type="file" accept="image/*,video/*" multiple className="hidden"
+                    onChange={async e => { if (e.target.files?.length) await addProductMedia(e.target.files); e.target.value = ""; }}
                   />
-                  <Button size="sm" variant="outline" onClick={() => productPhotoRef.current?.click()} disabled={photoUploading} className="rounded-xl gap-2">
+                  <Button size="sm" variant="outline" onClick={() => productPhotoRef.current?.click()}
+                    disabled={photoUploading || videoUploading} className="rounded-xl gap-2">
                     <Camera className="h-4 w-4" />
-                    {photoUploading ? "Uploading…" : "Add Photos"}
-                  </Button>
-                  <input
-                    ref={productVideoRef} type="file" accept="video/*" className="hidden"
-                    onChange={async e => { const f = e.target.files?.[0]; if (f) await addProductVideo(f); e.target.value = ""; }}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => productVideoRef.current?.click()} disabled={videoUploading} className="rounded-xl gap-2">
-                    <Video className="h-4 w-4" />
-                    {videoUploading ? "Uploading…" : order.productVideo ? "Replace Video" : "Add Video"}
+                    {photoUploading || videoUploading ? "Uploading…" : order.productVideo ? "Add Photos / Replace Video" : "Add Photos & Video"}
                   </Button>
                 </>
               )}
@@ -3023,10 +3054,14 @@ export function OrderDetailPage() {
                   ? "Held against this order and billed to the supplier — no factory involved."
                   : `Goes straight to ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.`}
               </p>
-              <Select value={buySupplierId} onValueChange={setBuySupplierId}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-                <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
-              </Select>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Select value={buySupplierId} onValueChange={setBuySupplierId}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+                  <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                </Select>
+                <Input value={buyBillNo} onChange={e => setBuyBillNo(e.target.value)}
+                  className="rounded-xl h-10" placeholder="Supplier's bill no. *" />
+              </div>
 
               {buyLines.map((line, idx) => (
                 <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
@@ -3102,10 +3137,7 @@ export function OrderDetailPage() {
                     )}
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <Input value={line.invoiceNumber} onChange={e => updateBuyLine(idx, { invoiceNumber: e.target.value })} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
-                    <Input value={line.notes} onChange={e => updateBuyLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
-                  </div>
+                  <Input value={line.notes} onChange={e => updateBuyLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
 
                   <p className="text-xs text-muted-foreground text-right">
                     {Number(line.discountPct) > 0 && (

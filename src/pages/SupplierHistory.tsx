@@ -136,6 +136,10 @@ export function SupplierHistoryPage() {
   // that is what gets rounded — it rides on the first line so the supplier's
   // due matches the cash, and is stored there so a statement can explain it.
   const [roundOff, setRoundOff] = useState("");
+  // A supplier's bill number belongs to the BILL, not to each size on it. It is
+  // required because a purchase book is checked against it: without one there is
+  // no telling which chitthis have been entered and which are still waiting.
+  const [billNo, setBillNo] = useState("");
   const roundOffInr = Math.round(Number(roundOff) || 0);
   const grandTotalInr = linesTotalInr + roundOffInr;
 
@@ -144,9 +148,10 @@ export function SupplierHistoryPage() {
   const addPurchaseLine = () => setPurchaseLines(prev => [...prev, emptyPurchaseLine()]);
   const removePurchaseLine = (idx: number) => setPurchaseLines(prev => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
 
-  const resetPurchaseForm = () => { setPurchaseLines([emptyPurchaseLine()]); setRoundOff(""); };
+  const resetPurchaseForm = () => { setPurchaseLines([emptyPurchaseLine()]); setRoundOff(""); setBillNo(""); };
 
   const recordPurchase = async () => {
+    if (!billNo.trim()) { toast.error("Enter the supplier's bill number"); return; }
     for (const line of purchaseLines) {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
@@ -219,7 +224,7 @@ export function SupplierHistoryPage() {
             totalInr,
             roundOffInr: roundOffInr !== 0 && entry.id === entries[0].id ? roundOffInr : undefined,
             payments: [],
-            invoiceNumber: line.invoiceNumber.trim() || undefined,
+            invoiceNumber: billNo.trim(),
             notes: line.notes.trim() || undefined,
             createdBy: user!.id,
             createdAt: now,
@@ -652,6 +657,12 @@ export function SupplierHistoryPage() {
           <div className="pt-2 border-t border-border/60 space-y-3">
             <p className="text-sm font-medium text-brand-dark">Record Purchase</p>
 
+            <div>
+              <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
+              <Input value={billNo} onChange={e => setBillNo(e.target.value)}
+                className="rounded-xl h-10 mt-1" placeholder="The supplier's bill number — the whole bill, not each item" />
+            </div>
+
             {purchaseLines.map((line, idx) => (
               <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
                 {purchaseLines.length > 1 && (
@@ -743,10 +754,7 @@ export function SupplierHistoryPage() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <Input value={line.invoiceNumber} onChange={e => updatePurchaseLine(idx, { invoiceNumber: e.target.value })} className="rounded-xl h-10" placeholder="Invoice # (optional)" />
-                  <Input value={line.notes} onChange={e => updatePurchaseLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
-                </div>
+                <Input value={line.notes} onChange={e => updatePurchaseLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
 
                 <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(purchaseLineTotalInr(line))}</span></p>
               </div>

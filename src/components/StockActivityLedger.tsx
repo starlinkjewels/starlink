@@ -24,6 +24,8 @@ interface Row {
   /** A bill's own lines, when this row is a whole bill. */
   items?: { material: string; qty: number; unit: "g" | "ct"; amountInr: number; discountPct?: number }[];
   billNo?: string;
+  /** Set when the purchase was bought for one order rather than into stock. */
+  forOrder?: string;
 }
 
 /**
@@ -43,16 +45,20 @@ export function StockActivityLedger() {
   const [kind, setKind] = useState("");
   const [material, setMaterial] = useState("");
   const [open, setOpen] = useState<string | null>(null);
+  const [billFilter, setBillFilter] = useState("");
 
   const all: Row[] = [];
 
-  // Bought into stock — the Buy Material tab. A supplier's chitthi is ONE bill
-  // with a line per size, and it is checked against its own total, so the lines
-  // saved together in one go are shown as that bill rather than as strangers.
-  // They stay separate purchases underneath, because stock is counted per size.
+  // EVERY material purchase, wherever it was entered — bought into stock here,
+  // recorded on a supplier's page, or bought for one order. A purchase book is
+  // checked bill by bill against all of them, so splitting them by the screen
+  // they happened to be typed on made that impossible.
+  //
+  // A supplier's chitthi is ONE bill with a line per size, checked against its
+  // own total, so lines saved together are shown as that bill rather than as
+  // strangers. They stay separate purchases underneath: stock is per size.
   const bills = new Map<string, Row>();
   for (const p of db.purchases ?? []) {
-    if (p.purpose !== "stock") continue;
     const isGold = p.material === "gold";
     const label = isGold
       ? `Gold ${p.gold?.purity ?? ""}`.trim()
@@ -72,8 +78,10 @@ export function StockActivityLedger() {
       if (existing.unit !== unit) existing.unit = unit; // mixed bill — the count is shown per line
       continue;
     }
+    const forOrder = p.orderId ? db.orders.find(o => o.id === p.orderId)?.orderNumber : undefined;
     bills.set(key, {
       id: p.id, date: p.createdAt, kind: "Purchase",
+      forOrder,
       party: db.suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier",
       material: label, qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
@@ -125,6 +133,9 @@ export function StockActivityLedger() {
       if (!inDateRange(r.date, from, to)) return false;
       if (kind && r.kind !== kind) return false;
       if (material && !r.material.toLowerCase().startsWith(material.toLowerCase())) return false;
+      // Purchases entered before the bill number was required — the ones that
+      // still need tying back to a chitthi.
+      if (billFilter === "none" && r.billNo) return false;
       return !ql || r.party.toLowerCase().includes(ql)
         || r.material.toLowerCase().includes(ql)
         || (r.billNo ?? "").toLowerCase().includes(ql)
@@ -133,8 +144,8 @@ export function StockActivityLedger() {
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
-  const filtered = !!(ql || from || to || kind || material);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setPage(1); };
+  const filtered = !!(ql || from || to || kind || material || billFilter);
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setPage(1); };
   const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE, "act");
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
@@ -186,7 +197,7 @@ export function StockActivityLedger() {
   return (
     <div className="card-luxe p-5">
       <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">Activity</p>
+        <p className="font-display text-lg text-brand-dark leading-tight">Purchase &amp; Stock Ledger</p>
         <p className="text-xs text-muted-foreground">
           {rows.length} entr{rows.length !== 1 ? "ies" : "y"}{filtered ? ` of ${all.length}` : ""}
           {totalIn > 0 && <> · bought in {fmtMoneyInr(totalIn)}</>}
@@ -197,7 +208,7 @@ export function StockActivityLedger() {
 
       <LedgerFilters
         q={q} onQ={v => { setQ(v); setPage(1); }}
-        placeholder="Search party, material, remark…"
+        placeholder="Search bill no., party, material, remark…"
         from={from} to={to}
         onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
         selects={[
@@ -205,6 +216,8 @@ export function StockActivityLedger() {
             options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
           { label: "Materials", value: material, onChange: v => { setMaterial(v); setPage(1); },
             options: [{ value: "Gold", label: "Gold" }, { value: "Diamond", label: "Diamond" }] },
+          { label: "Bills", value: billFilter, onChange: v => { setBillFilter(v); setPage(1); },
+            options: [{ value: "none", label: "No bill number" }] },
         ]}
         active={filtered} onReset={reset}
         onPdf={exportPdf} onCsv={exportCsv}
@@ -242,8 +255,18 @@ export function StockActivityLedger() {
                     <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
                     <td className="px-3 py-2.5 text-xs whitespace-nowrap">{r.kind}</td>
-                    <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{r.billNo ?? "—"}</td>
-                    <td className="px-3 py-2.5 font-medium max-w-[160px] truncate" title={r.party}>{r.party}</td>
+                    <td className="px-3 py-2.5 whitespace-nowrap">
+                      {r.billNo
+                        ? <button type="button" onClick={e => { e.stopPropagation(); setQ(r.billNo!); setPage(1); }}
+                            title="Show everything on this bill" className="font-mono text-[11px] text-primary hover:underline">
+                            {r.billNo}
+                          </button>
+                        : <span className="font-mono text-[11px] text-muted-foreground">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5 font-medium max-w-[160px] truncate" title={r.party}>
+                      {r.party}
+                      {r.forOrder && <span className="block text-[10px] text-muted-foreground">for {r.forOrder}</span>}
+                    </td>
                     <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>
                       {multi && <ChevronRight className={`inline h-3 w-3 mr-1 transition-transform ${isOpen ? "rotate-90" : ""}`} />}
                       {r.material}

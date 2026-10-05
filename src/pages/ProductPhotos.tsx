@@ -4,34 +4,18 @@ import { useAuth } from "@/lib/auth";
 import { updateDb, uid, currentUserOrders, type CatalogFolder, type ProductPhotoItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
+import { compressImage as compressImg, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
+import { downloadAsZip } from "@/lib/zipDownload";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
 import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package } from "lucide-react";
 
 const MAX_VIDEO_MB = 60;
 
-/** Compress an image File to a base64 JPEG, capped at ~1400px. */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const MAX = 1400;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) { if (w > h) { h = Math.round(h * MAX / w); w = MAX; } else { w = Math.round(w * MAX / h); h = MAX; } }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.85));
-      };
-      img.src = e.target!.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
+// A photo the client downloads keeps the size it was uploaded at — see
+// src/lib/images.ts. This page used to cap at 1400px and the order page at 900,
+// so the same shot came out a different size depending on where it went in.
+const compressImage = (file: File) => compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY);
 
 async function downloadOne(fileUrl: string, filename: string) {
   try {
@@ -167,7 +151,15 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
   const designOrders = design ? (designMap.get(design) ?? []) : [];
   const items = design ? buildOrderItems(designOrders, design) : [];
 
-  const downloadAll = async () => { setDownloading(true); try { for (const it of items) await downloadOne(it.src, it.filename); } finally { setDownloading(false); } };
+  const downloadAll = async () => {
+    setDownloading(true);
+    try {
+      const r = await downloadAsZip(items.map(it => ({ url: it.src, filename: it.filename })), `${design || "photos"}`);
+      if (!r.added) toast.error("Nothing could be downloaded — check the connection and try again");
+      else if (r.failed.length) toast.warning(`${r.added} downloaded, ${r.failed.length} could not be fetched`);
+      else toast.success(`${r.added} file${r.added !== 1 ? "s" : ""} downloaded as ${design || "photos"}.zip`);
+    } finally { setDownloading(false); }
+  };
 
   return (
     <div className="space-y-4">
@@ -370,7 +362,16 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
 
 
   const deleteItem = async (id: string) => { const it = allItems.find(x => x.id === id); updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); }); if (it) await deleteByUrl(it.url); };
-  const downloadAll = async () => { setDownloading(true); try { for (const it of gallery) await downloadOne(it.src, it.filename); } finally { setDownloading(false); } };
+  const downloadAll = async () => {
+    const name = (currentFolderId ? folders.find((f: CatalogFolder) => f.id === currentFolderId)?.name : "") || "photos";
+    setDownloading(true);
+    try {
+      const r = await downloadAsZip(gallery.map(it => ({ url: it.src, filename: it.filename })), name);
+      if (!r.added) toast.error("Nothing could be downloaded — check the connection and try again");
+      else if (r.failed.length) toast.warning(`${r.added} downloaded, ${r.failed.length} could not be fetched`);
+      else toast.success(`${r.added} file${r.added !== 1 ? "s" : ""} downloaded as ${name}.zip`);
+    } finally { setDownloading(false); }
+  };
 
   const goTo = (id: string | null) => { setCurrentFolderId(id); setShowNewFolder(false); setRenamingId(null); };
   const atRoot = currentFolderId === null;
