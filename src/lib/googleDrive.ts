@@ -30,10 +30,26 @@ const DAYS: Record<Exclude<Frequency, "off">, number> = {
   daily: 1, weekly: 7, monthly: 30, yearly: 365,
 };
 
-/** The OAuth client id, from VITE_GOOGLE_CLIENT_ID. Without it the feature
- *  simply does not offer itself, rather than failing at the click. */
+/**
+ * The OAuth client id.
+ *
+ * Google will not let any app touch a Drive without one, and only the account
+ * holder can create it — there is no way around that for us or for anyone
+ * else. What we can do is not make it a build variable: it lives in settings so
+ * an admin pastes it in once and connects there and then, instead of editing an
+ * environment variable and waiting for a redeploy. The build variable still
+ * works as a fallback for anyone who set it that way.
+ */
 export function driveClientId(): string {
+  const fromSettings = (loadDb().settings.googleClientId ?? "").trim();
+  if (fromSettings) return fromSettings;
   return ((import.meta.env?.VITE_GOOGLE_CLIENT_ID as string | undefined) ?? "").trim();
+}
+
+/** Where this app is being served from — the exact string Google wants under
+ *  "Authorised JavaScript origins", so nobody has to guess it. */
+export function driveOrigin(): string {
+  return typeof window !== "undefined" ? window.location.origin : "";
 }
 
 export function driveConfigured(): boolean {

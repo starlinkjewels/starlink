@@ -31,17 +31,18 @@ creates credentials tied to your own Google account.
 
 ## 2. Give it to the app
 
-Set it as an environment variable where the app is built:
+Paste it into **Settings → Google Drive Backup** and press **Save & Connect**.
+That is all — it is stored with the other company settings, so it syncs to every
+admin and no redeploy is involved. The card walks through step 1 as well, with
+the origin to paste already filled in and a copy button.
 
-```
-VITE_GOOGLE_CLIENT_ID=1234567890-abc123.apps.googleusercontent.com
-```
+A web OAuth client id is public by design, which is why it is safe to keep it
+here: on its own it does nothing. What makes it work is the authorised origin,
+which pins it to this app's address, and that is set in the Google console where
+only you can change it.
 
-On Vercel: **Project → Settings → Environment Variables**, then redeploy. For
-local work put it in `.env.local` at the repo root.
-
-Until this is set, the Settings page shows the Drive card greyed out and says it
-is not configured. Nothing breaks.
+`VITE_GOOGLE_CLIENT_ID` still works as a build variable if you would rather set
+it that way; the setting takes precedence when both are present.
 
 ## 3. Connect
 

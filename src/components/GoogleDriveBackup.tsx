@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   driveConfigured, driveStatus, connectDrive, disconnectDrive, backupToDrive,
-  setDriveFrequency, listDriveBackups, type Frequency, type DriveBackup,
+  setDriveFrequency, listDriveBackups, driveOrigin, type Frequency, type DriveBackup,
 } from "@/lib/googleDrive";
+import { updateDb } from "@/lib/db";
+import { Input } from "@/components/ui/input";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -27,6 +29,28 @@ export function GoogleDriveBackup() {
   const [status, setStatus] = useState(driveStatus);
   const [files, setFiles] = useState<DriveBackup[] | null>(null);
   const [busy, setBusy] = useState(false);
+  const [idDraft, setIdDraft] = useState("");
+
+  /** Store the client id, then go straight into the Google account picker —
+   *  saving it is not the goal, connecting is. */
+  const saveClientId = async () => {
+    const id = idDraft.trim();
+    if (!id.endsWith(".apps.googleusercontent.com")) {
+      toast.error("That does not look like a client ID — it should end in .apps.googleusercontent.com");
+      return;
+    }
+    updateDb(d => { d.settings.googleClientId = id; });
+    setBusy(true);
+    try {
+      const email = await connectDrive();
+      setStatus(driveStatus());
+      toast.success(`Connected to ${email}`);
+      await refreshFiles();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Saved, but Google did not connect — check the origin matches.");
+      setStatus(driveStatus());
+    } finally { setBusy(false); }
+  };
 
   const refreshFiles = useCallback(async () => {
     if (!driveStatus().connected) { setFiles(null); return; }
@@ -35,6 +59,11 @@ export function GoogleDriveBackup() {
 
   useEffect(() => { void refreshFiles(); }, [refreshFiles]);
 
+  // Google will not let any app touch a Drive without a client id of its own,
+  // and only the account holder can make one. Rather than a dead end saying so,
+  // this walks through it: the three links in order, the origin to paste
+  // already filled in, and a box for the id. One go, about five minutes, once
+  // ever — and no redeploy, because it is kept in settings.
   if (!driveConfigured()) {
     return (
       <div className="rounded-xl border border-border/70 p-4 mt-2">
@@ -43,9 +72,52 @@ export function GoogleDriveBackup() {
           <div>
             <h3 className="font-semibold text-brand-dark text-sm">Google Drive Backup</h3>
             <p className="text-[11px] text-muted-foreground">
-              Not set up yet — a Google OAuth client id is needed before this can be connected.
+              Keep a second copy of everything in a Google Drive account. Google needs a one-time
+              setup first — about five minutes, and only once.
             </p>
           </div>
+        </div>
+
+        <ol className="mt-3 space-y-2 text-[11px] text-muted-foreground list-decimal pl-4">
+          <li>
+            Turn on the Drive API for your Google project —{" "}
+            <a className="text-primary hover:underline inline-flex items-center gap-0.5" target="_blank" rel="noreferrer"
+              href="https://console.cloud.google.com/apis/library/drive.googleapis.com">
+              open it <ExternalLink className="h-3 w-3" />
+            </a>{" "}
+            and press <span className="font-medium text-foreground">Enable</span>.
+          </li>
+          <li>
+            On the{" "}
+            <a className="text-primary hover:underline inline-flex items-center gap-0.5" target="_blank" rel="noreferrer"
+              href="https://console.cloud.google.com/apis/credentials/consent">
+              consent screen <ExternalLink className="h-3 w-3" />
+            </a>{" "}
+            add only the scope <code className="font-mono text-foreground">.../auth/drive.file</code> — that one
+            lets this app see nothing in the Drive except the files it creates itself.
+          </li>
+          <li>
+            Create an{" "}
+            <a className="text-primary hover:underline inline-flex items-center gap-0.5" target="_blank" rel="noreferrer"
+              href="https://console.cloud.google.com/apis/credentials/oauthclient">
+              OAuth client ID <ExternalLink className="h-3 w-3" />
+            </a>{" "}
+            of type <span className="font-medium text-foreground">Web application</span>, and under
+            <span className="font-medium text-foreground"> Authorised JavaScript origins</span> paste this exactly:
+            <span className="mt-1 flex items-center gap-1.5">
+              <code className="font-mono text-foreground bg-secondary rounded px-1.5 py-0.5 select-all">{driveOrigin()}</code>
+              <button type="button" onClick={() => { void navigator.clipboard?.writeText(driveOrigin()); toast.success("Copied"); }}
+                className="text-primary hover:underline">copy</button>
+            </span>
+          </li>
+          <li>Paste the client ID it gives you below.</li>
+        </ol>
+
+        <div className="mt-3 flex items-center gap-2 flex-wrap">
+          <Input value={idDraft} onChange={e => setIdDraft(e.target.value)}
+            className="rounded-xl h-10 flex-1 min-w-[260px] font-mono text-xs"
+            placeholder="1234567890-abc123.apps.googleusercontent.com" />
+          <AsyncButton onClick={saveClientId} disabled={busy} className="btn-hero rounded-xl h-10">Save &amp; Connect</AsyncButton>
         </div>
       </div>
     );

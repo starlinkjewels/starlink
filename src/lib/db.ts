@@ -665,6 +665,12 @@ export interface Settings {
   barcodeBandEnabled?: boolean; // show the "Print Band" (barcode jewellery tag) option on orders. undefined = on.
   barcodeBandShowPrice?: boolean; // print the price on the band. undefined = on.
   labelPresets?: LabelPreset[]; // admin-defined label sizes/styles for each label printer / stock
+  /** Google OAuth client id for Drive backups. Kept here rather than in a build
+   *  variable so an admin can paste it in and connect straight away — needing a
+   *  redeploy to change a setting is not a setting. Not a secret: a web OAuth
+   *  client id is public by design and is useless without the authorised origin
+   *  that pins it to this app. */
+  googleClientId?: string;
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area
