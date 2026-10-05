@@ -2023,7 +2023,25 @@ async function persist() {
       else (remote[c as ArrayCol] as unknown) = snap[c as ArrayCol];
     }
   } catch (err) {
-    console.error("[db] Firestore write failed:", err);
+    // A failed write is NOT reconciled above, so the same documents are
+    // attempted again on the very next save — which is right for a dropped
+    // connection and useless for a collection the rules do not allow. That
+    // case retries forever, quietly, on every save for the life of the
+    // session: the app feels slow and the only clue is a generic "Save
+    // failed". Name the collection instead, once, so it can be fixed.
+    const code = (err as { code?: string })?.code ?? "";
+    console.error(`[db] Firestore write failed (${[...touched].join(", ")}):`, err);
+    if (code === "permission-denied") {
+      for (const c of touched) {
+        if (deniedReported.has(c)) continue;
+        deniedReported.add(c);
+        console.error(
+          `[db] "${c}" is being rejected by the security rules. Every save from now on will retry it and fail. `
+          + `Deploy the rules (firebase deploy --only firestore:rules) — a collection added in the app but not in `
+          + `firestore.rules does exactly this.`,
+        );
+      }
+    }
     if (typeof window !== "undefined")
       window.dispatchEvent(new CustomEvent("starlink-db-error", { detail: err }));
   } finally {
@@ -2033,6 +2051,9 @@ async function persist() {
     setPending(pendingCount - 1);
   }
 }
+
+/** Collections already reported as rejected — one message each, not one per save. */
+const deniedReported = new Set<string>();
 
 // Number of Firestore write batches currently in flight — drives the global
 // "Saving…" indicator so every action shows Firebase progress.
