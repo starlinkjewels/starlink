@@ -67,6 +67,13 @@ const DEFAULT_LABEL_PRESETS = [
 // this one word.
 const SHOW_REPAIR_TOOLS = false;
 
+// Invoice Numbers, Delete an Invoice and Automatic Backups are hidden too.
+// All three rewrite or remove something that is already settled — renumbering
+// every bill, deleting one, or restoring the whole database over the top of
+// today's work — and none of them is part of anybody's day. Same as above:
+// switched off, not deleted, so one word brings them back when one is needed.
+const SHOW_ADMIN_TOOLS = false;
+
 export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
@@ -1515,7 +1522,7 @@ export function SettingsPage() {
 
 
         {/* ── Invoice numbering (admin only) ── */}
-        {isAdminUser && (
+        {SHOW_ADMIN_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${invoiceGaps.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
@@ -1547,7 +1554,7 @@ export function SettingsPage() {
 
 
         {/* ── Invoices raised by mistake (admin only) ── */}
-        {isAdminUser && (
+        {SHOW_ADMIN_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${undispatchedCount ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
@@ -1615,7 +1622,7 @@ export function SettingsPage() {
         )}
 
         {/* ── Automatic daily cloud backups (admin only) ── */}
-        {isAdminUser && (
+        {SHOW_ADMIN_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div className="flex items-center gap-2">
