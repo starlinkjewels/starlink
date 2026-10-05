@@ -2236,6 +2236,7 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
 
 /** Unsubscribe all listeners and clear the cache (on sign-out). */
 export function stopDb() {
+  subGeneration++;
   unsubscribers.forEach((u) => {
     try {
       u();
@@ -2271,7 +2272,12 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
 }
 
 /** Subscribe according to scope; resolves after each stream has fired once. */
+/** Bumped on every sign-out, so listeners queued during a boot that has since
+ *  been torn down never attach and leak. */
+let subGeneration = 0;
+
 function subscribeAll(scope: Scope): Promise<void> {
+  const gen = ++subGeneration;
   const client = scope.kind === "client" ? scope : null;
   messagesScopeIsFull = !client;
   clientAppId = client ? client.appId : null;
@@ -2340,6 +2346,9 @@ function subscribeAll(scope: Scope): Promise<void> {
     timing.push({ col, ms: Math.round(now - t0), docs });
   };
 
+  // Set once the core streams are up; called the moment they have all landed.
+  let restAttach: (() => void) | null = null;
+
   return new Promise((resolve) => {
     let opened = false;
     const first = (name: string) => {
@@ -2351,8 +2360,13 @@ function subscribeAll(scope: Scope): Promise<void> {
         opened = true;
         seeded = true;
         const ms = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
-        console.info(`[db] opened in ${ms}ms — ${pending.size} collection(s) still loading in the background`);
+        console.info(`[db] opened in ${ms}ms — ${pending.size} collection(s) now loading in the background`);
         resolve();
+        // Everything else starts only now, so it never competes with the three
+        // streams the splash screen was waiting on.
+        const go = restAttach;
+        restAttach = null;
+        if (go) setTimeout(() => { if (gen === subGeneration) go(); }, 0);
       }
       if (pending.size === 0) {
         const total = timing.length ? Math.max(...timing.map((t) => t.ms)) : 0;
@@ -2370,7 +2384,7 @@ function subscribeAll(scope: Scope): Promise<void> {
       }
     };
 
-    for (const { col, q } of specs) {
+    const attach = ({ col, q }: { col: ArrayCol; q: Query<DocumentData> }) => {
       unsubscribers.push(
         onSnapshot(
           q,
@@ -2393,7 +2407,19 @@ function subscribeAll(scope: Scope): Promise<void> {
           },
         ),
       );
-    }
+    };
+
+    // Opening twenty-nine listen streams at once puts them all on one
+    // connection, so the three the splash screen is actually waiting for queue
+    // behind twenty-six nobody needs yet — on a phone that is most of the wait.
+    // The core goes on first and has the connection to itself; the rest follow
+    // once it has landed, and refresh the screen as they arrive.
+    const core = specs.filter((s) => corePending.has(s.col));
+    const rest = specs.filter((s) => !corePending.has(s.col));
+    core.forEach(attach);
+    const attachRest = () => rest.forEach(attach);
+    if (core.length === 0) attachRest();
+    else restAttach = attachRest;
 
     // A client's messages are those they sent OR received — two queries merged
     // (Firestore can't OR across two fields in one query).
