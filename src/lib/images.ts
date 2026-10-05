@@ -33,8 +33,24 @@ export async function compressImage(file: File, max = 900, quality = 0.8): Promi
   });
 }
 
-/** What a photo the CLIENT downloads is kept at: full size up to 2400px, which
- *  leaves the 1500×1500 shots staff actually upload untouched, at near-original
- *  quality. Only a camera-sized original gets scaled at all. */
+/** A photo the CLIENT downloads is kept at full size up to 2400px. Only a
+ *  camera-sized original is scaled at all. */
 export const PRODUCT_PHOTO_MAX = 2400;
 export const PRODUCT_PHOTO_QUALITY = 0.92;
+
+/** Above this, even a product photo is worth shrinking before it is uploaded. */
+const KEEP_ORIGINAL_UNDER_MB = 12;
+
+/**
+ * Is this file fine to upload exactly as it is?
+ *
+ * Re-encoding keeps the pixel count but is still a second JPEG pass over an
+ * image that was already fine. For the photos a client downloads the honest
+ * answer is to send the file that was picked, so what comes back is what went
+ * in — right down to the bytes. Only something camera-sized is worth touching.
+ */
+export function canUploadOriginal(file: File): boolean {
+  if (!file.type.startsWith("image/")) return false;
+  // A format the browser may not re-encode faithfully is also better untouched.
+  return file.size <= KEEP_ORIGINAL_UNDER_MB * 1024 * 1024;
+}

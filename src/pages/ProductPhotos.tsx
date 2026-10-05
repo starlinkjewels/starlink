@@ -4,7 +4,7 @@ import { useAuth } from "@/lib/auth";
 import { updateDb, uid, currentUserOrders, type CatalogFolder, type ProductPhotoItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
-import { compressImage as compressImg, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
+import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
@@ -12,10 +12,14 @@ import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Cam
 
 const MAX_VIDEO_MB = 60;
 
-// A photo the client downloads keeps the size it was uploaded at — see
+// A photo the client downloads is uploaded exactly as it was picked — see
 // src/lib/images.ts. This page used to cap at 1400px and the order page at 900,
 // so the same shot came out a different size depending on where it went in.
-const compressImage = (file: File) => compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY);
+// Only a camera-sized original is scaled at all.
+const putPhoto = (file: File, folder: string) =>
+  canUploadOriginal(file)
+    ? uploadFile(file, folder)
+    : compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY).then(d => uploadDataUrl(d, folder));
 
 async function downloadOne(fileUrl: string, filename: string) {
   try {
@@ -263,7 +267,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (!imgs.length) { toast.error("Please choose image files"); return; }
     setUploading(true);
     try {
-      const urls = await Promise.all(imgs.map(async f => uploadDataUrl(await compressImage(f), `productPhotos/${currentFolderId}`)));
+      const urls = await Promise.all(imgs.map(f => putPhoto(f, `productPhotos/${currentFolderId}`)));
       updateDb(d => { urls.forEach((u, i) => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: imgs[i].name.replace(/\.[^.]+$/, "").slice(0, 60) || "Image", type: "image", url: u, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem)); });
       toast.success(`${urls.length} image${urls.length !== 1 ? "s" : ""} uploaded`);
     } catch { toast.error("Failed to upload images"); }
@@ -332,7 +336,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
       try {
         const url = isVideo
           ? await uploadFile(f, `productPhotos/${folderId}`)
-          : await uploadDataUrl(await compressImage(f), `productPhotos/${folderId}`);
+          : await putPhoto(f, `productPhotos/${folderId}`);
         made.push({
           id: uid("ppi_"), folderId,
           name: f.name.replace(/\.[^.]+$/, "").slice(0, 60) || (isVideo ? "Video" : "Image"),

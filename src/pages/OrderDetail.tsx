@@ -37,7 +37,7 @@ import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, vo
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance } from "@/lib/receipts";
-import { compressImage as compressImg, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
+import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
@@ -1557,10 +1557,14 @@ export function OrderDetailPage() {
     const batch = incoming.slice(0, room);
     setPhotoUploading(true);
     try {
-      // Full size for these: they are what the client downloads, not a thumbnail
-      // for us. Capped at 900px, a 1500×1500 shot came back as 900×900.
+      // These are what the client downloads, not a thumbnail for us, so the file
+      // that was picked is uploaded as it is — what comes back is what went in.
+      // Only something camera-sized is scaled. Capped at 900px before this, a
+      // 1500×1500 shot reached the client as 900×900.
       const urls = await Promise.all(batch.map(async f =>
-        uploadDataUrl(await compressImg(f, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY), `orders/${order.id}/product`)));
+        canUploadOriginal(f)
+          ? uploadFile(f, `orders/${order.id}/product`)
+          : uploadDataUrl(await compressImg(f, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY), `orders/${order.id}/product`)));
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         o.productPhotos = [...(o.productPhotos ?? []), ...urls];
