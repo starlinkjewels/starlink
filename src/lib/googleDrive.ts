@@ -14,7 +14,11 @@
 // verification for it is light.
 import { loadDb } from "./db";
 
-const SCOPE = "https://www.googleapis.com/auth/drive.file";
+// drive.file is the narrow one: only files this app creates itself. "email"
+// is asked for alongside it purely so the card can name the account that got
+// connected — without it the userinfo call is refused and it reads "Google
+// account". Both are needed for the consent screen to list them.
+const SCOPE = "https://www.googleapis.com/auth/drive.file email";
 const FOLDER_NAME = "Starlink Jewels Backups";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 

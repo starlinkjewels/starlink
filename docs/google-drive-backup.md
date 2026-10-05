@@ -66,3 +66,26 @@ renew it in the background. When it has lapsed the automatic run quietly skips,
 and pressing **Back up now** in Settings renews it. If this matters more than it
 sounds, the alternative is a scheduled Cloud Function holding a refresh token,
 which needs the Firebase Blaze plan.
+
+## "Google hasn’t verified this app"
+
+Expected, and not a sign anything is wrong. Google shows that screen for any
+app it has not reviewed that asks for a scope it calls sensitive, and
+`drive.file` is one — even though it is the narrowest Drive scope there is.
+
+Press **Advanced → Go to Starlink Jewels (unsafe)** and carry on. The wording is
+aimed at a stranger’s app asking for your Drive; here the app, the Google
+project and the Drive are all yours.
+
+To stop it appearing:
+
+- **Add each admin as a Test user** on the consent screen. Quickest, and enough
+  when only two or three people ever connect.
+- **Publish the app and submit it for verification.** Removes the screen for
+  everyone. `drive.file` is *sensitive*, not *restricted*, so the review is the
+  short kind — no security assessment, usually days rather than weeks.
+- **Use a Google Workspace account and set the consent screen to Internal.**
+  No warning and no verification at all, but it needs a Workspace domain; a
+  plain gmail.com address cannot be Internal.
+
+Whichever is chosen, the backups work from the moment the connection is made.
