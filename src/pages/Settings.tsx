@@ -161,31 +161,12 @@ export function SettingsPage() {
     };
     r.readAsText(f);
   };
-  const clear = async () => {
-    // Most destructive action in the app — require typing RESET, not a single OK.
-    const typed = prompt(
-      "This WIPES ALL data (clients, orders, invoices, payments, expenses, catalog) and cannot be undone.\n\nType RESET to confirm:",
-    );
-    if (typed?.trim().toUpperCase() !== "RESET") { toast.info("Cancelled — nothing was deleted."); return; }
-    const fresh = loadDb();
-    fresh.users = [];
-    fresh.clients = [];
-    fresh.orders = [];
-    fresh.tasks = [];
-    fresh.messages = [];
-    fresh.notifications = [];
-    fresh.invoices = [];
-    fresh.expenses = [];
-    fresh.catalogFolders = [];
-    fresh.catalogFavorites = [];
-    saveDb(fresh); // diff-sync deletes every remote doc; admin is re-seeded on next boot
-    // catalogItems is paginated and lives outside the diff-sync engine (see
-    // src/lib/catalogItems.ts) — wipe it directly.
-    const { deleteAllCatalogItems } = await import("@/lib/catalogItems");
-    await deleteAllCatalogItems();
-    toast.success("Data cleared — reloading");
-    setTimeout(() => location.reload(), 600);
-  };
+  // "Clear Data & Reset Seed" used to live here: one button that emptied every
+  // collection and every catalog item, guarded only by typing RESET into a
+  // browser prompt. On a live business that is not a setting, it is an accident
+  // waiting to happen, so the button and the code behind it are both gone
+  // rather than merely hidden. Restoring from a backup sits on this same page
+  // and covers the only honest reason anyone had to reach for it.
 
   // ── Automatic cloud backups (admin only) ──
   const [backups, setBackups] = useState<BackupEntry[]>([]);
@@ -1663,13 +1644,6 @@ export function SettingsPage() {
           </div>
         )}
 
-        <AsyncButton
-          variant="outline"
-          onClick={clear}
-          className="rounded-xl w-full text-destructive"
-        >
-          Clear Data &amp; Reset Seed
-        </AsyncButton>
       </div>
       )}
 

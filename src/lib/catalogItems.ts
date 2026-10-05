@@ -154,8 +154,7 @@ export async function deleteCatalogItemsInFolders(folderIds: string[]): Promise<
   return deletedIds;
 }
 
-/** Full wipe — used only by the admin "reset database" action in Settings. */
-export async function deleteAllCatalogItems(): Promise<void> {
-  const snap = await getDocs(collection(fsdb, COL));
-  await deleteRefsInBatches(snap.docs.map((d) => d.ref));
-}
+// deleteAllCatalogItems() lived here, wiping every catalog item in one go.
+// Its only caller was Settings’ "Clear Data & Reset Seed", which has been
+// removed as too dangerous on a live business — so this went with it rather
+// than sitting around as a one-call way to empty the catalog.
