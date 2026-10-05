@@ -59,6 +59,14 @@ const DEFAULT_LABEL_PRESETS = [
   { id: "label-50x30", name: "Spec label", style: "label" as const, widthMm: 50, heightMm: 30 },
 ];
 
+// The three repair tools — Order Numbers, Receipt Numbers and Unapplied Money
+// In — are hidden. They were built to clean up data from before those things
+// were recorded properly, that work is done, and a page of permanently-empty
+// repair cards is noise. Left in place rather than deleted: if a figure ever
+// looks wrong again these are what diagnose it, and turning them back on is
+// this one word.
+const SHOW_REPAIR_TOOLS = false;
+
 export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
@@ -1203,7 +1211,7 @@ export function SettingsPage() {
         )}
 
         {/* ── Duplicate order numbers (repairs legacy data) ── */}
-        {isAdminUser && (
+        {SHOW_REPAIR_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${duplicateGroups.length ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
@@ -1266,7 +1274,7 @@ export function SettingsPage() {
         )}
 
         {/* ── Receipt numbers for past payments (admin only) ── */}
-        {isAdminUser && (
+        {SHOW_REPAIR_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${unnumberedPayments.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
@@ -1367,7 +1375,7 @@ export function SettingsPage() {
 
 
         {/* ── Client payments that never reached their orders (admin only) ── */}
-        {isAdminUser && (
+        {SHOW_REPAIR_TOOLS && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${looseIncome.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
