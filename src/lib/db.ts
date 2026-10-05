@@ -14,6 +14,7 @@ import {
   collection,
   doc,
   onSnapshot,
+  setDoc,
   writeBatch,
   query,
   where,
@@ -2094,6 +2095,37 @@ export function saveDb(db?: DB) {
   persistQueue = persistQueue
     .then(persist)
     .catch((err) => console.error("[db] persist error", err));
+}
+
+/**
+ * Stamp the signed-in user as recently active.
+ *
+ * This is bookkeeping for a "last seen" dot, and it used to go through
+ * updateDb() like any real change: on every app open, every 45 seconds, and
+ * every time the tab regained focus, it mutated the cache and queued a full
+ * persist() — which serialises and diffs the ENTIRE database to work out that
+ * one timestamp moved. On a phone with a few thousand documents that is a
+ * noticeable freeze every time, and the write raised the global pending count,
+ * so "Saving…" appeared on every single open and then again every 45 seconds.
+ *
+ * It writes the one field directly instead, keeps the local mirror in step so
+ * the next real save still sees no change, and never touches the pending
+ * counter — nobody needs a progress indicator for a heartbeat.
+ */
+export async function touchPresence(userId: string): Promise<void> {
+  const at = new Date().toISOString();
+  const u = cache.users.find((x) => x.id === userId);
+  if (!u) return;
+  u.lastActiveAt = at;
+  // Keep `remote` in step, or the next genuine save would diff this timestamp
+  // and write the whole user document again.
+  const mirrored = (remote.users as User[] | undefined)?.find((x) => x.id === userId);
+  if (mirrored) mirrored.lastActiveAt = at;
+  try {
+    await setDoc(doc(fsdb, "users", userId), { lastActiveAt: at }, { merge: true });
+  } catch {
+    // A heartbeat that fails is not worth telling anyone about.
+  }
 }
 
 export function updateDb(fn: (db: DB) => void) {
