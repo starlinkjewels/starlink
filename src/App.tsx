@@ -95,6 +95,9 @@ export function App() {
     // Wait for the initial Firestore sync to finish so we snapshot real data.
     const id = window.setTimeout(() => {
       import("./lib/backup").then(m => m.autoBackup()).catch(() => {});
+      // And the off-site copy, if a Drive account is connected and one is due.
+      // Silent either way — Settings shows the state and renews permission.
+      import("./lib/googleDrive").then(m => m.autoBackupToDrive()).catch(() => {});
     }, 8000);
     return () => clearTimeout(id);
   }, [user]);

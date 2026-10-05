@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
+import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
 import { unappliedIncome, invoiceBalance, applyIncomeToClient, markedNotClientPayment, setNotClientPayment } from "@/lib/clientPayments";
@@ -1643,6 +1644,9 @@ export function SettingsPage() {
             </div>
           </div>
         )}
+
+        {/* ── The same snapshot, in Drive — the copy that is not in this project ── */}
+        {isAdminUser && <GoogleDriveBackup />}
 
       </div>
       )}
