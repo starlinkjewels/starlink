@@ -1135,7 +1135,11 @@ export function OrderDetailPage() {
     if (faIdx === null) return;
     const needsGold = orderMaterialRequirements(order).needsGold;
     const netW = parseFloat(faGoldNet);
-    const hasNet = needsGold && !isNaN(netW) && netW > 0;
+    // A weight typed here is gold that went into the piece, whatever metal the
+    // order was raised as. This was gated on needsGold, so on a platinum or
+    // silver order the figure was taken, ignored and silently thrown away — and
+    // a two-tone piece is platinum AND gold.
+    const hasNet = !isNaN(netW) && netW > 0;
     const purity = parseFloat(faGoldPurity) || 0; // ‰ e.g. 750
     const karat = order.productKarats || "18K"; // label only
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
@@ -3617,7 +3621,7 @@ export function OrderDetailPage() {
           metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
           metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
         };
-        const faNetW = Math.round(((needsGold ? (Number(faGoldNet) || 0) : 0)
+        const faNetW = Math.round(((Number(faGoldNet) || 0)
           + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0)) * 1000) / 1000;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
@@ -3641,9 +3645,13 @@ export function OrderDetailPage() {
                 </p>
               </div>
 
-              {needsGold && (
+              {/* Always offered. A piece ordered as platinum or silver can still
+                  have gold in it, and this was the only place to record it. */}
+              {(
                 <div className="mb-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Gold used</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
+                    Gold used{needsGold ? "" : " (optional)"}
+                  </p>
                   <div className="grid grid-cols-2 gap-2.5">
                     <div><Label className="text-[11px]">Net Weight (g)</Label><Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
                     <div>
@@ -3785,7 +3793,7 @@ export function OrderDetailPage() {
               {/* Auto totals — diamond used (ct → g) and gross = gold net + diamond */}
               {(() => {
                 const diaG = Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000;
-                const netG = needsGold ? (Number(faGoldNet) || 0) : 0;
+                const netG = Number(faGoldNet) || 0;
                 const otherG = faOtherMetal ? (Number(faOtherNet) || 0) : 0;
                 const gross = Math.round((netG + otherG + diaG) * 1000) / 1000;
                 return (
@@ -3798,7 +3806,7 @@ export function OrderDetailPage() {
                     {Number(faDiaPcs) > 0 && (
                       <div className="flex justify-between"><span className="text-muted-foreground">Total diamond pcs</span><span className="font-semibold text-foreground">{Math.round(Number(faDiaPcs))}</span></div>
                     )}
-                    {needsGold && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
+                    {netG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
                     {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{otherG} g</span></div>}
                     <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
                   </div>
