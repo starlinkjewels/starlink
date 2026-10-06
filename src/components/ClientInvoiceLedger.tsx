@@ -120,7 +120,8 @@ export function buildInvoiceBlocks(
   // is the statement a client is sent, and it shows what they were invoiced and
   // what they have paid against it, nothing else.
 
-  return blocks.sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  // Newest invoice first, like every other list in the app.
+  return blocks.sort((a, b) => +new Date(b.date) - +new Date(a.date));
 }
 
 export function ClientInvoiceLedger({

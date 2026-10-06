@@ -75,6 +75,9 @@ export function EmployeeDetailPage() {
   // everything paid to this person, opening included.
   const salaryStatement: StatementRow[] = (() => {
     let running = 0;
+    // The running total can only be worked out oldest-first; the list is read
+    // newest-first, so it is reversed after the balances are in (see the
+    // .reverse() at the end).
     return salaryRows
       .slice()
       .sort((a, b) => +new Date(a.date) - +new Date(b.date))

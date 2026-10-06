@@ -570,7 +570,9 @@ export function ReportsPage() {
         return;
       }
 
-      const rows = catRows(cat); const suppliers = db.suppliers ?? [];
+      // catRows is oldest-first because the PDF above runs a balance down it;
+      // on screen the newest purchase belongs at the top.
+      const rows = [...catRows(cat)].reverse(); const suppliers = db.suppliers ?? [];
       const avg = b.qty > 0 ? b.amount / b.qty : 0;
       const rs = (n: number) => Math.round(n).toLocaleString("en-IN");
       const packets = db.diamondPackets ?? [];

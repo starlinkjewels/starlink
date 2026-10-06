@@ -210,7 +210,9 @@ export function buildFactoryOrderRows(
     row.entries.sort((a, b) => +new Date(a.date) - +new Date(b.date));
   }
 
-  return [...byOrder.values()].sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  // Newest order first. The latest job is the one being looked up; the oldest
+  // was reached only by paging to the end.
+  return [...byOrder.values()].sort((a, b) => +new Date(b.date) - +new Date(a.date));
 }
 
 export function FactoryOrderLedger({
