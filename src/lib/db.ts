@@ -330,6 +330,12 @@ export interface Order {
   diamondWeightAdjust?: number;
   /** How many stones the factory’s bill counts. */
   actualDiamondPcs?: number;
+  /** Marked when the finished piece has no diamond in it at all — a plain gold
+   *  band, or an estimate that called for stones the piece did not end up
+   *  using. Final Approval waits for a diamond to be sourced because the order
+   *  asked for one; this is how someone says it no longer does, on the record,
+   *  instead of forcing the stage through. */
+  noDiamond?: boolean;
   /** The factory's OWN bill number for this piece. One of their bills covers
    *  several pieces, but each comes back on its own, so without this there is
    *  nothing tying our entries to the bill they are being checked against —

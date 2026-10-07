@@ -315,6 +315,24 @@ export function OrderDetailPage() {
   const [savingIssuance, setSavingIssuance] = useState(false);
   const [removingIssuanceId, setRemovingIssuanceId] = useState<string | null>(null);
 
+  /**
+   * Say the finished piece has no diamond in it.
+   *
+   * Final Approval waits for a diamond because the order asked for one. A plain
+   * gold piece, or one whose estimate called for stones it did not end up
+   * using, had no way past that except the admin override — which records
+   * nothing about why. This records the reason and lets the order move on.
+   */
+  const setNoDiamond = (on: boolean) => {
+    const issued = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
+    if (on && issued.length > 0) {
+      toast.error("Diamond is already recorded against this order — remove it first.");
+      return;
+    }
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id); if (o) o.noDiamond = on || undefined; });
+    toast.success(on ? "Marked gold only — no diamond in this piece" : "Diamond is expected again");
+  };
+
   const openEditIssuance = (mi: MaterialIssuance) => {
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
@@ -3020,6 +3038,15 @@ export function OrderDetailPage() {
             )}
 
             {/* ② Diamond — from our stock, or buy new. (Gold stays reserved at the factory.) */}
+            {canEditStage() && !faDone && !diamondOnly && order.noDiamond && (
+              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
+                <span className="text-xs text-muted-foreground">Gold only — no diamond in this piece.</span>
+                <button type="button" onClick={() => setNoDiamond(false)} className="text-xs text-primary hover:underline">
+                  this piece does have diamond
+                </button>
+              </div>
+            )}
             {canEditStage() && !faDone && orderMaterialRequirements(order).needsDiamond && (
               <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
                 <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
@@ -3039,6 +3066,14 @@ export function OrderDetailPage() {
                 </div>
                 {showDiamond && (
                   <button type="button" onClick={() => { setShowDiamond(false); setShowIssueForm(false); setShowBuyForm(false); }} className="text-xs text-muted-foreground underline">cancel</button>
+                )}
+                {/* Some pieces are plain gold. Saying so is a third answer to
+                    "where is the diamond coming from", not an override. */}
+                {!diamondOnly && (
+                  <button type="button" onClick={() => setNoDiamond(true)}
+                    className="text-xs text-primary hover:underline ml-auto">
+                    No diamond in this piece
+                  </button>
                 )}
               </div>
             )}

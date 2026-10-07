@@ -42,7 +42,7 @@ export function fmtLockerAmount(n: number, currency?: "INR" | "USD"): string {
 // orders never need a factory material issuance to proceed.
 const GOLDLESS_METALS = new Set(["Platinum", "Silver", "None (Diamond only)"]);
 
-export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondWeight">): {
+export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondWeight" | "noDiamond">): {
   needsGold: boolean;
   needsDiamond: boolean;
 } {
@@ -50,7 +50,12 @@ export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondW
     needsGold: !GOLDLESS_METALS.has(order.metal),
     // A diamond-only order is FOR the stones, so it needs them whatever the
     // estimated weight says — an estimate of 0 ct is missing, not "no diamond".
-    needsDiamond: order.diamondWeight > 0 || isDiamondOnlyOrder(order),
+    //
+    // `noDiamond` is someone saying the finished piece has none: a plain gold
+    // band, or an estimate that asked for stones the piece did not use. Without
+    // it the only way past Final Approval was the admin override, which records
+    // nothing about why.
+    needsDiamond: !order.noDiamond && (order.diamondWeight > 0 || isDiamondOnlyOrder(order)),
   };
 }
 
