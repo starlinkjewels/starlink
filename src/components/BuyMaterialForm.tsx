@@ -6,7 +6,7 @@ import {
   type Purchase, type PurchaseCurrency,
 } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -40,8 +40,7 @@ const emptyLine = (): Line => ({
 /** Weight × rate, less this line's own discount. */
 function lineBase(l: Line): number {
   const gross = (Number(l.qty) || 0) * (Number(l.rate) || 0);
-  const d = Math.min(Math.max(Number(l.discountPct) || 0, 0), 100);
-  return gross * (1 - d / 100);
+  return applyDiscountPct(gross, l.discountPct);
 }
 
 /**
@@ -116,7 +115,7 @@ export function BuyMaterialForm() {
         if (!d.purchases) d.purchases = [];
         lines.forEach((l, i) => {
           const q = Number(l.qty);
-          const disc = Math.min(Math.max(Number(l.discountPct) || 0, 0), 100);
+          const disc = Math.min(Math.max(Number(l.discountPct) || 0, -100), 100);
           const isGold = l.kind === "gold";
           const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
@@ -133,7 +132,7 @@ export function BuyMaterialForm() {
             totalUsd: currency === "USD" ? Math.round(lineBase(l) * 100) / 100 : undefined,
             exchangeRate: currency === "USD" ? Number(xrate) : undefined,
             totalInr: total, payments: [],
-            discountPct: disc > 0 ? disc : undefined,
+            discountPct: disc !== 0 ? disc : undefined,
             // The bill is rounded once, so it rides on its first line.
             roundOffInr: i === 0 && roundOffInr !== 0 ? roundOffInr : undefined,
             invoiceNumber: billNo.trim() || undefined,
@@ -254,10 +253,10 @@ export function BuyMaterialForm() {
           <div className="flex items-end justify-between gap-2.5 flex-wrap">
             <div className="w-32">
               <Label className="text-xs">Discount %</Label>
-              <Input type="number" min={0} max={100} step="0.01" value={l.discountPct} onChange={e => set(i, { discountPct: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="0" />
+              <Input type="number" min={-100} max={100} step="0.01" value={l.discountPct} onChange={e => set(i, { discountPct: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="0 — minus adds" />
             </div>
             <p className="text-xs text-muted-foreground pb-2.5">
-              {Number(l.discountPct) > 0 && <span className="mr-1">less {Number(l.discountPct)}% ·</span>}
+              {!!Number(l.discountPct) && <span className="mr-1">{discountLabel(Number(l.discountPct))} ·</span>}
               Item total: <span className="font-semibold text-foreground">{fmtMoneyInr(lineInr(l))}</span>
             </p>
           </div>

@@ -289,7 +289,9 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
       }
     }
     pur.totalInr = edit.totalInr;
-    pur.discountPct = edit.discountPct && edit.discountPct > 0 ? edit.discountPct : undefined;
+    // A NEGATIVE adjustment is a charge added on, so "any non-zero" — not
+    // "greater than zero", which dropped it silently.
+    pur.discountPct = edit.discountPct ? edit.discountPct : undefined;
     if (edit.totalUsd !== undefined) pur.totalUsd = edit.totalUsd;
     if (edit.exchangeRate !== undefined) pur.exchangeRate = edit.exchangeRate;
     pur.invoiceNumber = edit.invoiceNumber?.trim() || undefined;

@@ -987,8 +987,10 @@ export interface Purchase {
   totalInr: number; // ALWAYS present — the one canonical amount every ledger function sums
 
   payments: PurchasePayment[]; // mirrors Order.advances[] — paid/pending are derived, never stored
-  /** Supplier discount already taken off this line, in % ("less 5%"). Stored
-   *  for the record only — totalInr/totalUsd are the discounted figures. */
+  /** The percentage adjustment already applied to this line. Positive is a
+   *  discount ("less 5%"); NEGATIVE is a charge added on ("plus 1.5%") — the
+   *  GST or cash handling a supplier adds when there is no discount at all.
+   *  Stored for the record only; totalInr/totalUsd are the adjusted figures. */
   discountPct?: number;
   /** What was knocked off (or added) to make the bill a round figure — the few
    *  rupees nobody actually hands over. Already inside totalInr; kept separately

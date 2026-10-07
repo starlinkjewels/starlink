@@ -1,7 +1,7 @@
 import { Fragment, useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate } from "@/lib/db";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { ChevronRight } from "lucide-react";
@@ -159,7 +159,7 @@ export function StockActivityLedger() {
     // chitthi a line at a time and not only on the total.
     if (r.items && r.items.length > 1) {
       for (const it of r.items) {
-        body.push(["", "", "  item", "", "", it.material, it.qty, it.unit, it.amountInr, it.discountPct ? `less ${it.discountPct}%` : ""]);
+        body.push(["", "", "  item", "", "", it.material, it.qty, it.unit, it.amountInr, it.discountPct ? discountLabel(it.discountPct) : ""]);
       }
     }
   });
@@ -280,7 +280,7 @@ export function StockActivityLedger() {
                       <td className="px-5 py-1.5" />
                       <td className="px-3 py-1.5" colSpan={5}>
                         <span className="text-muted-foreground">{it.material}</span>
-                        {it.discountPct ? <span className="text-muted-foreground"> · less {it.discountPct}%</span> : null}
+                        {it.discountPct ? <span className="text-muted-foreground"> · {discountLabel(it.discountPct)}</span> : null}
                       </td>
                       <td className="px-3 py-1.5 text-right">{it.qty}{it.unit}</td>
                       <td className="px-3 py-1.5 text-right font-medium">{fmtMoneyInr(it.amountInr)}</td>

@@ -4,7 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, applyDiscountPct } from "@/lib/manufacturing";
 import type { Purchase } from "@/lib/db";
 import type { PurchaseEdit } from "@/lib/purchaseVoid";
 
@@ -59,8 +59,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const fx = purchase.exchangeRate ?? 0;
   // A supplier discount ("less 5%") comes off before the currency conversion,
   // exactly as it does when the purchase is first recorded.
-  const disc = Math.min(Math.max(Number(discount) || 0, 0), 100);
-  const net = q * r * (1 - disc / 100);
+  const disc = Math.min(Math.max(Number(discount) || 0, -100), 100);
+  const net = applyDiscountPct(q * r, disc);
   const totalUsd = isUsd ? Math.round(net * 100) / 100 : undefined;
   const totalInr = isUsd ? Math.round(net * fx) : Math.round(net);
 
@@ -105,7 +105,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           </div>
           <div>
             <Label className="text-xs">Discount %</Label>
-            <Input type="number" min={0} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+            <Input type="number" min={-100} max={100} step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0 — minus adds" />
           </div>
         </div>
         {lockQuantity && lockNote && (

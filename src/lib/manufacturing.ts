@@ -111,6 +111,24 @@ export function purchasePending(p: Purchase): number {
  * same account, are that one payment; the split stays inside the bills, where
  * the allocation belongs, and the bills are named instead.
  */
+/**
+ * What a line comes to after its percentage adjustment.
+ *
+ * Positive takes off (a 5% discount); negative adds on (1.5% GST, 1% for cash)
+ * — which is why it is not clamped at zero. It used to be, so a supplier who
+ * charges rather than discounts had nowhere to put it and the line read short.
+ * Bounded at ±100 so a typo cannot wipe a bill out or double it twice over.
+ */
+export function applyDiscountPct(gross: number, pct: number | string | undefined): number {
+  const d = Math.min(Math.max(Number(pct) || 0, -100), 100);
+  return gross * (1 - d / 100);
+}
+
+/** "less 5%" or "plus 1.5%", however it was entered. */
+export function discountLabel(pct: number): string {
+  return pct > 0 ? `less ${pct}%` : `plus ${Math.abs(pct)}%`;
+}
+
 export function groupPaymentsAsMade<T extends { id: string; lockerId?: string; createdAt: string; amountInr: number; note?: string }>(
   legs: { pay: T; label?: string }[],
 ): { ids: string[]; labels: string[]; at: string; amountInr: number; note?: string; lockerId?: string }[] {
