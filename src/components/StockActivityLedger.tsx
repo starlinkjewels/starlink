@@ -7,6 +7,8 @@ import {
   voidPurchase as voidPurchaseCascade, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
 import { Pencil, Trash2 } from "lucide-react";
+import { canEditIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
+import { canVoidSale, saleVoidImpact, voidDiamondSale } from "@/lib/diamondSaleVoid";
 import { toast } from "sonner";
 import { fmtDate, type Purchase } from "@/lib/db";
 import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
@@ -83,6 +85,52 @@ export function StockActivityLedger() {
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't apply the correction.");
     }
+  };
+
+  /** Gold handed to a factory in bulk. It draws down real stock, so entering it
+   *  twice or for the wrong factory leaves the stock short until it is undone. */
+  const removeAssignment = async (id: string) => {
+    const mi = (db.materialIssuances ?? []).find(x => x.id === id);
+    if (!mi) return;
+    const check = canEditIssuance(db, mi);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    if (!confirm([
+      `Cancel this assignment of ${mi.quantityIssued}${mi.material === "gold" ? "g" : "ct"} ${mi.purityOrQuality}?`,
+      "",
+      ...issuanceVoidImpact(db, mi),
+      "",
+      "This cannot be undone.",
+    ].join("\n"))) return;
+    setRemovingId(id);
+    try {
+      await deleteIssuance(db, mi, user!.id);
+      toast.success("Assignment cancelled — material returned to stock");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't cancel this.");
+    } finally { setRemovingId(null); }
+  };
+
+  /** A diamond sold straight out of stock — wrong buyer, wrong rate, or simply
+   *  entered twice. Reverses the stone, the sale and the money together. */
+  const removeSale = async (id: string) => {
+    const sale = (db.diamondSales ?? []).find(x => x.id === id);
+    if (!sale) return;
+    const check = canVoidSale(db, sale);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    if (!confirm([
+      `Cancel this sale of ${sale.carat}ct ${sale.shape}?`,
+      "",
+      ...saleVoidImpact(db, sale),
+      "",
+      "This cannot be undone.",
+    ].join("\n"))) return;
+    setRemovingId(id);
+    try {
+      await voidDiamondSale(db, sale, user!.id);
+      toast.success("Sale cancelled — stone, sale and money all reversed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't cancel this sale.");
+    } finally { setRemovingId(null); }
   };
 
   const remove = async (id: string) => {
@@ -343,7 +391,21 @@ export function StockActivityLedger() {
                         a factory assignment are each undone where they were
                         made, not here. */}
                     <td className="px-5 py-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                      {r.kind !== "Purchase" ? (
+                      {r.kind === "Assigned to factory" ? (
+                        <button onClick={() => removeAssignment(r.id)} disabled={removingId === r.id}
+                          title="Cancel this assignment — the material goes back into stock"
+                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : r.kind === "Diamond sold" ? (
+                        <button onClick={() => removeSale(r.id)} disabled={removingId === r.id}
+                          title="Cancel this sale — reverses the stone, the sale and the money"
+                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : r.kind !== "Purchase" ? (
+                        // An opening balance is a starting figure, not an event;
+                        // it is corrected on the Stock page where it was set.
                         <span className="text-[11px] text-muted-foreground">—</span>
                       ) : multi ? (
                         <span className="text-[11px] text-muted-foreground">{isOpen ? "per item ↓" : "open to edit"}</span>

@@ -8,7 +8,11 @@ import {
   supplierAccount, groupPaymentsAsMade, purchasePaid, purchasePending, allocateSupplierPaymentFIFO, fmtMoneyInr, lockerBalance, fmtLockerAmount,
 } from "@/lib/manufacturing";
 import { increaseStock } from "@/lib/stock";
-import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact } from "@/lib/purchaseVoid";
+import {
+  canVoidPurchase, canEditPurchase, editPurchase, voidPurchase as voidPurchaseCascade,
+  purchaseLabel, voidImpact, type PurchaseEdit,
+} from "@/lib/purchaseVoid";
+import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -16,7 +20,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
-  Download, FileText, FileSpreadsheet, X, Trash2, ArrowDownCircle,
+  Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -387,6 +391,24 @@ export function SupplierHistoryPage() {
   // already left stock, or if pooled stock has already been consumed. This keeps
   // production money/inventory from silently drifting.
   const [voidingId, setVoidingId] = useState<string | null>(null);
+  const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
+
+  const openEditPurchase = (p: Purchase) => {
+    const check = canEditPurchase(db, p);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    setEditingPurchase(p);
+  };
+
+  const saveEditPurchase = async (edit: PurchaseEdit) => {
+    if (!editingPurchase) return;
+    try {
+      await editPurchase(db, editingPurchase, edit, user!.id);
+      toast.success("Purchase corrected — supplier due, factory issue and stock updated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't apply the correction.");
+    }
+  };
+
   const voidPurchase = async (p: Purchase) => {
     // Every unwind rule lives in src/lib/purchaseVoid.ts so the Order page and
     // this ledger can never disagree about what "removing a purchase" means.
@@ -933,6 +955,18 @@ export function SupplierHistoryPage() {
                     {pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}
                   </p>
                   {paid > 0 && pending > 0 && <p className="text-[10px] text-muted-foreground">{fmtMoneyInr(paid)} paid so far</p>}
+                  {/* Correcting beats voiding and re-entering: a void unwinds the
+                      factory issue, the stock trail and the certified packet with
+                      it. This was the one list where a purchase could be removed
+                      but not put right. */}
+                  {user?.role === "admin" && (
+                    <button
+                      onClick={() => openEditPurchase(p)}
+                      className="mt-1 mr-2 text-[11px] text-primary inline-flex items-center gap-1 hover:underline"
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </button>
+                  )}
                   {user?.role === "admin" && paid === 0 && (
                     <button
                       onClick={() => voidPurchase(p)}
@@ -949,6 +983,12 @@ export function SupplierHistoryPage() {
           {purchases.length === 0 && <div className="px-5 py-12 text-center text-muted-foreground">No purchases recorded yet.</div>}
         </div>
       </div>
+      <EditPurchaseDialog
+        purchase={editingPurchase}
+        onClose={() => setEditingPurchase(null)}
+        onSave={saveEditPurchase}
+      />
+
     </div>
   );
 }
