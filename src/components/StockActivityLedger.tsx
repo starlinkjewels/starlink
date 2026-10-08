@@ -1,6 +1,14 @@
 import { Fragment, useState } from "react";
 import { useDb } from "@/hooks/useDb";
-import { fmtDate } from "@/lib/db";
+import { useAuth } from "@/lib/auth";
+import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
+import {
+  canEditPurchase, canVoidPurchase, editPurchase, purchaseLabel, voidImpact,
+  voidPurchase as voidPurchaseCascade, type PurchaseEdit,
+} from "@/lib/purchaseVoid";
+import { Pencil, Trash2 } from "lucide-react";
+import { toast } from "sonner";
+import { fmtDate, type Purchase } from "@/lib/db";
 import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -22,7 +30,7 @@ interface Row {
   amountInr?: number;
   remark?: string;
   /** A bill's own lines, when this row is a whole bill. */
-  items?: { material: string; qty: number; unit: "g" | "ct"; amountInr: number; discountPct?: number }[];
+  items?: { id: string; material: string; qty: number; unit: "g" | "ct"; amountInr: number; discountPct?: number }[];
   billNo?: string;
   /** Set when the purchase was bought for one order rather than into stock. */
   forOrder?: string;
@@ -39,6 +47,7 @@ interface Row {
  */
 export function StockActivityLedger() {
   const db = useDb();
+  const { user } = useAuth();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -46,6 +55,57 @@ export function StockActivityLedger() {
   const [material, setMaterial] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [billFilter, setBillFilter] = useState("");
+  const [editing, setEditing] = useState<Purchase | null>(null);
+  const [removingId, setRemovingId] = useState<string | null>(null);
+
+  /**
+   * Correcting a purchase from the ledger.
+   *
+   * This is where someone comes looking for a purchase, so this is where it has
+   * to be fixable. Both actions go through the same guarded helpers the order
+   * page uses — they carry the change through the supplier's due, the factory
+   * issue, the stock trail and any certified packet, and refuse outright when
+   * it can no longer be unwound cleanly.
+   */
+  const openEdit = (id: string) => {
+    const p = (db.purchases ?? []).find(x => x.id === id);
+    if (!p) return;
+    const check = canEditPurchase(db, p);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    setEditing(p);
+  };
+
+  const saveEdit = async (edit: PurchaseEdit) => {
+    if (!editing) return;
+    try {
+      await editPurchase(db, editing, edit, user!.id);
+      toast.success("Purchase corrected — supplier due, factory issue and stock updated");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't apply the correction.");
+    }
+  };
+
+  const remove = async (id: string) => {
+    const p = (db.purchases ?? []).find(x => x.id === id);
+    if (!p) return;
+    const check = canVoidPurchase(db, p);
+    if (!check.ok) { toast.error(check.reason!); return; }
+    if (!confirm([
+      `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)})?`,
+      "",
+      "What changes:",
+      ...voidImpact(db, p),
+      "",
+      "This cannot be undone.",
+    ].join("\n"))) return;
+    setRemovingId(id);
+    try {
+      await voidPurchaseCascade(db, p, user!.id);
+      toast.success("Purchase removed — supplier due, factory issue and stock all reversed");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't remove this purchase.");
+    } finally { setRemovingId(null); }
+  };
 
   const all: Row[] = [];
 
@@ -72,7 +132,7 @@ export function StockActivityLedger() {
       : `${p.supplierId}|at:${p.createdAt}`;
     const existing = bills.get(key);
     if (existing) {
-      existing.items!.push({ material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
+      existing.items!.push({ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
       existing.qty = Math.round((existing.qty + qty) * 1000) / 1000;
       existing.amountInr = (existing.amountInr ?? 0) + p.totalInr;
       if (existing.unit !== unit) existing.unit = unit; // mixed bill — the count is shown per line
@@ -86,7 +146,7 @@ export function StockActivityLedger() {
       material: label, qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
       remark: p.notes || undefined,
-      items: [{ material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
+      items: [{ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
     });
   }
   for (const b of bills.values()) {
@@ -224,7 +284,7 @@ export function StockActivityLedger() {
       />
 
       <div className="overflow-x-auto -mx-5">
-        <table className="w-full text-sm min-w-[720px]">
+        <table className="w-full text-sm min-w-[840px]">
           <thead className="bg-secondary/50 text-[11px] uppercase tracking-wider text-muted-foreground">
             <tr>
               <th className="text-left px-5 py-2.5">Sr</th>
@@ -235,12 +295,13 @@ export function StockActivityLedger() {
               <th className="text-left px-3 py-2.5">Material</th>
               <th className="text-right px-3 py-2.5">Quantity</th>
               <th className="text-right px-3 py-2.5">Amount</th>
-              <th className="text-left px-5 py-2.5">Remark</th>
+              <th className="text-left px-3 py-2.5">Remark</th>
+              <th className="text-right px-5 py-2.5">Action</th>
             </tr>
           </thead>
           <tbody>
             {paged.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
                 {filtered ? "Nothing matches these filters." : "Nothing bought, assigned or sold yet."}
               </td></tr>
             ) : paged.map((r, i) => {
@@ -273,7 +334,33 @@ export function StockActivityLedger() {
                     </td>
                     <td className="px-3 py-2.5 text-right font-medium whitespace-nowrap">{r.qty}{r.unit}</td>
                     <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{r.amountInr != null ? fmtMoneyInr(r.amountInr) : "—"}</td>
-                    <td className="px-5 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</td>
+                    <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</td>
+                    {/* A bill of several lines is corrected line by line, since
+                        each line is its own purchase with its own supplier due
+                        and factory issue — so its actions sit on the lines, which
+                        open below. Only the other three kinds of entry have
+                        nothing to offer: a diamond sale, an opening balance and
+                        a factory assignment are each undone where they were
+                        made, not here. */}
+                    <td className="px-5 py-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
+                      {r.kind !== "Purchase" ? (
+                        <span className="text-[11px] text-muted-foreground">—</span>
+                      ) : multi ? (
+                        <span className="text-[11px] text-muted-foreground">{isOpen ? "per item ↓" : "open to edit"}</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1">
+                          <button onClick={() => openEdit(r.items![0].id)} title="Correct this purchase"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => remove(r.items![0].id)} disabled={removingId === r.items![0].id}
+                            title="Remove this purchase — reverses the supplier due, stock and factory issue"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      )}
+                    </td>
                   </tr>
                   {multi && isOpen && r.items!.map((it, n) => (
                     <tr key={`${r.id}-${n}`} className="bg-secondary/30 text-xs">
@@ -284,7 +371,20 @@ export function StockActivityLedger() {
                       </td>
                       <td className="px-3 py-1.5 text-right">{it.qty}{it.unit}</td>
                       <td className="px-3 py-1.5 text-right font-medium">{fmtMoneyInr(it.amountInr)}</td>
-                      <td className="px-5 py-1.5" />
+                      <td className="px-3 py-1.5" />
+                      <td className="px-5 py-1.5 text-right whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1">
+                          <button onClick={() => openEdit(it.id)} title="Correct this item"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
+                            <Pencil className="h-3.5 w-3.5" />
+                          </button>
+                          <button onClick={() => remove(it.id)} disabled={removingId === it.id}
+                            title="Remove this item — reverses the supplier due, stock and factory issue"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        </span>
+                      </td>
                     </tr>
                   ))}
                 </Fragment>
@@ -295,6 +395,12 @@ export function StockActivityLedger() {
       </div>
       <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
         label={rows.length ? `Showing ${start + 1}–${end} of ${rows.length}` : undefined} />
+
+      <EditPurchaseDialog
+        purchase={editing}
+        onClose={() => setEditing(null)}
+        onSave={saveEdit}
+      />
     </div>
   );
 }
