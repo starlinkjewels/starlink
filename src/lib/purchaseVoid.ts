@@ -15,7 +15,7 @@
 // whenever the purchase can't be cleanly reversed — money already paid, making
 // charges already paid, the factory already finished the piece, or a certified
 // stone already used/sold. Those must be undone at the source first.
-import { updateDb, uid, type DB, type Purchase } from "./db";
+import { updateDb, uid, type DB, type Purchase, type StockMovement } from "./db";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "./stock";
 
@@ -126,13 +126,7 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
     // logOrderDirectPurchase). Remove exactly ONE — a genuine duplicate has an
     // identical twin that must survive until it is voided in its own right.
     if (p.orderId) {
-      const idx = d.stockMovements.findIndex(m =>
-        m.type === "order_direct_use" &&
-        m.refType === "order" &&
-        m.refId === p.orderId &&
-        m.material === p.material &&
-        m.createdAt === p.createdAt &&
-        Math.abs(m.quantity - qty) < 0.0001);
+      const idx = findDirectUseIdx(d.stockMovements ?? [], p, qty);
       if (idx >= 0) d.stockMovements.splice(idx, 1);
     }
 
@@ -180,6 +174,31 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
 
 /** The correctable fields of a purchase. Amounts are computed by the caller so
  *  the USD × exchange-rate maths stays in one place (the form). */
+/**
+ * The "used directly on order" leg that belongs to one purchase.
+ *
+ * The leg carries no purchase id — its refId is the ORDER — so it is found by
+ * material, quantity and the moment it was written. Both legs now share the
+ * purchase's own timestamp, but everything recorded before that has the two a
+ * few milliseconds apart, so an exact match is tried first and a two-second
+ * window after it. Without the window, removing an older purchase deletes the
+ * "bought" leg and orphans the "used" leg, and the stock balance falls by the
+ * whole quantity and never comes back.
+ */
+function findDirectUseIdx(
+  movements: StockMovement[],
+  p: { orderId?: string; material: string; createdAt: string },
+  qty: number,
+): number {
+  const candidate = (m: StockMovement) =>
+    m.type === "order_direct_use" && m.refType === "order" && m.refId === p.orderId
+    && m.material === p.material && Math.abs(m.quantity - qty) < 0.0001;
+  const exact = movements.findIndex(m => candidate(m) && m.createdAt === p.createdAt);
+  if (exact >= 0) return exact;
+  const at = +new Date(p.createdAt);
+  return movements.findIndex(m => candidate(m) && Math.abs(+new Date(m.createdAt) - at) < 2000);
+}
+
 export interface PurchaseEdit {
   quantity: number;      // grams (gold) / carats (diamond)
   ratePerUnit: number;   // per gram / per carat, in the purchase's billing currency
@@ -187,6 +206,11 @@ export interface PurchaseEdit {
   totalInr: number;
   totalUsd?: number;
   exchangeRate?: number;
+  /** Moving the purchase to a different supplier. The wrong name is one click
+   *  away in a long list, and until now the only way back was to remove the
+   *  purchase and enter it again — which unwinds the factory issue, the stock
+   *  trail and the certified packet with it. */
+  supplierId?: string;
   invoiceNumber?: string;
   notes?: string;
   quality?: string;
@@ -294,6 +318,13 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     pur.discountPct = edit.discountPct ? edit.discountPct : undefined;
     if (edit.totalUsd !== undefined) pur.totalUsd = edit.totalUsd;
     if (edit.exchangeRate !== undefined) pur.exchangeRate = edit.exchangeRate;
+    // Both suppliers' dues follow from their purchases, so moving the purchase
+    // moves the money with it. A purchase with a payment already against it is
+    // refused upstream — that payment belongs to the supplier who received it.
+    if (edit.supplierId && edit.supplierId !== pur.supplierId) {
+      pur.supplierId = edit.supplierId;
+      for (const pk of d.diamondPackets ?? []) if (pk.purchaseId === pur.id) pk.supplierId = edit.supplierId;
+    }
     pur.invoiceNumber = edit.invoiceNumber?.trim() || undefined;
     pur.notes = edit.notes?.trim() || undefined;
 
@@ -326,10 +357,7 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
         if (m.refType === "purchase" && m.refId === p.id && m.type === "purchase_in") m.quantity = newQty;
       }
       if (p.orderId) {
-        const idx = (d.stockMovements ?? []).findIndex(m =>
-          m.type === "order_direct_use" && m.refType === "order" && m.refId === p.orderId &&
-          m.material === p.material && m.createdAt === p.createdAt &&
-          Math.abs(m.quantity - oldQty) < 0.0001);
+        const idx = findDirectUseIdx(d.stockMovements ?? [], p, oldQty);
         if (idx >= 0) d.stockMovements[idx].quantity = newQty;
       }
     }

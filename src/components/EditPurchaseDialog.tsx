@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { fmtMoneyInr, applyDiscountPct } from "@/lib/manufacturing";
+import { useDb } from "@/hooks/useDb";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Purchase } from "@/lib/db";
 import type { PurchaseEdit } from "@/lib/purchaseVoid";
 
@@ -22,10 +24,12 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   lockQuantity?: boolean;
   lockNote?: string;
 }) {
+  const db = useDb();
   const isGold = purchase?.material === "gold";
   const isCertified = purchase?.material === "diamond" && purchase?.diamond?.kind === "certified";
   const unit = isGold ? "g" : "ct";
 
+  const [supplierId, setSupplierId] = useState("");
   const [qty, setQty] = useState("");
   const [rate, setRate] = useState("");
   const [discount, setDiscount] = useState("");
@@ -39,6 +43,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   // Reload the form whenever a different purchase is opened.
   useEffect(() => {
     if (!purchase) return;
+    setSupplierId(purchase.supplierId);
     setQty(String(purchase.material === "gold" ? purchase.gold?.weightGrams ?? 0 : purchase.diamond?.carat ?? 0));
     setRate(String(purchase.material === "gold" ? purchase.gold?.ratePerGram ?? 0 : purchase.diamond?.ratePerCarat ?? 0));
     setDiscount(purchase.discountPct ? String(purchase.discountPct) : "");
@@ -68,6 +73,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
     setSaving(true);
     try {
       await onSave({
+        supplierId,
         quantity: q,
         ratePerUnit: r,
         discountPct: disc,
@@ -131,6 +137,28 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
             </div>
           </div>
         )}
+
+        {/* The wrong supplier is one click away in a long list. Correcting it
+            here moves the due from one to the other; removing the purchase and
+            entering it again would unwind the factory issue and the stock trail
+            with it. */}
+        <div>
+          <Label className="text-xs">Supplier</Label>
+          <Select value={supplierId} onValueChange={setSupplierId}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+            <SelectContent>
+              {db.suppliers.filter(s => s.active !== false || s.id === purchase.supplierId)
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          {supplierId !== purchase.supplierId && (
+            <p className="text-[11px] text-warning mt-1">
+              {fmtMoneyInr(purchase.totalInr)} moves off {db.suppliers.find(s => s.id === purchase.supplierId)?.name ?? "the old supplier"}
+              {" "}and onto {db.suppliers.find(s => s.id === supplierId)?.name ?? "the new one"}.
+            </p>
+          )}
+        </div>
 
         <div className="grid grid-cols-2 gap-3">
           <div>

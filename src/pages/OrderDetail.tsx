@@ -508,6 +508,8 @@ export function OrderDetailPage() {
         await logOrderDirectPurchase({
           material: newPurchases[i].material, purityOrQuality, quantity: qty,
           purchaseId: newPurchases[i].id, orderId: order.id, createdBy: user!.id,
+          // Same instant as the purchase itself, so the two legs stay findable.
+          createdAt: now,
         });
       }
 

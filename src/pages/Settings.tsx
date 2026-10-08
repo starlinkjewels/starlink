@@ -7,6 +7,7 @@ import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
 import { unappliedIncome, invoiceBalance, applyIncomeToClient, markedNotClientPayment, setNotClientPayment } from "@/lib/clientPayments";
 import { legacyPayments, backfillReceipts } from "@/lib/receipts";
 import { orphanSupplierPayments, repairSupplierPayments } from "@/lib/supplierRepair";
+import { orphanDirectUses, orphanImpact, repairOrphanDirectUses } from "@/lib/stockRepair";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
@@ -37,6 +38,7 @@ import {
   DollarSign,
   Building2,
   Database,
+  Boxes,
   SlidersHorizontal,
   Hash,
   Receipt,
@@ -415,6 +417,32 @@ export function SettingsPage() {
     } catch {
       toast.error("Couldn't finish — nothing was lost, try again.");
     } finally { setFixingSupplier(false); }
+  }
+
+  // ── Stock gone negative from a half-removed purchase ──────────────────
+  const [fixingStock, setFixingStock] = useState(false);
+  const widowedUses = useMemo(() => orphanDirectUses(liveDb), [liveDb]);
+  const widowedImpact = useMemo(() => orphanImpact(widowedUses), [widowedUses]);
+
+  function repairStock() {
+    const n = widowedUses.length;
+    if (!n) return;
+    if (!confirm([
+      `Clear ${n} stock movement${n !== 1 ? "s" : ""} with nothing behind them?`,
+      "",
+      "These record material leaving a pool it was never added to, because the purchase",
+      "they belonged to was removed and only half the pair went with it. Clearing them",
+      "puts the balance back.",
+      "",
+      "Nothing else changes — no purchase, issue, order or payment is touched.",
+    ].join("\n"))) return;
+    setFixingStock(true);
+    try {
+      const done = repairOrphanDirectUses();
+      toast.success(`${done} movement${done !== 1 ? "s" : ""} cleared — stock balances restored`);
+    } catch {
+      toast.error("Couldn't finish — nothing was lost, try again.");
+    } finally { setFixingStock(false); }
   }
 
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
@@ -1332,6 +1360,55 @@ export function SettingsPage() {
           </div>
         )}
 
+
+        {/* ── Stock driven negative by a half-removed purchase (admin only) ── */}
+        {isAdminUser && widowedUses.length > 0 && (
+          <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-4 mt-2">
+            <div className="flex items-center gap-2">
+              <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-destructive/10 text-destructive">
+                <Boxes className="h-4 w-4" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-brand-dark text-sm">Stock Showing Less Than It Should</h3>
+                <p className="text-[11px] text-muted-foreground">
+                  {widowedUses.length} movement{widowedUses.length !== 1 ? "s" : ""} record material leaving stock it was never added to.
+                </p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[11px] text-muted-foreground">
+              Material bought for one order and sent straight to the factory is written as a pair — bought in,
+              used out, netting to zero. Removing such a purchase had to move both, but it looked for the second
+              row by the exact instant it was written and that row carried its own clock, a few milliseconds later,
+              so it was never found. The &ldquo;bought&rdquo; row went and the &ldquo;used&rdquo; row stayed,
+              with nothing to cancel it. Clearing these puts the balance back;
+              <span className="font-medium text-foreground"> no purchase, issue, order or payment is touched</span>.
+              The pairing itself is fixed, so this cannot happen again.
+            </p>
+
+            {widowedImpact.length > 0 && (
+              <p className="mt-2 text-[11px]">
+                <span className="text-muted-foreground">Short by: </span>
+                {widowedImpact.map(i => `${i.key} ${i.qty}${i.unit}`).join(" · ")}
+              </p>
+            )}
+
+            <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
+              {widowedUses.slice(0, 8).map(r => (
+                <p key={r.id} className="text-[11px] text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleDateString()} · {r.purityOrQuality} · {r.quantity}{r.material === "gold" ? "g" : "ct"} · {r.orderNumber}
+                </p>
+              ))}
+              {widowedUses.length > 8 && (
+                <p className="text-[11px] text-muted-foreground">…and {widowedUses.length - 8} more.</p>
+              )}
+            </div>
+
+            <AsyncButton size="sm" variant="outline" disabled={fixingStock} onClick={repairStock} className="rounded-xl h-9 mt-3">
+              {fixingStock ? "Clearing…" : `Clear ${widowedUses.length} movement${widowedUses.length !== 1 ? "s" : ""}`}
+            </AsyncButton>
+          </div>
+        )}
 
         {/* ── Supplier payments that never reached the supplier's books (admin only) ── */}
         {isAdminUser && lostSupplierPayments.length > 0 && (

@@ -173,8 +173,15 @@ export async function logOrderDirectPurchase(args: {
   purchaseId: string;
   orderId: string;
   createdBy: string;
+  /** The PURCHASE's own timestamp. Both legs must carry it: the "used" leg has
+   *  no purchase id of its own, so editing or removing a purchase finds its
+   *  partner by material, quantity and this instant. Minting a fresh one here
+   *  put the two milliseconds apart, the match never succeeded, and removing a
+   *  purchase deleted the "bought" leg while orphaning the "used" leg — which
+   *  is a stock balance that falls by the whole quantity and stays there. */
+  createdAt?: string;
 }): Promise<void> {
-  const now = new Date().toISOString();
+  const now = args.createdAt ?? new Date().toISOString();
   await Promise.all([
     addStockMovement({
       material: args.material, type: "purchase_in", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
