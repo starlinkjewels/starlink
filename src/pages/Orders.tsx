@@ -7,9 +7,10 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
+import { exportProductsCsv, exportProductsPdf } from "@/lib/productExport";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
@@ -63,6 +64,24 @@ export function OrdersPage() {
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
+  /**
+   * The pieces on screen, with the weights a sale is priced from.
+   *
+   * Filter to one client and the ready work, and this is the sheet a bulk sale
+   * is settled on: gross, net and diamond weight, the stone count, and what is
+   * already paid — figures that were only ever visible one order at a time.
+   * Whatever the filters leave is what downloads, as everywhere else.
+   */
+  const exportName = () => {
+    const who = clientFilter === "all" ? "" : `-${(db.clients.find(c => c.id === clientFilter)?.companyName ?? "").replace(/\s+/g, "_")}`;
+    return `Products${who}${status === "all" ? "" : `-${status.replace(/\s+/g, "_")}`}`;
+  };
+  const exportSubject = () => [
+    clientFilter === "all" ? "All clients" : db.clients.find(c => c.id === clientFilter)?.companyName,
+    status === "all" ? "All status" : status,
+    q.trim() ? `Search: "${q.trim()}"` : "",
+  ].filter(Boolean).join(" · ");
+
   return (
     <div className="max-w-7xl mx-auto space-y-4">
 
@@ -110,6 +129,19 @@ export function OrdersPage() {
                 <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
             </SelectContent>
           </Select>
+        )}
+
+        {isStaff && orders.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => exportProductsPdf(db, orders, exportName(), exportSubject())}
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+              <FileText className="h-4 w-4" /> PDF
+            </button>
+            <button onClick={() => exportProductsCsv(db, orders, exportName())}
+              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+              <FileSpreadsheet className="h-4 w-4" /> Excel
+            </button>
+          </div>
         )}
 
         <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">

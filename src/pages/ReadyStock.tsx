@@ -12,7 +12,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Film, Play } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Film, Play, FileText, FileSpreadsheet } from "lucide-react";
+import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
@@ -89,6 +90,17 @@ export function ReadyStockPage() {
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE);
+
+  /**
+   * The shelf, as a sheet. Whatever the search and the availability filter
+   * leave on screen is what downloads — a bulk sale is quoted off these
+   * weights, so the file has to be the same set of pieces the eye just checked.
+   */
+  const exportName = () => `Ready_Stock${avail === "all" ? "" : `-${avail}`}`;
+  const exportSubject = () => [
+    avail === "all" ? "All items" : avail === "available" ? "Available only" : "Sold out only",
+    q.trim() ? `Search: "${q.trim()}"` : "",
+  ].filter(Boolean).join(" · ");
 
   // ── Add / Edit dialog ──
   const [open, setOpen] = useState(false);
@@ -389,6 +401,19 @@ export function ReadyStockPage() {
             <SelectItem value="sold">Sold out</SelectItem>
           </SelectContent>
         </Select>
+        {canManage && items.length > 0 && (
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => exportReadyStockPdf(items, exportName(), exportSubject())}
+              className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+              <FileText className="h-4 w-4" /> PDF
+            </button>
+            <button onClick={() => exportReadyStockCsv(items, exportName(), isAdmin)}
+              className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
+              <FileSpreadsheet className="h-4 w-4" /> Excel
+            </button>
+          </div>
+        )}
+
         <div className="shrink-0 ml-auto inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
           <button onClick={() => saveView("list")} aria-label="List view"
             className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
