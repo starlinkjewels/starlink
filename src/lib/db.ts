@@ -423,6 +423,8 @@ export interface Order {
    *  got round to entering it. ISO; absent on orders dispatched before this
    *  was recorded, where the timeline's own stamp is the only date there is. */
   dispatchedAt?: string;
+  /** The day it reached the client, on the same footing as dispatchedAt. */
+  deliveredAt?: string;
   // Finished-product photography (captured at/after dispatch, optional). Photos
   // + one short video of the actual piece; shown on the dedicated Product Photos
   // page (grouped by design number), not the shared Catalog. Storage download URLs.

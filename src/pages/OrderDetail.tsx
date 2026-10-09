@@ -171,6 +171,10 @@ export function OrderDetailPage() {
   // days later, and stamping those with "now" put the wrong day in the record
   // with no way to correct it.
   const [dispatchDay, setDispatchDay] = useState(todayLocal());
+  // Arrival is entered late more often than dispatch is, so it takes a date on
+  // the same terms.
+  const [deliverModalIdx, setDeliverModalIdx] = useState<number | null>(null);
+  const [deliverDay, setDeliverDay] = useState(todayLocal());
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingLink, setTrackingLink] = useState("");
 
@@ -2881,7 +2885,9 @@ export function OrderDetailPage() {
                         ? readiness.ready && <AsyncButton size="sm" variant="outline" onClick={() => openFinalApproval(idx)} className="mt-2 h-7 rounded-lg text-xs">Final Approval — enter actuals</AsyncButton>
                         : t.step === "Dispatch"
                           ? <AsyncButton size="sm" variant="outline" onClick={() => openDispatchModal(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
-                          : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                          : t.step === "Delivered"
+                            ? <AsyncButton size="sm" variant="outline" onClick={() => { setDeliverDay(order.deliveredAt ? dayOf(order.deliveredAt) : todayLocal()); setDeliverModalIdx(idx); }} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                            : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
                   {canEditStage() && isDone && (
@@ -3598,6 +3604,26 @@ export function OrderDetailPage() {
             ✕
           </button>
         </motion.div>
+      )}
+
+      {/* ── Delivery date popup (from the timeline "Mark complete") ── */}
+      {deliverModalIdx !== null && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setDeliverModalIdx(null)}>
+          <div className="card-luxe w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+            <h3 className="font-display text-lg text-brand-dark mb-1">Delivered — {order.orderNumber}</h3>
+            <p className="text-xs text-muted-foreground mb-4">The day it reached the client, which need not be today.</p>
+            <Label className="text-xs">Delivery Date *</Label>
+            <Input type="date" value={deliverDay} max={todayLocal()} onChange={e => setDeliverDay(e.target.value)} className="rounded-xl h-10 mt-1" />
+            <div className="flex gap-2 mt-5">
+              <button onClick={() => setDeliverModalIdx(null)} className="flex-1 rounded-xl border border-border py-2 text-sm">Cancel</button>
+              <AsyncButton onClick={() => {
+                const idx = deliverModalIdx;
+                updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.deliveredAt = stampFor(deliverDay); });
+                if (advanceStep(idx, false, stampFor(deliverDay))) setDeliverModalIdx(null);
+              }} className="btn-hero flex-1 rounded-xl py-2 text-sm">Mark Delivered</AsyncButton>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Dispatch Details popup (from the timeline "Mark complete") ── */}
