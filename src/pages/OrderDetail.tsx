@@ -5,7 +5,7 @@ import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
-  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor,
+  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
@@ -1733,7 +1733,7 @@ export function OrderDetailPage() {
     setCourierName(order.courierName ?? "");
     setTrackingNumber(order.trackingNumber ?? "");
     setTrackingLink(order.trackingLink ?? "");
-    setDispatchDay(order.dispatchedAt ? order.dispatchedAt.slice(0, 10) : todayLocal());
+    setDispatchDay(order.dispatchedAt ? dayOf(order.dispatchedAt) : todayLocal());
     setDispatchModalIdx(idx);
   };
 
@@ -2401,7 +2401,7 @@ export function OrderDetailPage() {
                 setCourierName(order.courierName ?? "");
                 setTrackingNumber(order.trackingNumber ?? "");
                 setTrackingLink(order.trackingLink ?? "");
-                setDispatchDay(order.dispatchedAt ? order.dispatchedAt.slice(0, 10) : todayLocal());
+                setDispatchDay(order.dispatchedAt ? dayOf(order.dispatchedAt) : todayLocal());
                 setShowDispatch(v => !v);
               }} className="rounded-xl gap-2">
                 <Truck className="h-4 w-4" />

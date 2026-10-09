@@ -206,6 +206,22 @@ export function todayLocal(): string {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
 }
 
+/**
+ * The local calendar day an ISO stamp falls on, as <input type="date"> wants it.
+ *
+ * Slicing the first ten characters of the ISO string gives the UTC day, which
+ * is yesterday for anyone east of UTC in the early hours — so a date entered
+ * at 2am in India reads back a day earlier, and saving the form again moves it
+ * back another day. The round trip has to go through local time, the same way
+ * todayLocal does.
+ */
+export function dayOf(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(+d)) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+}
+
 /** The chosen day, carrying the current time of day so entries made on the same
  *  date still sort in the order they were recorded. */
 export function stampFor(day: string): string {
