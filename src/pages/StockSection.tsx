@@ -385,15 +385,51 @@ function CertifiedSection() {
   const histActive = !!histFrom || !!histTo;
   const histRows = allPackets.filter(p => inDateRange(boughtDate(p), histFromDate, histToDate));
 
+  /**
+   * What a certified stone cost, in the currency it was actually bought in.
+   *
+   * A certified line is one stone and one purchase, so the bill’s own figures
+   * belong to this packet exactly — no dividing a shared total. A stone bought
+   * in dollars carries the dollar amount and the rate it was converted at, both
+   * as entered; a rupee purchase simply has no dollar side, and inventing one
+   * at today’s rate would misstate what was paid.
+   */
+  const costOf = (p: DiamondPacket) => {
+    const pu = purchaseOf(p.purchaseId);
+    const inr = p.ratePerCaratInr ? Math.round(p.ratePerCaratInr * p.carat) : (pu?.totalInr ?? undefined);
+    const usd = pu?.currency === "USD" ? pu.totalUsd : undefined;
+    return {
+      currency: pu?.currency ?? "",
+      rateInr: p.ratePerCaratInr,
+      totalInr: inr,
+      rateUsd: usd != null && p.carat > 0 ? Math.round((usd / p.carat) * 100) / 100 : undefined,
+      totalUsd: usd,
+      exchangeRate: pu?.currency === "USD" ? pu.exchangeRate : undefined,
+    };
+  };
+
   const exportCertCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       "Stock-Certified_Diamonds-History",
-      ["Bought", "Stock #", "Shape", "Carat", "Certificate", "Lab", "Supplier", "Rate/ct (INR)", "Cost (INR)", "Status", "Order"],
-      allPackets.filter(p => inDateRange(boughtDate(p), from, to)).map(p => [
-        fmtDate(boughtDate(p)), p.stockNumber ?? "", p.shape, p.carat, p.certificateNumber, p.certificateLab ?? "",
-        supplierName(p.supplierId) ?? "", p.ratePerCaratInr ?? "",
-        p.ratePerCaratInr ? Math.round(p.ratePerCaratInr * p.carat) : "", STATUS_LABEL[p.status], orderNoOf(p.orderId) ?? "",
-      ]),
+      [
+        "Bought", "Stock #", "Shape", "Carat", "Measurement (mm)",
+        "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Quality",
+        "Report Number", "Lab", "Supplier",
+        "Currency", "Rate/ct ($)", "Total ($)", "Exchange Rate",
+        "Rate/ct (INR)", "Total (INR)", "Status", "Order",
+      ],
+      allPackets.filter(p => inDateRange(boughtDate(p), from, to)).map(p => {
+        const c = costOf(p);
+        return [
+          fmtDate(boughtDate(p)), p.stockNumber ?? "", p.shape, p.carat, p.measurement ?? "",
+          p.color ?? "", p.clarity ?? "", p.cut ?? "", p.polish ?? "", p.symmetry ?? "",
+          p.fluorescence ?? "", p.quality ?? "",
+          p.certificateNumber, p.certificateLab ?? "", supplierName(p.supplierId) ?? "",
+          c.currency, c.rateUsd ?? "", c.totalUsd ?? "", c.exchangeRate ?? "",
+          c.rateInr ?? "", c.totalInr ?? "",
+          STATUS_LABEL[p.status], orderNoOf(p.orderId) ?? "",
+        ];
+      }),
     );
   };
   const exportCertPdf = (from: Date | null, to: Date | null) => {
@@ -402,26 +438,37 @@ function CertifiedSection() {
       title: "Certified Diamonds — Full History",
       subjectLines: [
         `${filtered.length} packet${filtered.length !== 1 ? "s" : ""}${from || to ? " (filtered)" : " (all time)"}`,
-        "Rate/ct in Rs (INR)",
+        "Totals in Rs (INR); the $ column is what a dollar purchase was billed at",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
+        { label: "Carats", value: String(Math.round(filtered.reduce((s, p) => s + p.carat, 0) * 100) / 100) },
         { label: "In stock", value: String(filtered.filter(p => p.status === "in_stock").length) },
         { label: "Issued / used", value: String(filtered.filter(p => p.status === "issued" || p.status === "used").length) },
         { label: "Sold", value: String(filtered.filter(p => p.status === "sold").length) },
       ],
       landscape: true,
       columns: [
-        { header: "Bought", x: 14 }, { header: "Shape/ct", x: 44 }, { header: "Certificate", x: 84 },
-        { header: "Supplier", x: 132 }, { header: "Rate/ct", x: 210 }, { header: "Status", x: 238 },
+        { header: "Bought", x: 14 }, { header: "Stock #", x: 37 }, { header: "Shape", x: 54 },
+        { header: "Ct", x: 82 }, { header: "Color", x: 86 }, { header: "Clarity", x: 99 },
+        { header: "Report", x: 115 }, { header: "Supplier", x: 149 },
+        { header: "Rate/ct", x: 196 }, { header: "Total Rs", x: 221 }, { header: "Total $", x: 242 },
+        { header: "Status", x: 246 },
       ],
-      align: ["left", "left", "left", "left", "right", "left"],
-      rows: filtered.map(p => [
-        fmtDate(boughtDate(p)), `${p.shape} ${p.carat}ct`, String(p.certificateNumber).slice(0, 24),
-        (supplierName(p.supplierId) ?? "—").slice(0, 30),
-        p.ratePerCaratInr ? Math.round(p.ratePerCaratInr).toLocaleString("en-IN") : "—",
-        STATUS_LABEL[p.status] + (p.orderId ? ` (${orderNoOf(p.orderId) ?? ""})` : ""),
-      ]),
+      align: ["left", "left", "left", "right", "left", "left", "left", "left", "right", "right", "right", "left"],
+      rows: filtered.map(p => {
+        const c = costOf(p);
+        return [
+          fmtDate(boughtDate(p)), p.stockNumber ?? "—", p.shape.slice(0, 12), String(p.carat),
+          (p.color ?? "—").slice(0, 6), (p.clarity ?? "—").slice(0, 7),
+          String(p.certificateNumber).slice(0, 20),
+          (supplierName(p.supplierId) ?? "—").slice(0, 28),
+          c.rateInr ? Math.round(c.rateInr).toLocaleString("en-IN") : "—",
+          c.totalInr ? Math.round(c.totalInr).toLocaleString("en-IN") : "—",
+          c.totalUsd != null ? c.totalUsd.toLocaleString("en-US") : "—",
+          (STATUS_LABEL[p.status] + (p.orderId ? ` (${orderNoOf(p.orderId) ?? ""})` : "")).slice(0, 26),
+        ];
+      }),
       filename: "Stock-Certified_Diamonds-History",
     });
   };
@@ -640,7 +687,7 @@ function CertifiedSection() {
           <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
           <ExportDialog open={showExport} onClose={() => setShowExport(false)} title="Certified Diamonds — History" options={[
             { label: "Full History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportCertPdf },
-            { label: "Full History — Excel", sublabel: "Supplier, rate, cost, status, order", kind: "excel", run: exportCertCsv },
+            { label: "Full History — Excel", sublabel: "Shape, size, colour, clarity, report no., $ + rate, INR, supplier, status", kind: "excel", run: exportCertCsv },
           ]} />
         </div>
         <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
