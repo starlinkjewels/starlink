@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Film, Play, FileText, FileSpreadsheet } from "lucide-react";
+import { Plus, Search, Trash2, Gem, ImagePlus, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Film, Play, FileText, FileSpreadsheet, Check } from "lucide-react";
 import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
@@ -22,6 +22,21 @@ const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Penda
 const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 const PAGE_SIZE = 12;
+
+/** A tick-box riding on top of a card, which must not trigger the card itself. */
+function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; onToggle: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      aria-label={checked ? "Deselect this piece" : "Select this piece"}
+      onClick={e => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      className={`z-30 h-6 w-6 grid place-items-center rounded-md border shadow-soft transition-colors ${checked ? "bg-primary border-primary text-white" : "bg-white/90 border-border text-transparent hover:border-primary"} ${className}`}
+    >
+      <Check className="h-4 w-4" />
+    </button>
+  );
+}
 
 /** Compress a File to a base64 JPEG ≤800px — same convention as NewOrder.tsx/OrderDetail.tsx. */
 async function compressImage(file: File): Promise<string> {
@@ -85,22 +100,42 @@ export function ReadyStockPage() {
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("readystock-view", v); } catch { /* ignore */ } };
 
+  // Commas separate alternatives — a few SKUs read off a list can be pasted in
+  // as written and the sheet drawn from exactly those pieces.
+  const terms = q.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
   const items = db.readyStock
-    .filter(i => i.name.toLowerCase().includes(q.toLowerCase()) || (i.sku || "").toLowerCase().includes(q.toLowerCase()))
+    .filter(i => !terms.length || terms.some(t =>
+      i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(items, PAGE_SIZE);
 
   /**
-   * The shelf, as a sheet. Whatever the search and the availability filter
-   * leave on screen is what downloads — a bulk sale is quoted off these
-   * weights, so the file has to be the same set of pieces the eye just checked.
+   * The shelf, as a sheet. A sale is rarely a whole filter, so pieces can be
+   * ticked one by one: tick any and the download narrows to those; tick none
+   * and it is whatever the search and the availability filter left on screen.
+   * Only what is still visible counts, so narrowing the filters after ticking
+   * drops the hidden pieces rather than letting them ride along unseen.
    */
-  const exportName = () => `Ready_Stock${avail === "all" ? "" : `-${avail}`}`;
-  const exportSubject = () => [
-    avail === "all" ? "All items" : avail === "available" ? "Available only" : "Sold out only",
-    q.trim() ? `Search: "${q.trim()}"` : "",
-  ].filter(Boolean).join(" · ");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const toggleSel = (id: string) => setSel(prev => {
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+  const chosen = items.filter(i => sel.has(i.id));
+  const exportItems = chosen.length ? chosen : items;
+  const allShown = items.length > 0 && items.every(i => sel.has(i.id));
+
+  const exportName = () => chosen.length
+    ? `Ready_Stock-Selected-${chosen.length}`
+    : `Ready_Stock${avail === "all" ? "" : `-${avail}`}`;
+  const exportSubject = () => (chosen.length
+    ? [`${chosen.length} selected piece${chosen.length !== 1 ? "s" : ""}`]
+    : [
+        avail === "all" ? "All items" : avail === "available" ? "Available only" : "Sold out only",
+        q.trim() ? `Search: "${q.trim()}"` : "",
+      ]).filter(Boolean).join(" · ");
 
   // ── Add / Edit dialog ──
   const [open, setOpen] = useState(false);
@@ -391,7 +426,7 @@ export function ReadyStockPage() {
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[160px] sm:w-64 sm:flex-none">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or SKU..." className="pl-9 h-11 rounded-xl" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or SKU — or SKU-1, SKU-2" className="pl-9 h-11 rounded-xl" />
         </div>
         <Select value={avail} onValueChange={v => setAvail(v as "all" | "available" | "sold")}>
           <SelectTrigger className="flex-1 sm:flex-none sm:w-44 h-11 rounded-xl"><SelectValue /></SelectTrigger>
@@ -403,11 +438,11 @@ export function ReadyStockPage() {
         </Select>
         {canManage && items.length > 0 && (
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => exportReadyStockPdf(items, exportName(), exportSubject())}
+            <button onClick={() => exportReadyStockPdf(exportItems, exportName(), exportSubject())}
               className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileText className="h-4 w-4" /> PDF
             </button>
-            <button onClick={() => exportReadyStockCsv(items, exportName(), isAdmin)}
+            <button onClick={() => exportReadyStockCsv(exportItems, exportName(), isAdmin)}
               className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </button>
@@ -426,11 +461,36 @@ export function ReadyStockPage() {
         </div>
       </div>
 
+      {canManage && sel.size > 0 && (
+        <div className="card-luxe px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span className="font-semibold text-brand-dark">{chosen.length} selected</span>
+          {chosen.length !== sel.size && (
+            <span className="text-xs text-muted-foreground">
+              ({sel.size - chosen.length} more hidden by the filters — not included)
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">PDF and Excel will hold just these.</span>
+          <div className="ml-auto flex items-center gap-2">
+            {!allShown && (
+              <button onClick={() => setSel(new Set(items.map(i => i.id)))}
+                className="text-xs font-medium text-primary hover:underline">
+                Select all {items.length}
+              </button>
+            )}
+            <button onClick={() => setSel(new Set())}
+              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" /> Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {view === "grid" && (
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {paged.map(item => (
-          <div key={item.id} className="card-luxe card-hover overflow-hidden flex flex-col">
+          <div key={item.id} className={`card-luxe card-hover overflow-hidden flex flex-col ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
             <div className="aspect-square bg-secondary relative">
+              {canManage && <SelectBox checked={sel.has(item.id)} onToggle={() => toggleSel(item.id)} className="absolute top-2 right-2" />}
               {item.images?.[0] ? (
                 <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />
               ) : (
@@ -520,7 +580,8 @@ export function ReadyStockPage() {
       {view === "list" && (
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(item => (
-            <div key={item.id} className="flex items-center gap-3 px-3 sm:px-4 py-3 hover:bg-secondary/50 transition-colors">
+            <div key={item.id} className={`flex items-center gap-3 px-3 sm:px-4 py-3 transition-colors ${sel.has(item.id) ? "bg-primary/5" : "hover:bg-secondary/50"}`}>
+              {canManage && <SelectBox checked={sel.has(item.id)} onToggle={() => toggleSel(item.id)} className="shrink-0" />}
               <div className="h-16 w-16 rounded-xl bg-secondary overflow-hidden shrink-0 relative">
                 {item.images?.[0]
                   ? <img src={item.images[0]} alt={item.name} className="w-full h-full object-cover" />

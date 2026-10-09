@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf } from "@/lib/productExport";
@@ -15,6 +15,21 @@ import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
 const PAGE_SIZE = 12;
+
+/** A tick-box riding on top of a card, which must not follow the card's link. */
+function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; onToggle: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      aria-pressed={checked}
+      aria-label={checked ? "Deselect this piece" : "Select this piece"}
+      onClick={e => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
+      className={`z-30 h-6 w-6 grid place-items-center rounded-md border shadow-soft transition-colors ${checked ? "bg-primary border-primary text-white" : "bg-white/90 border-border text-transparent hover:border-primary"} ${className}`}
+    >
+      <Check className="h-4 w-4" />
+    </button>
+  );
+}
 
 /** The factory has reported back: net weight, purity and the finished piece are
  *  recorded, so the job itself is done even if the order has not shipped. */
@@ -54,11 +69,17 @@ export function OrdersPage() {
     if (status === "Pending") list = list.filter(o => o.status === "Waiting" || o.status === "Approved");
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
-    if (q) list = list.filter(o =>
-      o.orderNumber.toLowerCase().includes(q.toLowerCase()) ||
-      o.jewelleryType.toLowerCase().includes(q.toLowerCase()) ||
-      (o.designNumber ?? "").toLowerCase().includes(q.toLowerCase())
-    );
+    // Commas separate alternatives: "1090, 1091" means either, not both. A
+    // handful of order or design numbers read off a list can be pasted in as
+    // they were written — trailing comma and all — and the ledger drawn from
+    // exactly those pieces. Without a comma this is the single term it always
+    // was, so "white gold" still matches as one phrase.
+    const terms = q.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (terms.length) list = list.filter(o => terms.some(t =>
+      o.orderNumber.toLowerCase().includes(t) ||
+      o.jewelleryType.toLowerCase().includes(t) ||
+      (o.designNumber ?? "").toLowerCase().includes(t)
+    ));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   }, [db, user, q, status, clientFilter]);
 
@@ -70,17 +91,36 @@ export function OrdersPage() {
    * Filter to one client and the ready work, and this is the sheet a bulk sale
    * is settled on: gross, net and diamond weight, the stone count, and what is
    * already paid — figures that were only ever visible one order at a time.
-   * Whatever the filters leave is what downloads, as everywhere else.
+   *
+   * A sale is rarely a whole filter, though, so pieces can be ticked one by
+   * one: tick any and the download narrows to those; tick none and it is
+   * whatever the filters left, as everywhere else.
    */
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const toggleSel = (id: string) => setSel(prev => {
+    const next = new Set(prev);
+    if (!next.delete(id)) next.add(id);
+    return next;
+  });
+  // Only what is still on screen counts. Narrow the filters after ticking and
+  // the hidden pieces drop out of the download too, rather than riding along
+  // invisibly into the sheet.
+  const chosen = orders.filter(o => sel.has(o.id));
+  const exportRows = chosen.length ? chosen : orders;
+  const allShown = orders.length > 0 && orders.every(o => sel.has(o.id));
+
   const exportName = () => {
+    if (chosen.length) return `Products-Selected-${chosen.length}`;
     const who = clientFilter === "all" ? "" : `-${(db.clients.find(c => c.id === clientFilter)?.companyName ?? "").replace(/\s+/g, "_")}`;
     return `Products${who}${status === "all" ? "" : `-${status.replace(/\s+/g, "_")}`}`;
   };
-  const exportSubject = () => [
-    clientFilter === "all" ? "All clients" : db.clients.find(c => c.id === clientFilter)?.companyName,
-    status === "all" ? "All status" : status,
-    q.trim() ? `Search: "${q.trim()}"` : "",
-  ].filter(Boolean).join(" · ");
+  const exportSubject = () => (chosen.length
+    ? [`${chosen.length} selected piece${chosen.length !== 1 ? "s" : ""}`]
+    : [
+        clientFilter === "all" ? "All clients" : db.clients.find(c => c.id === clientFilter)?.companyName,
+        status === "all" ? "All status" : status,
+        q.trim() ? `Search: "${q.trim()}"` : "",
+      ]).filter(Boolean).join(" · ");
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
@@ -103,7 +143,7 @@ export function OrdersPage() {
         {/* Search grows to fill whatever space is left (own full row on mobile) */}
         <div className="relative flex-1 basis-full sm:basis-0 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders…" className="pl-9 h-10 rounded-lg text-sm" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search — or 1090, 1091, LR-528" className="pl-9 h-10 rounded-lg text-sm" />
         </div>
 
         <Select value={status} onValueChange={setStatus}>
@@ -133,11 +173,11 @@ export function OrdersPage() {
 
         {isStaff && orders.length > 0 && (
           <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => exportProductsPdf(db, orders, exportName(), exportSubject())}
+            <button onClick={() => exportProductsPdf(db, exportRows, exportName(), exportSubject())}
               className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileText className="h-4 w-4" /> PDF
             </button>
-            <button onClick={() => exportProductsCsv(db, orders, exportName())}
+            <button onClick={() => exportProductsCsv(db, exportRows, exportName())}
               className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </button>
@@ -156,6 +196,33 @@ export function OrdersPage() {
         </div>
       </div>
 
+      {/* ── What is ticked, and what the download will hold ── */}
+      {isStaff && sel.size > 0 && (
+        <div className="card-luxe px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+          <span className="font-semibold text-brand-dark">
+            {chosen.length} selected
+          </span>
+          {chosen.length !== sel.size && (
+            <span className="text-xs text-muted-foreground">
+              ({sel.size - chosen.length} more hidden by the filters — not included)
+            </span>
+          )}
+          <span className="text-xs text-muted-foreground">PDF and Excel will hold just these.</span>
+          <div className="ml-auto flex items-center gap-2">
+            {!allShown && (
+              <button onClick={() => setSel(new Set(orders.map(o => o.id)))}
+                className="text-xs font-medium text-primary hover:underline">
+                Select all {orders.length}
+              </button>
+            )}
+            <button onClick={() => setSel(new Set())}
+              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+              <X className="h-3.5 w-3.5" /> Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Empty state ── */}
       {total === 0 && (
         <div className="card-luxe p-12 text-center text-muted-foreground">
@@ -173,7 +240,8 @@ export function OrdersPage() {
             const progress = Math.round(done / o.timeline.length * 100);
             const img = o.cadImage || o.images?.[0];
             return (
-              <Link key={o.id} to={`/orders/${o.id}`} className="card-luxe card-hover overflow-hidden block min-w-0">
+              <Link key={o.id} to={`/orders/${o.id}`}
+                className={`card-luxe card-hover overflow-hidden block min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
                 <div className={`relative aspect-square overflow-hidden ${img ? "bg-secondary animate-pulse" : "bg-secondary/50"}`}>
                   {img ? (
                     <img
@@ -189,6 +257,7 @@ export function OrdersPage() {
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}
                   <div className="absolute top-2 left-2 z-20"><StatusBadge status={o.status} /></div>
+                  {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 right-2" />}
                 </div>
                 <div className="p-3">
                   <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
@@ -240,10 +309,11 @@ export function OrdersPage() {
             <Link
               key={o.id}
               to={`/orders/${o.id}`}
-              className="card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px] min-w-0"
+              className={`card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px] min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}
             >
               {/* ── Left: full-height product / CAD photo ── */}
               <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">
+                {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 left-2" />}
                 {rowImg
                   ? <img src={rowImg} alt={o.orderNumber} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40"><Package className="h-9 w-9" /></div>}
