@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, orderIsDispatched } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,50 @@ import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
 const PAGE_SIZE = 12;
+
+/** A piece that ought to be on an invoice by now: it has shipped, it belongs to
+ *  a client, and it was not rejected. Anything else has nothing to bill yet. */
+function needsInvoice(o: Order): boolean {
+  return orderIsDispatched(o) && !o.forReadyStock && o.status !== "Rejected";
+}
+
+/**
+ * Whether this piece has been billed, said on the card itself.
+ *
+ * Billing is done a parcel at a time, and an order left out of one simply
+ * stopped being mentioned — it looked exactly like an order that had been
+ * invoiced, and the only way to find it was to open the Invoices page and work
+ * out what was missing. A dispatched piece now either carries its invoice
+ * number or says plainly that it has none.
+ *
+ * Only dispatched work is marked: a piece still in production has nothing to be
+ * billed for yet, and flagging it would be noise on every card in the list.
+ */
+function InvoiceBadge({ invoice, dispatched, onOpen, className = "" }: {
+  invoice?: { number: string };
+  dispatched: boolean;
+  onOpen: (number: string) => void;
+  className?: string;
+}) {
+  if (!invoice && !dispatched) return null;
+  if (!invoice) {
+    return (
+      <span className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-[10px] font-bold text-amber-700 ${className}`}>
+        <FileText className="h-3 w-3" /> NO INVOICE
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      title={`On invoice ${invoice.number}`}
+      onClick={e => { e.preventDefault(); e.stopPropagation(); onOpen(invoice.number); }}
+      className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-success/15 border border-success/40 text-[10px] font-bold text-success hover:bg-success/25 ${className}`}
+    >
+      <FileText className="h-3 w-3" /> {invoice.number}
+    </button>
+  );
+}
 
 /** A tick-box riding on top of a card, which must not follow the card's link. */
 function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; onToggle: () => void; className?: string }) {
@@ -69,6 +113,9 @@ export function OrdersPage() {
   const orders = useMemo(() => {
     let list = currentUserOrders(db, user!);
     if (status === "Pending") list = list.filter(o => o.status === "Waiting" || o.status === "Approved");
+    // Shipped work that nobody has billed yet — the whole point of the badge,
+    // gathered into one list instead of spotted by scrolling.
+    else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
     // Commas separate alternatives: "1090, 1091" means either, not both. A
@@ -104,6 +151,10 @@ export function OrdersPage() {
   const [bulkDispatch, setBulkDispatch] = useState(false);
   const [bulkDeliver, setBulkDeliver] = useState(false);
   const [bulkInvoice, setBulkInvoice] = useState(false);
+  // The badge is a way in as well as a marker — the invoice it names opens on
+  // the Invoices page, already searched for.
+  const nav = useNavigate();
+  const openInvoice = (number: string) => nav(`/invoices?q=${encodeURIComponent(number)}`);
   const toggleSel = (id: string) => setSel(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
@@ -127,7 +178,7 @@ export function OrdersPage() {
     ? [`${chosen.length} selected piece${chosen.length !== 1 ? "s" : ""}`]
     : [
         clientFilter === "all" ? "All clients" : db.clients.find(c => c.id === clientFilter)?.companyName,
-        status === "all" ? "All status" : status,
+        status === "all" ? "All status" : status === "uninvoiced" ? "Shipped, not invoiced" : status,
         q.trim() ? `Search: "${q.trim()}"` : "",
       ]).filter(Boolean).join(" · ");
 
@@ -162,6 +213,7 @@ export function OrdersPage() {
           <SelectContent>
             <SelectItem value="all">All status</SelectItem>
             <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
+            {isStaff && <SelectItem value="uninvoiced">Not invoiced (shipped)</SelectItem>}
             {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
               <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
@@ -285,7 +337,10 @@ export function OrdersPage() {
                   ) : (
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}
-                  <div className="absolute top-2 left-2 z-20"><StatusBadge status={o.status} /></div>
+                  <div className="absolute top-2 left-2 z-20 flex flex-col items-start gap-1">
+                    <StatusBadge status={o.status} />
+                    {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
+                  </div>
                   {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 right-2" />}
                 </div>
                 <div className="p-3">
@@ -362,7 +417,10 @@ export function OrdersPage() {
                       <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
                     )}
                   </div>
-                  <StatusBadge status={o.status} />
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <StatusBadge status={o.status} />
+                    {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
+                  </div>
                 </div>
 
                 {/* Weights — gross / net / diamond */}

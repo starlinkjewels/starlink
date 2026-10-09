@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift } from "lucide-react";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
@@ -36,7 +36,10 @@ export function InvoicesPage() {
   const { user } = useAuth();
   const db = useDb();
   const isStaff = user!.role !== "client";
-  const [q, setQ] = useState("");
+  // Arriving from an order's invoice badge: open with that invoice already
+  // searched for, rather than landing on the whole list to hunt for it.
+  const [sp] = useSearchParams();
+  const [q, setQ] = useState(sp.get("q") ?? "");
   const [clientFilter, setClientFilter] = useState("all");
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
