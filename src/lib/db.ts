@@ -241,6 +241,33 @@ export function buildReadyStockSaleTimelineSteps(): string[] {
   return [...READY_STOCK_SALE_TIMELINE_STEPS];
 }
 
+/** Order status derived purely from how many timeline steps are done — so a
+ *  reverted (undone) stage downgrades the status correctly, not just upgrades. */
+export function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false, readyStockSale = false): Order["status"] {
+  const total = timeline.length;
+  const done = timeline.filter(t => t.status === "done").length;
+  // In-house Ready-Stock builds have no client-approval/shipping stages: they just
+  // stay "In Production" until the final step, then "Ready" (piece ready for stock).
+  if (forReadyStock) return done >= total ? "Ready" : "In Production";
+  const dispatchIdxA = timeline.findIndex(x => x.step === "Dispatch");
+  // Ready-Stock SALE of an existing piece: Confirmed → (Ready) → Dispatch → Delivered.
+  if (readyStockSale) {
+    if (done >= total) return "Delivered";
+    if (dispatchIdxA >= 0 && done >= dispatchIdxA + 1) return "Dispatched";
+    return "Ready";
+  }
+  const finalApprovalIdx = timeline.findIndex(x => x.step === "Final Approval");
+  const dispatchIdx = timeline.findIndex(x => x.step === "Dispatch");
+  if (done >= total) return "Delivered";
+  if (dispatchIdx >= 0 && done >= dispatchIdx + 1) return "Dispatched";
+  if (finalApprovalIdx >= 0 && done >= finalApprovalIdx + 1) return "Ready";
+  // A diamond-only order has no production stages at all, so counting steps
+  // must never label it "In Production" — nothing is being made.
+  if (done >= 3) return timeline.some(x => x.step === "In Production") ? "In Production" : "Ready";
+  if (done >= 2) return "Approved";
+  return "Waiting";
+}
+
 export interface TimelineEntry {
   step: TimelineStep;
   status: "pending" | "in_progress" | "done";
@@ -376,6 +403,10 @@ export interface Order {
   courierName?: string;
   trackingNumber?: string;
   trackingLink?: string;
+  /** The day the parcel actually left, which is not always the day somebody
+   *  got round to entering it. ISO; absent on orders dispatched before this
+   *  was recorded, where the timeline's own stamp is the only date there is. */
+  dispatchedAt?: string;
   // Finished-product photography (captured at/after dispatch, optional). Photos
   // + one short video of the actual piece; shown on the dedicated Product Photos
   // page (grouped by design number), not the shared Catalog. Storage download URLs.

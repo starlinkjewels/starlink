@@ -40,6 +40,8 @@ export interface ProductRow {
   totalUsd: number;
   paidUsd: number;
   dueUsd: number;
+  /** The day the parcel left, where one has gone. */
+  dispatchedOn: string;
 }
 
 const n3 = (x: number) => Math.round(x * 1000) / 1000;
@@ -77,6 +79,7 @@ export function buildProductRows(db: DB, orders: Order[]): ProductRow[] {
       totalUsd: orderTotal(o),
       paidUsd: totalAdvance(o),
       dueUsd: balanceDue(o),
+      dispatchedOn: o.dispatchedAt ?? "",
     };
   });
 }
@@ -85,7 +88,7 @@ const HEAD = [
   "Order", "Design", "Client", "Date", "Item", "Metal", "Karat",
   "Gross wt (g)", "Net wt (g)", "Other metal", "Other wt (g)",
   "Diamond (ct)", "Diamond pcs", "Shape", "Weights",
-  "Value ($)", "Shipping ($)", "Total ($)", "Paid ($)", "Due ($)", "Status",
+  "Value ($)", "Shipping ($)", "Total ($)", "Paid ($)", "Due ($)", "Status", "Dispatched",
 ];
 
 /** The spreadsheet a bulk sale is priced on — every figure as a number, so it
@@ -97,6 +100,7 @@ export function exportProductsCsv(db: DB, orders: Order[], name: string): void {
     r.grossG, r.netG, r.otherMetal, r.otherMetalG || "",
     r.diamondCt, r.diamondPcs, r.shape, r.estimated ? "estimated" : "actual",
     r.valueUsd, r.shippingUsd, r.totalUsd, r.paidUsd, r.dueUsd, r.status,
+    r.dispatchedOn ? fmtDate(r.dispatchedOn) : "",
   ]));
 }
 

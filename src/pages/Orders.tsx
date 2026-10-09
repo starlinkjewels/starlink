@@ -11,6 +11,7 @@ import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf } from "@/lib/productExport";
+import { BulkDispatchDialog } from "@/components/BulkDispatchDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
@@ -97,6 +98,9 @@ export function OrdersPage() {
    * whatever the filters left, as everywhere else.
    */
   const [sel, setSel] = useState<Set<string>>(new Set());
+  // Several pieces leave in one parcel under one tracking number, so dispatch
+  // is entered once for the whole selection rather than order by order.
+  const [bulkDispatch, setBulkDispatch] = useState(false);
   const toggleSel = (id: string) => setSel(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
@@ -209,6 +213,12 @@ export function OrdersPage() {
           )}
           <span className="text-xs text-muted-foreground">PDF and Excel will hold just these.</span>
           <div className="ml-auto flex items-center gap-2">
+            {chosen.length > 0 && (
+              <button onClick={() => setBulkDispatch(true)}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-semibold text-blue-700 hover:bg-blue-500/20">
+                <Truck className="h-3.5 w-3.5" /> Dispatch
+              </button>
+            )}
             {!allShown && (
               <button onClick={() => setSel(new Set(orders.map(o => o.id)))}
                 className="text-xs font-medium text-primary hover:underline">
@@ -426,6 +436,14 @@ export function OrdersPage() {
       />
 
       <TrackingModal order={trackingOrder} onClose={() => setTrackingOrder(null)} />
+
+      {bulkDispatch && chosen.length > 0 && (
+        <BulkDispatchDialog
+          orders={chosen}
+          onClose={() => setBulkDispatch(false)}
+          onDone={() => { setBulkDispatch(false); setSel(new Set()); }}
+        />
+      )}
     </div>
   );
 }

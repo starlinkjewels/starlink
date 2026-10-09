@@ -5,7 +5,7 @@ import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
-  isDiamondOnlyOrder, isProductionStep,
+  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
@@ -130,33 +130,6 @@ async function compressImage(file: File): Promise<string> {
   });
 }
 
-/** Order status derived purely from how many timeline steps are done — so a
- *  reverted (undone) stage downgrades the status correctly, not just upgrades. */
-function statusFromTimeline(timeline: Order["timeline"], forReadyStock = false, readyStockSale = false): Order["status"] {
-  const total = timeline.length;
-  const done = timeline.filter(t => t.status === "done").length;
-  // In-house Ready-Stock builds have no client-approval/shipping stages: they just
-  // stay "In Production" until the final step, then "Ready" (piece ready for stock).
-  if (forReadyStock) return done >= total ? "Ready" : "In Production";
-  const dispatchIdxA = timeline.findIndex(x => x.step === "Dispatch");
-  // Ready-Stock SALE of an existing piece: Confirmed → (Ready) → Dispatch → Delivered.
-  if (readyStockSale) {
-    if (done >= total) return "Delivered";
-    if (dispatchIdxA >= 0 && done >= dispatchIdxA + 1) return "Dispatched";
-    return "Ready";
-  }
-  const finalApprovalIdx = timeline.findIndex(x => x.step === "Final Approval");
-  const dispatchIdx = timeline.findIndex(x => x.step === "Dispatch");
-  if (done >= total) return "Delivered";
-  if (dispatchIdx >= 0 && done >= dispatchIdx + 1) return "Dispatched";
-  if (finalApprovalIdx >= 0 && done >= finalApprovalIdx + 1) return "Ready";
-  // A diamond-only order has no production stages at all, so counting steps
-  // must never label it "In Production" — nothing is being made.
-  if (done >= 3) return timeline.some(x => x.step === "In Production") ? "In Production" : "Ready";
-  if (done >= 2) return "Approved";
-  return "Waiting";
-}
-
 export function OrderDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
@@ -194,6 +167,10 @@ export function OrderDetailPage() {
   const [dispatchModalIdx, setDispatchModalIdx] = useState<number | null>(null); // Dispatch-details popup on "Mark complete"
   const [dispatchSaving, setDispatchSaving] = useState(false);
   const [courierName, setCourierName] = useState("");
+  // The day the goods actually left. Entries are often caught up two or three
+  // days later, and stamping those with "now" put the wrong day in the record
+  // with no way to correct it.
+  const [dispatchDay, setDispatchDay] = useState(todayLocal());
   const [trackingNumber, setTrackingNumber] = useState("");
   const [trackingLink, setTrackingLink] = useState("");
 
@@ -740,7 +717,6 @@ export function OrderDetailPage() {
     toast.success("Diamond totals saved");
   };
 
-
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
 
   // ── Final Approval popup: one window for all the actual details ──
@@ -1049,7 +1025,7 @@ export function OrderDetailPage() {
   const faStepIdx = order.timeline.findIndex(t => t.step === "Final Approval");
   const faDone = faStepIdx >= 0 && order.timeline[faStepIdx].status === "done";
 
-  const advanceStep = (idx: number, overrideReadiness = false): boolean => {
+  const advanceStep = (idx: number, overrideReadiness = false, atISO?: string): boolean => {
     if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
       toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
       return false;
@@ -1059,6 +1035,9 @@ export function OrderDetailPage() {
       if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return false; }
       if (balanceDue(order) > 0 && !confirm(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`)) return false;
     }
+    // The caller may know the stage happened on an earlier day than the one it
+    // is being entered on; everything else is stamped as it is recorded.
+    const at = atISO ?? new Date().toISOString();
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       // Diamond-only orders created before the production stages were dropped
@@ -1067,11 +1046,11 @@ export function OrderDetailPage() {
       if (diamondOnly) {
         for (let i = 0; i < idx; i++) {
           if (o.timeline[i].status !== "done" && isProductionStep(o.timeline[i].step)) {
-            o.timeline[i] = { ...o.timeline[i], status: "done", date: new Date().toISOString(), remarks: "Not applicable — diamond only" };
+            o.timeline[i] = { ...o.timeline[i], status: "done", date: at, remarks: "Not applicable — diamond only" };
           }
         }
       }
-      o.timeline[idx] = { ...o.timeline[idx], status: "done", date: new Date().toISOString(), employeeId: user!.id, department: user!.department, remarks: "Completed" };
+      o.timeline[idx] = { ...o.timeline[idx], status: "done", date: at, employeeId: user!.id, department: user!.department, remarks: "Completed" };
       if (idx + 1 < o.timeline.length && o.timeline[idx + 1].status === "pending") o.timeline[idx + 1].status = "in_progress";
       o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
       // Cashback: on delivery of a real (client) order, grant a % gift card for
@@ -1736,6 +1715,11 @@ export function OrderDetailPage() {
       o.courierName = courierName.trim();
       o.trackingNumber = trackingNumber.trim();
       o.trackingLink = trackingLink.trim() || undefined;
+      o.dispatchedAt = stampFor(dispatchDay);
+      // If the parcel has already gone, correcting the date here corrects the
+      // stage it was recorded against — the two must never disagree.
+      const di = o.timeline.findIndex(t => t.step === "Dispatch");
+      if (di >= 0 && o.timeline[di].status === "done") o.timeline[di] = { ...o.timeline[di], date: o.dispatchedAt };
       const clientUser = d.users.find(u => u.clientId === o.clientId);
       if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Order Dispatched", body: `${o.orderNumber} dispatched via ${courierName.trim()} · Tracking: ${trackingNumber.trim()}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
@@ -1749,6 +1733,7 @@ export function OrderDetailPage() {
     setCourierName(order.courierName ?? "");
     setTrackingNumber(order.trackingNumber ?? "");
     setTrackingLink(order.trackingLink ?? "");
+    setDispatchDay(order.dispatchedAt ? order.dispatchedAt.slice(0, 10) : todayLocal());
     setDispatchModalIdx(idx);
   };
 
@@ -1764,9 +1749,11 @@ export function OrderDetailPage() {
         o.courierName = courierName.trim();
         o.trackingNumber = trackingNumber.trim();
         o.trackingLink = trackingLink.trim() || undefined;
+        o.dispatchedAt = stampFor(dispatchDay);
       });
-      // …then complete the Dispatch step (runs the price/unpaid guard).
-      const advanced = advanceStep(dispatchModalIdx, false);
+      // …then complete the Dispatch step (runs the price/unpaid guard), dated
+      // the day the parcel left rather than the day it was typed up.
+      const advanced = advanceStep(dispatchModalIdx, false, stampFor(dispatchDay));
       if (advanced) {
         if (client?.email) {
           const m = orderDispatchedEmail({ ...orderEmailInfo(), courierName: courierName.trim(), trackingNumber: trackingNumber.trim(), trackingLink: trackingLink.trim() || undefined });
@@ -2414,6 +2401,7 @@ export function OrderDetailPage() {
                 setCourierName(order.courierName ?? "");
                 setTrackingNumber(order.trackingNumber ?? "");
                 setTrackingLink(order.trackingLink ?? "");
+                setDispatchDay(order.dispatchedAt ? order.dispatchedAt.slice(0, 10) : todayLocal());
                 setShowDispatch(v => !v);
               }} className="rounded-xl gap-2">
                 <Truck className="h-4 w-4" />
@@ -2433,6 +2421,12 @@ export function OrderDetailPage() {
                 <p className="text-xs text-muted-foreground mb-1">Tracking Number</p>
                 <p className="font-semibold font-mono">{order.trackingNumber}</p>
               </div>
+              {order.dispatchedAt && (
+                <div className="p-4 rounded-xl bg-secondary">
+                  <p className="text-xs text-muted-foreground mb-1">Dispatched On</p>
+                  <p className="font-semibold">{fmtDate(order.dispatchedAt)}</p>
+                </div>
+              )}
               {order.trackingLink && (
                 <div className="sm:col-span-2 p-4 rounded-xl bg-secondary">
                   <p className="text-xs text-muted-foreground mb-1">Tracking Link</p>
@@ -2478,6 +2472,16 @@ export function OrderDetailPage() {
                         onChange={e => setTrackingNumber(e.target.value)}
                         className="rounded-xl h-10 font-mono"
                         placeholder="e.g. 1Z999AA10123456784"
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Dispatch Date</Label>
+                      <Input
+                        type="date"
+                        value={dispatchDay}
+                        max={todayLocal()}
+                        onChange={e => setDispatchDay(e.target.value)}
+                        className="rounded-xl h-10"
                       />
                     </div>
                     <div className="space-y-1.5 sm:col-span-2">
@@ -3605,6 +3609,7 @@ export function OrderDetailPage() {
             <div className="space-y-3">
               <div><Label className="text-xs">Courier Company *</Label><Input value={courierName} onChange={e => setCourierName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. FedEx, DHL" /></div>
               <div><Label className="text-xs">Tracking Number *</Label><Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 1234567890" /></div>
+              <div><Label className="text-xs">Dispatch Date *</Label><Input type="date" value={dispatchDay} max={todayLocal()} onChange={e => setDispatchDay(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
               <div><Label className="text-xs">Tracking Link (optional)</Label><Input value={trackingLink} onChange={e => setTrackingLink(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="https://..." /></div>
             </div>
             <div className="flex gap-2 mt-5">
