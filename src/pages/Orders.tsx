@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf } from "@/lib/productExport";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
+import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
@@ -102,6 +103,7 @@ export function OrdersPage() {
   // is entered once for the whole selection rather than order by order.
   const [bulkDispatch, setBulkDispatch] = useState(false);
   const [bulkDeliver, setBulkDeliver] = useState(false);
+  const [bulkInvoice, setBulkInvoice] = useState(false);
   const toggleSel = (id: string) => setSel(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
@@ -111,6 +113,8 @@ export function OrdersPage() {
   // the hidden pieces drop out of the download too, rather than riding along
   // invisibly into the sheet.
   const chosen = orders.filter(o => sel.has(o.id));
+  // One client, so one invoice can cover the lot.
+  const oneClient = chosen.length > 0 && new Set(chosen.map(o => o.clientId)).size === 1;
   const exportRows = chosen.length ? chosen : orders;
   const allShown = orders.length > 0 && orders.every(o => sel.has(o.id));
 
@@ -223,6 +227,14 @@ export function OrdersPage() {
                 <button onClick={() => setBulkDeliver(true)}
                   className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/10 border border-success/30 text-xs font-semibold text-success hover:bg-success/20">
                   <PackageCheck className="h-3.5 w-3.5" /> Delivered
+                </button>
+                {/* An invoice covers one client, so this stays out of reach until
+                    the selection is down to one — with the reason said, not just
+                    a dead button. */}
+                <button onClick={() => setBulkInvoice(true)} disabled={!oneClient}
+                  title={oneClient ? "Bill these orders on one invoice" : "Select orders from a single client"}
+                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-primary/10 border border-primary/30 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed">
+                  <FileText className="h-3.5 w-3.5" /> Invoice
                 </button>
               </>
             )}
@@ -457,6 +469,14 @@ export function OrdersPage() {
           orders={chosen}
           onClose={() => setBulkDeliver(false)}
           onDone={() => { setBulkDeliver(false); setSel(new Set()); }}
+        />
+      )}
+
+      {bulkInvoice && chosen.length > 0 && (
+        <BulkInvoiceDialog
+          orders={chosen}
+          onClose={() => setBulkInvoice(false)}
+          onDone={() => { setBulkInvoice(false); setSel(new Set()); }}
         />
       )}
     </div>

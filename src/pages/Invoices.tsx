@@ -3,7 +3,7 @@ import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
 import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid,
-  invoiceOrderIds, orderInvoiced, orderIsDispatched, createInvoiceFromOrders, recordOrderPayment,
+  invoiceOrderIds, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, reallocateClientPayments,
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
@@ -22,6 +22,9 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
 import { reserveInvoiceNumber } from "@/lib/counters";
+// The same rule the Orders page bills by, so the two lists can never disagree
+// about what is ready to invoice.
+import { invoiceBlocker } from "@/lib/invoiceBatch";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -88,8 +91,7 @@ export function InvoicesPage() {
   // shipped. createInvoiceFromOrders() refuses them now as well; this keeps them
   // off the screen so the refusal never has to fire.
   const eligible = clientFilter === "all" || !isStaff ? [] : db.orders
-    .filter(o => o.clientId === clientFilter && o.amount > 0 && o.status !== "Rejected"
-      && orderIsDispatched(o) && !orderInvoiced(db.invoices, o.id))
+    .filter(o => o.clientId === clientFilter && invoiceBlocker(db, o) === null)
     .map(o => ({ o, disp: dispatchInfo(o) }))
     .sort((a, b) => {
       const ad = a.disp.date || a.o.createdAt, bd = b.disp.date || b.o.createdAt;
