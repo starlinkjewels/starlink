@@ -75,6 +75,12 @@ export const STORAGE_PREFIX = "ssdiamdemo";
 export const ADMIN_EMAILS = [
   "marketing.starlinkjewels@gmail.com",
   "admin@starlinkjewels.com",
+  // DEMO ONLY — the account the demo is shown from, so nobody has to hand a
+  // prospective client the real administrator's password. It is an admin of
+  // the ssdiamdemo database and nothing else: production's rules, which are
+  // deployed from main, do not list it, so signing in with it against the live
+  // app gets "no access" and is signed straight back out.
+  "test@gmail.com",
 ].map(e => e.toLowerCase());
 
 export function isAdminEmail(email?: string | null): boolean {

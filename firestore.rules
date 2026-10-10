@@ -21,9 +21,13 @@ service cloud.firestore {
 
     // 👇 EDIT: your admin Firebase Auth email(s) — MUST match ADMIN_EMAILS in src/lib/firebase.ts.
     function isAdmin() {
-      return signedIn() && request.auth.token.email in ['marketing.starlinkjewels@gmail.com', 'admin@starlinkjewels.com'];
+      // 'test@gmail.com' is the DEMO administrator and belongs to this branch
+      // only. These rules are released to the ssdiamdemo database; production's
+      // come from main and do not include it. Never deploy this file to
+      // diamondflow — see DEMO.md.
+      return signedIn() && request.auth.token.email in ['marketing.starlinkjewels@gmail.com', 'admin@starlinkjewels.com', 'test@gmail.com'];
     }
-
+  
     function idxRef() { return /databases/$(database)/documents/userByAuth/$(request.auth.uid); }
     function hasIdx() { return signedIn() && exists(idxRef()); }
     function idx()    { return get(idxRef()).data; }
