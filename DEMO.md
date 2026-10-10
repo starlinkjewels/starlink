@@ -19,7 +19,7 @@ This branch writes to `ssdiamdemo`. Both live in the same Firebase project
 | Cloud Functions | — | — | **Yes**, one deployment |
 | Hosting / domain | `ssdiamdemo.web.app` | Vercel | No |
 
-## The two rules
+## The three rules
 
 **1. Never deploy functions from this branch.**
 
