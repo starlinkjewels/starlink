@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
+import { IS_DEMO } from "@/lib/firebase";
+import { seedDemoData, clearDemoData, hasDemoData } from "@/lib/demoSeed";
 import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
@@ -629,6 +631,51 @@ export function SettingsPage() {
 
         {/* Active section content */}
         <div className="min-w-0 space-y-4">
+
+      {/* ── Sample data — demo build only ── */}
+      {activeId === "company" && IS_DEMO && isAdmin && (
+      <div className="card-luxe p-6 space-y-3 border-amber-500/40">
+        <div className="flex items-center gap-2">
+          <Database className="h-4 w-4 text-amber-600" />
+          <div>
+            <h3 className="font-semibold">Demo sample data</h3>
+            <p className="text-xs text-muted-foreground">
+              Clients, orders at every stage, ready stock and certified stones — so the
+              app can be shown doing its job instead of sitting empty.
+            </p>
+          </div>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          Everything it adds is dated from today and marked internally, so loading it again
+          replaces the sample and leaves anything entered during the demo untouched.
+          Removing it does the same in reverse.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <AsyncButton
+            onClick={async () => {
+              seedDemoData();
+              toast.success("Sample data loaded — open Orders to see it");
+            }}
+            className="btn-hero rounded-xl"
+          >
+            {hasDemoData() ? "Reload sample data" : "Load sample data"}
+          </AsyncButton>
+          {hasDemoData() && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (!confirm("Remove the sample data? Anything entered during the demo is kept.")) return;
+                clearDemoData();
+                toast.success("Sample data removed");
+              }}
+              className="rounded-xl text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              Remove sample data
+            </Button>
+          )}
+        </div>
+      </div>
+      )}
 
       {/* Company */}
       {activeId === "company" && (
