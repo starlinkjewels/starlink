@@ -3,7 +3,10 @@
 // All images/videos are stored in Firebase Storage (NOT inline in Firestore —
 // base64 blobs would blow the 1 MB/doc limit). Docs keep only the download URL.
 import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
-import { storage } from "./firebase";
+import { storage, STORAGE_PREFIX } from "./firebase";
+
+/** Keeps this build's uploads inside its own folder of a shared bucket. */
+const scoped = (folder: string) => (STORAGE_PREFIX ? `${STORAGE_PREFIX}/${folder}` : folder);
 
 /** Non-random unique-ish suffix (Math.random is fine for storage paths). */
 function key() {
@@ -22,7 +25,7 @@ export async function uploadDataUrl(dataUrl: string, folder: string): Promise<st
   const mimeMatch = /^data:([^;]+);/.exec(dataUrl);
   const mime = mimeMatch?.[1] ?? "image/jpeg";
   const ext = mime.split("/")[1]?.split("+")[0] || "jpg";
-  const path = `${folder}/${key()}.${ext}`;
+  const path = `${scoped(folder)}/${key()}.${ext}`;
   const r = ref(storage, path);
   await uploadString(r, dataUrl, "data_url");
   return getDownloadURL(r);
@@ -43,7 +46,7 @@ export async function uploadFile(
   onProgress?: (percent: number) => void,
 ): Promise<string> {
   const ext = file.name.split(".").pop() || "bin";
-  const path = `${folder}/${key()}.${ext}`;
+  const path = `${scoped(folder)}/${key()}.${ext}`;
   const r = ref(storage, path);
   const task = uploadBytesResumable(r, file, { contentType: file.type || undefined });
   await new Promise<void>((resolve, reject) => {

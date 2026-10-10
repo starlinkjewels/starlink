@@ -1,7 +1,7 @@
 {
   "firestore": [
     {
-      "database": "diamondflow",
+      "database": "ssdiamdemo",
       "rules": "firestore.rules",
       "indexes": "firestore.indexes.json"
     }

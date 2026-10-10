@@ -1,8 +1,27 @@
 // Firebase initialisation for Starlink Jewels / Diamond Flow.
 //
-// Uses the "diamondflow" named Firestore database (created in the Firebase
-// console) rather than the project's "(default)" database — see getFirestore
-// below. The web API key/config below is public by design (client SDK config);
+// ⚠️  DEMO BRANCH (ssdiamdemo) — NOT PRODUCTION.
+//
+// This branch exists to show the app to a prospective client without touching
+// the live business. It shares the Firebase PROJECT with production, because
+// that project already hosts several apps as separate named databases, but it
+// reads and writes its own database and its own Storage folder. Production
+// data is never read and never written from here.
+//
+// What is shared, and why it is safe:
+//   • Firestore — NOT shared. "ssdiamdemo", its own database, its own rules.
+//   • Storage   — same bucket, but every demo file goes under STORAGE_PREFIX,
+//                  so nothing lands in a folder production reads.
+//   • Auth      — shared user pool. A demo login is a real auth account; the
+//                  app's own user records live in the demo database, so the
+//                  live app never sees them.
+//   • Functions — shared and DEPLOYED FROM MAIN ONLY. They are bound to the
+//                  production database by name, so anything here that would
+//                  call one is switched off instead (see IS_DEMO). Deploying
+//                  functions from this branch would overwrite production's.
+//
+// Uses a named Firestore database (created in the Firebase console) rather
+// than the project's "(default)" database — see getFirestore below. The web API key/config below is public by design (client SDK config);
 // access is governed by Firestore/Storage security rules, not by hiding this.
 import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
@@ -25,7 +44,26 @@ const firebaseConfig = {
 };
 
 /** The Firestore named database id this app reads/writes. */
-export const DATABASE_ID = "diamondflow";
+export const DATABASE_ID = "ssdiamdemo";
+
+/**
+ * This build is the demo, not the live business.
+ *
+ * Read by anything that would otherwise reach a shared, production-bound
+ * resource — chiefly the Cloud Functions, which are deployed from main and
+ * talk to the production database whatever this build points at.
+ */
+export const IS_DEMO = true;
+
+/**
+ * Every file this build uploads goes under this folder.
+ *
+ * The Storage bucket is shared with production, so without a prefix a demo
+ * photo would land beside a real one and be indistinguishable later. With it,
+ * the demo's files are one folder that can be deleted whole when the demo is
+ * over, and nothing production reads is ever written to.
+ */
+export const STORAGE_PREFIX = "ssdiamdemo";
 
 /**
  * Admin accounts, identified by their Firebase Auth email. Anyone signing in

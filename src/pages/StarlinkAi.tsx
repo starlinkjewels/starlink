@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { httpsCallable, type HttpsCallableResult, type FunctionsError } from "firebase/functions";
 import { motion, AnimatePresence } from "framer-motion";
-import { functions } from "@/lib/firebase";
+import { functions, IS_DEMO } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -114,6 +114,19 @@ export function StarlinkAiPage() {
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content || sending) return;
+    // The assistant runs in a Cloud Function that is deployed from main and
+    // reads the PRODUCTION database whatever this build points at. Answering
+    // here would read one business’s books out to another, so on the demo it
+    // does not run at all. Re-deploying the function against the demo database
+    // is not an option either: it would replace production’s.
+    if (IS_DEMO) {
+      setMessages(m => [...m, { role: "user", content }, {
+        role: "assistant",
+        content: "The assistant is switched off in this demo — it answers from the live business’s own records, which this demo has no access to. Everything else on the app works against the demo’s own data.",
+      }]);
+      setInput("");
+      return;
+    }
     const history = messages.slice(-10);
     setMessages(m => [...m, { role: "user", content }]);
     setInput("");
