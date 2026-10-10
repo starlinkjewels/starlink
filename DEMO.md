@@ -1,5 +1,7 @@
 # `ssdiamdemo` — the demo branch
 
+**Live at https://ssdiamdemo.web.app**
+
 This branch exists to show the app to a prospective client. **It is not
 production, and it must never become production's problem.**
 
@@ -15,7 +17,7 @@ This branch writes to `ssdiamdemo`. Both live in the same Firebase project
 | Storage files | `ssdiamdemo/…` | everything else | Same bucket, different folder |
 | Auth accounts | — | — | **Yes**, one user pool |
 | Cloud Functions | — | — | **Yes**, one deployment |
-| Hosting / domain | to be decided | Vercel | No |
+| Hosting / domain | `ssdiamdemo.web.app` | Vercel | No |
 
 ## The two rules
 
@@ -36,7 +38,22 @@ Because of this, the AI assistant is switched off on the demo (`IS_DEMO` in
 `src/lib/firebase.ts`). Push notifications simply do not fire here — in-app
 notifications still work, as they are only database rows.
 
-**2. Deploy rules with the database named.**
+**2. Deploy to this branch's own targets, never a bare `--only hosting`.**
+
+The project has three hosting sites: `starlinkjewels109` (the default, and
+production's app id), `patelsamajdevgam` (someone else's app) and this one.
+`firebase.json` here pins `"site": "ssdiamdemo"`, but always name the target
+anyway:
+
+```
+npx vite build
+firebase deploy --only hosting:ssdiamdemo
+```
+
+Every line of the output should read `hosting[ssdiamdemo]`. If it does not,
+stop.
+
+**3. Deploy rules with the database named.**
 
 `firebase.json` on this branch points firestore at `ssdiamdemo`, so from this
 branch:
@@ -45,8 +62,23 @@ branch:
 firebase deploy --only firestore:rules
 ```
 
-targets the demo database. Check the output says `ssdiamdemo`. If it ever says
-`diamondflow`, stop — you are on the wrong branch.
+**⚠️ `--only firestore:rules` silently does nothing** with this `firebase.json`
+— it prints "Deploy complete!" and uploads no rules at all, because with the
+multi-database array form the deploy targets are named `firestore:<database>`,
+not `firestore:rules`. Use `--only firestore` (as above) or
+`--only firestore:ssdiamdemo`. A working run prints *uploading rules* and
+*deployed indexes … for ssdiamdemo database*; if those lines are missing,
+nothing happened.
+
+The CLI never prints which database the rules were released to — it logs
+"released rules to cloud.firestore" whatever the target. It does pass the
+database id through (`release(file, "cloud.firestore", databaseId)` in
+`lib/deploy/firestore/release.js`), so the real release is
+`cloud.firestore/ssdiamdemo`. Trust the *indexes* line, which does name the
+database.
+
+**The same trap applies on `main`.** Its `firebase.json` has the same array
+shape, so any `--only firestore:rules` run there also did nothing.
 
 ## Keeping the demo current
 
@@ -72,9 +104,20 @@ Never merge this branch **into** `main`.
 - Delete the `ssdiamdemo/` folder in Storage
 - Remove any demo logins from Firebase Auth
 
-## Still to confirm
+## App Check
 
-**App Check.** The project uses reCAPTCHA v3, keyed to production's domains.
-If the demo is served from a new domain, that domain has to be added to the
-reCAPTCHA key (Firebase Console → App Check), or every request from the demo
-is rejected. Decide where the demo is hosted first, then check this.
+Not a problem, as it turns out. The project initialises App Check with
+reCAPTCHA v3, but enforcement is **off**: an unauthenticated read of the demo
+database comes back `PERMISSION_DENIED — Missing or insufficient permissions`,
+which is the security rules refusing it, not App Check. An App Check rejection
+would say so explicitly. So the demo works on its own domain even though the
+reCAPTCHA key does not list it.
+
+If App Check is ever switched to Enforced, add `ssdiamdemo.web.app` to the
+reCAPTCHA key first, or this demo stops working the moment it is.
+
+## The demo database starts empty
+
+Sign in with an admin email (see `ADMIN_EMAILS`) and the app boots on an empty
+database — no orders, clients or stock. Whatever is entered during the demo
+stays in `ssdiamdemo` and is invisible to the live app.
