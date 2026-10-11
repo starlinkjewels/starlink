@@ -1,3 +1,4 @@
+import { DataTable } from "@/components/DataTable";
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardStatus, type GiftCard, type GiftCardStatus } from "@/lib/db";
@@ -142,55 +143,28 @@ export function GiftCardsAdminPage() {
               <SelectItem value="cancelled">Cancelled</SelectItem>
             </SelectContent>
           </Select>
-          {total > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {start + 1}–{end} of {total}</p>}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="table-luxe w-full text-sm min-w-[820px]">
-            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left px-5 py-3">Client</th>
-                <th className="text-left px-3 py-3">Source</th>
-                <th className="text-right px-3 py-3">Amount</th>
-                <th className="text-right px-3 py-3">Used</th>
-                <th className="text-right px-3 py-3">Remaining</th>
-                <th className="text-center px-3 py-3">Status</th>
-                <th className="text-left px-3 py-3">Issued</th>
-                <th className="text-left px-3 py-3">Expires</th>
-                <th className="text-left px-4 py-3">Orders</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map(c => {
-                const rem = giftCardRemaining(c, db.orders);
-                const st = giftCardStatus(c, db.orders);
-                const ords = ordersFor(c.id);
-                return (
-                  <tr key={c.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
-                    <td className="px-5 py-3 font-medium max-w-[180px] truncate">{clientName(c.clientId)}</td>
-                    <td className="px-3 py-3 text-xs text-muted-foreground">{sourceLabel(c.source)}</td>
-                    <td className="px-3 py-3 text-right font-semibold tabular-nums">{fmtMoney(c.amount)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums text-success">{fmtMoney(c.amount - rem)}</td>
-                    <td className="px-3 py-3 text-right tabular-nums">{fmtMoney(rem)}</td>
-                    <td className="px-3 py-3 text-center"><span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[st]}`}>{st}</span></td>
-                    <td className="px-3 py-3 text-xs text-muted-foreground">{fmtDate(c.createdAt)}</td>
-                    <td className="px-3 py-3 text-xs text-muted-foreground">{fmtDate(c.expiresAt)}</td>
-                    <td className="px-4 py-3 text-xs font-mono text-muted-foreground max-w-[160px] truncate">{ords.map(o => o.orderNumber).join(", ") || "—"}</td>
-                  </tr>
-                );
-              })}
-              {total === 0 && (
-                <tr><td colSpan={9} className="p-12 text-center text-muted-foreground">{ql || statusFilter !== "all" ? "No gift cards match your filters." : "No gift cards issued yet."}</td></tr>
-              )}
-            </tbody>
-          </table>
+        <div className="p-4">
+          <DataTable
+            id="gift-cards"
+            rows={rows}
+            rowKey={c => c.id}
+            defaultSort={{ key: "issued", dir: "desc" }}
+            emptyText={ql || statusFilter !== "all" ? "No gift cards match your filters." : "No gift cards issued yet."}
+            columns={[
+              { key: "client", header: "Client", always: true, sortValue: c => clientName(c.clientId), cell: c => <span className="font-medium max-w-[180px] truncate block">{clientName(c.clientId)}</span> },
+              { key: "source", header: "Source", sortValue: c => sourceLabel(c.source), cell: c => <span className="text-xs text-muted-foreground">{sourceLabel(c.source)}</span> },
+              { key: "amount", header: "Amount", align: "right", sortValue: c => c.amount, cell: c => <span className="font-semibold tabular-nums">{fmtMoney(c.amount)}</span> },
+              { key: "used", header: "Used", align: "right", sortValue: c => c.amount - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums text-success">{fmtMoney(c.amount - giftCardRemaining(c, db.orders))}</span> },
+              { key: "remaining", header: "Remaining", align: "right", sortValue: c => giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums">{fmtMoney(giftCardRemaining(c, db.orders))}</span> },
+              { key: "status", header: "Status", align: "center", sortValue: c => giftCardStatus(c, db.orders), cell: c => { const st = giftCardStatus(c, db.orders); return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[st]}`}>{st}</span>; } },
+              { key: "issued", header: "Issued", sortValue: c => c.createdAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.createdAt)}</span> },
+              { key: "expires", header: "Expires", sortValue: c => c.expiresAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.expiresAt)}</span> },
+              { key: "orders", header: "Orders", sortValue: c => ordersFor(c.id).map(o => o.orderNumber).join(", "), cell: c => <span className="text-xs font-mono text-muted-foreground max-w-[160px] truncate block">{ordersFor(c.id).map(o => o.orderNumber).join(", ") || "—"}</span> },
+            ]}
+          />
         </div>
-
-        {totalPages > 1 && (
-          <div className="px-5 border-t border-border/60">
-            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`${start + 1}–${end} of ${total}`} />
-          </div>
-        )}
       </div>
 
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title="Gift Cards Report"

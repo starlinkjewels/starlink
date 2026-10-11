@@ -818,6 +818,8 @@ export interface Settings {
   googleClientId?: string;
   /** Our other companies — the first company is these settings themselves. */
   companies?: Company[];
+  /** How every table in the app looks — Settings → Table Style. See tableStyle.ts. */
+  tableUi?: { style: string; density: string; zebra: boolean; hover: boolean; lines: boolean; sticky: boolean };
   /** The first company's extras, alongside its Invoice & Bill details. */
   companyLegalSuffix?: string; // default "INC"
   companyLogoUrl?: string;     // default the Starlink logo
