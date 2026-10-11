@@ -34,6 +34,44 @@ export async function reserveSequence(name: string, floor: number): Promise<numb
   });
 }
 
+/**
+ * Point a sequence at a given next value — admin repair only.
+ *
+ * Used after renumbering, which rewrites the book but leaves the counter where
+ * it was: invoices renumbered to 0001–0017 with the counter still on 22 would
+ * put the very next invoice at 0022 and open a five-number hole on the spot.
+ *
+ * Lowering a counter is safe here only because every reserve takes the highest
+ * number already in the data as its floor, so a counter set too low still can
+ * never hand out a number that is in use.
+ */
+export async function resetSequence(name: string, next: number): Promise<void> {
+  const ref = doc(fsdb, COL, name);
+  await runTransaction(fsdb, async (tx) => {
+    tx.set(ref, { next, updatedAt: new Date().toISOString() }, { merge: true });
+  });
+}
+
+/**
+ * Hand a reserved number back, so a sequence that was claimed and then not used
+ * does not leave a hole.
+ *
+ * Only takes it back when the counter is still sitting exactly one past it —
+ * that is, when nobody has been handed a number since. If somebody has, the
+ * number is genuinely spent and rolling back would hand the same one out twice,
+ * which is far worse than a gap. Safe to call on every failed write.
+ */
+export async function releaseSequence(name: string, value: number): Promise<void> {
+  const ref = doc(fsdb, COL, name);
+  await runTransaction(fsdb, async (tx) => {
+    const snap = await tx.get(ref);
+    if (!snap.exists()) return;
+    const stored = Number((snap.data() as { next?: number }).next);
+    if (stored !== value + 1) return; // someone else moved on — leave it alone
+    tx.set(ref, { next: value, updatedAt: new Date().toISOString() }, { merge: true });
+  });
+}
+
 /** Highest trailing number already used in a list ("SLJ-2026-1035" → 1035). */
 export function highestSuffix(values: (string | undefined)[], base: number): number {
   let max = base;
@@ -61,6 +99,20 @@ export async function reserveInvoiceNumber(invoices: { number?: string }[]): Pro
   const floor = highestSuffix(invoices.map((i) => i.number), 0) + 1;
   const seq = await reserveSequence("invoiceNumber", floor);
   return String(seq).padStart(4, "0");
+}
+
+/**
+ * Give an invoice number back when the invoice was not written after all.
+ *
+ * The number is claimed before the write, so a write that then refuses — every
+ * order already billed, nothing eligible left — used to burn the number and
+ * leave a hole in the sequence for good. That is where 0009, 0010, 0014, 0015
+ * and 0017 went.
+ */
+export async function releaseInvoiceNumber(number: string): Promise<void> {
+  const n = parseInt(number, 10);
+  if (!Number.isFinite(n)) return;
+  await releaseSequence("invoiceNumber", n);
 }
 
 /**

@@ -1,8 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { IS_DEMO } from "@/lib/firebase";
 import { seedDemoData, clearDemoData, hasDemoData } from "@/lib/demoSeed";
+import { releaseInvoiceNumber, resetSequence } from "@/lib/counters";
+import { useDbVersion } from "@/hooks/useDb";
+import {
+  fxTableOf, writeFxTable, adminStoreReady, exposedAdminFigures, copyAdminFiguresToPrivate,
+  stripExposedAdminFigures, collectionRefused, flush,
+} from "@/lib/db";
 import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
@@ -40,6 +46,7 @@ import {
   DollarSign,
   Building2,
   Database,
+  Lock,
   Boxes,
   SlidersHorizontal,
   Hash,
@@ -78,6 +85,12 @@ const SHOW_REPAIR_TOOLS = false;
 // switched off, not deleted, so one word brings them back when one is needed.
 const SHOW_ADMIN_TOOLS = false;
 
+// …except the invoice numbering tool, which is the one of the three that puts
+// something right rather than throwing it away: it renumbers the book so the
+// sequence runs straight through, keeping every amount, order link and payment
+// exactly where it is. Deleting an invoice and restoring a backup stay hidden.
+const SHOW_INVOICE_NUMBER_TOOL = true;
+
 export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
@@ -96,10 +109,23 @@ export function SettingsPage() {
   // since (this is what wiped a saved locker and a live order). updateDb touches
   // the live cache in place and leaves all other data alone.
   const persistSettings = (msg: string) => {
-    updateDb(d => { d.settings = { ...db.settings }; });
+    updateDb(d => {
+      const s = { ...db.settings };
+      // Once the rates live in the admin-only record, this form's copy of the
+      // old ones must not be written back into settings, where every signed-in
+      // user can read them. The form may still hold them from before the move.
+      if ((d.adminRecords ?? []).some(r => r.kind === "fx")) {
+        delete s.fxRates;
+        delete s.usdToInr;
+      }
+      d.settings = s;
+    });
     toast.success(msg);
   };
   const save = () => persistSettings("Settings saved");
+  // New dated exchange rate being typed in (admin, Pricing).
+  const [fxFrom, setFxFrom] = useState(todayLocal());
+  const [fxRate, setFxRate] = useState("");
   const saveRates = () => persistSettings("Pricing rates updated");
   const saveInvoice = () => persistSettings("Invoice settings saved");
   const saveBand = () => persistSettings("Label & barcode settings saved");
@@ -252,6 +278,9 @@ export function SettingsPage() {
       toast.error(e instanceof Error ? e.message : "Couldn't merge those accounts.");
     } finally { setMergingEmail(null); }
   };
+  // Re-draw when the data moves, so things saved straight to the live record
+  // — a new exchange rate, the result of the privacy move — show at once.
+  useDbVersion();
   const liveDb = loadDb();
   const duplicateGroups = useMemo(() => duplicateOrderNumbers(liveDb.orders), [liveDb.orders, dupScan]);
 
@@ -290,9 +319,13 @@ export function SettingsPage() {
     [liveDb.invoices, liveDb.orders],
   );
 
-  function deleteInvoice(id: string, number: string) {
+  async function deleteInvoice(id: string, number: string) {
     if (!confirm(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`)) return;
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
+    // If this was the newest number, hand it back so the next invoice takes it
+    // instead of the book skipping one. Older numbers are left alone — their
+    // hole can only be closed by renumbering.
+    await releaseInvoiceNumber(number);
     toast.success(`Invoice ${number} deleted`);
   }
 
@@ -315,22 +348,40 @@ export function SettingsPage() {
     const list = [...(liveDb.invoices ?? [])].sort(
       (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) || a.number.localeCompare(b.number));
     if (!list.length) return;
+    // Show exactly which number becomes which before anything is written — the
+    // point of the whole exercise is that the book reads differently afterwards.
+    const moves = list
+      .map((inv, i) => ({ from: inv.number, to: String(i + 1).padStart(4, "0") }))
+      .filter(m => m.from !== m.to);
+    if (!moves.length) {
+      toast.success("The sequence already runs straight through — nothing to renumber");
+      return;
+    }
+    const preview = moves.slice(0, 12).map(m => `  ${m.from}  →  ${m.to}`).join("\n")
+      + (moves.length > 12 ? `\n  …and ${moves.length - 12} more` : "");
     if (!confirm(
-      `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?
-
-`
-      + "Only the numbers change — every amount, order link and payment stays exactly as it is. "
-      + "Do this only if an invoice has been cancelled and the sequence has a hole in it; anything already "
-      + "sent to a client will no longer match the copy they hold."
+      `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?\n\n`
+      + `${moves.length} will change:\n${preview}\n\n`
+      + "Every amount, order link and payment stays exactly as it is — only the numbers move. "
+      + "Each invoice keeps its old number on record, so a client holding the old copy can still be found by "
+      + "searching for it."
     )) return;
     updateDb(d => {
       const byId = new Map(list.map((inv, i) => [inv.id, String(i + 1).padStart(4, "0")]));
       for (const inv of d.invoices ?? []) {
         const n = byId.get(inv.id);
-        if (n) inv.number = n;
+        if (!n || n === inv.number) continue;
+        // Keep the first number it ever carried, not the one from the last
+        // renumber — that is the one on the paperwork a client holds.
+        if (!inv.previousNumber) inv.previousNumber = inv.number;
+        inv.number = n;
       }
     });
-    toast.success(`Renumbered ${list.length} invoice${list.length !== 1 ? "s" : ""}`);
+    // The book now runs 1..N, so the counter has to follow it. Left where it
+    // was, the next invoice would carry on from the old high number and open a
+    // fresh hole the moment the renumber finished.
+    void resetSequence("invoiceNumber", list.length + 1);
+    toast.success(`Renumbered ${list.length} invoice${list.length !== 1 ? "s" : ""} — next is ${String(list.length + 1).padStart(4, "0")}`);
   }
 
 
@@ -923,6 +974,148 @@ export function SettingsPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">per gram</p>
             </div>
+
+            {/* ₹ to $ over time — admin only: it is what turns an order's rupee cost
+                into a profit, and profit is not for anyone else's screen. */}
+            {isAdmin && (
+              <div className="space-y-2 col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5 text-amber-600" />
+                  Exchange Rates for Profit (₹ per $1) — admin only
+                </Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Each rate holds from its date until the next one. A sale is converted at the rate in force on
+                  the day it was dispatched — an order shipped in March is worth what the dollar fetched in March,
+                  not what it fetches today. Add a new rate whenever the bank rate moves enough to matter.
+                </p>
+                {(() => {
+                  const table = fxTableOf(liveDb);
+                  const rates = [...table.rates].sort((a, b) => b.from.localeCompare(a.from));
+                  // Saved straight away, to the admin-only record when its rules are
+                  // live and to settings until then. When it lands in settings the
+                  // form's copy follows, or the next "Save Pricing Rates" — which
+                  // writes the whole form back — would put the old list back.
+                  const commit = (next: { from: string; rate: number }[]) => {
+                    let where: "private" | "settings" = "settings";
+                    updateDb(d => { where = writeFxTable(d, next, fxTableOf(d).flat); });
+                    if (where === "settings") setDb(prev => ({ ...prev, settings: { ...prev.settings, fxRates: next } }));
+                  };
+                  return (
+                    <>
+                      {rates.length > 0 ? (
+                        <div className="rounded-lg border border-border/60 bg-white divide-y divide-border/50">
+                          {rates.map((r, i) => (
+                            <div key={r.from} className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+                              <span>
+                                From <span className="font-medium">{fmtDate(r.from)}</span>
+                                {i === 0 && <span className="ml-1.5 text-[10px] font-semibold text-success">current</span>}
+                              </span>
+                              <span className="flex items-center gap-3">
+                                <span className="font-semibold tabular-nums">₹{r.rate}</span>
+                                <button
+                                  onClick={() => {
+                                    if (!confirm(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`)) return;
+                                    commit(table.rates.filter(x => x.from !== r.from));
+                                    toast.success("Rate removed");
+                                  }}
+                                  className="text-muted-foreground hover:text-destructive" aria-label="Remove rate">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-amber-700">
+                          No dated rates yet.{table.flat ? ` A flat rate of ₹${table.flat} is being used for every order until you add one.` : " Profit is not shown until one is added."}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">From</p>
+                          <Input type="date" value={fxFrom} max={todayLocal()} onChange={e => setFxFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+                        </div>
+                        <div className="relative">
+                          <p className="text-[10px] text-muted-foreground mb-0.5">₹ per $1</p>
+                          <Input type="number" min={0} step={0.01} value={fxRate} placeholder="e.g. 84.50"
+                            onChange={e => setFxRate(e.target.value)} className="rounded-xl h-9 w-28" />
+                        </div>
+                        <Button size="sm" variant="outline" className="rounded-xl h-9"
+                          onClick={() => {
+                            const rate = Number(fxRate);
+                            if (!fxFrom) { toast.error("Pick the date the rate applies from"); return; }
+                            if (!(rate > 0)) { toast.error("Enter the rate"); return; }
+                            // One rate per day: entering a day again corrects it.
+                            const next = [...table.rates.filter(x => x.from !== fxFrom), { from: fxFrom, rate }];
+                            commit(next);
+                            setFxRate("");
+                            toast.success(`₹${rate} from ${fmtDate(fxFrom)} saved`);
+                          }}>
+                          Add rate
+                        </Button>
+                      </div>
+                    </>
+                  );
+                })()}
+              </div>
+            )}
+
+            {/* ── Where the cost figures are kept — admin only ── */}
+            {isAdmin && (() => {
+              const ready = adminStoreReady();
+              const exposed = exposedAdminFigures(liveDb);
+              const owed = exposed.stockCosts > 0 || exposed.rates;
+              const move = async () => {
+                if (!confirm(
+                  "Move every ready-stock cost and the exchange rates into the admin-only store?\n\n"
+                  + "They are copied first and only removed from their old places once the copy has reached the server, "
+                  + "so nothing can be lost on the way. Afterwards no employee or client can read them, even from the raw data.",
+                )) return;
+                updateDb(d => { copyAdminFiguresToPrivate(d); });
+                await flush();
+                if (collectionRefused("adminRecords")) {
+                  toast.error("The server refused the admin-only store — nothing was moved. The security update has to be deployed first.");
+                  return;
+                }
+                let removed = 0;
+                updateDb(d => { removed = stripExposedAdminFigures(d); });
+                await flush();
+                // The form still holds the old rates; refresh it so "Save Pricing
+                // Rates" cannot write them back where they came from.
+                setDb(loadDb());
+                toast.success(`Moved — ${removed} figure${removed !== 1 ? "s are" : " is"} now admin-only`);
+              };
+              return (
+                <div className={`col-span-2 rounded-xl border p-3 text-xs ${!ready ? "border-border/60 bg-secondary/30" : owed ? "border-destructive/30 bg-destructive/5" : "border-success/30 bg-success/5"}`}>
+                  <p className="font-semibold text-brand-dark flex items-center gap-1.5 mb-1">
+                    <Lock className="h-3.5 w-3.5" /> Who can read your cost figures
+                  </p>
+                  {!ready ? (
+                    <p className="text-muted-foreground">
+                      The security update that keeps ready-stock costs and exchange rates admin-only is not live yet.
+                      Until it is deployed they stay where they are — rates readable by staff, and ready-stock costs
+                      readable by <span className="font-semibold text-destructive">clients too</span>, from the raw data even
+                      though the screens hide them.
+                    </p>
+                  ) : owed ? (
+                    <>
+                      <p className="text-muted-foreground">
+                        Still readable by others:{" "}
+                        {[
+                          exposed.stockCosts > 0 ? `${exposed.stockCosts} ready-stock cost${exposed.stockCosts !== 1 ? "s" : ""} (clients can read these)` : "",
+                          exposed.rates ? "the exchange rates (staff can read these)" : "",
+                        ].filter(Boolean).join(" and ")}.
+                      </p>
+                      <AsyncButton onClick={move} className="btn-hero rounded-xl h-8 text-xs mt-2">Make them admin-only</AsyncButton>
+                    </>
+                  ) : (
+                    <p className="text-success font-medium">
+                      All ready-stock costs and exchange rates are admin-only — no employee or client can read them.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Default shipping charge */}
             <div className="space-y-1.5 col-span-2">
@@ -1646,7 +1839,7 @@ export function SettingsPage() {
 
 
         {/* ── Invoice numbering (admin only) ── */}
-        {SHOW_ADMIN_TOOLS && isAdminUser && (
+        {SHOW_INVOICE_NUMBER_TOOL && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${invoiceGaps.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
@@ -1664,9 +1857,14 @@ export function SettingsPage() {
             {invoiceGaps.length > 0 && (
               <>
                 <p className="mt-3 text-[11px] text-muted-foreground">
-                  Renumbering puts every invoice back in date order starting at 0001. Only the numbers change —
-                  amounts, order links and payments stay exactly as they are. Do not do this if a client already
-                  holds a copy of an invoice, because their number will no longer match yours.
+                  Renumbering puts every invoice back in date order starting at 0001, so the book reads
+                  0001, 0002, 0003 with nothing missing. Only the numbers move — every amount, order link
+                  and payment stays exactly where it is, and the next invoice carries on from the end.
+                </p>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Each invoice keeps the number it had before, so a client holding the old copy can still be
+                  found by searching for that number. You will see exactly which numbers change before anything
+                  is written.
                 </p>
                 <Button size="sm" variant="outline" onClick={renumberInvoices} className="rounded-xl h-9 mt-3">
                   Renumber invoices in date order

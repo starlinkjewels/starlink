@@ -488,6 +488,10 @@ export interface Invoice {
   orderIds?: string[]; // all orders billed on this invoice (dispatch-batch invoicing)
   clientId: string;
   number: string;
+  /** The number this invoice carried before the book was renumbered. Kept so a
+   *  client holding the old copy can still be matched — search finds either.
+   *  Same idea as Order.previousOrderNumber. */
+  previousNumber?: string;
   amount: number; // snapshot at creation; the UI always recomputes live from the orders
   paid: boolean;
   createdAt: string;
@@ -623,6 +627,13 @@ export interface Expense {
   currency?: "INR" | "USD";
   createdAt: string;
   lockerId?: string; // optional — which Locker this was actually paid from
+  /** The orders this expense was incurred FOR — freight and insurance on a
+   *  shipment, a lab fee on a stone. Set, it is a direct cost of those orders
+   *  (split across them by value) and is left out of overheads; unset, it is
+   *  an ordinary running cost of the business. */
+  orderIds?: string[];
+  /** The courier and tracking number a shipping cost belongs to. */
+  shipmentRef?: string;
 }
 
 /** Format an expense amount in its own account currency (₹ default for legacy). */
@@ -714,6 +725,15 @@ export interface Settings {
   notifications: boolean;
   diamondRate: number; // $ per carat
   metalRate: number; // $ per gram
+  /** ₹ to the $ — converts an order's rupee cost so it can be set against its
+   *  dollar selling price. ADMIN ONLY, like everything profit touches. Unset
+   *  means no profit is stated at all rather than one worked out at a guess. */
+  usdToInr?: number;
+  /** ₹ to the $ over time, each rate in force from its date until the next.
+   *  A sale is converted at the rate on the day it was made, not today's — the
+   *  transaction-date rate, which is how the books are meant to be kept. ADMIN
+   *  ONLY. Supersedes usdToInr, which remains the fallback when this is empty. */
+  fxRates?: { from: string; rate: number }[];
   defaultShippingCharge: number; // $ flat default per order
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
@@ -1225,8 +1245,28 @@ export interface DB {
   readyStock: ReadyStockItem[];
   diamondPackets: DiamondPacket[];
   diamondSales: DiamondSale[];
+  /** ADMIN ONLY — loaded for the admin alone and refused to everyone else by
+   *  the security rules. See AdminRecord. */
+  adminRecords: AdminRecord[];
   session: { userId: string | null };
 }
+
+/**
+ * Figures only the admin may see, kept where only the admin can read them.
+ *
+ * Hiding a number on screen is not the same as keeping it private: anything in
+ * a document a user can read is one browser console away from them. A ready-
+ * stock item's cost sat on the item, which every client can read to browse the
+ * shop — so every client could read what each piece cost. These live in their
+ * own collection, which the rules give to the admin and nobody else, and which
+ * is not even requested for anyone else.
+ *
+ *  • "fx"        — the dated ₹-to-$ rates that turn rupee cost into profit.
+ *  • "stockCost" — what one ready-stock piece cost, in dollars.
+ */
+export type AdminRecord =
+  | { id: "fx"; kind: "fx"; rates: { from: string; rate: number }[]; flat?: number }
+  | { id: string; kind: "stockCost"; itemId: string; cost: number };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
@@ -1280,6 +1320,7 @@ function emptyDb(): DB {
     readyStock: [],
     diamondPackets: [],
     diamondSales: [],
+    adminRecords: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -1420,29 +1461,15 @@ export function cashbackPercentFor(d: DB, client: Client | undefined): number {
   return pct > 0 ? pct : 0;
 }
 
-/**
- * Apply `amount` across the given orders, OLDEST bill first (FIFO), by pushing a
- * payment (advance) entry onto each order until its balance is cleared. Mutates
- * the passed order objects (call inside updateDb). Returns the unallocated
- * leftover — which the caller should carry forward as client credit.
- */
-export function allocatePaymentFIFO(
-  orders: Order[],
-  amount: number,
-  recordedBy: string,
-  at: string,
-  note = "Payment received",
-  fromCredit = false,
-): number {
-  const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  return allocateInOrder(oldestFirst, amount, recordedBy, at, note, fromCredit);
-}
 
 /**
- * Fill the given orders IN THE ORDER GIVEN, each up to its balance. Separate
- * from allocatePaymentFIFO because that one re-sorts by date — which is right
- * for "oldest bill first" and wrong when the caller has deliberately put one
- * invoice at the front. Returns the leftover.
+ * Fill the given orders IN THE ORDER GIVEN, each up to its balance, and return
+ * whatever is left over.
+ *
+ * The order is the caller's decision and this never second-guesses it: the
+ * orders on one invoice when money was sent for that invoice, oldest bill first
+ * when somebody has asked for their credit to be spread. Nothing re-sorts by
+ * date behind the caller's back any more.
  */
 export function allocateInOrder(
   orders: Order[],
@@ -1521,112 +1548,33 @@ function billingOrder(d: DB, clientId: string, firstInvoiceId?: string): Order[]
   return [...out, ...rest];
 }
 
-/**
- * Apply money the client has sent AGAINST ONE INVOICE. That invoice is cleared
- * first; whatever is left rolls on to their NEXT invoice, then the one after
- * that, then any uninvoiced work, and only then to credit.
- *
- * Plain FIFO across every order is right for "here is some money"; it is wrong
- * for "here is the payment for invoice 0001", which would land on older
- * unbilled work and leave the invoice the client just paid still showing as
- * pending. Returns the leftover, for the caller to store as client credit.
- */
-export function allocateToInvoice(
-  d: DB,
-  invoiceId: string,
-  amount: number,
-  recordedBy: string,
-  at: string,
-  note?: string,
-): number {
+/** The orders billed on one invoice, skipping any since rejected. */
+function invoiceOrders(d: DB, invoiceId: string): Order[] {
   const inv = (d.invoices ?? []).find(i => i.id === invoiceId);
-  if (!inv) return amount;
-  const label = note ?? `Payment — invoice ${inv.number}`;
-  const targets = billingOrder(d, inv.clientId, invoiceId);
-  return allocateInOrder(targets, amount, recordedBy, at, label);
+  if (!inv) return [];
+  return invoiceOrderIds(inv)
+    .map(oid => d.orders.find(o => o.id === oid))
+    .filter((o): o is Order => !!o && o.status !== "Rejected");
 }
 
 /**
- * Re-spread everything a client has ALREADY paid, putting one invoice first.
+ * Take money in on a client's account.
  *
- * Payments are allocated oldest-bill-first as they come in, which is right in
- * general but wrong when the client says "this transfer is for invoice 0001":
- * the money lands on older unbilled work and the invoice they just settled
- * still reads as pending. Nothing is created or destroyed here — every existing
- * advance is pooled and laid down again in a different order, so the client's
- * total paid, the lockers and every cash figure are untouched.
+ * A running account, not a reshuffle. Money goes against the invoice it was
+ * sent for and nowhere else; what that invoice cannot absorb, and anything sent
+ * without an invoice named, stays as credit until somebody decides where it
+ * belongs. The client's balance is simply what they have been billed less what
+ * they have paid — plus and minus, the way the books are kept by hand.
  *
- * Each payment keeps its own note, date, recorder and locker link; a payment
- * that has to straddle two orders is split, not rewritten. Returns what moved.
- */
-export function reallocateClientPayments(
-  d: DB,
-  clientId: string,
-  invoiceFirstId?: string,
-): { total: number; toInvoice: number; credit: number } {
-  const r2n = (n: number) => Math.round(n * 100) / 100;
-  const client = d.clients.find(c => c.id === clientId);
-  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
-
-  // 1. Lift every payment off the orders, oldest first, keeping its details.
-  const pool: AdvancePayment[] = [];
-  for (const o of orders) {
-    for (const a of o.advances ?? []) pool.push({ ...a });
-    o.advances = [];
-  }
-  pool.sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  const total = r2n(pool.reduce((s, a) => s + a.amount, 0) + (client?.creditBalance || 0));
-
-  // Carried credit joins the pool as one more source, so it settles bills too.
-  if (client?.creditBalance && client.creditBalance > 0) {
-    pool.push({
-      id: uid("adv_"), amount: client.creditBalance, note: "Credit carried forward",
-      recordedBy: "system", createdAt: new Date().toISOString(), fromCredit: true,
-    });
-  }
-
-  // 2. Bills are refilled invoice by invoice with the chosen one at the front,
-  //    so what the first invoice cannot absorb rolls on to the next invoice
-  //    rather than scattering across unbilled orders.
-  const firstIds = invoiceFirstId
-    ? invoiceOrderIds((d.invoices ?? []).find(i => i.id === invoiceFirstId) ?? ({ orderId: "" } as Invoice))
-    : [];
-  const targets = billingOrder(d, clientId, invoiceFirstId);
-
-  // 3. Lay the pool back down, splitting a payment across orders when needed.
-  let toInvoice = 0;
-  let src = 0;
-  for (const o of targets) {
-    let need = orderTotal(o);
-    while (need > 0.009 && src < pool.length) {
-      const take = Math.min(need, pool[src].amount);
-      if (!o.advances) o.advances = [];
-      o.advances.push({ ...pool[src], id: uid("adv_"), amount: r2n(take) });
-      if (firstIds.includes(o.id)) toInvoice = r2n(toInvoice + take);
-      pool[src].amount = r2n(pool[src].amount - take);
-      need = r2n(need - take);
-      if (pool[src].amount <= 0.009) src++;
-    }
-  }
-
-  // 4. Anything the bills couldn't absorb goes back to credit.
-  const credit = r2n(pool.slice(src).reduce((s, a) => s + a.amount, 0));
-  if (client) client.creditBalance = credit > 0 ? credit : undefined;
-  return { total, toInvoice, credit };
-}
-
-
-
-/**
- * Settle a client's account from one place: reclaim any over-payment, fold in
- * carried credit and whatever they have just sent, then pay their bills off
- * INVOICE BY INVOICE — oldest invoice first, or `firstInvoiceId` first when the
- * transfer was sent for a particular one. What an invoice cannot absorb rolls
- * on to the next invoice, then to work not yet invoiced, and only what is left
- * after all of that becomes credit against their next bill.
+ * It used to fill their bills oldest-invoice-first instead, which moved money
+ * the moment more arrived: a payment sent for invoice 0021 landed on invoice
+ * 0005, an invoice that read Paid yesterday read Pending today, and no
+ * statement ever matched twice. Nothing is allocated on its own any more.
+ * Putting held credit against bills is a deliberate act — see
+ * applyCreditToBills, and the per-invoice version below.
  *
- * This is what the client sees on their side: the invoice they paid reads as
- * cleared, and the remainder shows up against the next one.
+ * Over-payment sitting on an order is still reclaimed to credit, because an
+ * order holding more than it is worth is not a balance anybody can read.
  * Writes the leftover back to the client record and returns it.
  */
 export function settleClientAccount(
@@ -1643,11 +1591,36 @@ export function settleClientAccount(
   let pool = (extra || 0) + (client?.creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
-  const leftover = allocateInOrder(
-    billingOrder(d, clientId, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received",
-  );
+  const leftover = firstInvoiceId
+    ? allocateInOrder(invoiceOrders(d, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received")
+    : pool;
   if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
   return leftover;
+}
+
+/**
+ * Put a client's held credit against their bills, oldest invoice first.
+ *
+ * Deliberate, never automatic: this runs when somebody presses the button, not
+ * when money happens to arrive. Returns how much was actually applied.
+ */
+export function applyCreditToBills(
+  d: DB,
+  clientId: string,
+  recordedBy: string,
+  at: string,
+  note = "Credit applied",
+  invoiceId?: string,
+): number {
+  const client = d.clients.find(c => c.id === clientId);
+  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
+  let pool = client?.creditBalance || 0;
+  for (const o of orders) pool += capOrderAdvances(o);
+  pool = Math.round(pool * 100) / 100;
+  const targets = invoiceId ? invoiceOrders(d, invoiceId) : billingOrder(d, clientId);
+  const leftover = allocateInOrder(targets, pool, recordedBy, at, note, true);
+  if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
+  return Math.round((pool - leftover) * 100) / 100;
 }
 
 
@@ -1793,7 +1766,8 @@ type ArrayCol =
   | "stockMovements"
   | "readyStock"
   | "diamondPackets"
-  | "diamondSales";
+  | "diamondSales"
+  | "adminRecords";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -1823,6 +1797,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "readyStock",
   "diamondPackets",
   "diamondSales",
+  "adminRecords",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
@@ -2110,8 +2085,9 @@ async function persist() {
         console.error(
           `[db] "${c}" was rejected by the security rules, so it will not be attempted again this session. `
           + `Nothing is lost — it stays on this device and goes up once the rules allow it. `
-          + `Run: firebase deploy --only firestore:rules (a collection added in the app but missing from `
-          + `firestore.rules does exactly this), then reload.`,
+          + `Run: firebase deploy --only firestore (a collection added in the app but missing from `
+          + `firestore.rules does exactly this), then reload. Not --only firestore:rules: with the `
+          + `named-database firebase.json that matches nothing and deploys nothing.`,
         );
       }
     }
@@ -2123,6 +2099,17 @@ async function persist() {
     });
     setPending(pendingCount - 1);
   }
+}
+
+/**
+ * Whether the admin-only records can actually be read and written — true once
+ * the security rules for them are deployed and the admin's listener has had a
+ * first answer. Until then everything stays where it always was, because a
+ * write the rules refuse is kept only on this device and gone on reload.
+ */
+let adminStoreLive = false;
+export function adminStoreReady(): boolean {
+  return adminStoreLive && !deniedCols.has("adminRecords");
 }
 
 /** Collections the rules refuse. Skipped for the rest of the session so one
@@ -2240,7 +2227,11 @@ let unsubscribers: Array<() => void> = [];
  *  • "client" — subscribe only to the client's own orders/invoices/messages/
  *               notifications/client-record (enforced identically by the rules).
  */
-export type Scope = { kind: "full" } | { kind: "client"; appId: string; clientId: string };
+export type Scope =
+  /** Staff. `admin` decides whether the admin-only records are requested at
+   *  all — an employee never asks for them, so never sees them. */
+  | { kind: "full"; admin?: boolean }
+  | { kind: "client"; appId: string; clientId: string };
 
 /**
  * Watch the signed-in user's own role-index doc and invoke `onRevoked` the
@@ -2347,7 +2338,12 @@ function subscribeAll(scope: Scope): Promise<void> {
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
+  const amAdminScope = scope.kind === "full" && !!scope.admin;
+  adminStoreLive = false;
   for (const col of ARRAY_COLS) {
+    // Requested by the admin and nobody else. The rules would refuse it to
+    // anyone else anyway; not asking at all means there is nothing to refuse.
+    if (col === "adminRecords" && !amAdminScope) continue;
     if (client) {
       // Staff-only collections are never loaded for a client.
       if (
@@ -2452,6 +2448,9 @@ function subscribeAll(scope: Scope): Promise<void> {
         onSnapshot(
           q,
           (snap) => {
+            // The rules for the admin-only records are live: they can be
+            // written there from now on rather than in the old places.
+            if (col === "adminRecords") adminStoreLive = true;
             if (writePending[col]) {
               first(col);
               return;
@@ -2466,6 +2465,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           },
           (err) => {
             console.error(`[db] listener ${col} failed:`, err);
+            if (col === "adminRecords") adminStoreLive = false;
             first(col);
           },
         ),
@@ -2729,4 +2729,115 @@ export function mainDiamondShape(d: DB, orderId: string): string | undefined {
     }
   }
   return best?.shape;
+}
+
+/* ── Admin-only figures: where they are read from, and written to ─────────── */
+
+/**
+ * The dated exchange rates. From the admin-only record once the move has been
+ * made; until then from the settings document, where they were first kept.
+ */
+export function fxTableOf(d: DB): { rates: { from: string; rate: number }[]; flat?: number } {
+  const rec = (d.adminRecords ?? []).find(r => r.kind === "fx") as Extract<AdminRecord, { kind: "fx" }> | undefined;
+  if (rec) return { rates: rec.rates ?? [], flat: rec.flat };
+  return { rates: d.settings.fxRates ?? [], flat: d.settings.usdToInr };
+}
+
+/** What a ready-stock piece cost — the admin-only record first, the old field
+ *  on the item until it has been moved. */
+export function stockCostOf(d: DB, item: { id: string; cost?: number }): number | undefined {
+  const rec = (d.adminRecords ?? []).find(r => r.kind === "stockCost" && r.itemId === item.id) as
+    Extract<AdminRecord, { kind: "stockCost" }> | undefined;
+  return rec ? rec.cost : item.cost;
+}
+
+/**
+ * Save the rate table. Into the admin-only record when its rules are live;
+ * otherwise into settings as before — a write the rules refuse would be kept
+ * only on this device and lost on the next reload, which is worse than a rate
+ * staff could have read.
+ */
+export function writeFxTable(d: DB, rates: { from: string; rate: number }[], flat?: number): "private" | "settings" {
+  if (adminStoreReady()) {
+    if (!d.adminRecords) d.adminRecords = [];
+    const i = d.adminRecords.findIndex(r => r.kind === "fx");
+    const rec: AdminRecord = { id: "fx", kind: "fx", rates, ...(flat ? { flat } : {}) };
+    if (i >= 0) d.adminRecords[i] = rec; else d.adminRecords.push(rec);
+    return "private";
+  }
+  d.settings = { ...d.settings, fxRates: rates };
+  return "settings";
+}
+
+/** Save a ready-stock piece's cost, by the same rule. Undefined clears it. */
+export function writeStockCost(d: DB, itemId: string, cost: number | undefined): "private" | "settings" {
+  const item = d.readyStock.find(i => i.id === itemId);
+  if (adminStoreReady()) {
+    if (!d.adminRecords) d.adminRecords = [];
+    d.adminRecords = d.adminRecords.filter(r => !(r.kind === "stockCost" && r.itemId === itemId));
+    if (cost != null && cost > 0) d.adminRecords.push({ id: `rsc_${itemId}`, kind: "stockCost", itemId, cost });
+    // Nothing left on the item for anyone else to read.
+    if (item && item.cost !== undefined) delete item.cost;
+    return "private";
+  }
+  if (item) item.cost = cost;
+  return "settings";
+}
+
+/**
+ * Everything still sitting where others can read it: ready-stock costs on the
+ * items themselves, and the rates in settings. Counted, so the admin can see
+ * whether the move is still owed.
+ */
+export function exposedAdminFigures(d: DB): { stockCosts: number; rates: boolean } {
+  return {
+    stockCosts: d.readyStock.filter(i => i.cost != null).length,
+    rates: !!(d.settings.fxRates?.length || d.settings.usdToInr),
+  };
+}
+
+/**
+ * Copy every exposed figure into the admin-only records. Copying only — the
+ * originals are removed by stripExposedAdminFigures, and only once this copy is
+ * confirmed to have reached the server, so nothing can be lost in between.
+ */
+export function copyAdminFiguresToPrivate(d: DB): number {
+  if (!d.adminRecords) d.adminRecords = [];
+  let n = 0;
+  if (!d.adminRecords.some(r => r.kind === "fx") && (d.settings.fxRates?.length || d.settings.usdToInr)) {
+    d.adminRecords.push({ id: "fx", kind: "fx", rates: d.settings.fxRates ?? [], ...(d.settings.usdToInr ? { flat: d.settings.usdToInr } : {}) });
+    n++;
+  }
+  for (const item of d.readyStock) {
+    if (item.cost == null) continue;
+    if (d.adminRecords.some(r => r.kind === "stockCost" && r.itemId === item.id)) continue;
+    d.adminRecords.push({ id: `rsc_${item.id}`, kind: "stockCost", itemId: item.id, cost: item.cost });
+    n++;
+  }
+  return n;
+}
+
+/** Remove the exposed originals — but only those whose private copy exists. */
+export function stripExposedAdminFigures(d: DB): number {
+  let n = 0;
+  const priv = d.adminRecords ?? [];
+  if (priv.some(r => r.kind === "fx") && (d.settings.fxRates || d.settings.usdToInr)) {
+    const s = { ...d.settings };
+    delete s.fxRates;
+    delete s.usdToInr;
+    d.settings = s;
+    n++;
+  }
+  for (const item of d.readyStock) {
+    if (item.cost == null) continue;
+    if (!priv.some(r => r.kind === "stockCost" && r.itemId === item.id)) continue;
+    delete item.cost;
+    n++;
+  }
+  return n;
+}
+
+/** True when a collection's writes have been refused this session. */
+export function collectionRefused(col: string): boolean {
+  return deniedCols.has(col);
 }

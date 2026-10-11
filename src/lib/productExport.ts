@@ -3,6 +3,7 @@ import {
   CARAT_TO_GRAM, type DB, type Order, type ReadyStockItem,
 } from "@/lib/db";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { orderProfit, recognisedSale, saleDate } from "@/lib/orderCost";
 
 /**
  * The finished pieces, with the weights a sale is priced from.
@@ -156,7 +157,11 @@ const STOCK_HEAD = [
 
 /** Cost is admin-only everywhere else in the app, so it is only appended for an
  *  admin — an employee's sheet must not be able to leak the margin. */
-export function exportReadyStockCsv(items: ReadyStockItem[], name: string, withCost: boolean): void {
+export function exportReadyStockCsv(
+  items: ReadyStockItem[], name: string, withCost: boolean,
+  /** Where each piece's cost is read from — the admin-only record once moved. */
+  costOf: (i: ReadyStockItem) => number | undefined = i => i.cost,
+): void {
   const head = withCost ? [...STOCK_HEAD, "Cost ($)", "Profit ($)"] : STOCK_HEAD;
   downloadCsv(name, head, items.map(i => {
     const row: (string | number)[] = [
@@ -165,7 +170,8 @@ export function exportReadyStockCsv(items: ReadyStockItem[], name: string, withC
       i.quantity, i.price, n3(i.price * i.quantity), i.location ?? "",
       i.quantity > 0 ? "Available" : "Sold out", fmtDate(i.createdAt),
     ];
-    if (withCost) row.push(i.cost ?? "", i.cost != null ? n3((i.price - i.cost) * i.quantity) : "");
+    const cost = withCost ? costOf(i) : undefined;
+    if (withCost) row.push(cost ?? "", cost != null ? n3((i.price - cost) * i.quantity) : "");
     return row;
   }));
 }
@@ -202,4 +208,42 @@ export function exportReadyStockPdf(items: ReadyStockItem[], name: string, subje
     ]),
     filename: name,
   });
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Profit — ADMIN ONLY.
+ *
+ * Kept apart from the product sheet above on purpose. That one is sent to
+ * customers to price a bulk sale; a cost column added to it would go out to a
+ * customer the first time somebody forwarded it without looking. This sheet
+ * has its own button, shown to the admin alone, and its name says what it is.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const PROFIT_HEAD = [
+  "Order", "Design", "Client", "Item", "Metal", "Status", "Ordered", "Sold (dispatched)",
+  "Selling ($)", "Gold cost (₹)", "Diamond cost (₹)", "Factory (₹)", "Freight & other (₹)", "Total cost (₹)",
+  "Rate (₹/$)", "Rate basis", "Cost ($)", "Profit ($)", "Margin %", "Cost complete", "Not yet valued",
+];
+
+const BASIS: Record<string, string> = {
+  dated: "rate on the sale day",
+  earliest: "earliest rate on file (none that far back)",
+  single: "one flat rate (no dated rates)",
+};
+
+export function exportProfitCsv(db: DB, orders: Order[], name: string): void {
+  const sum = (ls: { amountInr: number }[]) => Math.round(ls.reduce((s, l) => s + l.amountInr, 0) * 100) / 100;
+  downloadCsv(`${name}-PROFIT-ADMIN`, PROFIT_HEAD, orders.map(o => {
+    const p = orderProfit(db, o);
+    const c = p.cost;
+    return [
+      o.orderNumber, o.designNumber ?? "", db.clients.find(x => x.id === o.clientId)?.companyName ?? (o.forReadyStock ? "Ready stock" : ""),
+      o.jewelleryType, `${o.metal}${o.productKarats ? ` ${o.productKarats}` : ""}`, o.status, fmtDate(o.createdAt),
+      recognisedSale(o) ? fmtDate(saleDate(o)) : "",
+      o.forReadyStock ? "" : p.sellingUsd, sum(c.gold), sum(c.diamond), sum(c.labour), sum(c.other), c.totalInr,
+      p.fx?.rate ?? "", p.fx ? BASIS[p.fx.basis] : "no rate",
+      p.costUsd ?? "", o.forReadyStock ? "" : p.profitUsd ?? "", o.forReadyStock ? "" : p.marginPct ?? "",
+      c.complete ? "yes" : "NO", c.missing.map(m => `${m.label} (${m.reason})`).join("; "),
+    ];
+  }));
 }

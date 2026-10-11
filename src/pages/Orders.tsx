@@ -7,12 +7,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
-import { exportProductsCsv, exportProductsPdf } from "@/lib/productExport";
+import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
+import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
@@ -242,6 +243,16 @@ export function OrdersPage() {
               className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </button>
+            {/* Its own button, and the admin's alone. The Excel beside it is the
+                sheet customers are sent for a bulk sale — cost must never be
+                one forward away from reaching one. */}
+            {user!.role === "admin" && (
+              <button onClick={() => exportProfitCsv(db, exportRows, exportName())}
+                title="Cost and profit per order — admin only, never send this to a customer"
+                className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-800">
+                <TrendingUp className="h-4 w-4" /> Profit
+              </button>
+            )}
           </div>
         )}
 
@@ -354,6 +365,7 @@ export function OrdersPage() {
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
                     : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
+                  {user!.role === "admin" && <OrderProfitBadge db={db} order={o} />}
                   <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
                   </div>
@@ -416,6 +428,7 @@ export function OrdersPage() {
                     {jobFinished(o) && (
                       <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
                     )}
+                    {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-0.5 text-xs" />}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <StatusBadge status={o.status} />

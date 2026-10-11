@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, allocatePaymentFIFO, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { receiptForAdvance } from "@/lib/receipts";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
@@ -377,14 +377,10 @@ export function NewOrderPage() {
           type: "order", read: false, createdAt: new Date().toISOString(),
         });
 
-        // Auto-apply any carried-forward client credit to the oldest bills first.
-        // Only staff sessions may write the client record, so scope this to them.
-        const c = d.clients.find(cl => cl.id === clientId);
-        if (c && (c.creditBalance || 0) > 0) {
-          const clientOrders = d.orders.filter(o => o.clientId === clientId);
-          const leftover = allocatePaymentFIFO(clientOrders, c.creditBalance || 0, user!.id, new Date().toISOString(), "Credit applied", true);
-          c.creditBalance = leftover > 0 ? leftover : undefined;
-        }
+        // Credit a client is holding stays theirs until somebody puts it
+        // somewhere. It used to pay itself onto the oldest bills the moment a
+        // new order was taken, which quietly settled invoices nobody had sent
+        // the money for. "Apply Credit" on their account does it deliberately.
       }
     });
 

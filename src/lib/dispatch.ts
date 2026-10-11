@@ -302,3 +302,157 @@ export function applyDelivery(
   }
   return "delivered";
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * What the shipment cost us.
+ *
+ * Freight and insurance are paid once per parcel, however many pieces are in
+ * it. Recorded here as expenses tied to those orders: they appear in the
+ * expense list and — when paid from an account — in that account's book like
+ * any other expense, and each order's cost carries its share by value. One
+ * entry, every place it belongs, nothing typed twice.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface ShippingCost {
+  freight: number;
+  insurance: number;
+  /** Currency the amounts are in — the paying account's, when one is chosen. */
+  currency: "INR" | "USD";
+  /** The account it was paid from. Left out when the courier bills later. */
+  lockerId?: string;
+  /** Nothing to pay: handed over in person, or on the client's own account. */
+  none?: boolean;
+}
+
+export const EMPTY_SHIPPING_COST: ShippingCost = { freight: 0, insurance: 0, currency: "INR" };
+
+/** Writes the freight and insurance for one parcel. Call inside updateDb. */
+export function recordShippingCost(
+  d: DB,
+  orderIds: string[],
+  cost: ShippingCost,
+  shipment: { courierName: string; trackingNumber: string },
+  by: { id: string },
+  at: string,
+): number {
+  if (!orderIds.length) return 0;
+  if (cost.none) {
+    recordNoFreight(d, orderIds, "no shipping charge", shipment, by, at);
+    return 1;
+  }
+  const locker = cost.lockerId ? d.lockers.find(l => l.id === cost.lockerId) : undefined;
+  // Paid from an account, the amount is in that account's currency, full stop.
+  const currency: "INR" | "USD" = locker ? ((locker.currency || "INR") === "USD" ? "USD" : "INR") : cost.currency;
+  const ref = `${shipment.courierName.trim()} ${shipment.trackingNumber.trim()}`.trim();
+  const numbers = orderIds.map(id => d.orders.find(o => o.id === id)?.orderNumber).filter(Boolean).join(", ");
+  let written = 0;
+  for (const [kind, amount] of [["Freight", cost.freight], ["Insurance", cost.insurance]] as const) {
+    if (!(amount > 0)) continue;
+    const id = uid("exp_");
+    if (!d.expenses) d.expenses = [];
+    d.expenses.push({
+      id,
+      title: `${kind} — ${ref}`,
+      amount: Math.round(amount * 100) / 100,
+      category: "Shipping",
+      note: `Shipment of ${numbers}`,
+      employeeId: by.id,
+      currency,
+      createdAt: at,
+      lockerId: locker?.id,
+      orderIds: [...orderIds],
+      shipmentRef: ref,
+    });
+    if (locker) {
+      if (!d.lockerTransactions) d.lockerTransactions = [];
+      d.lockerTransactions.push({
+        id: uid("ltx_"), lockerId: locker.id, type: "expense", amountInr: Math.round(amount * 100) / 100,
+        currency: locker.currency || "INR", category: `Expense — ${kind} — ${ref}`,
+        refType: "expense", refId: id, recordedBy: by.id, createdAt: at,
+      });
+    }
+    written++;
+  }
+  return written;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Shipments with no freight on record.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/** An expense that is this shipment's freight, insurance, or the record that
+ *  there was none. */
+export function isShippingExpense(e: { category: string; orderIds?: string[]; shipmentRef?: string }): boolean {
+  return !!e.orderIds?.length && (e.category === "Shipping" || !!e.shipmentRef);
+}
+
+/** Whether anything at all is on record for this order's shipping. */
+export function freightRecorded(d: DB, orderId: string): boolean {
+  return (d.expenses ?? []).some(e => isShippingExpense(e) && e.orderIds!.includes(orderId));
+}
+
+/**
+ * Record that a parcel cost nothing to send — handed over in person, or sent on
+ * the client's own courier account. Written as a ₹0 shipping entry rather than
+ * a flag, so the Expenses list keeps a trail of who said so and when, and the
+ * order's cost is complete rather than silently missing a line.
+ */
+export function recordNoFreight(
+  d: DB, orderIds: string[], reason: string,
+  shipment: { courierName: string; trackingNumber: string }, by: { id: string }, at: string,
+): void {
+  if (!orderIds.length) return;
+  if (!d.expenses) d.expenses = [];
+  const ref = `${shipment.courierName.trim()} ${shipment.trackingNumber.trim()}`.trim();
+  d.expenses.push({
+    id: uid("exp_"), title: `No freight — ${reason.trim() || "none charged"}${ref ? ` (${ref})` : ""}`,
+    amount: 0, category: "Shipping", employeeId: by.id, currency: "INR", createdAt: at,
+    orderIds: [...orderIds], shipmentRef: ref || undefined,
+  });
+}
+
+export interface Parcel {
+  /** Tracking number when there is one; otherwise the single order's id. */
+  key: string;
+  courierName: string;
+  trackingNumber: string;
+  orders: Order[];
+  dispatchedAt: string;
+}
+
+/**
+ * Dispatched orders with nothing on record for shipping, gathered into the
+ * parcels they went out in. Pieces sent together share a tracking number, so
+ * that is what groups them — one freight bill each, the way it was paid.
+ */
+export function parcelsWithoutFreight(d: DB): Parcel[] {
+  const map = new Map<string, Parcel>();
+  for (const o of d.orders) {
+    const shipped = (o.status === "Dispatched" || o.status === "Delivered") && !o.forReadyStock;
+    if (!shipped || freightRecorded(d, o.id)) continue;
+    const tn = (o.trackingNumber ?? "").trim().toUpperCase();
+    const key = tn ? `${(o.courierName ?? "").trim().toUpperCase()}|${tn}` : `order:${o.id}`;
+    const at = o.dispatchedAt
+      ?? o.timeline.find(t => t.step === "Dispatch" && t.status === "done")?.date
+      ?? o.createdAt;
+    const p = map.get(key) ?? { key, courierName: o.courierName ?? "", trackingNumber: o.trackingNumber ?? "", orders: [], dispatchedAt: at };
+    p.orders.push(o);
+    if (at < p.dispatchedAt) p.dispatchedAt = at;
+    map.set(key, p);
+  }
+  return [...map.values()].sort((a, b) => b.dispatchedAt.localeCompare(a.dispatchedAt));
+}
+
+/**
+ * Attach a bill already entered as an ordinary expense to the shipments it
+ * paid for. It stops being an overhead and becomes part of those orders' cost
+ * — moved, not copied, so the money is never counted twice. A monthly courier
+ * bill covering several parcels can be attached to each in turn.
+ */
+export function linkExpenseToShipment(d: DB, expenseId: string, orderIds: string[], shipmentRef: string): boolean {
+  const e = (d.expenses ?? []).find(x => x.id === expenseId);
+  if (!e) return false;
+  e.orderIds = [...new Set([...(e.orderIds ?? []), ...orderIds])];
+  if (!e.shipmentRef) e.shipmentRef = shipmentRef || "courier bill";
+  return true;
+}

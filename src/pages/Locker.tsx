@@ -180,6 +180,15 @@ export function LockerPage() {
       }
     }
     const now = new Date().toISOString();
+    // Everything that can refuse this entry is checked BEFORE the voucher
+    // number is claimed. A number taken and then not used leaves a hole in the
+    // book that nothing closes — which is exactly how the invoice sequence
+    // ended up missing five numbers.
+    if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
+      toast.error("That destination locker couldn't be found — pick it again and retry.");
+      return;
+    }
+
     // A voucher number is what a person quotes when they refer to a cash entry.
     // Reserved in the database, so two people banking at once cannot share one.
     const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
@@ -189,10 +198,6 @@ export function LockerPage() {
     const receiptFor: { draft: ClientReceiptDraft | null } = { draft: null };
     const xferId = uid("xfer_");
     const currency = selected.currency || "INR";
-    if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
-      toast.error("That destination locker couldn't be found — pick it again and retry.");
-      return;
-    }
     updateDb(d => {
       if (!d.lockerTransactions) d.lockerTransactions = [];
       if (txnType === "transfer_out") {

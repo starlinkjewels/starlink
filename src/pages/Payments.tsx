@@ -154,8 +154,8 @@ function ReceiveFromClient() {
 
   // When the client has exactly ONE invoice still outstanding, a transfer from
   // them is almost always for that invoice — preselect it so the money settles
-  // the bill they actually paid instead of scattering onto older orders.
-  // Anything less clear-cut stays on oldest-bills-first for staff to choose.
+  // the bill they actually paid. With more than one open, nothing is guessed:
+  // the money is held as credit until somebody names the invoice.
   const openUnpaid = openInvoices.filter(x => x.bal > 0);
   useEffect(() => {
     setInvoiceId(openUnpaid.length === 1 ? openUnpaid[0].inv.id : "");
@@ -226,7 +226,10 @@ function ReceiveFromClient() {
             <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="fifo">Oldest bills first</SelectItem>
+                {/* No invoice named means the money is simply held on the
+                    client's account. It used to be spread over their oldest
+                    bills, which moved payments they had already been shown. */}
+                <SelectItem value="fifo">No invoice — hold as credit</SelectItem>
                 {openInvoices.map(({ inv, bal }) => (
                   <SelectItem key={inv.id} value={inv.id}>
                     Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}

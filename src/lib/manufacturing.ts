@@ -1,6 +1,6 @@
 // Manufacturing & Accounts ledger math — Locker, Supplier/Purchase, Factory/
 // MaterialIssuance. Mirrors the existing client-billing pattern in src/lib/db.ts
-// (totalAdvance/orderTotal/balanceDue/clientAccount/allocatePaymentFIFO)
+// (totalAdvance/orderTotal/balanceDue/clientAccount/settleClientAccount)
 // exactly, but for a SEPARATE, INR-denominated ledger (sourcing/manufacturing
 // cost side), never mixed with the USD client-billing figures.
 //
