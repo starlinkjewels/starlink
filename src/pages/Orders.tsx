@@ -371,6 +371,10 @@ export function OrdersPage() {
                     ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
                     : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
                   {user!.role === "admin" && <OrderProfitBadge db={db} order={o} />}
+                  {isStaff && (() => {
+                    const wp = pieceWeights(o, db.materialIssuances).problem;
+                    return wp ? <p title={wp} className="text-[10px] font-semibold text-destructive truncate">⚠ Check weights</p> : null;
+                  })()}
                   <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
                   </div>
