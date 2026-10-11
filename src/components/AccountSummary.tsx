@@ -23,21 +23,21 @@ export function AccountSummary({
   const netTone = net > 0 ? "blue" : net < 0 ? "red" : "green";
 
   const cards: {
-    key: string; label: string; value: string; sub: string;
+    key: string; label: string; short: string; value: string; sub: string;
     icon: typeof Scale; accent: string; chip: string; bar: string;
   }[] = [
     {
-      key: "rec", label: "Total Receivable", value: fmt(receivable),
+      key: "rec", label: "Total Receivable", short: "Receivable", value: fmt(receivable),
       sub: receivableSub ?? "to collect · ughrani", icon: ArrowDownLeft,
       accent: "text-blue-600", chip: "bg-blue-500/10 text-blue-600", bar: "bg-blue-500",
     },
     {
-      key: "pay", label: "Total Payable", value: fmt(payable),
+      key: "pay", label: "Total Payable", short: "Payable", value: fmt(payable),
       sub: payableSub ?? "to pay · chukavni", icon: ArrowUpRight,
       accent: "text-destructive", chip: "bg-destructive/10 text-destructive", bar: "bg-destructive",
     },
     {
-      key: "net", label: "Net", value: net === 0 ? "✓ Settled" : fmt(Math.abs(net)),
+      key: "net", label: "Net", short: "Net", value: net === 0 ? "✓ Settled" : fmt(Math.abs(net)),
       sub: net > 0 ? "net receivable" : net < 0 ? "net payable" : "all settled", icon: Scale,
       accent: netTone === "blue" ? "text-blue-600" : netTone === "red" ? "text-destructive" : "text-success",
       chip: netTone === "blue" ? "bg-blue-500/10 text-blue-600" : netTone === "red" ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success",
@@ -57,10 +57,13 @@ export function AccountSummary({
             <span className={`h-7 w-7 sm:h-9 sm:w-9 rounded-xl grid place-items-center shrink-0 ${c.chip}`}>
               <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </span>
-            <span className="text-[9.5px] sm:text-[11px] font-medium uppercase tracking-[0.12em] text-muted-foreground truncate">{c.label}</span>
+            {/* Phones get the short name — "Total…" cut off said nothing. */}
+            <span className="text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.08em] sm:tracking-[0.12em] text-muted-foreground truncate" title={c.label}>
+              <span className="sm:hidden">{c.short}</span><span className="hidden sm:inline">{c.label}</span>
+            </span>
           </div>
-          <p className={`mt-2 sm:mt-3 font-display text-lg sm:text-3xl leading-none tabular-nums ${c.accent}`}>{c.value}</p>
-          <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1.5 truncate">{c.sub}</p>
+          <p className={`mt-2 sm:mt-3 font-display text-[17px] sm:text-3xl leading-none tabular-nums truncate ${c.accent}`} title={c.value}>{c.value}</p>
+          <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1.5 line-clamp-2 leading-snug">{c.sub}</p>
         </div>
       ))}
     </div>

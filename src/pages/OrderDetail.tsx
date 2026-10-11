@@ -3775,8 +3775,8 @@ export function OrderDetailPage() {
 
       {/* ── Delivery date popup (from the timeline "Mark complete") ── */}
       {deliverModalIdx !== null && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setDeliverModalIdx(null)}>
-          <div className="card-luxe w-full max-w-sm p-5" onClick={e => e.stopPropagation()}>
+        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => setDeliverModalIdx(null)}>
+          <div className="card-luxe w-full max-w-sm p-5 ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
             <h3 className="font-display text-lg text-brand-dark mb-1">Delivered — {order.orderNumber}</h3>
             <p className="text-xs text-muted-foreground mb-4">The day it reached the client, which need not be today.</p>
             <Label className="text-xs">Delivery Date *</Label>
@@ -3795,8 +3795,8 @@ export function OrderDetailPage() {
 
       {/* ── Dispatch Details popup (from the timeline "Mark complete") ── */}
       {dispatchModalIdx !== null && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !dispatchSaving && setDispatchModalIdx(null)}>
-          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => !dispatchSaving && setDispatchModalIdx(null)}>
+          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
             <h3 className="font-display text-lg text-brand-dark mb-1">Dispatch Details — {order.orderNumber}</h3>
             <p className="text-xs text-muted-foreground mb-4">Enter the courier details. On confirm, the order is marked dispatched and the client is emailed automatically.</p>
             <div className="space-y-3">
@@ -3863,8 +3863,8 @@ export function OrderDetailPage() {
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
         return (
-          <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !faSaving && setFaIdx(null)}>
-            <div className="card-luxe w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+          <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => !faSaving && setFaIdx(null)}>
+            <div className="card-luxe w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
               <h3 className="font-display text-lg text-brand-dark mb-1">Final Approval — {order.orderNumber}</h3>
               <p className="text-xs text-muted-foreground mb-4">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</p>
 

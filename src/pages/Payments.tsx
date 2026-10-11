@@ -76,7 +76,7 @@ export function PaymentsPage() {
         <p className="text-sm text-muted-foreground mt-0.5">The day book, and every payment in or out — all in one place</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-6 gap-2">
+      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {([
           { m: "daybook", label: "Day Book", icon: BookOpen },
           { m: "client", label: "Receive from Client", icon: CreditCard },
@@ -86,7 +86,7 @@ export function PaymentsPage() {
           { m: "locker", label: "Locker", icon: Landmark },
         ] as const).map(opt => (
           <button key={opt.m} onClick={() => setMode(opt.m)}
-            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors text-xs font-medium
+            className={`flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 sm:p-3 rounded-xl border transition-colors text-[11px] sm:text-xs font-medium leading-tight text-center
               ${mode === opt.m ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
             <opt.icon className="h-4 w-4" />
             {opt.label}

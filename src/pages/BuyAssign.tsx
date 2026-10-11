@@ -36,7 +36,7 @@ export function BuyAssignPage() {
         <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold to a factory, or sell a diamond directly</p>
       </div>
 
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
         {([
           { m: "buy", label: "Buy Material", icon: ShoppingCart },
           { m: "opening", label: "Opening Stock", icon: Boxes },
@@ -44,7 +44,7 @@ export function BuyAssignPage() {
           { m: "sell", label: "Sell Diamond", icon: Tag },
         ] as const).map(opt => (
           <button key={opt.m} onClick={() => setMode(opt.m)}
-            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-colors text-xs font-medium
+            className={`flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 sm:p-3 rounded-xl border transition-colors text-[11px] sm:text-xs font-medium leading-tight text-center
               ${mode === opt.m ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
             <opt.icon className="h-4 w-4" />
             {opt.label}
