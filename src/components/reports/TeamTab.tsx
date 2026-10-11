@@ -19,7 +19,7 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [db, orders, period.from, period.to, withProfit, version],
   );
-  const active = rows.filter(r => r.received || r.sold || r.collectedUsd || r.tasksDone || r.tasksOpen || r.open || r.expensesInr);
+  const active = rows.filter(r => (ctx.employeeId ? r.id === ctx.employeeId : (r.received || r.sold || r.collectedUsd || r.tasksDone || r.tasksOpen || r.open || r.expensesInr)));
   const maxSales = Math.max(0, ...active.map(r => r.salesUsd));
   const best = active.find(r => r.salesUsd > 0);
 

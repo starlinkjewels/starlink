@@ -39,14 +39,23 @@ export function inPeriod(p: Period, iso: string | undefined): boolean {
   return true;
 }
 
-export type PresetKey = "thisMonth" | "lastMonth" | "thisQuarter" | "lastQuarter" | "thisFY" | "lastFY" | "last12" | "all";
+export type PresetKey =
+  | "today" | "yesterday" | "thisWeek" | "lastWeek" | "last7" | "last30"
+  | "thisMonth" | "lastMonth" | "thisQuarter" | "lastQuarter" | "thisFY" | "lastFY" | "thisYear" | "last12" | "all";
 export const PRESETS: { key: PresetKey; label: string }[] = [
+  { key: "today", label: "Today" },
+  { key: "yesterday", label: "Yesterday" },
+  { key: "thisWeek", label: "This week" },
+  { key: "lastWeek", label: "Last week" },
+  { key: "last7", label: "Last 7 days" },
+  { key: "last30", label: "Last 30 days" },
   { key: "thisMonth", label: "This month" },
   { key: "lastMonth", label: "Last month" },
   { key: "thisQuarter", label: "This quarter" },
   { key: "lastQuarter", label: "Last quarter" },
   { key: "thisFY", label: "This FY" },
   { key: "lastFY", label: "Last FY" },
+  { key: "thisYear", label: "This calendar year" },
   { key: "last12", label: "Last 12 months" },
   { key: "all", label: "All time" },
 ];
@@ -55,7 +64,17 @@ export const PRESETS: { key: PresetKey; label: string }[] = [
 export function presetPeriod(key: PresetKey, now = new Date()): Period {
   const y = now.getFullYear(), m = now.getMonth();
   const range = (a: Date, b: Date) => ({ from: dayStr(a), to: dayStr(b) });
+  const d = now.getDate();
+  // Weeks run Monday to Sunday.
+  const monday = new Date(y, m, d - ((now.getDay() + 6) % 7));
   switch (key) {
+    case "today": return range(new Date(y, m, d), new Date(y, m, d));
+    case "yesterday": return range(new Date(y, m, d - 1), new Date(y, m, d - 1));
+    case "thisWeek": return range(monday, new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + 6));
+    case "lastWeek": return range(new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 7), new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() - 1));
+    case "last7": return range(new Date(y, m, d - 6), new Date(y, m, d));
+    case "last30": return range(new Date(y, m, d - 29), new Date(y, m, d));
+    case "thisYear": return range(new Date(y, 0, 1), new Date(y, 11, 31));
     case "thisMonth": return range(new Date(y, m, 1), new Date(y, m + 1, 0));
     case "lastMonth": return range(new Date(y, m - 1, 1), new Date(y, m, 0));
     case "thisQuarter": { const q = Math.floor(m / 3) * 3; return range(new Date(y, q, 1), new Date(y, q + 3, 0)); }

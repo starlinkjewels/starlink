@@ -12,8 +12,10 @@ export interface ReportCtx {
   /** Cost, profit and margin — the admin's alone, and only once costs are loaded. */
   withProfit: boolean;
   isAdmin: boolean;
-  /** Set when one client is chosen. */
+  /** Whose money counts: set when one client — or one employee's clients — are chosen. */
   clientIds?: Set<string>;
+  /** Set when the admin looks at one employee's work. */
+  employeeId?: string;
   /** Changes whenever the data does — memo key. */
   version: number;
   /** A short name for the range, for export file names. */

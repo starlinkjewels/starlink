@@ -129,10 +129,14 @@ export interface ReportSectionsProps {
   period?: { from: string; to: string };
   /** The Reports page's client filter. */
   clientId?: string;
+  /** Narrows every order-based section further — the Reports page's employee filter. */
+  scope?: (o: Order) => boolean;
+  /** Changes when `scope` does, so the sections recompute. */
+  scopeKey?: string;
 }
 
 /* ─────────────────────────────────────────────────────────────── */
-export function ReportSections({ embedded = false, show, period, clientId }: ReportSectionsProps = {}) {
+export function ReportSections({ embedded = false, show, period, clientId, scope, scopeKey = "" }: ReportSectionsProps = {}) {
   const vis = (k: SectionKey) => !show || show.includes(k);
   const { user } = useAuth();
   const isClient   = user?.role === "client";
@@ -144,7 +148,9 @@ export function ReportSections({ embedded = false, show, period, clientId }: Rep
   // Changes whenever the data does — the P&L is keyed on it, since the
   // store's lists are edited in place and would never trip a memo by themselves.
   const dbVersion = useDbVersion();
-  const myOrders  = currentUserOrders(db, user!);
+  // What this person may report on — for an employee, their own orders —
+  // narrowed by the page's employee filter when one is set.
+  const myOrders  = currentUserOrders(db, user!).filter(o => !scope || scope(o));
   const clients   = db.clients;
 
   /* ── filters (admin / employee) ── */
@@ -358,7 +364,7 @@ export function ReportSections({ embedded = false, show, period, clientId }: Rep
   const salesReport = useMemo(() => {
     if (!canSeeAll) return null;
     const inRange = makeInRange(salesFrom, salesTo);
-    const orders = (db.orders ?? []).filter(o => o.status !== "Rejected" && inRange(o.createdAt));
+    const orders = myOrders.filter(o => o.status !== "Rejected" && inRange(o.createdAt));
     const billed = orders.reduce((s, o) => s + orderTotal(o), 0);
     const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
@@ -375,7 +381,8 @@ export function ReportSections({ embedded = false, show, period, clientId }: Rep
       billed, received, outstanding, giftRedeemed,
       byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
     };
-  }, [db.orders, clients, salesFrom, salesTo, canSeeAll]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbVersion, scopeKey, clients, salesFrom, salesTo, canSeeAll]);
 
   /* ── Profit & Loss — ADMIN ONLY.
      Revenue is recognised when the goods leave: an order belongs to the period
@@ -386,7 +393,7 @@ export function ReportSections({ embedded = false, show, period, clientId }: Rep
   const profit = useMemo(() => {
     if (!isAdmin) return null;
     const inRange = makeInRange(profitFrom, profitTo);
-    const gross = profitReport(db, (db.orders ?? []).filter(o => recognisedSale(o) && inRange(saleDate(o))));
+    const gross = profitReport(db, myOrders.filter(o => recognisedSale(o) && inRange(saleDate(o))));
     const opex = operatingExpenses(db, inRange);
     // What turning the dollars into rupees gained or lost against the rate
     // each sale was booked at. Not anybody's margin on a piece, so it sits
@@ -400,7 +407,8 @@ export function ReportSections({ embedded = false, show, period, clientId }: Rep
       : null;
     return { ...gross, opex, fx, netUsd, netMargin };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dbVersion, profitFrom, profitTo, isAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dbVersion, scopeKey, profitFrom, profitTo, isAdmin]);
   const profitPeriodLabel = periodLabel(profitFrom, profitTo);
   const monthLabel = (k: string) => {
     const [y, m] = k.split("-").map(Number);
