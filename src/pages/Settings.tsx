@@ -1,3 +1,5 @@
+import { TimelineSettings } from "@/components/TimelineSettings";
+import { ListOrdered } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
@@ -653,6 +655,7 @@ export function SettingsPage() {
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates },
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
+    { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
     { id: "data", label: "Data & Backup", icon: Database, show: true },
   ].filter((s) => s.show);
@@ -1335,6 +1338,9 @@ export function SettingsPage() {
           </AsyncButton>
         </div>
       )}
+
+      {/* Production timeline — admin only */}
+      {activeId === "timeline" && <TimelineSettings />}
 
       {/* Expense Categories — admin only */}
       {activeId === "expenses" && (

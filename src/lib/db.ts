@@ -238,9 +238,19 @@ export function stampFor(day: string): string {
   return new Date(y, (m || 1) - 1, d || 1, now.getHours(), now.getMinutes(), now.getSeconds()).toISOString();
 }
 
-export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false): string[] {
-  return (TIMELINE_STEPS as readonly string[]).filter(
-    (s) => (s !== "Certification" || hasCertificate) && !(diamondOnly && isProductionStep(s)),
+/**
+ * `middle` is the admin's own order for the stages between approval and
+ * dispatch (see stages.ts middleStages) — the built-in order when not given.
+ * An admin's own stages are steps in making a piece, so a diamond-only order,
+ * where nothing is made, skips them along with CAD, production and approval.
+ */
+export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false, middle?: string[]): string[] {
+  const order = middle && middle.length
+    ? ["Order Submitted", "Order Approved", ...middle, "Dispatch", "Delivered"]
+    : (TIMELINE_STEPS as readonly string[]);
+  const builtin = (s: string) => (TIMELINE_STEPS as readonly string[]).includes(s);
+  return order.filter(
+    (s) => (s !== "Certification" || hasCertificate) && !(diamondOnly && (isProductionStep(s) || !builtin(s))),
   );
 }
 
@@ -253,8 +263,11 @@ export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false)
 // and the finished piece reached stock carrying only the estimates it started
 // with. A piece made for stock is made the same way as one made to order.
 export const READY_STOCK_TIMELINE_STEPS = ["Order Submitted", "CAD Designing", "In Production", "Final Approval", "Ready for Stock"] as const;
-export function buildReadyStockTimelineSteps(): string[] {
-  return [...READY_STOCK_TIMELINE_STEPS];
+/** A stock build follows the admin's middle stages too — minus Certification,
+ *  which is for a client — and ends at Ready for Stock instead of shipping. */
+export function buildReadyStockTimelineSteps(middle?: string[]): string[] {
+  if (!middle || !middle.length) return [...READY_STOCK_TIMELINE_STEPS];
+  return ["Order Submitted", ...middle.filter(s => s !== "Certification"), "Ready for Stock"];
 }
 
 // Selling an EXISTING finished piece from Ready Stock — the piece is already made,
@@ -742,6 +755,11 @@ export interface Settings {
    *  ONLY. Supersedes usdToInr, which remains the fallback when this is empty. */
   fxRates?: { from: string; rate: number }[];
   defaultShippingCharge: number; // $ flat default per order
+  /** The middle of the production timeline, in the admin's order — the
+   *  built-in stages plus any of their own. The start (Submitted, Approved) and
+   *  the end (Dispatch, Delivered) never move. Applies to orders created after
+   *  it is saved; an order keeps the stages it was created with. See stages.ts. */
+  timelineStages?: string[];
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
   barcodeBandEnabled?: boolean; // show the "Print Band" (barcode jewellery tag) option on orders. undefined = on.
