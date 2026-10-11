@@ -36,10 +36,16 @@ function stockRef() {
 
 /** Real-time subscription — call the returned unsubscribe on unmount. */
 export function subscribeStockLevels(onChange: (levels: StockLevels) => void): () => void {
-  return onSnapshot(stockRef(), snap => {
-    if (snap.exists()) onChange(snap.data() as StockLevels);
-    else onChange({ gold: {}, diamond: {}, updatedAt: new Date().toISOString(), version: 0 });
-  });
+  return onSnapshot(
+    stockRef(),
+    snap => {
+      if (snap.exists()) onChange(snap.data() as StockLevels);
+      else onChange({ gold: {}, diamond: {}, updatedAt: new Date().toISOString(), version: 0 });
+    },
+    // Stock levels are staff-only. Refused, there is simply nothing to show —
+    // without this the refusal surfaced as an uncaught error on the console.
+    err => console.warn("[stock] levels not available to this account:", err.code ?? err),
+  );
 }
 
 export async function fetchStockLevels(): Promise<StockLevels> {

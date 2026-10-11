@@ -28,7 +28,9 @@ export function Dashboard() {
   const orders = useMemo(() => currentUserOrders(db, user!), [db, user]);
 
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
-  useEffect(() => subscribeStockLevels(setStockLevels), []);
+  // Stock levels are staff-only; a client's dashboard does not ask for them.
+  const isStaffUser = user?.role === "admin" || user?.role === "employee";
+  useEffect(() => (isStaffUser ? subscribeStockLevels(setStockLevels) : undefined), [isStaffUser]);
   const ordersInProduction = db.orders.filter(o => o.status === "In Production").length;
   const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
