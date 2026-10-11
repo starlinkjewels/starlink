@@ -36,3 +36,7 @@ dist-ssr
 
 # Firebase CLI deploy cache — local, regenerated on every deploy
 .firebase/
+
+# Local scratch from test and patch runs
+.tmp-check/
+.tmp-patch/
