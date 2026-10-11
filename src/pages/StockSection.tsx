@@ -757,8 +757,8 @@ function CertifiedSection() {
 
       {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}
       {editPacket && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => setEditPacket(null)}>
-          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => setEditPacket(null)}>
+          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
             <h3 className="font-display text-lg text-brand-dark mb-1">Edit Certified Diamond</h3>
             <p className="text-xs text-muted-foreground mb-4">Correct the certificate, grading details or cost for this packet.</p>
             <div className="grid grid-cols-2 gap-3">

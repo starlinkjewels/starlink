@@ -145,12 +145,12 @@ export function ActivityPage() {
   return (
     <div className="max-w-6xl mx-auto space-y-4">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-3">
-          <div className="h-11 w-11 rounded-2xl bg-primary/10 grid place-items-center"><History className="h-5 w-5 text-primary" /></div>
-          <div>
-            <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Activity</h1>
-            <p className="text-sm text-muted-foreground flex items-center gap-1">
-              <Lock className="h-3 w-3" /> Every change, download, print and sign-in — by anyone. Nothing here can be edited or deleted.
+        <div className="flex items-start gap-3 min-w-0 flex-1">
+          <div className="h-10 w-10 md:h-11 md:w-11 rounded-2xl bg-primary/10 grid place-items-center shrink-0"><History className="h-5 w-5 text-primary" /></div>
+          <div className="min-w-0">
+            <h1 className="font-display text-2xl md:text-3xl text-brand-dark leading-tight">Activity</h1>
+            <p className="text-sm text-muted-foreground">
+              <Lock className="h-3 w-3 inline -mt-0.5 mr-1" />Every change, download, print and sign-in — by anyone. Nothing here can be edited or deleted.
             </p>
           </div>
         </div>

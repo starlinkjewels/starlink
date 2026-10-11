@@ -289,13 +289,13 @@ export function InvoicesPage() {
       <div className="card-luxe overflow-hidden">
         <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
           <h2 className="font-semibold text-brand-dark shrink-0">All Invoices</h2>
-          <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
+          <div className="relative flex-1 min-w-[180px] max-sm:basis-full sm:max-w-xs sm:ml-auto">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, order, client…" className="pl-9 h-9 rounded-xl text-sm" />
           </div>
           {isStaff && (
             <Select value={clientFilter} onValueChange={v => { setClientFilter(v); setSelected(new Set()); }}>
-              <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-[160px] max-sm:w-auto max-sm:flex-1 rounded-xl"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Clients</SelectItem>
                 {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
@@ -304,7 +304,7 @@ export function InvoicesPage() {
           )}
           {isStaff && multiCo && (
             <Select value={companyFilter} onValueChange={setCompanyFilter}>
-              <SelectTrigger className="h-9 w-[170px] rounded-xl" aria-label="Company"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="h-9 w-[170px] max-sm:w-auto max-sm:flex-1 rounded-xl" aria-label="Company"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All companies</SelectItem>
                 {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}

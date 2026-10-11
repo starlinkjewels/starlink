@@ -173,14 +173,17 @@
   }
   /* Lining figures: the display serif's default old-style digits make "1"
      read as "I" and "0" as "o" in every stat and total. */
-  h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.01em; font-variant-numeric: lining-nums; }
+  h1, h2, h3, .font-display {
+    font-family: var(--font-display); letter-spacing: -0.01em; font-variant-numeric: lining-nums;
+    /* …and kept when a heading also asks for tabular-nums, which Tailwind builds from these parts. */
+    --tw-numeric-figure: lining-nums;
+  }
 }
 
 @utility glass {
   /* 88% (was 78%): page text no longer reads through the bars on phones. */
   background: var(--glass-bg, color-mix(in oklab, white 88%, transparent));
   backdrop-filter: var(--glass-filter, saturate(140%) blur(14px));
-  -webkit-backdrop-filter: var(--glass-filter, saturate(140%) blur(14px));
   border: 1px solid var(--glass-line, color-mix(in oklab, var(--color-border) 70%, transparent));
 }
 
@@ -459,7 +462,6 @@
   border: 1px solid var(--glass-line);
   background: var(--glass-bg);
   backdrop-filter: var(--glass-filter);
-  -webkit-backdrop-filter: var(--glass-filter);
   overflow: hidden;
 }
 @media (min-width: 768px) {
@@ -474,18 +476,16 @@
   border: 1px solid var(--glass-line);
 }
 :root[data-ui="glass"] .ui-dialog {
-  background: color-mix(in oklab, white 82%, transparent);
+  background: color-mix(in oklab, white 85%, transparent);
   backdrop-filter: saturate(180%) blur(32px);
-  -webkit-backdrop-filter: saturate(180%) blur(32px);
   border-color: rgb(255 255 255 / 0.7);
   box-shadow: var(--glass-rim), 0 28px 70px -24px rgb(15 23 42 / 0.45);
 }
 @media (min-width: 640px) { :root[data-ui="glass"] .ui-dialog:not(.app-more-sheet) { border-radius: 28px; } }
 :root[data-ui="glass"] .ui-scrim { background: rgb(15 23 42 / 0.32); backdrop-filter: blur(3px); }
 :root[data-ui="glass"] [data-radix-popper-content-wrapper] > .bg-popover {
-  background: color-mix(in oklab, white 80%, transparent);
+  background: color-mix(in oklab, white 86%, transparent);
   backdrop-filter: saturate(180%) blur(24px);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
   border-color: rgb(255 255 255 / 0.75);
   border-radius: 16px;
   box-shadow: var(--glass-rim), 0 18px 44px -16px rgb(15 23 42 / 0.35);
@@ -566,6 +566,6 @@
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
   :root[data-ui] { --glass-bg: var(--color-card); --glass-filter: none; --glass-line: var(--color-border); }
   :root[data-ui="glass"] :is(.ui-dialog, .app-sidebar, [data-radix-popper-content-wrapper] > .bg-popover) {
-    background: var(--color-card); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--color-border);
+    background: var(--color-card); backdrop-filter: none; border-color: var(--color-border);
   }
 }
