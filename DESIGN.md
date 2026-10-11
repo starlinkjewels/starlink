@@ -29,6 +29,7 @@ Admins pick the look in **Settings → Appearance**. It is saved once for everyo
 | `data-corners` | `sharp`, `round` | Normal |
 | `data-headings` | `sans` | Elegant serif (Cormorant Garamond) |
 | `data-motion` | `calm` | Smooth |
+| `data-width` | `centered` (pages at 80rem) | Fit screen |
 
 Table looks are separate: **Settings → Table Style** (`data-tbl*`, `src/lib/tableStyle.ts`).
 
@@ -40,7 +41,9 @@ Table looks are separate: **Settings → Table Style** (`data-tbl*`, `src/lib/ta
 4. **Never colour alone.** Every status pairs colour with text or an icon.
 5. **Phones get sheets.** Every dialog rises from the bottom, full width, with a grab handle and the home-bar inset; laptops get a centred dialog.
 6. **Motion is feedback for what the user did.** Live data never bounces or slides.
-7. **Numbers use lining figures.** The display serif's old-style digits make "1" read as "I"; `h1–h3` and `.font-display` force `lining-nums` (also when combined with `tabular-nums`).
+7. **Nothing is a fixed size — layout follows the screen.** Every page sits in one frame (`.app-page`) as wide as the screen; card grids use `grid-auto-cards` (min 18.5rem), `grid-auto-tiles` (14rem) or `grid-auto-photos` (11rem) from `lg` up, so a 1280px laptop keeps its old column count and a 1920px or 2560px monitor gets more columns, not wider cards. Form-like pages (`max-w-3xl`) grow with the screen up to 64rem.
+8. **Dialogs keep their title and actions in view.** In a standard dialog (`p-6`) the `DialogHeader` sticks to the top, the last row of buttons (or a `DialogFooter`) sticks to the bottom, and the close button stays in the corner however far the middle scrolls. End a dialog with its action row (`<div className="flex justify-end gap-2">…</div>`), not with a lone button or with fields.
+9. **Numbers use lining figures.** The display serif's old-style digits make "1" read as "I"; `h1–h3` and `.font-display` force `lining-nums` (also when combined with `tabular-nums`).
 
 ## 3. Layer map
 
@@ -117,4 +120,5 @@ Glass recipe (default): small = `white 64%` + `saturate(180%) blur(24px)` + whit
 ## 9. Progress
 
 - DONE 2026-10-11 — Appearance setting (4 looks, 6 accents, corners, headings, motion); dialogs and hand-made modals as phone sheets; glass blur fixed for Chrome; lining figures; stat labels wrap; phone search as an icon button; selected tab pill; compact section tiles (Payments, Buy & Assign); full-width invoice search on phones; Activity header.
+- DONE 2026-10-11 — Screen-size layout: pages fill the screen (Page width option), fluid card grids, pinned dialog header/footer/close.
 - TODO — Dark mode: many pages hard-code `bg-white`, so it needs a page-by-page pass before it can be offered.
