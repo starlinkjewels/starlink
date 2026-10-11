@@ -5,7 +5,7 @@ import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, orderIsDispatched } from "@/lib/db";
-import { useDb } from "@/hooks/useDb";
+import { useDb, useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -99,6 +99,9 @@ function lastTrackingStep(o: Order): string {
 export function OrdersPage() {
   const { user } = useAuth();
   const db = useDb();
+  // The store is edited in place; this changes whenever the data does, so the
+  // filtered list follows an order that moves stage or status.
+  const dbVersion = useDbVersion();
   const [sp] = useSearchParams();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
@@ -138,7 +141,8 @@ export function OrdersPage() {
       (o.designNumber ?? "").toLowerCase().includes(t)
     ));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  }, [db, user, q, status, clientFilter]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, dbVersion, user, q, status, clientFilter]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
