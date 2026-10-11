@@ -76,6 +76,18 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         </div>
       </div>
 
+      {/* ── Which rate, and why that one ── */}
+      {p.fx && (
+        <p className="text-[11px] text-muted-foreground">
+          Converted at <span className="font-medium text-foreground">₹{p.fx.rate}</span> to the dollar{" — "}
+          {p.fx.basis === "dated"
+            ? <>the rate in force on the {order.status === "Dispatched" || order.status === "Delivered" ? "day it was sold" : "day it was ordered (not sold yet)"}</>
+            : p.fx.basis === "earliest"
+              ? <span className="text-amber-700">no rate on file that far back, so the earliest one stands in</span>
+              : <span className="text-amber-700">one flat rate for every order; add dated rates in Settings to book each at its own day&rsquo;s rate</span>}
+        </p>
+      )}
+
       {/* ── Why a figure is missing or only an upper bound ── */}
       {!rateSet && (
         <p className="text-xs text-muted-foreground">
@@ -112,7 +124,7 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
               {section("Gold", cost.gold)}
               {section("Diamonds", cost.diamond)}
               {section("Factory", cost.labour)}
-              {section("Other", cost.other)}
+              {section("Shipping & other", cost.other)}
               <div className="flex items-baseline justify-between gap-3 pt-2 border-t border-border/60 text-sm">
                 <span className="font-semibold text-brand-dark">Total cost</span>
                 <span className="font-semibold tabular-nums">{fmtMoneyInr(cost.totalInr)}</span>

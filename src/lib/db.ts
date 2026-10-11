@@ -627,6 +627,13 @@ export interface Expense {
   currency?: "INR" | "USD";
   createdAt: string;
   lockerId?: string; // optional — which Locker this was actually paid from
+  /** The orders this expense was incurred FOR — freight and insurance on a
+   *  shipment, a lab fee on a stone. Set, it is a direct cost of those orders
+   *  (split across them by value) and is left out of overheads; unset, it is
+   *  an ordinary running cost of the business. */
+  orderIds?: string[];
+  /** The courier and tracking number a shipping cost belongs to. */
+  shipmentRef?: string;
 }
 
 /** Format an expense amount in its own account currency (₹ default for legacy). */
@@ -722,6 +729,11 @@ export interface Settings {
    *  dollar selling price. ADMIN ONLY, like everything profit touches. Unset
    *  means no profit is stated at all rather than one worked out at a guess. */
   usdToInr?: number;
+  /** ₹ to the $ over time, each rate in force from its date until the next.
+   *  A sale is converted at the rate on the day it was made, not today's — the
+   *  transaction-date rate, which is how the books are meant to be kept. ADMIN
+   *  ONLY. Supersedes usdToInr, which remains the fallback when this is empty. */
+  fxRates?: { from: string; rate: number }[];
   defaultShippingCharge: number; // $ flat default per order
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25

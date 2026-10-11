@@ -4,9 +4,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
-import { loadDb, updateDb, todayLocal, fmtMoney, type Order } from "@/lib/db";
+import { loadDb, updateDb, todayLocal, stampFor, fmtMoney, type Order } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
-import { applyDispatch, planDispatch, applyDelivery, planDelivery, type DispatchPlan } from "@/lib/dispatch";
+import {
+  applyDispatch, planDispatch, applyDelivery, planDelivery, recordShippingCost, EMPTY_SHIPPING_COST,
+  type DispatchPlan, type ShippingCost,
+} from "@/lib/dispatch";
 import { orderDispatchedEmail, sendMail } from "@/lib/email";
 import { Truck, AlertTriangle, Ban, PackageCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -36,6 +39,7 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
   const [day, setDay] = useState(todayLocal());
   const [ackUnpaid, setAckUnpaid] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [shipCost, setShipCost] = useState<ShippingCost>(EMPTY_SHIPPING_COST);
 
   const plan = useMemo(() => planDispatch(orders, db, user!), [orders, db, user]);
   const totalDue = plan.unpaid.reduce((s, u) => s + u.due, 0);
@@ -60,6 +64,10 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
           const what = applyDispatch(d, o.id, det, me);
           if (what === "dispatched") sent.push(o);
         }
+        // The parcel's freight and insurance, once, against the pieces that
+        // went out in it. A tracking number merely corrected is not a new
+        // shipment and is not charged again.
+        recordShippingCost(d, sent.map(o => o.id), shipCost, det, me, stampFor(day));
       });
       // Only the pieces that actually went out are announced. Correcting a
       // tracking number must not email the client a second "on its way".
@@ -129,6 +137,8 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
                 className="rounded-xl h-10" placeholder="https://..." type="url" />
             </div>
           </div>
+
+          <ShippingCostFields value={shipCost} onChange={setShipCost} pieces={plan.go.length} />
 
           <PlanPreview plan={plan} goLabel="will be dispatched"
             updateLabel="already dispatched — details corrected"
@@ -300,5 +310,74 @@ export function BulkDeliverDialog({ orders, onClose, onDone }: {
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+
+/**
+ * What the parcel cost to send — freight and insurance. Optional: leave both
+ * blank and nothing is recorded.
+ *
+ * Paid from an account, it posts to that account's book like any expense and
+ * takes that account's currency. Left without one, it is a cost owed to the
+ * courier — when that bill is paid later, record the payment in the Locker,
+ * not as a new expense, or the freight is counted twice.
+ */
+export function ShippingCostFields({ value, onChange, pieces }: {
+  value: ShippingCost;
+  onChange: (v: ShippingCost) => void;
+  /** How many orders the cost will be shared across. */
+  pieces: number;
+}) {
+  const db = loadDb();
+  const lockers = (db.lockers ?? []).filter(l => l.active);
+  const locker = lockers.find(l => l.id === value.lockerId);
+  const currency = locker ? ((locker.currency || "INR") === "USD" ? "USD" : "INR") : value.currency;
+  const sym = currency === "USD" ? "$" : "₹";
+  const num = (s: string) => Math.max(0, Number(s) || 0);
+  return (
+    <div className="rounded-xl border border-border/60 p-3 space-y-2.5">
+      <div>
+        <p className="text-xs font-semibold text-brand-dark">Shipping cost (optional)</p>
+        <p className="text-[11px] text-muted-foreground">
+          What this parcel cost to send. Recorded once{pieces > 1 ? ` and shared across the ${pieces} orders by value` : ""} — it
+          becomes part of each order&rsquo;s cost and appears in Expenses.
+        </p>
+      </div>
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        <div>
+          <Label className="text-[11px]">Freight ({sym})</Label>
+          <Input type="number" min={0} step="0.01" value={value.freight || ""} placeholder="0"
+            onChange={e => onChange({ ...value, freight: num(e.target.value) })} className="rounded-xl h-9 mt-1" />
+        </div>
+        <div>
+          <Label className="text-[11px]">Insurance ({sym})</Label>
+          <Input type="number" min={0} step="0.01" value={value.insurance || ""} placeholder="0"
+            onChange={e => onChange({ ...value, insurance: num(e.target.value) })} className="rounded-xl h-9 mt-1" />
+        </div>
+        <div className="col-span-2">
+          <Label className="text-[11px]">Paid from</Label>
+          <select
+            value={value.lockerId ?? ""}
+            onChange={e => onChange({ ...value, lockerId: e.target.value || undefined })}
+            className="w-full h-9 mt-1 rounded-xl border border-input bg-background px-2 text-sm">
+            <option value="">Not paid yet — courier bills later</option>
+            {lockers.map(l => <option key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</option>)}
+          </select>
+        </div>
+      </div>
+      {!locker && (value.freight > 0 || value.insurance > 0) && (
+        <div className="flex items-center gap-3 text-[11px]">
+          <span className="text-muted-foreground">Billed in</span>
+          {(["INR", "USD"] as const).map(c => (
+            <label key={c} className="flex items-center gap-1 cursor-pointer">
+              <input type="radio" checked={value.currency === c} onChange={() => onChange({ ...value, currency: c })} />
+              {c === "INR" ? "₹ rupees" : "$ dollars"}
+            </label>
+          ))}
+          <span className="text-muted-foreground">— pay the bill later from the Locker, not as a new expense.</span>
+        </div>
+      )}
+    </div>
   );
 }

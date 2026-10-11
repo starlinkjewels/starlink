@@ -1,4 +1,4 @@
-import { orderTotal, type DB, type Order, type Purchase } from "@/lib/db";
+import { orderTotal, dayOf, type DB, type Order, type Purchase } from "@/lib/db";
 
 const fmtRate = (n: number, unit: string) =>
   `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/${unit}`;
@@ -16,6 +16,58 @@ const fmtRate = (n: number, unit: string) =>
  * counted as zero. A profit worked out with the gold left out looks better
  * than it is, and is worse than no figure at all.
  */
+
+/**
+ * The day an order counts as sold: the day it left.
+ *
+ * Revenue is recognised when the goods pass to the buyer, and for a piece
+ * shipped to a client that is the day the parcel goes. So this is both the day
+ * the sale is converted at and the period it is reported in. An order not yet
+ * dispatched has not been sold; for its own page, the day it was placed stands
+ * in until it is.
+ */
+export function saleDate(o: Order): string {
+  if (o.dispatchedAt) return o.dispatchedAt;
+  const step = (o.timeline ?? []).find(t => t.step === "Dispatch" && t.status === "done");
+  return step?.date ?? o.createdAt;
+}
+
+/** Revenue that has actually been earned: shipped client work with a price. */
+export function recognisedSale(o: Order): boolean {
+  return !o.forReadyStock && o.status !== "Rejected" && o.amount > 0
+    && (o.status === "Dispatched" || o.status === "Delivered");
+}
+
+export interface FxRate {
+  rate: number;
+  /** "dated" — the rate in force that day. "earliest" — the day is before the
+   *  first rate on file, so the first one stands in. "single" — no dated rates
+   *  at all, only the one flat rate, applied to every order alike. */
+  basis: "dated" | "earliest" | "single";
+  from?: string;
+}
+
+/**
+ * ₹ to the $ on a given day — the transaction-date rate, the way a sale in a
+ * foreign currency is meant to be booked. Each dated rate holds from its date
+ * until the next. Null when there is no rate at all, and then nothing is
+ * converted rather than converted at a guess.
+ */
+export function rateOn(db: DB, iso: string): FxRate | null {
+  const table = [...(db.settings.fxRates ?? [])]
+    .filter(r => r.rate > 0 && !!r.from)
+    .sort((a, b) => a.from.localeCompare(b.from));
+  if (table.length) {
+    const day = dayOf(iso);
+    let pick: { from: string; rate: number } | null = null;
+    for (const r of table) if (r.from <= day) pick = r;
+    return pick
+      ? { rate: pick.rate, basis: "dated", from: pick.from }
+      : { rate: table[0].rate, basis: "earliest", from: table[0].from };
+  }
+  const single = db.settings.usdToInr ?? 0;
+  return single > 0 ? { rate: single, basis: "single" } : null;
+}
 
 export interface CostLine {
   label: string;
@@ -192,7 +244,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const name = item ? (item.sku ? `${item.sku} ${item.name}` : item.name) : "the stock piece";
     const build = item && db.orders.find(o => o.readyStockCreatedId === item.id && o.id !== order.id);
     const bc = build ? orderCost(db, build, depth + 1) : null;
-    const rate = db.settings.usdToInr ?? 0;
+    const rate = rateOn(db, saleDate(order))?.rate ?? 0;
     if (build && bc && bc.totalInr > 0) {
       // A build can make several identical pieces; this order carries its share.
       const pieces = build.quantity || 1;
@@ -213,6 +265,32 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     }
   }
 
+  // Costs incurred for this order, often together with others in the same
+  // parcel — freight and insurance, most of all. A shared cost is split by
+  // selling value, the usual basis for freight-out: a $3,000 ring carries more
+  // of a parcel's insurance than a $300 band in the same box. An expense paid
+  // in dollars is converted at the rate on the day it was paid.
+  for (const e of db.expenses ?? []) {
+    if (!e.orderIds?.includes(order.id)) continue;
+    const peers = e.orderIds.map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
+    const value = (o: Order) => Math.max(0, orderTotal(o));
+    const pool = peers.reduce((s, o) => s + value(o), 0);
+    const share = pool > 0 ? value(order) / pool : 1 / Math.max(peers.length, 1);
+    let inr: number | null = e.amount;
+    if (e.currency === "USD") {
+      const fx = rateOn(db, e.createdAt);
+      inr = fx ? e.amount * fx.rate : null;
+    }
+    if (inr === null) {
+      out.missing.push({ label: e.title, reason: "paid in dollars — set the exchange rate to count it" });
+      continue;
+    }
+    out.other.push({
+      label: peers.length > 1 ? `${e.title} — ${Math.round(share * 100)}% of a ${peers.length}-order parcel` : e.title,
+      amountInr: r2(inr * share),
+    });
+  }
+
   // The factory's bill — making, CAD, diamond setting, any metal the factory
   // supplied itself — exactly as it stands on the factory's ledger.
   for (const mi of issuances) {
@@ -230,6 +308,8 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
 
 export interface OrderProfit {
   cost: OrderCost;
+  /** The rate the cost was converted at, and why that one. */
+  fx: FxRate | null;
   sellingUsd: number;
   /** Null when there is no exchange rate to convert the cost with. */
   costUsd: number | null;
@@ -245,12 +325,14 @@ export interface OrderProfit {
 export function orderProfit(db: DB, order: Order): OrderProfit {
   const cost = orderCost(db, order);
   const sellingUsd = r2(orderTotal(order));
-  const rate = db.settings.usdToInr ?? 0;
-  if (!(rate > 0)) return { cost, sellingUsd, costUsd: null, profitUsd: null, marginPct: null };
-  const costUsd = r2(cost.totalInr / rate);
+  // Converted at the rate on the day it was sold, not today's — an order
+  // shipped in March is worth what the dollar fetched in March.
+  const fx = rateOn(db, saleDate(order));
+  if (!fx) return { cost, fx, sellingUsd, costUsd: null, profitUsd: null, marginPct: null };
+  const costUsd = r2(cost.totalInr / fx.rate);
   const profitUsd = r2(sellingUsd - costUsd);
   const marginPct = sellingUsd > 0 ? Math.round((profitUsd / sellingUsd) * 1000) / 10 : null;
-  return { cost, sellingUsd, costUsd, profitUsd, marginPct };
+  return { cost, fx, sellingUsd, costUsd, profitUsd, marginPct };
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
@@ -277,6 +359,7 @@ export interface ProfitRow {
   marginPct: number | null;
   complete: boolean;
   missing: MissingCost[];
+  fx: FxRate | null;
 }
 
 export interface ProfitGroup {
@@ -291,16 +374,21 @@ export interface ProfitGroup {
   incomplete: number;
 }
 
-function summarise(key: string, rows: ProfitRow[], rate: number): ProfitGroup {
+function summarise(key: string, rows: ProfitRow[]): ProfitGroup {
   const sellingUsd = r2(rows.reduce((s, r) => s + r.sellingUsd, 0));
   const costInr = r2(rows.reduce((s, r) => s + r.costInr, 0));
-  const costUsd = rate > 0 ? r2(costInr / rate) : null;
+  // Each order was converted at the rate on its own sale day, so the dollars
+  // are added up as they stand — a group cannot be converted again at one
+  // rate without undoing that. With any order unconvertible, so is the group.
+  const costUsd = rows.length && rows.every(r => r.costUsd !== null)
+    ? r2(rows.reduce((s, r) => s + (r.costUsd as number), 0))
+    : null;
   const profitUsd = costUsd === null ? null : r2(sellingUsd - costUsd);
   const marginPct = profitUsd === null || sellingUsd <= 0 ? null : Math.round((profitUsd / sellingUsd) * 1000) / 10;
   return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, incomplete: rows.filter(r => !r.complete).length };
 }
 
-function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string, rate: number): ProfitGroup[] {
+function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string): ProfitGroup[] {
   const map = new Map<string, ProfitRow[]>();
   for (const r of rows) {
     const k = keyOf(r);
@@ -308,21 +396,21 @@ function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string, rate: numbe
     list.push(r);
     map.set(k, list);
   }
-  return [...map.entries()].map(([k, rs]) => summarise(k, rs, rate));
+  return [...map.entries()].map(([k, rs]) => summarise(k, rs));
 }
 
 /**
- * Profit for a set of orders, totalled and broken down by client, by month
- * and by kind of piece. Group totals are summed in rupees and converted once,
- * rather than adding up figures already rounded to the cent.
+ * Gross profit for a set of orders, totalled and broken down by client, by
+ * month and by kind of piece. Months are the month each order was SOLD in —
+ * dispatched — which is the period its revenue belongs to.
  */
 export function profitReport(db: DB, orders: Order[]) {
-  const rate = db.settings.usdToInr ?? 0;
   const rows: ProfitRow[] = orders.map(o => {
     const p = orderProfit(db, o);
     return {
       order: o, sellingUsd: p.sellingUsd, costInr: p.cost.totalInr, costUsd: p.costUsd,
       profitUsd: p.profitUsd, marginPct: p.marginPct, complete: p.cost.complete, missing: p.cost.missing,
+      fx: p.fx,
     };
   });
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "Unknown";
@@ -332,14 +420,55 @@ export function profitReport(db: DB, orders: Order[]) {
   };
   const bySelling = (a: ProfitGroup, b: ProfitGroup) => b.sellingUsd - a.sellingUsd;
   return {
-    rate,
-    rows: [...rows].sort((a, b) => +new Date(b.order.createdAt) - +new Date(a.order.createdAt)),
-    totals: summarise("All", rows, rate),
-    byClient: groupBy(rows, r => clientName(r.order.clientId), rate).sort(bySelling),
+    /** Any order converted at a stand-in rate rather than its own day's. */
+    approximateRates: rows.filter(r => r.fx && r.fx.basis !== "dated").length,
+    unconverted: rows.filter(r => !r.fx).length,
+    rows: [...rows].sort((a, b) => +new Date(saleDate(b.order)) - +new Date(saleDate(a.order))),
+    totals: summarise("All", rows),
+    byClient: groupBy(rows, r => clientName(r.order.clientId)).sort(bySelling),
     // Newest month first, the way every other ledger in the app reads.
-    byMonth: groupBy(rows, r => monthOf(r.order.createdAt), rate).sort((a, b) => b.key.localeCompare(a.key)),
-    byType: groupBy(rows, r => r.order.jewelleryType, rate).sort(bySelling),
+    byMonth: groupBy(rows, r => monthOf(saleDate(r.order))).sort((a, b) => b.key.localeCompare(a.key)),
+    byType: groupBy(rows, r => r.order.jewelleryType).sort(bySelling),
     /** Sold for less than they cost — the ones worth looking at first. */
     losses: rows.filter(r => r.profitUsd !== null && r.profitUsd < 0).sort((a, b) => a.profitUsd! - b.profitUsd!),
+  };
+}
+
+/**
+ * The running costs of the business over a period — salaries, rent, travel,
+ * everything not incurred for a particular order. Gross profit less these is
+ * what the business actually made.
+ *
+ * An expense tied to orders is already inside those orders' cost, so it is
+ * left out here; counting it twice would understate the profit by exactly the
+ * freight bill. Rupee expenses are converted at the rate on the day they were
+ * paid, the same way the sales were.
+ */
+export function operatingExpenses(db: DB, inPeriod: (iso: string) => boolean) {
+  const rows = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && inPeriod(e.createdAt));
+  let usd = 0;
+  let inr = 0;
+  let convertible = true;
+  const byCategory = new Map<string, number>();
+  for (const e of rows) {
+    let asUsd: number | null;
+    if (e.currency === "USD") {
+      asUsd = e.amount;
+      const fx = rateOn(db, e.createdAt);
+      inr += fx ? e.amount * fx.rate : 0;
+    } else {
+      inr += e.amount;
+      const fx = rateOn(db, e.createdAt);
+      asUsd = fx ? e.amount / fx.rate : null;
+    }
+    if (asUsd === null) { convertible = false; continue; }
+    usd += asUsd;
+    byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + asUsd);
+  }
+  return {
+    count: rows.length,
+    totalInr: r2(inr),
+    totalUsd: convertible ? r2(usd) : null,
+    byCategory: [...byCategory.entries()].map(([k, v]) => ({ category: k, usd: r2(v) })).sort((a, b) => b.usd - a.usd),
   };
 }

@@ -4,7 +4,7 @@ import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
-import { profitReport, inProfitReport } from "@/lib/orderCost";
+import { profitReport, recognisedSale, saleDate, operatingExpenses } from "@/lib/orderCost";
 import { exportProfitCsv } from "@/lib/productExport";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -339,15 +339,26 @@ export function ReportsPage() {
     };
   }, [db.orders, clients, salesFrom, salesTo, canSeeAll]);
 
-  /* ── Profit — ADMIN ONLY. Same period basis as Sales / Billing (the date the
-     order was placed), so the two reports can be read side by side and agree
-     on which orders they cover. Finished work only: see inProfitReport. ── */
+  /* ── Profit & Loss — ADMIN ONLY.
+     Revenue is recognised when the goods leave: an order belongs to the period
+     it was DISPATCHED in, and only shipped work counts, since a finished piece
+     still on the bench has not been sold. Each sale is converted at the rate on
+     its own sale day. Running costs for the same period come off the gross to
+     give what the business actually made. ── */
   const profit = useMemo(() => {
     if (!isAdmin) return null;
     const inRange = makeInRange(profitFrom, profitTo);
-    return profitReport(db, (db.orders ?? []).filter(o => inProfitReport(o) && inRange(o.createdAt)));
+    const gross = profitReport(db, (db.orders ?? []).filter(o => recognisedSale(o) && inRange(saleDate(o))));
+    const opex = operatingExpenses(db, inRange);
+    const netUsd = gross.totals.profitUsd !== null && opex.totalUsd !== null
+      ? Math.round((gross.totals.profitUsd - opex.totalUsd) * 100) / 100
+      : null;
+    const netMargin = netUsd !== null && gross.totals.sellingUsd > 0
+      ? Math.round((netUsd / gross.totals.sellingUsd) * 1000) / 10
+      : null;
+    return { ...gross, opex, netUsd, netMargin };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.orders, db.purchases, db.materialIssuances, db.stockMovements, db.diamondPackets, db.settings, profitFrom, profitTo, isAdmin]);
+  }, [db.orders, db.purchases, db.materialIssuances, db.stockMovements, db.diamondPackets, db.expenses, db.settings, profitFrom, profitTo, isAdmin]);
   const profitPeriodLabel = periodLabel(profitFrom, profitTo);
   const monthLabel = (k: string) => {
     const [y, m] = k.split("-").map(Number);
@@ -1244,8 +1255,8 @@ export function ReportsPage() {
               <div className="h-10 w-10 rounded-2xl bg-amber-500/10 grid place-items-center shrink-0"><TrendingUp className="h-5 w-5 text-amber-600" /></div>
               <div>
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Admin only</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Profit Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Finished orders placed in period · {profitPeriodLabel}</p>
+                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Profit &amp; Loss</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Orders dispatched in period · {profitPeriodLabel}</p>
               </div>
             </div>
             <button
@@ -1258,36 +1269,51 @@ export function ReportsPage() {
 
           <PeriodBar from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo} />
 
-          {!profit.rate && (
+          {profit.unconverted > 0 && (
             <p className="text-xs rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-amber-800">
-              Set the rupee-to-dollar rate in <span className="font-semibold">Settings → Pricing</span> to see profit.
+              Add the rupee-to-dollar rate in <span className="font-semibold">Settings → Pricing</span> to see profit.
               Until then only the rupee cost is shown.
             </p>
           )}
+          {profit.approximateRates > 0 && profit.unconverted === 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-semibold text-amber-700">{profit.approximateRates} sale{profit.approximateRates !== 1 ? "s" : ""}</span>{" "}
+              converted at a stand-in rate — there is no rate on file for the day {profit.approximateRates !== 1 ? "they were" : "it was"} sold.
+              Add dated rates in Settings → Pricing to book each at its own day&rsquo;s rate.
+            </p>
+          )}
 
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground">Sales ({profit.totals.count})</p>
-              <p className="font-display text-xl text-brand-dark mt-1">{fmtMoney(profit.totals.sellingUsd)}</p>
-            </div>
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground">Cost</p>
-              <p className="font-display text-xl text-brand-dark mt-1">{profit.totals.costUsd !== null ? fmtMoney(profit.totals.costUsd) : fmtMoneyInr(profit.totals.costInr)}</p>
-              {profit.totals.costUsd !== null && <p className="text-[10px] text-muted-foreground mt-0.5">{fmtMoneyInr(profit.totals.costInr)}</p>}
-            </div>
-            <div className={`rounded-2xl border p-4 ${(profit.totals.profitUsd ?? 0) < 0 ? "border-destructive/20 bg-destructive/5" : "border-success/20 bg-success/5"}`}>
-              <p className="text-[11px] text-muted-foreground">Profit</p>
-              <p className={`font-display text-xl mt-1 ${(profit.totals.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>
-                {profit.totals.profitUsd === null ? "—" : `${profit.totals.incomplete ? "≤ " : ""}${fmtMoney(profit.totals.profitUsd)}`}
-              </p>
-            </div>
-            <div className={`rounded-2xl border p-4 ${(profit.totals.profitUsd ?? 0) < 0 ? "border-destructive/20 bg-destructive/5" : "border-success/20 bg-success/5"}`}>
-              <p className="text-[11px] text-muted-foreground">Margin</p>
-              <p className={`font-display text-xl mt-1 ${(profit.totals.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>
-                {profit.totals.marginPct === null ? "—" : `${profit.totals.incomplete ? "≤ " : ""}${profit.totals.marginPct}%`}
-              </p>
-            </div>
-          </div>
+          {/* ── The P&L, top to bottom, the way an accountant reads it ── */}
+          {(() => {
+            const le = profit.totals.incomplete ? "≤ " : "";
+            const line = (label: string, value: string, opts: { strong?: boolean; tone?: "pos" | "neg" | "muted"; sub?: string; indent?: boolean } = {}) => (
+              <div className={`flex items-baseline justify-between gap-3 py-1.5 ${opts.strong ? "border-t border-border/70 mt-1 pt-2.5" : ""}`}>
+                <span className={`${opts.indent ? "pl-4 text-muted-foreground" : ""} ${opts.strong ? "font-semibold text-brand-dark" : "text-sm"}`}>
+                  {label}{opts.sub && <span className="block text-[10px] text-muted-foreground font-normal">{opts.sub}</span>}
+                </span>
+                <span className={`tabular-nums whitespace-nowrap ${opts.strong ? "font-display text-lg" : "text-sm font-medium"} ${opts.tone === "pos" ? "text-success" : opts.tone === "neg" ? "text-destructive" : ""}`}>
+                  {value}
+                </span>
+              </div>
+            );
+            const usd = (v: number | null, prefix = "") => (v === null ? "—" : prefix + fmtMoney(v));
+            const tone = (v: number | null) => (v === null ? "muted" : v < 0 ? "neg" : "pos") as "pos" | "neg" | "muted";
+            return (
+              <div className="rounded-2xl border border-border/70 bg-secondary/20 px-4 py-2">
+                {line(`Sales — ${profit.totals.count} order${profit.totals.count !== 1 ? "s" : ""} shipped`, fmtMoney(profit.totals.sellingUsd))}
+                {line("Cost of goods sold", usd(profit.totals.costUsd, "− "),
+                  { sub: `material, factory, freight · ${fmtMoneyInr(profit.totals.costInr)}`, indent: true })}
+                {line("Gross profit", profit.totals.profitUsd === null ? "—" : le + fmtMoney(profit.totals.profitUsd),
+                  { strong: true, tone: tone(profit.totals.profitUsd),
+                    sub: profit.totals.marginPct === null ? undefined : `${le}${profit.totals.marginPct}% gross margin` })}
+                {line(`Operating expenses — ${profit.opex.count} entr${profit.opex.count !== 1 ? "ies" : "y"}`, usd(profit.opex.totalUsd, "− "),
+                  { sub: profit.opex.byCategory.length ? profit.opex.byCategory.slice(0, 4).map(c => `${c.category} ${fmtMoney(c.usd)}`).join(" · ") : "salaries, rent, travel and other running costs", indent: true })}
+                {line("Net profit", profit.netUsd === null ? "—" : le + fmtMoney(profit.netUsd),
+                  { strong: true, tone: tone(profit.netUsd),
+                    sub: profit.netMargin === null ? undefined : `${le}${profit.netMargin}% net margin` })}
+              </div>
+            );
+          })()}
 
           {profit.totals.incomplete > 0 && (
             <p className="text-[11px] text-muted-foreground">

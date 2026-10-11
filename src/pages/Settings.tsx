@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { releaseInvoiceNumber, resetSequence } from "@/lib/counters";
 import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
@@ -106,6 +106,9 @@ export function SettingsPage() {
     toast.success(msg);
   };
   const save = () => persistSettings("Settings saved");
+  // New dated exchange rate being typed in (admin, Pricing).
+  const [fxFrom, setFxFrom] = useState(todayLocal());
+  const [fxRate, setFxRate] = useState("");
   const saveRates = () => persistSettings("Pricing rates updated");
   const saveInvoice = () => persistSettings("Invoice settings saved");
   const saveBand = () => persistSettings("Label & barcode settings saved");
@@ -907,35 +910,85 @@ export function SettingsPage() {
               <p className="text-[11px] text-muted-foreground">per gram</p>
             </div>
 
-            {/* ₹ to $ — admin only: it is what turns an order's rupee cost into a
-                profit, and profit is not for anyone else's screen. */}
+            {/* ₹ to $ over time — admin only: it is what turns an order's rupee cost
+                into a profit, and profit is not for anyone else's screen. */}
             {isAdmin && (
-              <div className="space-y-1.5 col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+              <div className="space-y-2 col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
                 <Label className="text-xs flex items-center gap-1.5">
                   <Lock className="h-3.5 w-3.5 text-amber-600" />
-                  Exchange Rate for Profit (₹ per $1) — admin only
+                  Exchange Rates for Profit (₹ per $1) — admin only
                 </Label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
-                  <Input
-                    type="number"
-                    min={0}
-                    step={0.01}
-                    value={db.settings.usdToInr ?? ""}
-                    placeholder="e.g. 84.50"
-                    onChange={(e) =>
-                      setDb({
-                        ...db,
-                        settings: { ...db.settings, usdToInr: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) },
-                      })
-                    }
-                    className="rounded-xl pl-7"
-                  />
-                </div>
                 <p className="text-[11px] text-muted-foreground">
-                  Order costs are kept in rupees and orders are sold in dollars. This converts one to the other so
-                  each order can show its profit. Left blank, cost is shown in rupees and no profit is stated.
+                  Each rate holds from its date until the next one. A sale is converted at the rate in force on
+                  the day it was dispatched — an order shipped in March is worth what the dollar fetched in March,
+                  not what it fetches today. Add a new rate whenever the bank rate moves enough to matter.
                 </p>
+                {(() => {
+                  const rates = [...(db.settings.fxRates ?? [])].sort((a, b) => b.from.localeCompare(a.from));
+                  // The form's copy and the live record move together. persistSettings
+                  // writes the whole form back, so a rate saved to one and not the
+                  // other would be wiped by the next "Save Pricing Rates".
+                  const commit = (next: { from: string; rate: number }[]) => {
+                    setDb({ ...db, settings: { ...db.settings, fxRates: next } });
+                    updateDb(d => { d.settings = { ...d.settings, fxRates: next }; });
+                  };
+                  return (
+                    <>
+                      {rates.length > 0 ? (
+                        <div className="rounded-lg border border-border/60 bg-white divide-y divide-border/50">
+                          {rates.map((r, i) => (
+                            <div key={r.from} className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs">
+                              <span>
+                                From <span className="font-medium">{fmtDate(r.from)}</span>
+                                {i === 0 && <span className="ml-1.5 text-[10px] font-semibold text-success">current</span>}
+                              </span>
+                              <span className="flex items-center gap-3">
+                                <span className="font-semibold tabular-nums">₹{r.rate}</span>
+                                <button
+                                  onClick={() => {
+                                    if (!confirm(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`)) return;
+                                    commit((db.settings.fxRates ?? []).filter(x => x.from !== r.from));
+                                    toast.success("Rate removed");
+                                  }}
+                                  className="text-muted-foreground hover:text-destructive" aria-label="Remove rate">
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </button>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-[11px] text-amber-700">
+                          No dated rates yet.{db.settings.usdToInr ? ` A flat rate of ₹${db.settings.usdToInr} is being used for every order until you add one.` : " Profit is not shown until one is added."}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div>
+                          <p className="text-[10px] text-muted-foreground mb-0.5">From</p>
+                          <Input type="date" value={fxFrom} max={todayLocal()} onChange={e => setFxFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
+                        </div>
+                        <div className="relative">
+                          <p className="text-[10px] text-muted-foreground mb-0.5">₹ per $1</p>
+                          <Input type="number" min={0} step={0.01} value={fxRate} placeholder="e.g. 84.50"
+                            onChange={e => setFxRate(e.target.value)} className="rounded-xl h-9 w-28" />
+                        </div>
+                        <Button size="sm" variant="outline" className="rounded-xl h-9"
+                          onClick={() => {
+                            const rate = Number(fxRate);
+                            if (!fxFrom) { toast.error("Pick the date the rate applies from"); return; }
+                            if (!(rate > 0)) { toast.error("Enter the rate"); return; }
+                            // One rate per day: entering a day again corrects it.
+                            const next = [...(db.settings.fxRates ?? []).filter(x => x.from !== fxFrom), { from: fxFrom, rate }];
+                            commit(next);
+                            setFxRate("");
+                            toast.success(`₹${rate} from ${fmtDate(fxFrom)} saved`);
+                          }}>
+                          Add rate
+                        </Button>
+                      </div>
+                    </>
+                  );
+                })()}
               </div>
             )}
 

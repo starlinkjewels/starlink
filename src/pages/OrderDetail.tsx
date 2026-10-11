@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
+import { ShippingCostFields } from "@/components/BulkDispatchDialog";
+import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
@@ -172,6 +174,8 @@ export function OrderDetailPage() {
   // days later, and stamping those with "now" put the wrong day in the record
   // with no way to correct it.
   const [dispatchDay, setDispatchDay] = useState(todayLocal());
+  // What sending it cost — recorded with the dispatch, once.
+  const [dispShipCost, setDispShipCost] = useState<ShippingCost>(EMPTY_SHIPPING_COST);
   // Arrival is entered late more often than dispatch is, so it takes a date on
   // the same terms.
   const [deliverModalIdx, setDeliverModalIdx] = useState<number | null>(null);
@@ -1739,6 +1743,7 @@ export function OrderDetailPage() {
     setTrackingNumber(order.trackingNumber ?? "");
     setTrackingLink(order.trackingLink ?? "");
     setDispatchDay(order.dispatchedAt ? dayOf(order.dispatchedAt) : todayLocal());
+    setDispShipCost(EMPTY_SHIPPING_COST);
     setDispatchModalIdx(idx);
   };
 
@@ -1760,6 +1765,12 @@ export function OrderDetailPage() {
       // the day the parcel left rather than the day it was typed up.
       const advanced = advanceStep(dispatchModalIdx, false, stampFor(dispatchDay));
       if (advanced) {
+        // Only once it has really gone — a dispatch the price guard turned back
+        // must not leave a freight bill behind it.
+        updateDb(d => {
+          recordShippingCost(d, [order.id], dispShipCost,
+            { courierName, trackingNumber }, { id: user!.id }, stampFor(dispatchDay));
+        });
         if (client?.email) {
           const m = orderDispatchedEmail({ ...orderEmailInfo(), courierName: courierName.trim(), trackingNumber: trackingNumber.trim(), trackingLink: trackingLink.trim() || undefined });
           void sendMail(client.email, m.subject, m.html);
@@ -3635,7 +3646,7 @@ export function OrderDetailPage() {
       {/* ── Dispatch Details popup (from the timeline "Mark complete") ── */}
       {dispatchModalIdx !== null && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-black/40 p-4" onClick={() => !dispatchSaving && setDispatchModalIdx(null)}>
-          <div className="card-luxe w-full max-w-md p-5" onClick={e => e.stopPropagation()}>
+          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
             <h3 className="font-display text-lg text-brand-dark mb-1">Dispatch Details — {order.orderNumber}</h3>
             <p className="text-xs text-muted-foreground mb-4">Enter the courier details. On confirm, the order is marked dispatched and the client is emailed automatically.</p>
             <div className="space-y-3">
@@ -3643,6 +3654,7 @@ export function OrderDetailPage() {
               <div><Label className="text-xs">Tracking Number *</Label><Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 1234567890" /></div>
               <div><Label className="text-xs">Dispatch Date *</Label><Input type="date" value={dispatchDay} max={todayLocal()} onChange={e => setDispatchDay(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
               <div><Label className="text-xs">Tracking Link (optional)</Label><Input value={trackingLink} onChange={e => setTrackingLink(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="https://..." /></div>
+              <ShippingCostFields value={dispShipCost} onChange={setDispShipCost} pieces={1} />
             </div>
             <div className="flex gap-2 mt-5">
               <button onClick={() => setDispatchModalIdx(null)} disabled={dispatchSaving} className="flex-1 rounded-xl border border-border py-2 text-sm disabled:opacity-50">Cancel</button>

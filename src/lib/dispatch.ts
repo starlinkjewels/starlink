@@ -302,3 +302,70 @@ export function applyDelivery(
   }
   return "delivered";
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * What the shipment cost us.
+ *
+ * Freight and insurance are paid once per parcel, however many pieces are in
+ * it. Recorded here as expenses tied to those orders: they appear in the
+ * expense list and — when paid from an account — in that account's book like
+ * any other expense, and each order's cost carries its share by value. One
+ * entry, every place it belongs, nothing typed twice.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface ShippingCost {
+  freight: number;
+  insurance: number;
+  /** Currency the amounts are in — the paying account's, when one is chosen. */
+  currency: "INR" | "USD";
+  /** The account it was paid from. Left out when the courier bills later. */
+  lockerId?: string;
+}
+
+export const EMPTY_SHIPPING_COST: ShippingCost = { freight: 0, insurance: 0, currency: "INR" };
+
+/** Writes the freight and insurance for one parcel. Call inside updateDb. */
+export function recordShippingCost(
+  d: DB,
+  orderIds: string[],
+  cost: ShippingCost,
+  shipment: { courierName: string; trackingNumber: string },
+  by: { id: string },
+  at: string,
+): number {
+  if (!orderIds.length) return 0;
+  const locker = cost.lockerId ? d.lockers.find(l => l.id === cost.lockerId) : undefined;
+  // Paid from an account, the amount is in that account's currency, full stop.
+  const currency: "INR" | "USD" = locker ? ((locker.currency || "INR") === "USD" ? "USD" : "INR") : cost.currency;
+  const ref = `${shipment.courierName.trim()} ${shipment.trackingNumber.trim()}`.trim();
+  const numbers = orderIds.map(id => d.orders.find(o => o.id === id)?.orderNumber).filter(Boolean).join(", ");
+  let written = 0;
+  for (const [kind, amount] of [["Freight", cost.freight], ["Insurance", cost.insurance]] as const) {
+    if (!(amount > 0)) continue;
+    const id = uid("exp_");
+    if (!d.expenses) d.expenses = [];
+    d.expenses.push({
+      id,
+      title: `${kind} — ${ref}`,
+      amount: Math.round(amount * 100) / 100,
+      category: "Shipping",
+      note: `Shipment of ${numbers}`,
+      employeeId: by.id,
+      currency,
+      createdAt: at,
+      lockerId: locker?.id,
+      orderIds: [...orderIds],
+      shipmentRef: ref,
+    });
+    if (locker) {
+      if (!d.lockerTransactions) d.lockerTransactions = [];
+      d.lockerTransactions.push({
+        id: uid("ltx_"), lockerId: locker.id, type: "expense", amountInr: Math.round(amount * 100) / 100,
+        currency: locker.currency || "INR", category: `Expense — ${kind} — ${ref}`,
+        refType: "expense", refId: id, recordedBy: by.id, createdAt: at,
+      });
+    }
+    written++;
+  }
+  return written;
+}
