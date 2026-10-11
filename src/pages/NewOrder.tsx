@@ -112,7 +112,8 @@ export function NewOrderPage() {
   const [saving, setSaving] = useState(false);
 
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
-  useEffect(() => subscribeStockLevels(setStockLevels), []);
+  // Staff-only, like the stock it reports; a client placing an order never sees it.
+  useEffect(() => (isClient ? undefined : subscribeStockLevels(setStockLevels)), [isClient]);
   const availableGold = f.productKarats ? (stockLevels?.gold[f.productKarats] ?? 0) : null;
   const goldShort = availableGold !== null && Number(f.estimatedNetWeight) > availableGold;
 
