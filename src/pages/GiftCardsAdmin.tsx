@@ -159,8 +159,8 @@ export function GiftCardsAdminPage() {
               { key: "used", header: "Used", align: "right", sortValue: c => c.amount - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums text-success">{fmtMoney(c.amount - giftCardRemaining(c, db.orders))}</span> },
               { key: "remaining", header: "Remaining", align: "right", sortValue: c => giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums">{fmtMoney(giftCardRemaining(c, db.orders))}</span> },
               { key: "status", header: "Status", align: "center", sortValue: c => giftCardStatus(c, db.orders), cell: c => { const st = giftCardStatus(c, db.orders); return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[st]}`}>{st}</span>; } },
-              { key: "issued", header: "Issued", sortValue: c => c.createdAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.createdAt)}</span> },
-              { key: "expires", header: "Expires", sortValue: c => c.expiresAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.expiresAt)}</span> },
+              { key: "issued", header: "Issued", kind: "date", sortValue: c => c.createdAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.createdAt)}</span> },
+              { key: "expires", header: "Expires", kind: "date", sortValue: c => c.expiresAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.expiresAt)}</span> },
               { key: "orders", header: "Orders", sortValue: c => ordersFor(c.id).map(o => o.orderNumber).join(", "), cell: c => <span className="text-xs font-mono text-muted-foreground max-w-[160px] truncate block">{ordersFor(c.id).map(o => o.orderNumber).join(", ") || "—"}</span> },
             ]}
           />

@@ -106,7 +106,7 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
             { key: "owed", header: "Owed", align: "right", sortValue: r => r.outstandingUsd, cell: r => <span className={r.overdue90Usd > 0 ? "text-destructive font-semibold" : ""} title={r.overdue90Usd ? `${usd(r.overdue90Usd)} over 90 days` : undefined}>{r.outstandingUsd ? usd(r.outstandingUsd, true) : "—"}</span> },
             { key: "owed90", header: "Owed 90+ days", align: "right", hidden: true, sortValue: r => r.overdue90Usd, cell: r => (r.overdue90Usd ? usd(r.overdue90Usd, true) : "—") },
             { key: "avg", header: "Avg order", align: "right", sortValue: r => r.avgOrderUsd, cell: r => usd(r.avgOrderUsd, true) },
-            { key: "last", header: "Last order", align: "right", sortValue: r => r.daysSinceLast, cell: r => <span className={(r.daysSinceLast ?? 0) > 60 ? "text-amber-600" : "text-muted-foreground"}>{r.lastOrder ? `${r.daysSinceLast}d ago` : "never"}</span> },
+            { key: "last", header: "Last order", align: "right", sortFirst: "asc", sortValue: r => r.daysSinceLast, cell: r => <span className={(r.daysSinceLast ?? 0) > 60 ? "text-amber-600" : "text-muted-foreground"}>{r.lastOrder ? `${r.daysSinceLast}d ago` : "never"}</span> },
           ]}
         />
       </Panel>

@@ -25,6 +25,11 @@ export interface DataColumn<T> {
   hidden?: boolean;
   /** Can't be hidden — the column that says what a row is. */
   always?: boolean;
+  /** Which way the first click sorts. Amounts and dates start high → low
+   *  (biggest, newest on top); text starts A → Z. Defaults by alignment. */
+  sortFirst?: "asc" | "desc";
+  /** A date or an amount — reads "newest first" / "high → low" in the hint. */
+  kind?: "date" | "number" | "text";
   className?: string;
 }
 
@@ -38,7 +43,7 @@ const PAD = { compact: "py-1.5", normal: "py-2.5", spacious: "py-3.5" } as const
 
 export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
-  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra,
+  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
@@ -57,6 +62,8 @@ export function DataTable<T>({
   /** A totals row, below the rows (shown columns only). */
   footer?: (shown: DataColumn<T>[], rows: T[]) => ReactNode;
   toolbarExtra?: ReactNode;
+  /** Opens a row — the whole row is the button. */
+  onRowClick?: (row: T) => void;
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => read(id));
   const save = (p: Prefs) => { setPrefs(p); write(id, p); };
@@ -94,10 +101,29 @@ export function DataTable<T>({
   const cur = Math.min(page, pages);
   const visible = filtered.slice((cur - 1) * pageSize, cur * pageSize);
 
+  // First click: the column's natural way (amounts and dates high → low).
+  // Second: the other way. Third: back to the table's own order.
+  const firstOf = (c: DataColumn<T>) => c.sortFirst ?? (c.align === "right" || c.kind === "number" || c.kind === "date" ? "desc" : "asc");
   const clickSort = (c: DataColumn<T>) => {
     if (!c.sortValue) return;
-    const next: Sort = !sort || sort.key !== c.key ? { key: c.key, dir: "asc" } : sort.dir === "asc" ? { key: c.key, dir: "desc" } : null;
+    const first = firstOf(c);
+    const next: Sort = !sort || sort.key !== c.key ? { key: c.key, dir: first }
+      : sort.dir === first ? { key: c.key, dir: first === "asc" ? "desc" : "asc" }
+      : defaultSort;
     save({ ...prefs, sort: next });
+  };
+  const words = (c: DataColumn<T>, dir: "asc" | "desc") => {
+    const k = c.kind ?? (c.align === "right" ? "number" : "text");
+    if (k === "date") return dir === "desc" ? "newest first" : "oldest first";
+    if (k === "number") return dir === "desc" ? "high to low" : "low to high";
+    return dir === "asc" ? "A to Z" : "Z to A";
+  };
+  const hint = (c: DataColumn<T>) => {
+    if (!c.sortValue) return undefined;
+    const on = sort?.key === c.key;
+    const first = firstOf(c);
+    if (!on) return `Sort ${words(c, first)}`;
+    return sort!.dir === first ? `Sorted ${words(c, first)} — click for ${words(c, first === "asc" ? "desc" : "asc")}` : `Sorted ${words(c, sort!.dir)} — click to reset`;
   };
   const toggleCol = (k: string) => {
     const h = new Set(hidden);
@@ -163,7 +189,8 @@ export function DataTable<T>({
               {shown.map(c => {
                 const on = sort?.key === c.key;
                 return (
-                  <th key={c.key} className={`px-3 py-2.5 text-[11px] font-semibold text-muted-foreground whitespace-nowrap ${alignCls(c.align)} ${c.sortValue ? "cursor-pointer select-none hover:text-brand-dark" : ""}`}
+                  <th key={c.key} title={hint(c)}
+                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary bg-primary/[0.06] shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "cursor-pointer select-none hover:text-primary hover:bg-primary/[0.04] transition-colors" : ""}`}
                     onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}
@@ -178,8 +205,9 @@ export function DataTable<T>({
           </thead>
           <tbody>
             {visible.map(r => (
-              <tr key={rowKey(r)} className="hover:bg-secondary/30 transition-colors">
-                {shown.map(c => <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${c.className ?? ""}`}>{c.cell(r)}</td>)}
+              <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}
+                className={`hover:bg-secondary/30 transition-colors ${onRowClick ? "cursor-pointer" : ""}`}>
+                {shown.map(c => <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${sort?.key === c.key ? "bg-primary/[0.03]" : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>)}
               </tr>
             ))}
             {!visible.length && (
