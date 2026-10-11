@@ -6,6 +6,10 @@ import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { Toaster } from "@/components/ui/sonner";
 import "./styles.css";
+import { applyRememberedAppearance } from "@/lib/appearance";
+
+// Open in the look this device last showed, before any data arrives — no flash of the default.
+applyRememberedAppearance();
 
 const qc = new QueryClient();
 

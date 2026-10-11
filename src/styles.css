@@ -171,22 +171,25 @@
        isn't honored by every mobile browser). Still allows normal scrolling. */
     touch-action: pan-x pan-y;
   }
-  h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.01em; }
+  /* Lining figures: the display serif's default old-style digits make "1"
+     read as "I" and "0" as "o" in every stat and total. */
+  h1, h2, h3, .font-display { font-family: var(--font-display); letter-spacing: -0.01em; font-variant-numeric: lining-nums; }
 }
 
 @utility glass {
-  background: color-mix(in oklab, white 78%, transparent);
-  backdrop-filter: saturate(140%) blur(14px);
-  -webkit-backdrop-filter: saturate(140%) blur(14px);
-  border: 1px solid color-mix(in oklab, var(--color-border) 70%, transparent);
+  /* 88% (was 78%): page text no longer reads through the bars on phones. */
+  background: var(--glass-bg, color-mix(in oklab, white 88%, transparent));
+  backdrop-filter: var(--glass-filter, saturate(140%) blur(14px));
+  -webkit-backdrop-filter: var(--glass-filter, saturate(140%) blur(14px));
+  border: 1px solid var(--glass-line, color-mix(in oklab, var(--color-border) 70%, transparent));
 }
 
 @utility card-luxe {
-  background:
-    linear-gradient(180deg, color-mix(in oklab, var(--color-card) 92%, white) 0%, var(--color-card) 42%);
-  border-radius: 1.25rem;
-  box-shadow: var(--shadow-luxe);
-  border: 1px solid color-mix(in oklab, var(--color-border) 55%, transparent);
+  background: var(--card-bg,
+    linear-gradient(180deg, color-mix(in oklab, var(--color-card) 92%, white) 0%, var(--color-card) 42%));
+  border-radius: var(--card-radius, 1.25rem);
+  box-shadow: var(--card-shadow, var(--shadow-luxe));
+  border: 1px solid var(--card-line, color-mix(in oklab, var(--color-border) 55%, transparent));
 }
 
 /* Interactive cards: subtle lift + ring on hover. Add to clickable cards. */
@@ -195,8 +198,8 @@
 }
 @utility card-hover {
   &:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 18px 50px -16px rgb(23 59 120 / 0.28), 0 6px 16px -6px rgb(23 59 120 / 0.12);
+    transform: var(--card-lift, translateY(-2px));
+    box-shadow: var(--card-hover-shadow, 0 18px 50px -16px rgb(23 59 120 / 0.28), 0 6px 16px -6px rgb(23 59 120 / 0.12));
     border-color: color-mix(in oklab, var(--color-primary) 35%, transparent);
   }
 }
@@ -237,9 +240,9 @@
 }
 
 @utility btn-hero {
-  background-image: linear-gradient(135deg, var(--color-brand), var(--color-brand-dark));
+  background-image: var(--hero-bg, linear-gradient(135deg, var(--color-brand), var(--color-brand-dark)));
   color: white;
-  box-shadow: 0 10px 30px -10px color-mix(in oklab, var(--color-brand) 55%, transparent);
+  box-shadow: var(--hero-shadow, 0 10px 30px -10px color-mix(in oklab, var(--color-brand) 55%, transparent));
 }
 
 /* ── Scrollbar ── */
@@ -376,4 +379,193 @@
 @layer base {
   :root[data-tbl][data-tbl-zebra="on"] table:not(.tbl-plain) > tbody > tr:nth-child(even) { background-color: var(--tbl-zebra); }
   :root[data-tbl][data-tbl-hover="on"] table:not(.tbl-plain) > tbody > tr:hover { background-color: var(--tbl-hover); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════
+   Appearance — chosen in Settings → Appearance, applied to the whole app.
+
+   Driven by attributes on <html> (see src/lib/appearance.ts). With none —
+   Classic, Royal blue, default corners, serif headings — nothing here
+   applies and the app looks exactly as it was built.
+
+   The shared surfaces (card-luxe, glass, btn-hero) read variables whose
+   fallbacks are their Classic values; a look only sets the variables, so a
+   card a page deliberately colours keeps its colour. The app's own chrome
+   (app-shell, app-sidebar, app-header, app-tabbar) and the floating layer
+   (ui-dialog, ui-scrim, menus) are styled outright.
+
+   Order matters: accents, then looks, then corners — a later choice wins.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Accent colour ── */
+:root[data-accent="sapphire"] {
+  --primary: oklch(0.5 0.14 235); --brand: oklch(0.5 0.14 235); --brand-dark: oklch(0.36 0.11 240); --brand-light: oklch(0.7 0.11 235);
+  --accent: oklch(0.7 0.11 235); --ring: oklch(0.6 0.1 235); --secondary: oklch(0.955 0.016 235); --secondary-foreground: oklch(0.3 0.08 240);
+  --muted: oklch(0.955 0.012 235); --sidebar-primary: oklch(0.5 0.14 235); --sidebar-accent: oklch(0.955 0.016 235); --sidebar-ring: oklch(0.6 0.1 235);
+}
+:root[data-accent="emerald"] {
+  --primary: oklch(0.5 0.12 160); --brand: oklch(0.5 0.12 160); --brand-dark: oklch(0.37 0.09 162); --brand-light: oklch(0.7 0.11 160);
+  --accent: oklch(0.7 0.11 160); --ring: oklch(0.6 0.1 160); --secondary: oklch(0.958 0.018 160); --secondary-foreground: oklch(0.3 0.07 162);
+  --muted: oklch(0.958 0.012 160); --sidebar-primary: oklch(0.5 0.12 160); --sidebar-accent: oklch(0.958 0.018 160); --sidebar-ring: oklch(0.6 0.1 160);
+}
+:root[data-accent="gold"] {
+  --primary: oklch(0.52 0.1 72); --brand: oklch(0.52 0.1 72); --brand-dark: oklch(0.4 0.08 65); --brand-light: oklch(0.74 0.11 80);
+  --accent: oklch(0.74 0.11 80); --ring: oklch(0.65 0.1 75); --secondary: oklch(0.962 0.02 85); --secondary-foreground: oklch(0.33 0.06 65);
+  --muted: oklch(0.962 0.014 85); --sidebar-primary: oklch(0.52 0.1 72); --sidebar-accent: oklch(0.962 0.02 85); --sidebar-ring: oklch(0.65 0.1 75);
+}
+:root[data-accent="ruby"] {
+  --primary: oklch(0.5 0.17 15); --brand: oklch(0.5 0.17 15); --brand-dark: oklch(0.37 0.13 15); --brand-light: oklch(0.7 0.13 15);
+  --accent: oklch(0.7 0.13 15); --ring: oklch(0.6 0.14 15); --secondary: oklch(0.96 0.015 15); --secondary-foreground: oklch(0.32 0.1 15);
+  --muted: oklch(0.96 0.01 15); --sidebar-primary: oklch(0.5 0.17 15); --sidebar-accent: oklch(0.96 0.015 15); --sidebar-ring: oklch(0.6 0.14 15);
+}
+:root[data-accent="graphite"] {
+  --primary: oklch(0.36 0.02 260); --brand: oklch(0.36 0.02 260); --brand-dark: oklch(0.24 0.02 260); --brand-light: oklch(0.62 0.02 260);
+  --accent: oklch(0.62 0.02 260); --ring: oklch(0.55 0.02 260); --secondary: oklch(0.955 0.004 260); --secondary-foreground: oklch(0.28 0.02 260);
+  --muted: oklch(0.955 0.003 260); --sidebar-primary: oklch(0.36 0.02 260); --sidebar-accent: oklch(0.955 0.004 260); --sidebar-ring: oklch(0.55 0.02 260);
+}
+
+/* ── Liquid Glass — glass only on what floats (bars, sidebar, sheets,
+   menus); the content below stays solid and calm. ── */
+:root[data-ui="glass"] {
+  --background: oklch(0.972 0.01 255);
+  --card-bg: var(--color-card);
+  --card-radius: 1.5rem;
+  --card-line: color-mix(in oklab, var(--color-border) 85%, transparent);
+  --card-shadow: 0 1px 2px color-mix(in oklab, var(--color-brand-dark) 6%, transparent);
+  --card-hover-shadow: 0 10px 28px -14px color-mix(in oklab, var(--color-brand-dark) 28%, transparent);
+  --card-lift: none;
+  --glass-bg: color-mix(in oklab, white 64%, transparent);
+  --glass-filter: saturate(180%) blur(24px);
+  --glass-line: rgb(255 255 255 / 0.7);
+  --glass-rim: inset 0 1px 0 rgb(255 255 255 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.25);
+  --glass-drop: 0 10px 34px -14px color-mix(in oklab, var(--color-brand-dark) 30%, transparent);
+  --hero-bg: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 82%, white), var(--color-primary));
+  --hero-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 8px 20px -10px color-mix(in oklab, var(--color-primary) 70%, transparent);
+}
+/* The ambient wash the glass picks up colour from. */
+:root[data-ui="glass"] .app-shell {
+  background:
+    radial-gradient(60rem 40rem at 0% 0%, color-mix(in oklab, var(--color-primary) 13%, transparent), transparent 70%),
+    radial-gradient(50rem 36rem at 100% 100%, color-mix(in oklab, var(--color-brand-light) 16%, transparent), transparent 70%),
+    var(--color-background);
+}
+:root[data-ui="glass"] :is(.app-header, .app-tabbar, .app-sidebar) {
+  box-shadow: var(--glass-rim), var(--glass-drop);
+}
+:root[data-ui="glass"] .app-sidebar {
+  margin: 12px 0 12px 12px;
+  height: calc(100dvh - 24px);
+  border-radius: 28px;
+  border: 1px solid var(--glass-line);
+  background: var(--glass-bg);
+  backdrop-filter: var(--glass-filter);
+  -webkit-backdrop-filter: var(--glass-filter);
+  overflow: hidden;
+}
+@media (min-width: 768px) {
+  :root[data-ui="glass"] .app-header { margin: 12px 16px 4px; border-radius: 22px; border: 1px solid var(--glass-line); }
+}
+/* Phones: the tab bar floats as a capsule above the home bar. */
+:root[data-ui="glass"] .app-tabbar {
+  left: 12px; right: 12px;
+  bottom: calc(env(safe-area-inset-bottom) + 10px);
+  padding-bottom: 0.5rem !important;
+  border-radius: 26px;
+  border: 1px solid var(--glass-line);
+}
+:root[data-ui="glass"] .ui-dialog {
+  background: color-mix(in oklab, white 82%, transparent);
+  backdrop-filter: saturate(180%) blur(32px);
+  -webkit-backdrop-filter: saturate(180%) blur(32px);
+  border-color: rgb(255 255 255 / 0.7);
+  box-shadow: var(--glass-rim), 0 28px 70px -24px rgb(15 23 42 / 0.45);
+}
+@media (min-width: 640px) { :root[data-ui="glass"] .ui-dialog:not(.app-more-sheet) { border-radius: 28px; } }
+:root[data-ui="glass"] .ui-scrim { background: rgb(15 23 42 / 0.32); backdrop-filter: blur(3px); }
+:root[data-ui="glass"] [data-radix-popper-content-wrapper] > .bg-popover {
+  background: color-mix(in oklab, white 80%, transparent);
+  backdrop-filter: saturate(180%) blur(24px);
+  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  border-color: rgb(255 255 255 / 0.75);
+  border-radius: 16px;
+  box-shadow: var(--glass-rim), 0 18px 44px -16px rgb(15 23 42 / 0.35);
+}
+/* Glass controls answer the press with a small spring; content stays still. */
+@media (prefers-reduced-motion: no-preference) {
+  :root[data-ui="glass"]:not([data-motion="calm"]) .btn-hero {
+    transition: transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease, filter 0.2s ease;
+  }
+  :root[data-ui="glass"]:not([data-motion="calm"]) .btn-hero:active { transform: scale(0.96); transition-duration: 0.12s; }
+}
+
+/* ── Modern Flat — crisp hairlines, no shadows. ── */
+:root[data-ui="flat"] {
+  --background: oklch(0.985 0.003 255);
+  --card-bg: var(--color-card);
+  --card-radius: 0.875rem;
+  --card-line: var(--color-border);
+  --card-shadow: none;
+  --card-hover-shadow: 0 2px 8px -2px rgb(15 23 42 / 0.08);
+  --card-lift: none;
+  --glass-bg: white;
+  --glass-filter: none;
+  --glass-line: var(--color-border);
+  --hero-bg: linear-gradient(var(--color-primary), var(--color-primary));
+  --hero-shadow: 0 1px 2px rgb(15 23 42 / 0.12);
+}
+:root[data-ui="flat"] .app-sidebar { background: white; }
+:root[data-ui="flat"] .ui-dialog { box-shadow: 0 24px 60px -18px rgb(15 23 42 / 0.25); }
+@media (min-width: 640px) { :root[data-ui="flat"] .ui-dialog:not(.app-more-sheet) { border-radius: 14px; } }
+:root[data-ui="flat"] .ui-scrim { background: rgb(15 23 42 / 0.45); backdrop-filter: none; }
+:root[data-ui="flat"] [data-radix-popper-content-wrapper] > .bg-popover { border-radius: 10px; box-shadow: 0 12px 32px -12px rgb(15 23 42 / 0.22); }
+
+/* ── Luxe Ivory — warm ivory ground, fine gold lines. ── */
+:root[data-ui="ivory"] {
+  --background: oklch(0.982 0.01 85);
+  --secondary: oklch(0.956 0.016 85);
+  --muted: oklch(0.956 0.012 85);
+  --border: oklch(0.9 0.025 85);
+  --input: oklch(0.9 0.025 85);
+  --sidebar: oklch(0.975 0.012 85);
+  --sidebar-accent: oklch(0.95 0.018 85);
+  --sidebar-border: oklch(0.9 0.025 85);
+  --card-bg: linear-gradient(180deg, oklch(0.998 0.004 85), oklch(0.992 0.007 85));
+  --card-radius: 1.125rem;
+  --card-line: oklch(0.72 0.09 80 / 0.35);
+  --card-shadow: 0 1px 2px oklch(0.5 0.05 70 / 0.06), 0 14px 34px -20px oklch(0.45 0.06 70 / 0.3);
+  --card-hover-shadow: 0 18px 42px -20px oklch(0.45 0.06 70 / 0.4);
+  --glass-bg: oklch(0.985 0.01 85 / 0.9);
+  --glass-line: oklch(0.72 0.09 80 / 0.3);
+}
+:root[data-ui="ivory"] .ui-dialog { background: oklch(0.992 0.006 85); border-color: oklch(0.72 0.09 80 / 0.35); }
+:root[data-ui="ivory"] .ui-scrim { background: oklch(0.25 0.03 60 / 0.45); }
+:root[data-ui="ivory"] [data-radix-popper-content-wrapper] > .bg-popover { background: oklch(0.995 0.005 85); border-color: oklch(0.72 0.09 80 / 0.35); }
+
+/* ── Corners — after the looks, so it overrides theirs. ── */
+:root[data-corners="sharp"] { --radius: 0.5rem; --card-radius: 0.625rem; }
+:root[data-corners="round"] { --radius: 1.25rem; --card-radius: 1.75rem; }
+
+/* ── Headings in the sans — a cleaner, more modern read. The family is set
+   outright (the font-display class would win otherwise); the weight sits in
+   the base layer so a heading's own weight still counts. ── */
+:root[data-headings="sans"] :is(h1, h2, h3, .font-display) { font-family: var(--font-sans); letter-spacing: -0.02em; }
+@layer base { :root[data-headings="sans"] :is(h1, h2, h3, .font-display) { font-weight: 600; } }
+
+/* ── Calm motion — everything appears in place. Spinners keep spinning. ── */
+:root[data-motion="calm"] *:not(.animate-spin),
+:root[data-motion="calm"] *::before,
+:root[data-motion="calm"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ── The phone or computer asked for less transparency or more contrast:
+   every glass surface turns solid, with a clear edge. ── */
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  :root[data-ui] { --glass-bg: var(--color-card); --glass-filter: none; --glass-line: var(--color-border); }
+  :root[data-ui="glass"] :is(.ui-dialog, .app-sidebar, [data-radix-popper-content-wrapper] > .bg-popover) {
+    background: var(--color-card); backdrop-filter: none; -webkit-backdrop-filter: none; border-color: var(--color-border);
+  }
 }
