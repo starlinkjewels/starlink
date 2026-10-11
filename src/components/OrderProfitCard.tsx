@@ -221,7 +221,12 @@ export function OrderProfitBadge({ db, order, className = "" }: { db: DB; order:
     <p className={`text-[11px] font-bold truncate ${neg ? "text-destructive" : "text-success"} ${className}`}
       title={`Admin only — cost ${fmtMoneyInr(p.cost.totalInr)}${p.cost.complete ? "" : " (part not valued yet)"}`}>
       <Lock className="inline h-2.5 w-2.5 -mt-0.5 mr-0.5" />
-      {neg ? "Loss" : "Profit"} {le}{fmtMoney(p.profitUsd)}{p.marginPct !== null ? ` · ${le}${p.marginPct}%` : ""}
+      {/* A loss reads as a size, not a negative profit. And when part of the
+          cost is still unknown the bound flips: profit is AT MOST the figure,
+          so a loss is AT LEAST its size — "≤ −$234" would point the wrong way. */}
+      {neg
+        ? <>Loss {le ? "≥ " : ""}{fmtMoney(Math.abs(p.profitUsd))}{p.marginPct !== null ? ` · ${le ? "≥ " : ""}${Math.abs(p.marginPct)}%` : ""}</>
+        : <>Profit {le}{fmtMoney(p.profitUsd)}{p.marginPct !== null ? ` · ${le}${p.marginPct}%` : ""}</>}
     </p>
   );
 }
