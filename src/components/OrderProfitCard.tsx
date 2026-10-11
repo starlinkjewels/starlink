@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtMoney, type DB, type Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { orderProfit, inProfitReport, type CostLine } from "@/lib/orderCost";
+import { orderProfit, inProfitReport, exchangeDifference, type CostLine } from "@/lib/orderCost";
 import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown } from "lucide-react";
 
 /**
@@ -75,6 +75,34 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
           </p>
         </div>
       </div>
+
+      {/* ── What converting the payments gained or lost ── */}
+      {(() => {
+        const x = exchangeDifference(db, order);
+        if (!x || (x.convertedUsd === 0 && x.heldUsd === 0)) return null;
+        const loss = (x.usd ?? 0) < 0;
+        return (
+          <div className={`rounded-xl p-3 text-xs border ${loss ? "border-destructive/30 bg-destructive/5" : "border-success/30 bg-success/5"}`}>
+            {x.convertedUsd > 0 && (
+              <p>
+                <span className={`font-semibold ${loss ? "text-destructive" : "text-success"}`}>
+                  Exchange {loss ? "loss" : "gain"} {fmtMoneyInr(Math.abs(x.inr))}
+                  {x.usd !== null && ` (${fmtMoney(Math.abs(x.usd))})`}
+                </span>
+                <span className="text-muted-foreground">
+                  {" "}— the rupees actually received for {fmtMoney(x.convertedUsd)} against the rate the sale was booked at.
+                  Not part of the piece&rsquo;s margin; it shows in the P&amp;L below gross profit.
+                </span>
+              </p>
+            )}
+            {x.heldUsd > 0 && (
+              <p className="text-muted-foreground mt-1">
+                {fmtMoney(x.heldUsd)} is still in a dollar account — its gain or loss is realised when it is converted.
+              </p>
+            )}
+          </div>
+        );
+      })()}
 
       {/* ── Which rate, and why that one ── */}
       {p.fx && (

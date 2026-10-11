@@ -344,6 +344,12 @@ export function ShippingCostFields({ value, onChange, pieces }: {
           becomes part of each order&rsquo;s cost and appears in Expenses.
         </p>
       </div>
+      <label className="flex items-center gap-2 text-[11px] cursor-pointer">
+        <input type="checkbox" checked={!!value.none}
+          onChange={e => onChange(e.target.checked ? { ...EMPTY_SHIPPING_COST, none: true } : { ...value, none: false })} />
+        <span>No shipping charge on this parcel — handed over in person, or sent on the client&rsquo;s own courier account</span>
+      </label>
+      {!value.none && (
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
         <div>
           <Label className="text-[11px]">Freight ({sym})</Label>
@@ -366,7 +372,13 @@ export function ShippingCostFields({ value, onChange, pieces }: {
           </select>
         </div>
       </div>
-      {!locker && (value.freight > 0 || value.insurance > 0) && (
+      )}
+      {!value.none && !value.freight && !value.insurance && (
+        <p className="text-[11px] text-amber-700">
+          Left blank, the order&rsquo;s cost will say freight is not recorded until it is entered later.
+        </p>
+      )}
+      {!value.none && !locker && (value.freight > 0 || value.insurance > 0) && (
         <div className="flex items-center gap-3 text-[11px]">
           <span className="text-muted-foreground">Billed in</span>
           {(["INR", "USD"] as const).map(c => (

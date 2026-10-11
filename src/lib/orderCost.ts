@@ -1,4 +1,5 @@
 import { orderTotal, dayOf, type DB, type Order, type Purchase } from "@/lib/db";
+import { freightRecorded } from "@/lib/dispatch";
 
 const fmtRate = (n: number, unit: string) =>
   `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/${unit}`;
@@ -291,6 +292,15 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     });
   }
 
+  // A shipped order with nothing on record for its shipping is not free to
+  // send — the freight was simply never written down. Said so, rather than
+  // counted as nothing, until it is entered or the parcel is marked as having
+  // cost nothing. Orders shipped before freight was recorded at dispatch are
+  // exactly these, and the profit on them reads as an upper bound until then.
+  if (depth === 0 && recognisedSale(order) && !freightRecorded(db, order.id)) {
+    out.missing.push({ label: "Freight & insurance", reason: "not recorded for this shipment — enter it, or mark the parcel as having none" });
+  }
+
   // The factory's bill — making, CAD, diamond setting, any metal the factory
   // supplied itself — exactly as it stands on the factory's ledger.
   for (const mi of issuances) {
@@ -471,4 +481,91 @@ export function operatingExpenses(db: DB, inPeriod: (iso: string) => boolean) {
     totalUsd: convertible ? r2(usd) : null,
     byCategory: [...byCategory.entries()].map(([k, v]) => ({ category: k, usd: r2(v) })).sort((a, b) => b.usd - a.usd),
   };
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Exchange difference on collections.
+ *
+ * A sale is booked at the rate on the day it left. The client then pays, and
+ * the dollars are turned into rupees at whatever the bank gives that day. The
+ * gap between the rupees actually received and the rupees the sale was booked
+ * at is a real gain or loss of the business — the "exchange fluctuation" line
+ * in an exporter's accounts — and it is nobody's margin on the piece. It sits
+ * below gross profit, never inside it.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+export interface ExchangeDifference {
+  /** Rupees received less rupees booked, over the payments that were converted. */
+  inr: number;
+  /** The same, at the sale's own booking rate. Null with no booking rate. */
+  usd: number | null;
+  /** Dollars that were converted into rupees, so carry a realised difference. */
+  convertedUsd: number;
+  /** Dollars banked in a dollar account — not converted yet, so nothing is
+   *  realised on them until they are. */
+  heldUsd: number;
+  /** Dollars whose conversion rate is not on record (credit carried across,
+   *  or a payment entered before rates were kept), left out either way. */
+  unknownUsd: number;
+}
+
+/**
+ * The rate a payment was actually converted at, or why there is none. A
+ * payment comes in on a receipt, which carries the rate whenever the money
+ * landed in a rupee account; an older payment taken against one order may
+ * carry its own rupee amount instead.
+ */
+function realisedRate(db: DB, a: Order["advances"][number]): number | "held" | null {
+  if (a.fromCredit) return null; // the rupees came in on an earlier receipt
+  if (a.receiptId) {
+    const r = (db.clientReceipts ?? []).find(x => x.id === a.receiptId);
+    if (r) {
+      const cur = r.lockerCurrency ?? (r.lockerId ? db.lockers.find(l => l.id === r.lockerId)?.currency : undefined) ?? "INR";
+      if (cur === "USD") return "held";
+      if (r.exchangeRate && r.exchangeRate > 0) return r.exchangeRate;
+      if (r.lockerAmount && r.amountUsd > 0) return r.lockerAmount / r.amountUsd;
+      return null;
+    }
+  }
+  if (a.lockerId) {
+    const cur = db.lockers.find(l => l.id === a.lockerId)?.currency ?? "INR";
+    if (cur === "USD") return "held";
+    if (a.lockerAmount && a.amount > 0) return a.lockerAmount / a.amount;
+  }
+  return null;
+}
+
+export function exchangeDifference(db: DB, order: Order): ExchangeDifference | null {
+  // No sale, no booking rate to measure against.
+  if (!recognisedSale(order)) return null;
+  const booked = rateOn(db, saleDate(order));
+  const out: ExchangeDifference = { inr: 0, usd: null, convertedUsd: 0, heldUsd: 0, unknownUsd: 0 };
+  for (const a of order.advances ?? []) {
+    if (!(a.amount > 0)) continue;
+    const rate = realisedRate(db, a);
+    if (rate === "held") { out.heldUsd += a.amount; continue; }
+    if (rate === null || !booked) { out.unknownUsd += a.amount; continue; }
+    out.convertedUsd += a.amount;
+    out.inr += a.amount * (rate - booked.rate);
+  }
+  out.inr = r2(out.inr);
+  out.convertedUsd = r2(out.convertedUsd);
+  out.heldUsd = r2(out.heldUsd);
+  out.unknownUsd = r2(out.unknownUsd);
+  out.usd = booked ? r2(out.inr / booked.rate) : null;
+  return out;
+}
+
+/** Exchange difference across a set of sales — the line below gross profit. */
+export function exchangeDifferenceTotal(db: DB, orders: Order[]) {
+  let inr = 0, usd = 0, convertedUsd = 0, heldUsd = 0, unknownUsd = 0;
+  let convertible = true;
+  for (const o of orders) {
+    const x = exchangeDifference(db, o);
+    if (!x) continue;
+    inr += x.inr;
+    if (x.usd === null) convertible = false; else usd += x.usd;
+    convertedUsd += x.convertedUsd; heldUsd += x.heldUsd; unknownUsd += x.unknownUsd;
+  }
+  return { inr: r2(inr), usd: convertible ? r2(usd) : null, convertedUsd: r2(convertedUsd), heldUsd: r2(heldUsd), unknownUsd: r2(unknownUsd) };
 }

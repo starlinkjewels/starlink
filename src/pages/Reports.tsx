@@ -4,8 +4,10 @@ import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
-import { profitReport, recognisedSale, saleDate, operatingExpenses } from "@/lib/orderCost";
+import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal } from "@/lib/orderCost";
 import { exportProfitCsv } from "@/lib/productExport";
+import { useDbVersion } from "@/hooks/useDb";
+import { FreightBacklog } from "@/components/FreightBacklog";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
@@ -122,6 +124,9 @@ export function ReportsPage() {
   const canSeeAll  = isAdmin || isEmployee;
 
   const db        = loadDb();
+  // Changes whenever the data does — the P&L is keyed on it, since the
+  // store's lists are edited in place and would never trip a memo by themselves.
+  const dbVersion = useDbVersion();
   const myOrders  = currentUserOrders(db, user!);
   const clients   = db.clients;
 
@@ -350,15 +355,19 @@ export function ReportsPage() {
     const inRange = makeInRange(profitFrom, profitTo);
     const gross = profitReport(db, (db.orders ?? []).filter(o => recognisedSale(o) && inRange(saleDate(o))));
     const opex = operatingExpenses(db, inRange);
-    const netUsd = gross.totals.profitUsd !== null && opex.totalUsd !== null
-      ? Math.round((gross.totals.profitUsd - opex.totalUsd) * 100) / 100
+    // What turning the dollars into rupees gained or lost against the rate
+    // each sale was booked at. Not anybody's margin on a piece, so it sits
+    // between gross profit and the running costs.
+    const fx = exchangeDifferenceTotal(db, gross.rows.map(r => r.order));
+    const netUsd = gross.totals.profitUsd !== null && opex.totalUsd !== null && fx.usd !== null
+      ? Math.round((gross.totals.profitUsd + fx.usd - opex.totalUsd) * 100) / 100
       : null;
     const netMargin = netUsd !== null && gross.totals.sellingUsd > 0
       ? Math.round((netUsd / gross.totals.sellingUsd) * 1000) / 10
       : null;
-    return { ...gross, opex, netUsd, netMargin };
+    return { ...gross, opex, fx, netUsd, netMargin };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.orders, db.purchases, db.materialIssuances, db.stockMovements, db.diamondPackets, db.expenses, db.settings, profitFrom, profitTo, isAdmin]);
+  }, [dbVersion, profitFrom, profitTo, isAdmin]);
   const profitPeriodLabel = periodLabel(profitFrom, profitTo);
   const monthLabel = (k: string) => {
     const [y, m] = k.split("-").map(Number);
@@ -1306,6 +1315,14 @@ export function ReportsPage() {
                 {line("Gross profit", profit.totals.profitUsd === null ? "—" : le + fmtMoney(profit.totals.profitUsd),
                   { strong: true, tone: tone(profit.totals.profitUsd),
                     sub: profit.totals.marginPct === null ? undefined : `${le}${profit.totals.marginPct}% gross margin` })}
+                {line(
+                  profit.fx.usd !== null && profit.fx.usd < 0 ? "Exchange loss on collections" : "Exchange gain on collections",
+                  profit.fx.usd === null ? "—" : `${profit.fx.usd < 0 ? "− " : "+ "}${fmtMoney(Math.abs(profit.fx.usd))}`,
+                  { indent: true, sub: [
+                      `rupees received vs. booked on ${fmtMoney(profit.fx.convertedUsd)} converted · ${fmtMoneyInr(profit.fx.inr)}`,
+                      profit.fx.heldUsd > 0 ? `${fmtMoney(profit.fx.heldUsd)} still in dollar accounts — realised when converted` : "",
+                      profit.fx.unknownUsd > 0 ? `${fmtMoney(profit.fx.unknownUsd)} with no conversion rate on record` : "",
+                    ].filter(Boolean).join(" · ") })}
                 {line(`Operating expenses — ${profit.opex.count} entr${profit.opex.count !== 1 ? "ies" : "y"}`, usd(profit.opex.totalUsd, "− "),
                   { sub: profit.opex.byCategory.length ? profit.opex.byCategory.slice(0, 4).map(c => `${c.category} ${fmtMoney(c.usd)}`).join(" · ") : "salaries, rent, travel and other running costs", indent: true })}
                 {line("Net profit", profit.netUsd === null ? "—" : le + fmtMoney(profit.netUsd),
@@ -1314,6 +1331,8 @@ export function ReportsPage() {
               </div>
             );
           })()}
+
+          <FreightBacklog />
 
           {profit.totals.incomplete > 0 && (
             <p className="text-[11px] text-muted-foreground">
