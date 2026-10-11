@@ -5,7 +5,7 @@ import {
 } from "firebase/auth";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
-import { auth, isAdminEmail } from "./firebase";
+import { auth, isAdminEmail, clearDeviceCache } from "./firebase";
 import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, type User } from "./db";
 import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
@@ -54,11 +54,20 @@ function Splash({ label = "Loading…" }: { label?: string }) {
   );
 }
 
+const AFTER_RELOAD_KEY = "sl-after-signout";
+/** Sign-out reloads the page (see clearDeviceCache), which would swallow a
+ *  toast shown just before it — keep the message for the sign-in screen. */
+function noteAfterReload(msg: string) {
+  try { sessionStorage.setItem(AFTER_RELOAD_KEY, msg); } catch { /* no storage */ }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
   const fbRef = useRef<FbUser | null>(null);
   const accessUnsubRef = useRef<null | (() => void)>(null);
+  /** Set once the device copy is being wiped, so two sign-out events do it once. */
+  const clearingRef = useRef(false);
 
   const clearAccessWatch = () => { accessUnsubRef.current?.(); accessUnsubRef.current = null; };
 
@@ -114,9 +123,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   /** React to an auth-state change: load data + resolve profile, or clear. */
   const handleAuth = useCallback(async (fb: FbUser | null) => {
+    const wasSignedIn = !!fbRef.current;
     fbRef.current = fb;
     clearAccessWatch();
-    if (!fb) { stopDb(); setUser(null); return; }
+    if (!fb) {
+      stopDb(); setUser(null);
+      // Signed out on this device: wipe its saved copy of the data, so the next
+      // person on a shared computer finds none of it. The database connection
+      // is closed by that, so the page starts again at the sign-in screen.
+      if (wasSignedIn && !clearingRef.current) {
+        clearingRef.current = true;
+        if (await clearDeviceCache()) window.location.replace("/login");
+      }
+      return;
+    }
     let scope = await resolveScope(fb.uid); // client → scoped reads; staff → full
     // An admin loads the admin-only records: an owner (by the email list) or
     // an admin made in the app (by their index entry). The security rules
@@ -126,12 +146,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const profile = resolveProfile(fb);
     if (!profile) {
       toast.error("This account has no access. Contact your administrator.");
+      noteAfterReload("This account has no access. Contact your administrator.");
       await signOut(auth).catch(() => {});
       stopDb(); setUser(null);
       return;
     }
     if (profile.status !== "active") {
       toast.error("Your account is inactive. Contact your administrator.");
+      noteAfterReload("Your account is inactive. Contact your administrator.");
       await signOut(auth).catch(() => {});
       stopDb(); setUser(null);
       return;
@@ -141,12 +163,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (profile.role !== "admin") {
       accessUnsubRef.current = watchAccess(fb.uid, () => {
         toast.error("Your access has been revoked. Signing out…");
+        noteAfterReload("Your access has been revoked.");
         signOut(auth).catch(() => {});
       });
     }
   }, [resolveProfile]);
 
   useEffect(() => {
+    // A message from before the sign-out reload, shown on the sign-in screen.
+    try {
+      const m = sessionStorage.getItem(AFTER_RELOAD_KEY);
+      if (m) { sessionStorage.removeItem(AFTER_RELOAD_KEY); setTimeout(() => toast.error(m), 300); }
+    } catch { /* no storage */ }
     const unsub = onAuthStateChanged(auth, async fb => {
       await handleAuth(fb);
       setBooting(false);

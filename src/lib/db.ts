@@ -23,6 +23,7 @@ import {
   documentId,
   type Query,
   type DocumentData,
+  type DocumentSnapshot,
 } from "firebase/firestore";
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
@@ -2598,6 +2599,58 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
   }
 }
 
+/**
+ * With the device cache on (lib/firebase.ts), a listener first answers from
+ * the copy saved on this device — which can be hours old. This app saves whole
+ * records, so showing that copy and letting someone edit it could write stale
+ * data over newer work. So the first answer taken is the SERVER's, exactly as
+ * before the cache existed; the saved copy only means the server has less to
+ * send. Once the server has answered, every later update is taken as it comes.
+ *
+ * Offline there is no server answer at all. Rather than never opening, the
+ * saved copy is taken after OFFLINE_FALLBACK_MS — only while the device
+ * reports itself offline; a slow connection keeps waiting for the server.
+ */
+const OFFLINE_FALLBACK_MS = 12_000;
+function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: string, onData: (s: S) => void): (s: S) => void {
+  let live = false;
+  let cached: S | null = null;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const arm = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      if (live || !cached) return;
+      if (typeof navigator !== "undefined" && navigator.onLine === false) {
+        console.warn(`[db] ${label}: offline — opening this device's saved copy until the server answers`);
+        live = true;
+        onData(cached);
+      } else arm();
+    }, OFFLINE_FALLBACK_MS);
+  };
+  return (snap) => {
+    if (live) {
+      // Asked for metadata changes (below) so the server's confirmation of an
+      // unchanged copy arrives at all; past that first answer, an event that
+      // changes no document says nothing new and is not worth a redraw.
+      const q = snap as unknown as { docChanges?: () => unknown[] };
+      if (typeof q.docChanges === "function" && q.docChanges().length === 0) return;
+      onData(snap);
+      return;
+    }
+    if (!snap.metadata.fromCache) {
+      live = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      onData(snap);
+      return;
+    }
+    cached = snap;
+    if (!timer) arm();
+  };
+}
+
+/** Listener options: the server's "your copy is current" must reach serverFirst(). */
+const LISTEN = { includeMetadataChanges: true } as const;
+
 /** Subscribe according to scope; resolves after each stream has fired once. */
 /** Bumped on every sign-out, so listeners queued during a boot that has since
  *  been torn down never attach and leak. */
@@ -2736,7 +2789,8 @@ function subscribeAll(scope: Scope): Promise<void> {
       unsubscribers.push(
         onSnapshot(
           q,
-          (snap) => {
+          LISTEN,
+          serverFirst(col, (snap) => {
             // The rules for the admin-only records are live: they can be
             // written there from now on rather than in the old places.
             if (col === "adminRecords") adminStoreLive = true;
@@ -2752,7 +2806,7 @@ function subscribeAll(scope: Scope): Promise<void> {
             if (pending.has(col)) mark(col, snap.docs.length);
             first(col);
             if (seeded) emit();
-          },
+          }),
           (err) => {
             console.error(`[db] listener ${col} failed:`, err);
             if (col === "adminRecords") adminStoreLive = false;
@@ -2795,14 +2849,15 @@ function subscribeAll(scope: Scope): Promise<void> {
       unsubscribers.push(
         onSnapshot(
           query(msgs, where("fromUserId", "==", client.appId)),
-          (snap) => {
+          LISTEN,
+          serverFirst("messages(from)", (snap) => {
             if (!writePending["messages"]) {
               fromMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
               apply();
             }
             firedFrom = true;
             doneMsg();
-          },
+          }),
           (err) => {
             console.error("[db] listener messages(from) failed:", err);
             firedFrom = true;
@@ -2813,14 +2868,15 @@ function subscribeAll(scope: Scope): Promise<void> {
       unsubscribers.push(
         onSnapshot(
           query(msgs, where("toUserId", "==", client.appId)),
-          (snap) => {
+          LISTEN,
+          serverFirst("messages(to)", (snap) => {
             if (!writePending["messages"]) {
               toMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
               apply();
             }
             firedTo = true;
             doneMsg();
-          },
+          }),
           (err) => {
             console.error("[db] listener messages(to) failed:", err);
             firedTo = true;
@@ -2833,7 +2889,8 @@ function subscribeAll(scope: Scope): Promise<void> {
     unsubscribers.push(
       onSnapshot(
         doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
-        (snap) => {
+        LISTEN,
+        serverFirst<DocumentSnapshot<DocumentData>>("settings", (snap) => {
           if (writePending[SETTINGS_COL]) {
             first(SETTINGS_COL);
             return;
@@ -2844,7 +2901,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           }
           first(SETTINGS_COL);
           if (seeded) emit();
-        },
+        }),
         (err) => {
           console.error("[db] listener settings failed:", err);
           first(SETTINGS_COL);
