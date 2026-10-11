@@ -19,6 +19,7 @@ import {
   query,
   where,
   getDoc,
+  getDocs,
   documentId,
   type Query,
   type DocumentData,
@@ -2293,11 +2294,47 @@ export async function resolveScope(authUid: string): Promise<Scope> {
   return { kind: "full" }; // admin, employee, or admin-bootstrap (no index yet)
 }
 
+/**
+ * Check the role index against the server, and write back anything missing.
+ *
+ * A new client or employee is written in two steps: their profile, then the
+ * small index document the security rules read to recognise them. If the
+ * second step never happens — the tab closed a moment too soon, the signal
+ * dropped — they can sign in to nothing, and the login screen just says
+ * "Invalid credentials". The next admin session was meant to put it right,
+ * but it began by ASSUMING every account's index was already on the server,
+ * so it never looked, and never did. A missed index stayed missing for good.
+ *
+ * The admin is the one account allowed to read the whole index, so the admin
+ * session now reads it, replaces the assumption with what is really there,
+ * and lets the ordinary save write back whatever is absent or out of date.
+ * Only the index is touched; no record of anybody's is changed.
+ */
+async function reconcileRoleIndex(): Promise<void> {
+  try {
+    const snap = await getDocs(collection(fsdb, INDEX_COL));
+    for (const k of Object.keys(remoteIdx)) delete remoteIdx[k];
+    for (const d of snap.docs) {
+      const v = d.data() as IndexDoc;
+      remoteIdx[d.id] = JSON.stringify({ role: v.role, clientId: v.clientId ?? null, appId: v.appId ?? "", status: v.status });
+    }
+    idxSeeded = true;
+    const missing = cache.users.filter(u => u.authUid && remoteIdx[u.authUid] !== JSON.stringify(indexOf(u)));
+    if (missing.length) {
+      console.info(`[db] role index: ${missing.length} account(s) missing or out of date on the server — writing them back`);
+      updateDb(() => {}); // nothing changes in the data, so only the index is written
+    }
+  } catch (e) {
+    console.warn("[db] role index could not be checked against the server:", e);
+  }
+}
+
 /** Subscribe & load the cache from Firestore for the given scope. */
 export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
   if (startPromise) return startPromise;
   startPromise = (async () => {
     await subscribeAll(scope);
+    if (scope.kind === "full" && scope.admin) await reconcileRoleIndex();
     // Legacy localStorage migration only runs for staff (admin) sessions.
     if (scope.kind === "full") {
       const legacy = readLegacy();
