@@ -1,4 +1,4 @@
-import { orderTotal, dayOf, fxTableOf, stockCostOf, type DB, type Order, type Purchase } from "@/lib/db";
+import { orderTotal, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 
 const fmtRate = (n: number, unit: string) =>
@@ -148,6 +148,58 @@ export function stockAverageRate(db: DB, material: "gold" | "diamond", bucket: s
   return avg === null ? null : r2(avg);
 }
 
+/**
+ * What a gram of FINE (24KT) gold has cost us, as it stood on a given day.
+ *
+ * Gold is bought in one purity (bars of 24K, or 22K, …) and comes back from the
+ * factory in another (a 14K ring at 595‰), and the factory keeps our gold as a
+ * fine-gold account between the two. So gold is valued the way that account is
+ * kept: by its fine content. Every gold purchase with a price, whatever its
+ * karat, adds its fine grams and its rupees; so does opening gold entered with
+ * a value. The rate is rupees over fine grams — a weighted average.
+ *
+ * Only lots on or before the day count, so a piece is valued at what gold had
+ * cost by the time it was made. If nothing had been bought by then, every lot
+ * on file is used instead, and the basis says so. Null when no gold has ever
+ * been bought with a price — then gold is reported as missing, never guessed.
+ */
+export function fineGoldRate(db: DB, at: string): { rate: number; basis: string } | null {
+  const lots: { at: number; fine: number; inr: number }[] = [];
+  for (const p of db.purchases ?? []) {
+    if (p.material !== "gold" || !p.gold || !(p.totalInr > 0)) continue;
+    const fine = toPureGold(p.gold.weightGrams || 0, p.gold.purity);
+    if (fine > 0) lots.push({ at: +new Date(p.createdAt), fine, inr: p.totalInr });
+  }
+  for (const m of db.stockMovements ?? []) {
+    if (m.material !== "gold" || m.refType !== "opening" || m.valueInr == null || !(m.valueInr > 0)) continue;
+    const fine = toPureGold(Math.abs(m.quantity), m.purityOrQuality);
+    if (fine > 0) lots.push({ at: +new Date(m.createdAt), fine, inr: m.valueInr });
+  }
+  if (!lots.length) return null;
+  const cutoff = +new Date(at);
+  const upTo = lots.filter(l => l.at <= cutoff);
+  const use = upTo.length ? upTo : lots;
+  const fine = use.reduce((s, l) => s + l.fine, 0);
+  const inr = use.reduce((s, l) => s + l.inr, 0);
+  if (!(fine > 0)) return null;
+  const n = use.length;
+  return {
+    rate: r2(inr / fine),
+    basis: upTo.length
+      ? `average of ${n} gold lot${n !== 1 ? "s" : ""} bought by then`
+      : `average of all ${n} gold lot${n !== 1 ? "s" : ""} on file — none bought by then`,
+  };
+}
+
+/** The fine (24KT) grams in a finished piece's gold: its net weight at the
+ *  purity the factory reported, or the karat's standard purity. */
+function finishedFine(mi: MaterialIssuance): number {
+  const net = mi.finishedNetWeight ?? 0;
+  return mi.finishedPurity != null
+    ? pureFromPurity(net, mi.finishedPurity)
+    : toPureGold(net, mi.finishedKarat || mi.purityOrQuality);
+}
+
 export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, missing: [], complete: true };
   const issuances = (db.materialIssuances ?? []).filter(i => i.orderId === order.id);
@@ -156,10 +208,42 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   // made for an order is usually also the source of the issuance that sent it
   // to the factory, and counting both would double the material cost.
   const counted = new Set<string>();
+  // Once a finished piece's gold is on record, that is what the order used.
+  // Gold sent to the factory for it — from stock or bought for it — went into
+  // the factory's fine-gold account; whatever the piece did not take stays
+  // there and is charged to the piece that uses it. Charging both the gold
+  // sent and the gold in the piece would count it twice.
+  const goldFinished = issuances.some(i => i.material === "gold" && i.finishedNetWeight != null);
 
   for (const mi of issuances) {
     const unit = mi.material === "gold" ? "g" : "ct";
     const bucket = mi.material === "gold" ? out.gold : out.diamond;
+
+    if (mi.material === "gold" && mi.finishedNetWeight != null) {
+      if (mi.sourcePurchaseId) counted.add(mi.sourcePurchaseId);
+      const fine = finishedFine(mi);
+      if (fine <= 0) continue;
+      const when = mi.finishedPieces?.[0]?.recordedAt ?? mi.issuedAt;
+      const fg = fineGoldRate(db, when);
+      const purityTxt = mi.finishedPurity != null ? `${mi.finishedPurity}‰` : (mi.finishedKarat || mi.purityOrQuality);
+      if (!fg) {
+        out.missing.push({
+          label: `${mi.finishedNetWeight}g ${purityTxt} (${fine}g fine)`,
+          reason: "no gold purchase with a price is on file, so there is no average cost of fine gold to value it at",
+        });
+        continue;
+      }
+      bucket.push({
+        label: `${mi.finishedNetWeight}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`,
+        amountInr: r2(fine * fg.rate),
+      });
+      continue;
+    }
+    if (mi.material === "gold" && goldFinished) {
+      // Sent to the factory; the finished piece above is what it used.
+      if (mi.sourcePurchaseId) counted.add(mi.sourcePurchaseId);
+      continue;
+    }
 
     if (mi.material === "diamond" && mi.diamondKind === "certified") {
       // A certified stone carries its own cost. Valued stone by stone, and only
@@ -209,10 +293,25 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const avg = stockAverageRate(db, mi.material, mi.purityOrQuality, mi.issuedAt)
       ?? stockAverageRate(db, mi.material, mi.purityOrQuality, new Date().toISOString());
     const where = mi.source === "factoryPool" ? "from gold held at the factory" : "from stock";
+    if (avg === null && mi.material === "gold") {
+      // No purchase of this exact karat — value its fine content instead, at
+      // what fine gold has cost. Provisional until the finished piece is in.
+      const fine = toPureGold(used, mi.purityOrQuality);
+      const fg = fineGoldRate(db, mi.issuedAt);
+      if (fg && fine > 0) {
+        bucket.push({
+          label: `${used}g ${mi.purityOrQuality} ${where} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis}) — until the finished weight is in`,
+          amountInr: r2(fine * fg.rate),
+        });
+        continue;
+      }
+    }
     if (avg === null) {
       out.missing.push({
         label: `${used}${unit} ${mi.purityOrQuality}`,
-        reason: `${where} — no ${mi.purityOrQuality} has ever been bought with a price to value it by`,
+        reason: mi.material === "gold"
+          ? `${where} — no gold purchase with a price is on file to value it by`
+          : `${where} — no ${mi.purityOrQuality} has ever been bought with a price to value it by`,
       });
       continue;
     }
