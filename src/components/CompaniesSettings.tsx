@@ -138,7 +138,8 @@ export function CompaniesSettings() {
   );
 }
 
-function CompanyEditor({ company, all, invoices, onClose }: { company: Company; all: Company[]; invoices: number; onClose: () => void }) {
+/** The one company form — Settings → Companies, and "+ Add new company" in a dropdown. */
+export function CompanyEditor({ company, all, invoices, onClose, onSaved }: { company: Company; all: Company[]; invoices: number; onClose: () => void; onSaved?: (id: string) => void }) {
   const isNew = !company.id;
   const isMain = company.id === MAIN_COMPANY_ID;
   const [c, setC] = useState<Company>(company);
@@ -173,6 +174,7 @@ function CompanyEditor({ company, all, invoices, onClose }: { company: Company; 
     });
     toast.success(isNew ? `${clean.name} added` : `${clean.name} saved`);
     onClose();
+    onSaved?.(clean.id);
   };
 
   const field = (key: keyof Company, label: string, placeholder = "", extra: Partial<React.ComponentProps<typeof Input>> = {}) => (

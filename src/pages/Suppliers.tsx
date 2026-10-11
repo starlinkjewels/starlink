@@ -1,3 +1,4 @@
+import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { updateDb, uid, fmtDate, type Supplier } from "@/lib/db";
@@ -5,12 +6,11 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
-import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -28,8 +28,6 @@ export function SuppliersPage() {
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [f, setF] = useState<Partial<Supplier>>({ name: "", contactPerson: "", phone: "", email: "", address: "", gstin: "" });
 
   // Every supplier's account, worked out once: the rows, the sort and the grand
   // totals all read the same figures instead of each recomputing their own.
@@ -62,19 +60,6 @@ export function SuppliersPage() {
     return acc;
   }, { payable: 0, receivable: 0 });
 
-  const create = () => {
-    if (!f.name?.trim()) { toast.error("Enter a supplier name"); return; }
-    setSaving(true);
-    try {
-      updateDb(d => {
-        if (!d.suppliers) d.suppliers = [];
-        d.suppliers.unshift({ ...f, name: f.name!.trim(), id: uid("sup_"), active: true, createdAt: new Date().toISOString() } as Supplier);
-      });
-      toast.success("Supplier added");
-      setOpen(false);
-      setF({ name: "", contactPerson: "", phone: "", email: "", address: "", gstin: "" });
-    } finally { setSaving(false); }
-  };
 
   const toggle = (s: Supplier) => {
     updateDb(d => { const x = d.suppliers.find(x => x.id === s.id); if (x) x.active = !x.active; });
@@ -95,40 +80,10 @@ export function SuppliersPage() {
           <p className="text-sm text-muted-foreground">{total} supplier{total !== 1 ? "s" : ""}</p>
         </div>
         {isAdmin && (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Supplier</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg rounded-2xl">
-            <DialogHeader><DialogTitle className="font-display text-2xl">Add Supplier</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              {(["name", "contactPerson", "phone", "email", "address", "gstin"] as const).map(k => (
-                <div key={k} className={k === "address" || k === "name" ? "col-span-2" : ""}>
-                  <Label className="text-xs capitalize">
-                    {k === "gstin" ? "GSTIN" : k === "contactPerson" ? "Contact Person" : k.replace(/([A-Z])/g, " $1")}
-                  </Label>
-                  <Input
-                    value={(f as Record<string, string>)[k] || ""}
-                    onChange={e => setF({ ...f, [k]: e.target.value })}
-                    className="rounded-xl mt-1"
-                  />
-                </div>
-              ))}
-              <OpeningBalanceFields
-                amount={f.openingBalance != null ? String(f.openingBalance) : ""}
-                dir={f.openingDir || "credit"}
-                date={f.openingDate || ""}
-                onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
-                onDir={v => setF({ ...f, openingDir: v })}
-                onDate={v => setF({ ...f, openingDate: v || undefined })}
-                debitLabel="Supplier owes us (Debit)"
-                creditLabel="We owe supplier (Credit)"
-                hint="Amount outstanding with this supplier when you started using this app (₹). Shown as the first line of their ledger."
-              />
-            </div>
-            <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Supplier"}</Button>
-          </DialogContent>
-        </Dialog>
+          <>
+            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Supplier</Button>
+            <SupplierCreateDialog open={open} onOpenChange={setOpen} />
+          </>
         )}
       </div>
 

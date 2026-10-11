@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -60,6 +61,7 @@ function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], l
  */
 export function PaymentsPage() {
   const db = useDb();
+  const addNew = useAddNew();
   const can = useCan();
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
@@ -130,6 +132,7 @@ export function PaymentsPage() {
 function ReceiveFromClient() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [clientId, setClientId] = useState("");
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("Cash");
@@ -221,9 +224,9 @@ function ReceiveFromClient() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
         <div>
           <Label className="text-xs">Client</Label>
-          <Select value={clientId} onValueChange={setClientId}>
+          <Select value={clientId} onValueChange={addNew("client", setClientId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
-            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
+            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}<AddNewItem kind="client" /></SelectContent>
           </Select>
         </div>
 
@@ -269,9 +272,9 @@ function ReceiveFromClient() {
 
         <div>
           <Label className="text-xs">Deposited to Locker *</Label>
-          <Select value={lockerId} onValueChange={setLockerId}>
+          <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
 
@@ -325,6 +328,7 @@ function ReceiveFromClient() {
 function PaySupplier() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [dir, setDir] = useState<"pay" | "receive">("pay");
   const [supplierId, setSupplierId] = useState("");
   const [amount, setAmount] = useState("");
@@ -438,9 +442,9 @@ function PaySupplier() {
 
       <div>
         <Label className="text-xs">Supplier</Label>
-        <Select value={supplierId} onValueChange={v => { setSupplierId(v); setTarget("__fifo"); }}>
+        <Select value={supplierId} onValueChange={addNew("supplier", v => { setSupplierId(v); setTarget("__fifo"); })}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-          <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+          <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
         </Select>
       </div>
       {supplierId && (
@@ -476,9 +480,9 @@ function PaySupplier() {
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder={dir === "pay" ? "Note (optional)" : "Note (e.g. refund for returned goods)"} />
       <div>
         <Label className="text-xs">{dir === "pay" ? "Paid from Locker *" : "Received into Locker *"}</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
+        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
       </div>
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
@@ -490,6 +494,7 @@ function PaySupplier() {
 function PayFactory() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [factoryId, setFactoryId] = useState("");
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("__fifo");
@@ -569,9 +574,9 @@ function PayFactory() {
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Factory</Label>
-        <Select value={factoryId} onValueChange={v => { setFactoryId(v); setTarget("__fifo"); }}>
+        <Select value={factoryId} onValueChange={addNew("factory", v => { setFactoryId(v); setTarget("__fifo"); })}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-          <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+          <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
         </Select>
       </div>
       {factoryId && (
@@ -601,9 +606,9 @@ function PayFactory() {
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
       <div>
         <Label className="text-xs">Paid from Locker *</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
+        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
       </div>
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Factory Payment"}</AsyncButton>
@@ -615,6 +620,7 @@ function PayFactory() {
 function PayExpense() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState((db.settings.expenseCategories?.[0]) || DEFAULT_EXPENSE_CATEGORIES[0]);
@@ -673,9 +679,9 @@ function PayExpense() {
       {/* 1. Pay from account — first; it sets the currency (same flow as the Expenses page) */}
       <div>
         <Label className="text-xs">Pay from Account *</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
+        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
       </div>
       {/* Date first: an expense is often written up after the fact. */}
@@ -703,9 +709,9 @@ function PayExpense() {
       {category === "Salary" && (
         <div>
           <Label className="text-xs">Paid to Team Member *</Label>
-          <Select value={paidToEmployeeId || ""} onValueChange={setPaidToEmployeeId}>
+          <Select value={paidToEmployeeId || ""} onValueChange={addNew("employee", setPaidToEmployeeId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose team member" /></SelectTrigger>
-            <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}</SelectContent>
+            <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}<AddNewItem kind="employee" /></SelectContent>
           </Select>
           <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
         </div>
@@ -728,6 +734,7 @@ type LockerAction = "income" | "expense" | "transfer_out";
 function LockerActions() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [action, setAction] = useState<LockerAction>("income");
   const [lockerId, setLockerId] = useState("");
   const [amount, setAmount] = useState("");
@@ -844,9 +851,9 @@ function LockerActions() {
 
       <div>
         <Label className="text-xs">{action === "transfer_out" ? "From Locker *" : "Locker *"}</Label>
-        <Select value={lockerId} onValueChange={setLockerId}>
+        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+          <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
         {selected && (
           <p className="text-xs text-muted-foreground mt-1">Current balance: <span className="font-semibold text-foreground">{fmtLockerAmount(lockerBalance(selected, db.lockerTransactions), selected.currency)}</span></p>
@@ -856,9 +863,9 @@ function LockerActions() {
       {action === "transfer_out" && (
         <div>
           <Label className="text-xs">To Locker *</Label>
-          <Select value={targetLocker} onValueChange={setTargetLocker}>
+          <Select value={targetLocker} onValueChange={addNew("locker", setTargetLocker)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose destination" /></SelectTrigger>
-            <SelectContent>{lockers.filter(l => l.id !== lockerId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+            <SelectContent>{lockers.filter(l => l.id !== lockerId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
       )}

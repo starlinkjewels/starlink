@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -220,6 +221,7 @@ function OpeningStock() {
 function AssignGold() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [factoryId, setFactoryId] = useState("");
   const [purity, setPurity] = useState("22K");
   const [grams, setGrams] = useState("");
@@ -267,9 +269,9 @@ function AssignGold() {
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Factory</Label>
-        <Select value={factoryId} onValueChange={setFactoryId}>
+        <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-          <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+          <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
         </Select>
         {factoryId && (
           <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold)}g fine (24KT)</span></p>
@@ -295,6 +297,7 @@ type BuyerMode = "client" | "other";
 function SellDiamond() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [kind, setKind] = useState<SellKind>("loose");
   const [shape, setShape] = useState("Round");
   const [packetId, setPacketId] = useState("");
@@ -450,9 +453,9 @@ function SellDiamond() {
           ))}
         </div>
         {buyerMode === "client" ? (
-          <Select value={clientId} onValueChange={setClientId}>
+          <Select value={clientId} onValueChange={addNew("client", setClientId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
-            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
+            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}<AddNewItem kind="client" /></SelectContent>
           </Select>
         ) : (
           <Input value={buyerName} onChange={e => setBuyerName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Buyer's name" />
@@ -461,12 +464,12 @@ function SellDiamond() {
 
       <div>
         <Label className="text-xs">Deposit proceeds into (optional)</Label>
-        <Select value={lockerId || "__none"} onValueChange={v => setLockerId(v === "__none" ? "" : v)}>
+        <Select value={lockerId || "__none"} onValueChange={addNew("locker", v => setLockerId(v === "__none" ? "" : v))}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Don't record a cash movement" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="__none">Don't record a cash movement</SelectItem>
             {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-          </SelectContent>
+          <AddNewItem kind="locker" /></SelectContent>
         </Select>
         {lockerId === "" && lockers.length === 0 && (
           <p className="text-xs text-muted-foreground mt-1">No active {currency} lockers — sale will still be recorded, just without a cash entry.</p>

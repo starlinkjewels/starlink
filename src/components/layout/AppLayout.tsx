@@ -1,3 +1,4 @@
+import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -484,6 +485,8 @@ export function AppLayout() {
           <Suspense fallback={<div className="grid place-items-center py-24 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
             {/* The address bar is not a way round the sidebar: a section the
                 role does not allow is refused here, whatever was typed. */}
+            {/* "+ Add new …" in a dropdown opens the real form, from any page. */}
+            <QuickCreateProvider>
             {roleAllows(loc.pathname) ? <Outlet /> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
@@ -493,6 +496,7 @@ export function AppLayout() {
                 </p>
               </div>
             )}
+            </QuickCreateProvider>
           </Suspense>
         </motion.main>
 

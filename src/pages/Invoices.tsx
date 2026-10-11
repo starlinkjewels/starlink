@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
@@ -39,6 +40,7 @@ export function InvoicesPage() {
   const { user } = useAuth();
   const can = useCan();
   const db = useDb();
+  const addNew = useAddNew();
   const isStaff = user!.role !== "client";
   // Arriving from an order's invoice badge: open with that invoice already
   // searched for, rather than landing on the whole list to hunt for it.
@@ -625,9 +627,9 @@ export function InvoicesPage() {
                                 </div>
                                 <div>
                                   <Label className="text-xs">Deposited to locker</Label>
-                                  <Select value={payLockerId} onValueChange={setPayLockerId}>
+                                  <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
                                     <SelectTrigger className="h-9 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-                                    <SelectContent>{db.lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}</SelectContent>
+                                    <SelectContent>{db.lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
                                   </Select>
                                 </div>
                               </div>
