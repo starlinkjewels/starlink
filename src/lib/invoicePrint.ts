@@ -1,5 +1,5 @@
 import type { Order, Client, Settings } from "./db";
-import { totalAdvance, orderTotal, balanceDue } from "./db";
+import { totalAdvance, orderTotal, balanceDue, logEvent } from "./db";
 
 function dd(n: number) { return String(n).padStart(2, "0"); }
 function localDate(iso: string) {
@@ -444,6 +444,10 @@ export function printInvoice(
   mainShape?: string,
   draft?: boolean,
 ) {
+  logEvent("print", draft
+    ? `Printed a proforma for ${order.orderNumber} — ${client?.companyName ?? "client"}`
+    : `Printed invoice ${invoiceNumber} — ${order.orderNumber}, ${client?.companyName ?? "client"}`,
+    { invoice: invoiceNumber, order: order.orderNumber });
   const adv = totalAdvance(order);
   const total = orderTotal(order);
   const bal = balanceDue(order);
@@ -476,6 +480,7 @@ export function printBatchInvoice(
   dateStr: string, // "YYYY-MM-DD"
   mainShapes?: Record<string, string>, // orderId -> main diamond shape
 ) {
+  logEvent("print", `Printed invoice ${invoiceNumber} — ${client?.companyName ?? "client"}, ${orders.length} order${orders.length !== 1 ? "s" : ""}`, { invoice: invoiceNumber });
   const adv = orders.reduce((s, o) => s + totalAdvance(o), 0);
   const total = orders.reduce((s, o) => s + orderTotal(o), 0);
   const bal = orders.reduce((s, o) => s + balanceDue(o), 0);

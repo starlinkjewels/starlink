@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth";
-import { updateDb, uid, currentUserOrders, type CatalogFolder, type ProductPhotoItem, type Order } from "@/lib/db";
+import { updateDb, uid, currentUserOrders, logEvent, type CatalogFolder, type ProductPhotoItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
@@ -29,6 +29,7 @@ async function downloadOne(fileUrl: string, filename: string) {
     const a = document.createElement("a");
     a.href = obj; a.download = filename;
     document.body.appendChild(a); a.click(); a.remove();
+    logEvent("export", `Downloaded ${filename}`, { file: filename });
     setTimeout(() => URL.revokeObjectURL(obj), 4000);
   } catch { window.open(fileUrl, "_blank"); }
 }

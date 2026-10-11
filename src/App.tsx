@@ -25,6 +25,7 @@ const EmployeeDetailPage = lazy(() => import("./pages/EmployeeDetail").then(m =>
 const MessagesPage = lazy(() => import("./pages/Messages").then(m => ({ default: m.MessagesPage })));
 const NotificationsPage = lazy(() => import("./pages/Notifications").then(m => ({ default: m.NotificationsPage })));
 const ReportsPage = lazy(() => import("./pages/Reports").then(m => ({ default: m.ReportsPage })));
+const ActivityPage = lazy(() => import("./pages/Activity").then(m => ({ default: m.ActivityPage })));
 const SettingsPage = lazy(() => import("./pages/Settings").then(m => ({ default: m.SettingsPage })));
 const ProfilePage = lazy(() => import("./pages/Profile").then(m => ({ default: m.ProfilePage })));
 const InvoicesPage = lazy(() => import("./pages/Invoices").then(m => ({ default: m.InvoicesPage })));
@@ -154,6 +155,7 @@ export function App() {
           <Route path="clients" element={<Protected roles={["admin","employee"]}><ClientsPage /></Protected>} />
           <Route path="clients/:id" element={<Protected roles={["admin","employee"]}><ClientHistoryPage /></Protected>} />
           <Route path="employees" element={<Protected roles={["admin"]}><EmployeesPage /></Protected>} />
+          <Route path="activity" element={<Protected roles={["admin"]}><ActivityPage /></Protected>} />
           <Route path="employees/:id" element={<Protected roles={["admin"]}><EmployeeDetailPage /></Protected>} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="messages" element={<MessagesPage />} />

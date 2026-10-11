@@ -25,6 +25,8 @@ import {
   type DocumentData,
 } from "firebase/firestore";
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
+import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
+import { moduleForPath } from "./modules";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -1910,6 +1912,11 @@ async function persist() {
   const opsList: Op[] = [];
   const touched = new Set<string>();
   const committedDeletes: { col: ArrayCol; id: string }[] = [];
+  // Every record this save changes, as it was and as it will be — what the
+  // activity log is written from, once the save has actually gone through.
+  const logRaw: { col: string; id: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }[] = [];
+  const ctx = pendingChangeContext;
+  pendingChangeContext = null;
 
   for (const col of ARRAY_COLS) {
     // A collection the server refuses is not worth attempting again. A failed
@@ -1934,6 +1941,7 @@ async function persist() {
       if (!before || !eq(before, item)) {
         opsList.push({ kind: "set", col, id, data: item });
         touched.add(col);
+        logRaw.push({ col, id, before: (before as Record<string, unknown>) ?? null, after: item });
       }
     }
     for (const [id, prevItem] of prevMap) {
@@ -1970,6 +1978,7 @@ async function persist() {
       opsList.push({ kind: "del", col, id });
       committedDeletes.push({ col, id });
       touched.add(col);
+      logRaw.push({ col, id, before: prevItem as Record<string, unknown>, after: null });
     }
   }
 
@@ -1981,6 +1990,11 @@ async function persist() {
       data: snap.settings as unknown as Record<string, unknown>,
     });
     touched.add(SETTINGS_COL);
+    logRaw.push({
+      col: SETTINGS_COL, id: SETTINGS_DOC,
+      before: (remote.settings as unknown as Record<string, unknown>) ?? null,
+      after: snap.settings as unknown as Record<string, unknown>,
+    });
   }
 
   // Maintain the userByAuth role index (keyed by Firebase Auth uid). The
@@ -2069,6 +2083,9 @@ async function persist() {
       if (c === SETTINGS_COL) remote.settings = snap.settings;
       else (remote[c as ArrayCol] as unknown) = snap[c as ArrayCol];
     }
+    // Written, so it happened — now it goes in the activity log. Not awaited:
+    // the log is a record of the save, never a reason for it to be slow.
+    if (logRaw.length) void recordChanges(logRaw, ctx);
   } catch (err) {
     // A failed write is NOT reconciled above, so the same documents are
     // attempted again on the very next save — which is right for a dropped
@@ -2130,8 +2147,110 @@ export function costDataReady(): boolean {
   return need.every(c => loadedCols.has(c));
 }
 
+/** Whether one collection has given its first answer this session. */
+export function collectionLoaded(col: string): boolean {
+  return loadedCols.has(col);
+}
+
 export function adminStoreReady(): boolean {
   return adminStoreLive && !deniedCols.has("adminRecords");
+}
+
+/* ── Activity log ── */
+
+/** Set by a caller that knows better what its save means — an undo, chiefly. */
+export interface ChangeContext { kind?: ActivityKind; summary?: string; undoOf?: string }
+let pendingChangeContext: ChangeContext | null = null;
+
+/**
+ * updateDb, with a note on what the save is. The note travels with the save
+ * and labels its activity-log entry — so an undo is recorded as an undo, not
+ * as an anonymous edit.
+ */
+export function updateDbAs(ctx: ChangeContext, fn: (db: DB) => void) {
+  pendingChangeContext = ctx;
+  return updateDb(fn);
+}
+
+/** Refused by the rules this session (not deployed yet): stop trying. */
+let activityRefused = false;
+
+/** Who is doing this, as the log should name them. */
+function actor(): { actorUid: string; actorId: string; actorName: string; actorRole: string } | null {
+  const fb = fbAuth.currentUser;
+  if (!fb) return null;
+  const u = cache.users.find(x => x.authUid === fb.uid);
+  const owner = isAdminEmail(fb.email);
+  return {
+    actorUid: fb.uid,
+    actorId: u?.id ?? fb.uid,
+    actorName: u?.name || fb.displayName || fb.email || "Unknown",
+    actorRole: owner ? "owner" : (u?.role ?? "staff"),
+  };
+}
+
+function newActivityId(): string {
+  return `act_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/** Append one entry. Never throws, and never retries once refused. */
+async function writeActivity(entry: ActivityEntry): Promise<void> {
+  if (activityRefused) return;
+  try {
+    await setDoc(doc(fsdb, "activityLog", entry.id), clean(entry) as unknown as Record<string, unknown>);
+  } catch (e) {
+    if ((e as { code?: string })?.code === "permission-denied") {
+      activityRefused = true;
+      console.warn("[activity] the log is not accepted yet — deploy the firestore rules to switch it on.");
+    } else console.warn("[activity] entry not written:", e);
+  }
+}
+
+/** A save, as an entry: what changed, before and after, and whether it can be put back. */
+async function recordChanges(
+  raw: { col: string; id: string; before: Record<string, unknown> | null; after: Record<string, unknown> | null }[],
+  ctx: ChangeContext | null,
+): Promise<void> {
+  try {
+    const who = actor();
+    if (!who) return;
+    const changes = describeChanges(raw);
+    if (!changes.length) return;
+    const { summary, module } = summarise(changes);
+    const entry: ActivityEntry = {
+      id: newActivityId(), at: new Date().toISOString(), ...who,
+      kind: ctx?.kind ?? "change", module, summary: ctx?.summary ?? summary,
+      changes, undoable: false,
+      ...(ctx?.undoOf ? { undoOf: ctx.undoOf } : {}),
+    };
+    // A Firestore document holds a megabyte. A save that large keeps its list
+    // of what changed but not the full copies — and so cannot be undone.
+    if (JSON.stringify(entry).length > 700_000) {
+      entry.changes = changes.map(({ before: _b, after: _a, ...c }) => c);
+      entry.truncated = true;
+    }
+    const blocker = ctx?.kind === "undo" ? "This was itself an undo." : undoBlocker(changes, !!entry.truncated);
+    entry.undoable = !blocker;
+    if (blocker) entry.undoBlocker = blocker;
+    await writeActivity(entry);
+  } catch (e) {
+    console.warn("[activity] could not describe a save:", e);
+  }
+}
+
+/**
+ * Something that is not a change to a record but still worth knowing: a
+ * ledger downloaded, an invoice printed, a sign-in. Named for the section the
+ * person was in when they did it.
+ */
+export function logEvent(kind: Exclude<ActivityKind, "change" | "undo">, summary: string, meta?: Record<string, unknown>): void {
+  const who = actor();
+  if (!who) return;
+  const module = typeof window !== "undefined" ? moduleForPath(window.location.pathname) : "dashboard";
+  void writeActivity({
+    id: newActivityId(), at: new Date().toISOString(), ...who,
+    kind, module, summary, undoable: false, ...(meta ? { meta } : {}),
+  });
 }
 
 /** Collections the rules refuse. Skipped for the rest of the session so one

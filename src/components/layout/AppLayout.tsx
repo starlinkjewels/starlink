@@ -1,5 +1,5 @@
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb } from "@/lib/db";
@@ -19,6 +19,7 @@ const NAV: NavItem[] = [
   { to: "/orders", label: "Orders", icon: Package },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
+  { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/income", label: "Passbook", icon: BookOpen },
@@ -70,6 +71,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/ai", label: "Starlink AI", icon: Sparkles },
     { to: "/reports", label: "Reports", icon: BarChart3 },
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
+    { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
     { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   ] },
 ];
@@ -92,6 +94,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
+  { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
   { to: "/locker", label: "Locker", icon: Landmark, roles: ["admin","employee"] },
   { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin","employee"] },
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },

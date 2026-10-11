@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { logEvent } from "./db";
 
 /**
  * Download a set of files as one zip.
@@ -50,6 +51,7 @@ export async function downloadAsZip(
   const a = document.createElement("a");
   a.href = obj;
   a.download = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
+  logEvent("export", `Downloaded ${added} file${added !== 1 ? "s" : ""} as ${a.download}`, { file: a.download, files: added });
   document.body.appendChild(a);
   a.click();
   a.remove();

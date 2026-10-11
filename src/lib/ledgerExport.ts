@@ -2,6 +2,7 @@
 // Factory) — same plain-text jsPDF layout style already used for
 // ClientHistory/Reports (no autoTable dependency, manual column x positions).
 import jsPDF from "jspdf";
+import { logEvent } from "./db";
 
 /** jsPDF's built-in fonts can't render ₹ — plain-text amount for PDF cells only. */
 export function fmtInrPlain(n: number): string {
@@ -15,6 +16,7 @@ function csvCell(v: string | number): string {
 
 /** Downloads a UTF-8 CSV (opens directly in Excel) — BOM prefix so ₹/special chars render correctly. */
 export function downloadCsv(filename: string, headers: string[], rows: (string | number)[][]): void {
+  logEvent("export", `Downloaded ${filename.endsWith(".csv") ? filename : `${filename}.csv`} — ${rows.length} row${rows.length !== 1 ? "s" : ""}`, { file: filename, rows: rows.length });
   const lines = [headers.map(csvCell).join(","), ...rows.map(r => r.map(csvCell).join(","))];
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
@@ -146,6 +148,7 @@ export function downloadLedgerPdf(opts: {
     doc.text(`Page ${p} of ${pages}`, R, yFooter, { align: "right" });
   }
 
+  logEvent("export", `Downloaded ${opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`} — ${opts.title}`, { file: opts.filename, title: opts.title });
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
 }
 
@@ -248,5 +251,6 @@ export function downloadLedgerPdfMulti(opts: {
     doc.text(stamp, L, yFooter);
     doc.text(`Page ${p} of ${pages}`, R, yFooter, { align: "right" });
   }
+  logEvent("export", `Downloaded ${opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`} — ${opts.title}`, { file: opts.filename, title: opts.title });
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
 }

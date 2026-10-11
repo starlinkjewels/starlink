@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { IS_DEMO } from "@/lib/firebase";
 import { seedDemoData, clearDemoData, hasDemoData } from "@/lib/demoSeed";
@@ -179,6 +179,9 @@ export function SettingsPage() {
     a.href = URL.createObjectURL(blob);
     a.download = "starlink-backup.json";
     a.click();
+    // A full copy of every record leaving the building — the one download most
+    // worth knowing about.
+    logEvent("export", "Downloaded a full backup of all data", { file: "starlink-backup.json" });
   };
   const imp = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];

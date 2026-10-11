@@ -6,7 +6,7 @@ import {
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { auth, isAdminEmail } from "./firebase";
-import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, type User } from "./db";
+import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, type User } from "./db";
 import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
 interface AuthCtx {
@@ -165,6 +165,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       await handleAuth(cred.user);
       const p = resolveProfile(cred.user);
       if (!p || p.status !== "active") return null;
+      // A real sign-in, typed in — not the session quietly restored on every
+      // page load, which would bury the log in noise.
+      logEvent("signin", `Signed in — ${p.name || p.email}`);
       // Only a real, explicit sign-in fires this — not the automatic session
       // restore on every page load (handleAuth alone doesn't distinguish those).
       if (p.role === "client") {

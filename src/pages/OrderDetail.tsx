@@ -8,7 +8,7 @@ import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
-  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf,
+  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
@@ -1644,6 +1644,7 @@ export function OrderDetailPage() {
       const a = document.createElement("a");
       a.href = obj; a.download = filename;
       document.body.appendChild(a); a.click(); a.remove();
+      logEvent("export", `Downloaded ${filename}`, { file: filename });
       setTimeout(() => URL.revokeObjectURL(obj), 4000);
     } catch { window.open(fileUrl, "_blank"); }
   };
