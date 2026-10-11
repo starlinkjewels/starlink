@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
+import { releaseInvoiceNumber, resetSequence } from "@/lib/counters";
 import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
@@ -288,9 +289,13 @@ export function SettingsPage() {
     [liveDb.invoices, liveDb.orders],
   );
 
-  function deleteInvoice(id: string, number: string) {
+  async function deleteInvoice(id: string, number: string) {
     if (!confirm(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`)) return;
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
+    // If this was the newest number, hand it back so the next invoice takes it
+    // instead of the book skipping one. Older numbers are left alone — their
+    // hole can only be closed by renumbering.
+    await releaseInvoiceNumber(number);
     toast.success(`Invoice ${number} deleted`);
   }
 
@@ -328,7 +333,11 @@ export function SettingsPage() {
         if (n) inv.number = n;
       }
     });
-    toast.success(`Renumbered ${list.length} invoice${list.length !== 1 ? "s" : ""}`);
+    // The book now runs 1..N, so the counter has to follow it. Left where it
+    // was, the next invoice would carry on from the old high number and open a
+    // fresh hole the moment the renumber finished.
+    void resetSequence("invoiceNumber", list.length + 1);
+    toast.success(`Renumbered ${list.length} invoice${list.length !== 1 ? "s" : ""} — next is ${String(list.length + 1).padStart(4, "0")}`);
   }
 
 

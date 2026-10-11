@@ -1,7 +1,7 @@
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, clientAccount, findInvoiceForOrder, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
+import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -87,6 +87,7 @@ export function ClientHistoryPage() {
   const [payAmount, setPayAmount] = useState("");
   const [payMethod, setPayMethod] = useState("Cash");
   const [payRemark, setPayRemark] = useState("");
+  const [payInvoiceId, setPayInvoiceId] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
   const [payExchangeRate, setPayExchangeRate] = useState("");
   const [showPayForm, setShowPayForm] = useState(false);
@@ -97,6 +98,20 @@ export function ClientHistoryPage() {
   // an INR locker needs converting for the deposit side.
   const payNeedsRate = !!payLocker && payLockerCurrency !== "USD";
   const payRate = Number(payExchangeRate);
+
+  // Which invoice this money is for. Left blank it is held as credit on the
+  // client's account rather than being spread over their oldest bills.
+  const openInvoicesForPay = (db.invoices ?? [])
+    .filter(inv => inv.clientId === id)
+    .map(inv => ({
+      inv,
+      bal: invoiceOrderIds(inv).reduce((s, oid) => {
+        const o = db.orders.find(x => x.id === oid);
+        return s + (o ? balanceDue(o) : 0);
+      }, 0),
+    }))
+    .filter(x => x.bal > 0.009)
+    .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt));
 
   const recordPayment = async () => {
     const amt = parseFloat(payAmount);
@@ -118,7 +133,7 @@ export function ClientHistoryPage() {
       const beforeIds = advanceIds(d, id!);
       // Reclaim any over-payment, fold in existing credit + this amount, then
       // re-allocate oldest-bill-first — tagging entries with the payment method.
-      settleClientAccount(d, id!, amt, user!.id, now, note);
+      settleClientAccount(d, id!, amt, user!.id, now, note, payInvoiceId || undefined);
       newAdvanceIds = [...advanceIds(d, id!)].filter(x => !beforeIds.has(x));
       // Cash-position tracking — separate from the USD billing allocation above:
       // this is ONE deposit event, so it's recorded once here rather than split
@@ -157,7 +172,7 @@ export function ClientHistoryPage() {
       }
     }
     toast.success(`Payment recorded${receiptNo} (${payMethod}) & allocated to oldest bills`);
-    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setShowPayForm(false);
+    setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setPayInvoiceId(""); setShowPayForm(false);
   };
 
   const applyCredit = () => {
@@ -165,8 +180,10 @@ export function ClientHistoryPage() {
       const c = d.clients.find(x => x.id === id);
       if (!c) return;
       const before = advanceIds(d, id!);
-      // Reclaim any per-order over-payment + stored credit, re-allocate oldest first.
-      settleClientAccount(d, id!, 0, user!.id, new Date().toISOString());
+      // Deliberate: the only place credit is put against bills on its own
+      // account, oldest invoice first, because somebody pressed the button.
+      // Taking money in never does this by itself.
+      applyCreditToBills(d, id!, user!.id, new Date().toISOString());
       // No new money came in — this is credit the client already had being put
       // against bills. Marking it keeps it off the list of payments waiting for
       // a receipt number, which would otherwise number the same money twice.
@@ -526,6 +543,22 @@ export function ClientHistoryPage() {
                   onKeyDown={e => e.key === "Enter" && recordPayment()}
                   className="pl-9 rounded-xl h-10" placeholder="Amount received ($)" />
               </div>
+              {/* Which bill this is for — blank holds it as credit */}
+              {openInvoicesForPay.length > 0 && (
+                <Select value={payInvoiceId || "credit"} onValueChange={v => setPayInvoiceId(v === "credit" ? "" : v)}>
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <FileText className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="credit">No invoice — hold as credit</SelectItem>
+                    {openInvoicesForPay.map(({ inv, bal }) => (
+                      <SelectItem key={inv.id} value={inv.id}>
+                        Invoice {inv.number} — {fmtMoney(bal)} pending
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               {/* Method */}
               <Select value={payMethod} onValueChange={setPayMethod}>
                 <SelectTrigger className="h-10 rounded-xl">

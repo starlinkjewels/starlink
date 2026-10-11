@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { loadDb, updateDb, fmtMoney, orderTotal, balanceDue, createInvoiceFromOrders, type Invoice, type Order } from "@/lib/db";
-import { reserveInvoiceNumber } from "@/lib/counters";
+import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 import { planInvoice } from "@/lib/invoiceBatch";
 import { FileText, Ban, AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
@@ -49,6 +49,9 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
         toast.success(`Invoice ${(created as Invoice).number} created — ${plan.go.length} order${plan.go.length !== 1 ? "s" : ""} · ${fmtMoney(plan.total)}`);
         onDone();
       } else {
+        // Nothing written, so the number is unused — hand it back instead of
+        // leaving a gap in the sequence.
+        await releaseInvoiceNumber(number);
         toast.error("Those orders are already invoiced");
       }
     } finally {

@@ -1546,87 +1546,34 @@ export function allocateToInvoice(
   return allocateInOrder(targets, amount, recordedBy, at, label);
 }
 
-/**
- * Re-spread everything a client has ALREADY paid, putting one invoice first.
- *
- * Payments are allocated oldest-bill-first as they come in, which is right in
- * general but wrong when the client says "this transfer is for invoice 0001":
- * the money lands on older unbilled work and the invoice they just settled
- * still reads as pending. Nothing is created or destroyed here — every existing
- * advance is pooled and laid down again in a different order, so the client's
- * total paid, the lockers and every cash figure are untouched.
- *
- * Each payment keeps its own note, date, recorder and locker link; a payment
- * that has to straddle two orders is split, not rewritten. Returns what moved.
- */
-export function reallocateClientPayments(
-  d: DB,
-  clientId: string,
-  invoiceFirstId?: string,
-): { total: number; toInvoice: number; credit: number } {
-  const r2n = (n: number) => Math.round(n * 100) / 100;
-  const client = d.clients.find(c => c.id === clientId);
-  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
 
-  // 1. Lift every payment off the orders, oldest first, keeping its details.
-  const pool: AdvancePayment[] = [];
-  for (const o of orders) {
-    for (const a of o.advances ?? []) pool.push({ ...a });
-    o.advances = [];
-  }
-  pool.sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  const total = r2n(pool.reduce((s, a) => s + a.amount, 0) + (client?.creditBalance || 0));
-
-  // Carried credit joins the pool as one more source, so it settles bills too.
-  if (client?.creditBalance && client.creditBalance > 0) {
-    pool.push({
-      id: uid("adv_"), amount: client.creditBalance, note: "Credit carried forward",
-      recordedBy: "system", createdAt: new Date().toISOString(), fromCredit: true,
-    });
-  }
-
-  // 2. Bills are refilled invoice by invoice with the chosen one at the front,
-  //    so what the first invoice cannot absorb rolls on to the next invoice
-  //    rather than scattering across unbilled orders.
-  const firstIds = invoiceFirstId
-    ? invoiceOrderIds((d.invoices ?? []).find(i => i.id === invoiceFirstId) ?? ({ orderId: "" } as Invoice))
-    : [];
-  const targets = billingOrder(d, clientId, invoiceFirstId);
-
-  // 3. Lay the pool back down, splitting a payment across orders when needed.
-  let toInvoice = 0;
-  let src = 0;
-  for (const o of targets) {
-    let need = orderTotal(o);
-    while (need > 0.009 && src < pool.length) {
-      const take = Math.min(need, pool[src].amount);
-      if (!o.advances) o.advances = [];
-      o.advances.push({ ...pool[src], id: uid("adv_"), amount: r2n(take) });
-      if (firstIds.includes(o.id)) toInvoice = r2n(toInvoice + take);
-      pool[src].amount = r2n(pool[src].amount - take);
-      need = r2n(need - take);
-      if (pool[src].amount <= 0.009) src++;
-    }
-  }
-
-  // 4. Anything the bills couldn't absorb goes back to credit.
-  const credit = r2n(pool.slice(src).reduce((s, a) => s + a.amount, 0));
-  if (client) client.creditBalance = credit > 0 ? credit : undefined;
-  return { total, toInvoice, credit };
+/** The orders billed on one invoice, skipping any since rejected. */
+function invoiceOrders(d: DB, invoiceId: string): Order[] {
+  const inv = (d.invoices ?? []).find(i => i.id === invoiceId);
+  if (!inv) return [];
+  return invoiceOrderIds(inv)
+    .map(oid => d.orders.find(o => o.id === oid))
+    .filter((o): o is Order => !!o && o.status !== "Rejected");
 }
 
-
-
 /**
- * Settle a client's account from one place: reclaim any over-payment, fold in
- * carried credit and whatever they have just sent, then pay their bills off
- * INVOICE BY INVOICE — oldest invoice first, or `firstInvoiceId` first when the
- * transfer was sent for a particular one. What an invoice cannot absorb rolls
- * on to the next invoice, then to work not yet invoiced, and only what is left
- * after all of that becomes credit against their next bill.
+ * Take money in on a client's account.
  *
- * This is what the client sees on their side: the invoice they paid reads as
- * cleared, and the remainder shows up against the next one.
+ * A running account, not a reshuffle. Money goes against the invoice it was
+ * sent for and nowhere else; what that invoice cannot absorb, and anything sent
+ * without an invoice named, stays as credit until somebody decides where it
+ * belongs. The client's balance is simply what they have been billed less what
+ * they have paid — plus and minus, the way the books are kept by hand.
+ *
+ * It used to fill their bills oldest-invoice-first instead, which moved money
+ * the moment more arrived: a payment sent for invoice 0021 landed on invoice
+ * 0005, an invoice that read Paid yesterday read Pending today, and no
+ * statement ever matched twice. Nothing is allocated on its own any more.
+ * Putting held credit against bills is a deliberate act — see
+ * applyCreditToBills, and the per-invoice version below.
+ *
+ * Over-payment sitting on an order is still reclaimed to credit, because an
+ * order holding more than it is worth is not a balance anybody can read.
  * Writes the leftover back to the client record and returns it.
  */
 export function settleClientAccount(
@@ -1643,11 +1590,36 @@ export function settleClientAccount(
   let pool = (extra || 0) + (client?.creditBalance || 0);
   for (const o of orders) pool += capOrderAdvances(o);
   pool = Math.round(pool * 100) / 100;
-  const leftover = allocateInOrder(
-    billingOrder(d, clientId, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received",
-  );
+  const leftover = firstInvoiceId
+    ? allocateInOrder(invoiceOrders(d, firstInvoiceId), pool, recordedBy, at, note ?? "Payment received")
+    : pool;
   if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
   return leftover;
+}
+
+/**
+ * Put a client's held credit against their bills, oldest invoice first.
+ *
+ * Deliberate, never automatic: this runs when somebody presses the button, not
+ * when money happens to arrive. Returns how much was actually applied.
+ */
+export function applyCreditToBills(
+  d: DB,
+  clientId: string,
+  recordedBy: string,
+  at: string,
+  note = "Credit applied",
+  invoiceId?: string,
+): number {
+  const client = d.clients.find(c => c.id === clientId);
+  const orders = d.orders.filter(o => o.clientId === clientId && o.status !== "Rejected");
+  let pool = client?.creditBalance || 0;
+  for (const o of orders) pool += capOrderAdvances(o);
+  pool = Math.round(pool * 100) / 100;
+  const targets = invoiceId ? invoiceOrders(d, invoiceId) : billingOrder(d, clientId);
+  const leftover = allocateInOrder(targets, pool, recordedBy, at, note, true);
+  if (client) client.creditBalance = leftover > 0 ? leftover : undefined;
+  return Math.round((pool - leftover) * 100) / 100;
 }
 
 

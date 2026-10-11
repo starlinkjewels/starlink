@@ -226,7 +226,10 @@ function ReceiveFromClient() {
             <Select value={invoiceId || "fifo"} onValueChange={v => setInvoiceId(v === "fifo" ? "" : v)}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="fifo">Oldest bills first</SelectItem>
+                {/* No invoice named means the money is simply held on the
+                    client's account. It used to be spread over their oldest
+                    bills, which moved payments they had already been shown. */}
+                <SelectItem value="fifo">No invoice — hold as credit</SelectItem>
                 {openInvoices.map(({ inv, bal }) => (
                   <SelectItem key={inv.id} value={inv.id}>
                     Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
