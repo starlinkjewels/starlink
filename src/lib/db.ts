@@ -2419,7 +2419,12 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "clientReceipts" ||
         col === "factories" ||
         col === "materialIssuances" ||
-        col === "stockMovements"
+        col === "stockMovements" ||
+        // Staff-only as well. Asked for anyway, the rules refused them on every
+        // client sign-in — nothing leaked, but each refusal was a console error
+        // and a round trip the client's first screen waited behind.
+        col === "diamondPackets" ||
+        col === "diamondSales"
       )
         continue;
       if (col === "messages") continue; // handled specially (two-sided)
