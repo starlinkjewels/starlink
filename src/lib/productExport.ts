@@ -1,8 +1,9 @@
 import {
-  fmtDate, fmtMoney, orderTotal, totalAdvance, balanceDue, mainDiamondShape,
+  fmtDate, fmtMoney, orderTotal, totalAdvance, balanceDue, mainDiamondShape, costDataReady,
   CARAT_TO_GRAM, type DB, type Order, type ReadyStockItem,
 } from "@/lib/db";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { toast } from "sonner";
 import { orderProfit, recognisedSale, saleDate } from "@/lib/orderCost";
 
 /**
@@ -232,6 +233,12 @@ const BASIS: Record<string, string> = {
 };
 
 export function exportProfitCsv(db: DB, orders: Order[], name: string): void {
+  // A sheet saved now would carry costs missing whatever has not loaded yet,
+  // and nothing on it would say so.
+  if (!costDataReady()) {
+    toast.error("Still loading cost data — try again in a moment.");
+    return;
+  }
   const sum = (ls: { amountInr: number }[]) => Math.round(ls.reduce((s, l) => s + l.amountInr, 0) * 100) / 100;
   downloadCsv(`${name}-PROFIT-ADMIN`, PROFIT_HEAD, orders.map(o => {
     const p = orderProfit(db, o);

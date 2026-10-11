@@ -2108,6 +2108,27 @@ async function persist() {
  * write the rules refuse is kept only on this device and gone on reload.
  */
 let adminStoreLive = false;
+/** Whether this session is the admin's — decides which collections it waits on. */
+let adminScope = false;
+
+/** Collections that have given their first answer this session. */
+const loadedCols = new Set<string>();
+
+/**
+ * Whether everything a cost is worked out from has arrived.
+ *
+ * Only the people, clients and orders hold the door when the app opens; the
+ * rest stream in behind. Worked out in that gap, an order's cost came to
+ * nothing for a second or two and its profit to the whole selling price — a
+ * wrong figure, shown with confidence, to whoever glanced at it first. Profit
+ * waits for this instead.
+ */
+export function costDataReady(): boolean {
+  const need = ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "expenses", "clientReceipts", "readyStock", "lockers"];
+  if (adminScope) need.push("adminRecords");
+  return need.every(c => loadedCols.has(c));
+}
+
 export function adminStoreReady(): boolean {
   return adminStoreLive && !deniedCols.has("adminRecords");
 }
@@ -2340,6 +2361,8 @@ function subscribeAll(scope: Scope): Promise<void> {
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
   const amAdminScope = scope.kind === "full" && !!scope.admin;
   adminStoreLive = false;
+  adminScope = amAdminScope;
+  loadedCols.clear();
   for (const col of ARRAY_COLS) {
     // Requested by the admin and nobody else. The rules would refuse it to
     // anyone else anyway; not asking at all means there is nothing to refuse.
@@ -2393,7 +2416,11 @@ function subscribeAll(scope: Scope): Promise<void> {
    * lands, which is what the listeners already do for every later change.
    */
   const corePending = new Set<string>(
-    names.filter((n) => n === "users" || n === "clients" || n === "orders" || n === SETTINGS_COL),
+    // The admin-only records are in it too, for the admin. They are a handful
+    // of documents, and until they have answered nothing knows whether the
+    // private store is live — so an admin who acted in the first second used
+    // to save cost figures back where everyone could read them.
+    names.filter((n) => n === "users" || n === "clients" || n === "orders" || n === SETTINGS_COL || n === "adminRecords"),
   );
 
   // How long the whole load actually takes, logged once everything is in.
@@ -2413,6 +2440,7 @@ function subscribeAll(scope: Scope): Promise<void> {
     const first = (name: string) => {
       pending.delete(name);
       corePending.delete(name);
+      loadedCols.add(name);
       // Open as soon as there is something to show. Everything else arrives
       // behind it and refreshes the screen as it does.
       if (!opened && corePending.size === 0) {
