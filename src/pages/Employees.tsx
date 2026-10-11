@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, flush, uid, type User } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, rolesStoreReady, type User } from "@/lib/db";
+import { STANDARD_STAFF } from "@/lib/permissions";
 import { RolesPanel, EmployeeAccessControls } from "@/components/RolesAccess";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
@@ -32,6 +33,11 @@ export function EmployeesPage() {
   // an email and password on them meant inventing a fake address, which then
   // occupies a login and cannot be reused for a real one.
   const [needsLogin, setNeedsLogin] = useState(true);
+  // What they may do once signed in: Standard staff, one of the custom roles,
+  // or a full admin — a partner in the business. Only offered once roles are
+  // live on the server, since until then the server would not honour an admin.
+  const [access, setAccess] = useState<string>(STANDARD_STAFF.id);
+  const rolesLive = rolesStoreReady();
   // Opening salary already paid before the app (migration) — optional.
   const [openingPaid, setOpeningPaid] = useState("");
   const [openingCurrency, setOpeningCurrency] = useState<"INR" | "USD">("INR");
@@ -67,10 +73,15 @@ export function EmployeesPage() {
       // Only create a sign-in account when they actually need one. A
       // salary-only record has no Auth user, no email and no password — it exists
       // to be paid and to appear in the salary ledger, nothing more.
+      const asAdmin = needsLogin && rolesLive && access === "admin";
+      const roleId = needsLogin && rolesLive && access !== "admin" && access !== STANDARD_STAFF.id
+        && (loadDb().roles ?? []).some(r => r.id === access) ? access : undefined;
+      if (asAdmin && !confirm(`Create ${f.name.trim()} as an admin?\n\nThey will be able to do everything — money, settings, employees, roles and other admins. Owners stay owners.`)) return;
       const authUid = needsLogin ? await createAuthUser(email, f.password) : undefined;
       const opAmt = Number(openingPaid);
       updateDb(d => d.users.push({
-        id: uid("u_"), role: "employee", status: "active", createdAt: new Date().toISOString(),
+        id: uid("u_"), role: asAdmin ? "admin" : "employee", status: "active", createdAt: new Date().toISOString(),
+        ...(roleId ? { roleId } : {}),
         authUid, username: email, email, password: "",
         name: f.name, phone: f.phone, department: f.department,
         openingPaid: opAmt > 0 ? opAmt : undefined,
@@ -81,10 +92,13 @@ export function EmployeesPage() {
       // saying it is done. It goes up just after the profile; close the tab in
       // between and the account can sign in to nothing.
       await flush();
-      toast.success(needsLogin ? "Employee created — they can sign in with their email & password" : "Employee added for salary — no login created");
+      toast.success(!needsLogin ? "Employee added for salary — no login created"
+        : asAdmin ? "Admin created — they can sign in and do everything"
+        : "Employee created — they can sign in with their email & password");
       setOpen(false);
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
       setNeedsLogin(true);
+      setAccess(STANDARD_STAFF.id);
       setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
     } catch (e) {
       toast.error(authErrorMessage(e));
@@ -160,6 +174,24 @@ export function EmployeesPage() {
                     className="rounded-xl mt-1" />
                 </div>
               ))}
+              {needsLogin && (
+                <div>
+                  <Label className="text-xs">Access</Label>
+                  <Select value={access} onValueChange={setAccess} disabled={!rolesLive}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={STANDARD_STAFF.id}>{STANDARD_STAFF.name}</SelectItem>
+                      {(db.roles ?? []).map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+                      <SelectItem value="admin">Admin — partner, can do everything</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">
+                    {!rolesLive ? "Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff."
+                      : access === "admin" ? "Full control, the same as you: money, settings, employees and roles. You can take it back later from their card."
+                      : "What they may see and do. You can change it any time from their card."}
+                  </p>
+                </div>
+              )}
               <div>
                 <Label className="text-xs">Department</Label>
                 <Select value={f.department} onValueChange={v => setF({ ...f, department: v })}>
