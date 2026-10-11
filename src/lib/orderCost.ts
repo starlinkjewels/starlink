@@ -94,7 +94,7 @@ export function stockAverageRate(db: DB, material: "gold" | "diamond", bucket: s
   return avg === null ? null : r2(avg);
 }
 
-export function orderCost(db: DB, order: Order): OrderCost {
+export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, missing: [], complete: true };
   const issuances = (db.materialIssuances ?? []).filter(i => i.orderId === order.id);
   const purchases = db.purchases ?? [];
@@ -180,6 +180,37 @@ export function orderCost(db: DB, order: Order): OrderCost {
       label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
       amountInr: r2(p.totalInr),
     });
+  }
+
+  // Sold from ready stock: the piece was made earlier, on its own stock-build
+  // order, and every rupee it cost was spent there. This order has no material
+  // or factory records of its own, so without this it reads as costing nothing
+  // and selling at a hundred per cent profit.
+  if (order.materialSourcing === "readyStock" && order.readyStockItemId && depth === 0) {
+    const item = (db.readyStock ?? []).find(i => i.id === order.readyStockItemId);
+    const sold = order.quantity || 1;
+    const name = item ? (item.sku ? `${item.sku} ${item.name}` : item.name) : "the stock piece";
+    const build = item && db.orders.find(o => o.readyStockCreatedId === item.id && o.id !== order.id);
+    const bc = build ? orderCost(db, build, depth + 1) : null;
+    const rate = db.settings.usdToInr ?? 0;
+    if (build && bc && bc.totalInr > 0) {
+      // A build can make several identical pieces; this order carries its share.
+      const pieces = build.quantity || 1;
+      out.other.push({
+        label: `${name} — made on ${build.orderNumber}${pieces > 1 ? `, ${sold} of ${pieces} pieces` : ""}`,
+        amountInr: r2((bc.totalInr / pieces) * sold),
+      });
+      for (const m of bc.missing) out.missing.push({ label: m.label, reason: `on ${build.orderNumber}: ${m.reason}` });
+    } else if (item?.cost != null && item.cost > 0) {
+      // The cost typed on the stock item, in dollars like its price.
+      if (rate > 0) {
+        out.other.push({ label: `${name} — cost entered on the stock item ($${item.cost}${sold > 1 ? ` × ${sold}` : ""})`, amountInr: r2(item.cost * sold * rate) });
+      } else {
+        out.missing.push({ label: name, reason: "its cost is entered in dollars — set the exchange rate to count it" });
+      }
+    } else {
+      out.missing.push({ label: name, reason: "sold from ready stock, and the piece has no cost recorded on its build or on the stock item" });
+    }
   }
 
   // The factory's bill — making, CAD, diamond setting, any metal the factory
