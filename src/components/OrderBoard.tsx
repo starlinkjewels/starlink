@@ -163,7 +163,9 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
       </div>
 
       <div className="flex gap-3 overflow-x-auto pb-3 -mx-1 px-1 snap-x">
-        {cols.map(col => {
+        {/* "Order Submitted" is done the moment an order is placed, so nothing
+            waits in it — shown only if an older order somehow does. */}
+        {cols.filter(c => c !== "Order Submitted" || (byCol.get(c)?.length ?? 0) > 0).map(col => {
           const list = byCol.get(col) ?? [];
           const shown = col === DONE_COLUMN && !allDone ? list.slice(0, DONE_SHOWN) : list;
           const verdict = dragging ? planMove(dragging, col) : null;
