@@ -1424,23 +1424,6 @@ export function cashbackPercentFor(d: DB, client: Client | undefined): number {
   return pct > 0 ? pct : 0;
 }
 
-/**
- * Apply `amount` across the given orders, OLDEST bill first (FIFO), by pushing a
- * payment (advance) entry onto each order until its balance is cleared. Mutates
- * the passed order objects (call inside updateDb). Returns the unallocated
- * leftover — which the caller should carry forward as client credit.
- */
-export function allocatePaymentFIFO(
-  orders: Order[],
-  amount: number,
-  recordedBy: string,
-  at: string,
-  note = "Payment received",
-  fromCredit = false,
-): number {
-  const oldestFirst = [...orders].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
-  return allocateInOrder(oldestFirst, amount, recordedBy, at, note, fromCredit);
-}
 
 /**
  * Fill the given orders IN THE ORDER GIVEN, each up to its balance. Separate
@@ -1524,32 +1507,6 @@ function billingOrder(d: DB, clientId: string, firstInvoiceId?: string): Order[]
     .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
   return [...out, ...rest];
 }
-
-/**
- * Apply money the client has sent AGAINST ONE INVOICE. That invoice is cleared
- * first; whatever is left rolls on to their NEXT invoice, then the one after
- * that, then any uninvoiced work, and only then to credit.
- *
- * Plain FIFO across every order is right for "here is some money"; it is wrong
- * for "here is the payment for invoice 0001", which would land on older
- * unbilled work and leave the invoice the client just paid still showing as
- * pending. Returns the leftover, for the caller to store as client credit.
- */
-export function allocateToInvoice(
-  d: DB,
-  invoiceId: string,
-  amount: number,
-  recordedBy: string,
-  at: string,
-  note?: string,
-): number {
-  const inv = (d.invoices ?? []).find(i => i.id === invoiceId);
-  if (!inv) return amount;
-  const label = note ?? `Payment — invoice ${inv.number}`;
-  const targets = billingOrder(d, inv.clientId, invoiceId);
-  return allocateInOrder(targets, amount, recordedBy, at, label);
-}
-
 
 /** The orders billed on one invoice, skipping any since rejected. */
 function invoiceOrders(d: DB, invoiceId: string): Order[] {

@@ -117,7 +117,14 @@ export function InvoicesPage() {
     // Claim the number in the database first, so two people invoicing at the same
     // moment can never be handed the same invoice number.
     const number = await reserveInvoiceNumber(db.invoices || []);
-    updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString(), number); });
+    try {
+      updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString(), number); });
+    } catch (e) {
+      // The write blew up, so the number was never used. Give it back before
+      // the error goes up, or the sequence skips one for good.
+      await releaseInvoiceNumber(number);
+      throw e;
+    }
     if (created) {
       toast.success(`Invoice ${(created as Invoice).number} created — ${ids.length} order${ids.length > 1 ? "s" : ""}`);
       setSelected(new Set());

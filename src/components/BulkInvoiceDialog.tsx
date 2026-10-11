@@ -40,11 +40,18 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
       // same moment can never be handed the same one.
       const number = await reserveInvoiceNumber(db.invoices || []);
       let created: Invoice | null = null;
-      updateDb(d => {
-        created = createInvoiceFromOrders(
-          d, plan.clientId!, plan.go.map(o => o.id), new Date().toISOString(), number,
-        );
-      });
+      try {
+        updateDb(d => {
+          created = createInvoiceFromOrders(
+            d, plan.clientId!, plan.go.map(o => o.id), new Date().toISOString(), number,
+          );
+        });
+      } catch (e) {
+        // Nothing was written, so the number is unused — hand it back before
+        // the error goes up, or the sequence skips one for good.
+        await releaseInvoiceNumber(number);
+        throw e;
+      }
       if (created) {
         toast.success(`Invoice ${(created as Invoice).number} created — ${plan.go.length} order${plan.go.length !== 1 ? "s" : ""} · ${fmtMoney(plan.total)}`);
         onDone();
