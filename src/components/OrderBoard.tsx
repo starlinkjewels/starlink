@@ -1,6 +1,9 @@
 import { useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Lock, Package, CalendarClock, FileSignature, Truck, PackageCheck, CheckCircle2, BadgeCheck, Boxes } from "lucide-react";
+import { Lock, Package, CalendarClock, FileSignature, Truck, PackageCheck, CheckCircle2, BadgeCheck, Boxes, ChevronDown, ArrowRight, Undo2 } from "lucide-react";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
@@ -9,6 +12,7 @@ import { loadDb, updateDbAs, fmtDate, type Order } from "@/lib/db";
 import { sendMail, orderApprovedEmail } from "@/lib/email";
 import {
   DONE_COLUMN, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission,
+  type MovePlan,
 } from "@/lib/stages";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 
@@ -26,6 +30,18 @@ function StageIcon({ step }: { step: string }) {
   if (k === "readyStock") return <Boxes className={cls} />;
   if (k === "done") return <CheckCircle2 className={cls} />;
   return null;
+}
+
+/** What choosing this move will do, in a few words — shown under it in the menu. */
+function moveHint(plan: MovePlan): string {
+  const parts: string[] = [];
+  if (plan.approve) parts.push("Approve & tell the client");
+  if (plan.complete.length) parts.push(`Mark ${plan.complete.length === 1 ? "1 stage" : `${plan.complete.length} stages`} done`);
+  if (plan.then === "dispatch") parts.push("opens the dispatch form");
+  else if (plan.then === "deliver") parts.push("opens the delivery form");
+  else if (plan.then) parts.push("finish it on the order");
+  const s = parts.join(", then ");
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 /** What a column is waiting for, in a few words. */
@@ -199,7 +215,13 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                   const client = db.clients.find(c => c.id === o.clientId);
                   const img = o.cadImage || o.images?.[0];
                   const overdue = col !== DONE_COLUMN && !!o.expectedDelivery && o.expectedDelivery.slice(0, 10) < today;
-                  const targets = cols.filter(c => c !== col && (c === DONE_COLUMN || o.timeline.some(t => t.step === c)));
+                  // Only moves that would actually go through — a refused one is not offered.
+                  const targets = locked ? [] : cols
+                    .filter(c => c !== col && (c === DONE_COLUMN || o.timeline.some(t => t.step === c)))
+                    .map(c => ({ col: c, plan: planMove(o, c) }))
+                    .filter(t => !t.plan.none && !t.plan.blocked);
+                  const ahead = targets.filter(t => t.plan.revertFrom == null);
+                  const back = targets.filter(t => t.plan.revertFrom != null);
                   return (
                     <div key={o.id}
                       draggable={!locked}
@@ -228,13 +250,38 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                         <span className="ml-auto">
                           {locked ? (
                             <span title={locked} className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground"><Lock className="h-3 w-3" /></span>
-                          ) : (
-                            <select value="" onChange={e => { const t = e.target.value; e.target.value = ""; if (t) move(o.id, t); }}
-                              aria-label={`Move ${o.orderNumber} to another stage`}
-                              className="h-6 max-w-[7.5rem] rounded-md border border-border/70 bg-white px-1 text-[10px] text-muted-foreground">
-                              <option value="">Move to…</option>
-                              {targets.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
+                          ) : targets.length > 0 && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button type="button" aria-label={`Move ${o.orderNumber} to another stage`}
+                                  className="h-7 inline-flex items-center gap-1 rounded-lg border border-border/70 bg-white px-2 text-[11px] font-medium text-muted-foreground hover:text-primary hover:border-primary/40 hover:bg-primary/5 transition-colors data-[state=open]:border-primary/50 data-[state=open]:text-primary">
+                                  Move to <ChevronDown className="h-3 w-3" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-60 rounded-xl p-1.5">
+                                {ahead.length > 0 && <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2 py-1">Move ahead</DropdownMenuLabel>}
+                                {ahead.map(t => (
+                                  <DropdownMenuItem key={t.col} onSelect={() => move(o.id, t.col)} className="rounded-lg px-2 py-1.5 cursor-pointer gap-2 items-start">
+                                    <span className="mt-0.5 text-primary"><StageIcon step={t.col} />{stageKind(t.col) === "plain" && t.col !== DONE_COLUMN && <ArrowRight className="h-3.5 w-3.5" />}</span>
+                                    <span className="min-w-0">
+                                      <span className="block text-xs font-medium text-brand-dark">{t.col}</span>
+                                      <span className="block text-[10px] text-muted-foreground">{moveHint(t.plan)}</span>
+                                    </span>
+                                  </DropdownMenuItem>
+                                ))}
+                                {ahead.length > 0 && back.length > 0 && <DropdownMenuSeparator />}
+                                {back.length > 0 && <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2 py-1">Move back</DropdownMenuLabel>}
+                                {back.map(t => (
+                                  <DropdownMenuItem key={t.col} onSelect={() => move(o.id, t.col)} className="rounded-lg px-2 py-1.5 cursor-pointer gap-2 items-start">
+                                    <span className="mt-0.5 text-muted-foreground"><Undo2 className="h-3.5 w-3.5" /></span>
+                                    <span className="min-w-0">
+                                      <span className="block text-xs font-medium text-brand-dark">{t.col}</span>
+                                      <span className="block text-[10px] text-muted-foreground">Re-opens {t.plan.names.join(", ")}</span>
+                                    </span>
+                                  </DropdownMenuItem>
+                                ))}
+                              </DropdownMenuContent>
+                            </DropdownMenu>
                           )}
                         </span>
                       </div>
