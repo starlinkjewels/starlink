@@ -577,9 +577,9 @@
    ══════════════════════════════════════════════════════════════════════ */
 
 /* Card grids: a column for every minimum card width that fits. */
-@utility grid-auto-cards { grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr)); }
-@utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(15.5rem, 100%), 1fr)); }
-@utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11.5rem, 100%), 1fr)); }
+@utility grid-auto-cards { grid-template-columns: repeat(auto-fill, minmax(min(18.5rem, 100%), 1fr)); }
+@utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); }
+@utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11rem, 100%), 1fr)); }
 
 /* The page frame (AppLayout). "Fit screen" by default; Settings → Appearance
    → Page width can centre it at a comfortable reading width instead. */
