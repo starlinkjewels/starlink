@@ -1,9 +1,9 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { fmtMoney, type DB, type Order } from "@/lib/db";
+import { fmtMoney, costDataReady, type DB, type Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { orderProfit, inProfitReport, exchangeDifference, type CostLine } from "@/lib/orderCost";
-import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown } from "lucide-react";
+import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown, Loader2 } from "lucide-react";
 
 /**
  * Cost, selling price and profit for one order. ADMIN ONLY — the caller must
@@ -15,6 +15,18 @@ import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown } from "luci
  */
 export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
   const [open, setOpen] = useState(false);
+  // Until the purchases, issuances and the rest have arrived, a cost worked out
+  // now would be too low and the profit too high. Say it is coming instead.
+  if (!costDataReady()) {
+    return (
+      <div className="card-luxe p-6 border-amber-500/30">
+        <h3 className="font-display text-lg text-brand-dark">Cost &amp; Profit</h3>
+        <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1.5">
+          <Loader2 className="h-3.5 w-3.5 animate-spin" /> Working out the cost…
+        </p>
+      </div>
+    );
+  }
   const p = orderProfit(db, order);
   const { cost } = p;
   const rateSet = p.costUsd !== null;
@@ -181,6 +193,9 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
  */
 export function OrderProfitBadge({ db, order, className = "" }: { db: DB; order: Order; className?: string }) {
   if (order.status === "Rejected") return null;
+  // A badge worked out before the cost data has landed would claim a profit
+  // the order never made. Nothing is better than that.
+  if (!costDataReady()) return null;
   const p = orderProfit(db, order);
   const finished = inProfitReport(order);
   const le = p.cost.complete ? "" : "≤ ";

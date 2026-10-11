@@ -7,6 +7,7 @@ import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal } from "@/lib/orderCost";
 import { exportProfitCsv } from "@/lib/productExport";
 import { useDbVersion } from "@/hooks/useDb";
+import { costDataReady } from "@/lib/db";
 import { FreightBacklog } from "@/components/FreightBacklog";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
@@ -1257,7 +1258,13 @@ export function ReportsPage() {
       )}
 
       {/* ── Profit Report — admin only ── */}
-      {isAdmin && profit && (
+      {isAdmin && profit && !costDataReady() && (
+        <div className="card-luxe p-4 sm:p-5 border-amber-500/30">
+          <h3 className="font-semibold text-brand-dark text-sm sm:text-base">Profit &amp; Loss</h3>
+          <p className="text-xs text-muted-foreground mt-1">Working out costs… the figures appear as soon as every purchase and charge has loaded.</p>
+        </div>
+      )}
+      {isAdmin && profit && costDataReady() && (
         <div className="card-luxe p-4 sm:p-5 space-y-4 border-amber-500/30">
           <div className="flex items-start justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
