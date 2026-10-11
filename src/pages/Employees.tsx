@@ -4,7 +4,7 @@ import { loadDb, updateDb, flush, uid, rolesStoreReady, type User } from "@/lib/
 import { STANDARD_STAFF } from "@/lib/permissions";
 import { RolesPanel, EmployeeAccessControls } from "@/components/RolesAccess";
 import { useDb } from "@/hooks/useDb";
-import { auth, createAuthUser } from "@/lib/firebase";
+import { auth, createAuthUser, isAdminEmail } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
@@ -63,6 +63,9 @@ export function EmployeesPage() {
     const email = f.email.trim().toLowerCase();
     if (needsLogin) {
       if (!email || !f.password) { toast.error("Enter an email and password, or turn off the login"); return; }
+      // An owner's login is a permanent admin already — it exists, and adding it
+      // again would only make a second record for the same person.
+      if (isAdminEmail(email)) { toast.error("That is an owner's login — it is already a permanent admin and needs no record here. Use the partner's own email."); return; }
       if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
     } else if (email && loadDb().users.some(u => u.email.toLowerCase() === email)) {
       toast.error("That email is already in use"); return;
@@ -83,7 +86,9 @@ export function EmployeesPage() {
         id: uid("u_"), role: asAdmin ? "admin" : "employee", status: "active", createdAt: new Date().toISOString(),
         ...(roleId ? { roleId } : {}),
         authUid, username: email, email, password: "",
-        name: f.name, phone: f.phone, department: f.department,
+        // A department says where on the floor someone works; an admin partner
+        // runs the whole business, so they are not given one.
+        name: f.name, phone: f.phone, department: asAdmin ? undefined : f.department,
         openingPaid: opAmt > 0 ? opAmt : undefined,
         openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
         openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
@@ -192,13 +197,15 @@ export function EmployeesPage() {
                   </p>
                 </div>
               )}
-              <div>
-                <Label className="text-xs">Department</Label>
-                <Select value={f.department} onValueChange={v => setF({ ...f, department: v })}>
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
+              {!(needsLogin && rolesLive && access === "admin") && (
+                <div>
+                  <Label className="text-xs">Department</Label>
+                  <Select value={f.department} onValueChange={v => setF({ ...f, department: v })}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                    <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                  </Select>
+                </div>
+              )}
 
               {/* Opening salary already paid before the app (optional, migration) */}
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
@@ -259,7 +266,7 @@ export function EmployeesPage() {
                     {u.email || <span className="italic">Salary only — no login</span>}
                   </p>
                   <div className="flex items-center gap-2 mt-2.5">
-                    <span className={`text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{u.role === "admin" ? "Owner / Admin" : (u.department || "—")}</span>
+                    <span className={`text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{u.role === "admin" ? (isAdminEmail(u.email) ? "Owner" : "Admin · Partner") : (u.department || "—")}</span>
                     <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
                       <Users className="h-3 w-3" /> {clientCount(u.id)} client{clientCount(u.id) !== 1 ? "s" : ""}
                     </span>
