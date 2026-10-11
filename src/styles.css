@@ -599,7 +599,8 @@
 :root[data-ui="ivory"] .ui-dialog { --dlg-bg: oklch(0.992 0.006 85); }
 
 .ui-dialog.p-6 > .ui-dialog-header {
-  position: sticky; top: 0; z-index: 10;
+  /* Sticky offsets count from inside the dialog's padding, hence the -1.5rem. */
+  position: sticky; top: -1.5rem; z-index: 10;
   margin: -1.5rem -1.5rem 0;
   padding: 1.5rem 3.5rem 1rem 1.5rem; /* room on the right for the close button */
   background: var(--dlg-bg);
@@ -607,14 +608,11 @@
 }
 /* The last row of buttons — the dialog's actions — or a DialogFooter. A block
    that also holds fields is the dialog's body, not its footer. */
-.ui-dialog.p-6 > :is(div:has(+ .ui-dialog-close):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) {
-  position: sticky; bottom: 0; z-index: 10;
+.ui-dialog.p-6 > :is(div:has(+ .ui-dialog-close-wrap):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) {
+  position: sticky; bottom: calc(-1 * var(--dlg-pb)); z-index: 10;
   margin: 0 -1.5rem calc(-1 * var(--dlg-pb));
   padding: 1rem 1.5rem var(--dlg-pb);
   background: var(--dlg-bg);
   border-top: 1px solid var(--dlg-line);
 }
-:root[data-ui="glass"] .ui-dialog.p-6 > :is(.ui-dialog-header, div:has(+ .ui-dialog-close):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) { backdrop-filter: blur(20px) saturate(160%); }
-/* The close button stays in the corner while the dialog scrolls (the dialog
-   is moved into place with a transform, so "fixed" means fixed to it). */
-.ui-dialog > .ui-dialog-close { position: fixed; }
+:root[data-ui="glass"] .ui-dialog.p-6 > :is(.ui-dialog-header, div:has(+ .ui-dialog-close-wrap):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) { backdrop-filter: blur(20px) saturate(160%); }
