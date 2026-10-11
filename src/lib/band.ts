@@ -6,7 +6,7 @@
 // Order and a Ready Stock item via a normalised BandData shape.
 import { jsPDF } from "jspdf";
 import JsBarcode from "jsbarcode";
-import { orderTotal, fmtMoney, CARAT_TO_GRAM, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
+import { orderTotal, fmtMoney, CARAT_TO_GRAM, logEvent, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
 
 export type BandStyle = "tag" | "label";
 export type BandMode = "print" | "download";
@@ -94,6 +94,7 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
     doc.autoPrint();
     window.open(doc.output("bloburl") as unknown as string, "_blank");
   } else {
+    logEvent("print", `Printed barcode band ${d.code}`, { code: d.code });
     doc.save(`Band-${d.code}-${opts.style}.pdf`);
   }
 }

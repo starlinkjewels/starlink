@@ -112,6 +112,22 @@ service cloud.firestore {
     // a running integer.
     match /counters/{name} { allow read, write: if isActive(); }
 
+    // The activity log — append-only, and tamper-proof:
+    //  • anyone signed in and active may ADD an entry, but only in their own
+    //    name: actorUid must be the caller's own uid, so nobody can record an
+    //    action as if someone else did it;
+    //  • only an admin may READ it;
+    //  • nobody may EDIT an entry, except an admin marking it undone, and then
+    //    only the three "undone" fields — the record of what happened stays;
+    //  • nobody may DELETE an entry, admin included.
+    match /activityLog/{id} {
+      allow create: if isActive() && request.resource.data.actorUid == request.auth.uid;
+      allow read:   if isAdmin();
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['undoneAt', 'undoneBy', 'undoneByName']);
+      allow delete: if false;
+    }
+
     // Admin-only — what ready-stock pieces cost and the exchange rates that turn
     // rupee cost into profit. Not staff-only: employees are refused too. The app
     // does not even request this collection for anyone but the admin, so the
