@@ -65,9 +65,10 @@ export function KpiCard({ icon: Icon, label, value, sub, delta, goodWhenDown, to
         <span className={`h-8 w-8 rounded-xl grid place-items-center shrink-0 ${tones[tone]}`}><Icon className="h-4 w-4" /></span>
       </div>
       <p className="font-display text-2xl text-brand-dark leading-none truncate">{value}</p>
-      <div className="flex items-center justify-between gap-2 min-h-[14px]">
-        {sub ? <p className="text-[10px] text-muted-foreground truncate">{sub}</p> : <span />}
-        <Delta value={delta} goodWhenDown={goodWhenDown} />
+      {/* Stacked on a phone, side by side when there is room. */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 min-h-[14px]">
+        {sub ? <p className="text-[10px] text-muted-foreground truncate min-w-0">{sub}</p> : <span />}
+        <span className="shrink-0"><Delta value={delta} goodWhenDown={goodWhenDown} /></span>
       </div>
     </div>
   );
