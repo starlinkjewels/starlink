@@ -66,9 +66,10 @@ service cloud.firestore {
             && request.resource.data.status   == resource.data.status
             && request.resource.data.clientId == resource.data.clientId
             && request.resource.data.authUid  == resource.data.authUid
-            // Nor their own role. Read with get(): a field that is not there
+            // Nor their own role, or the companies they sell for. Read with get(): a field that is not there
             // fails the whole check, and most profiles have no roleId at all.
-            && request.resource.data.get('roleId', null) == resource.data.get('roleId', null));
+            && request.resource.data.get('roleId', null) == resource.data.get('roleId', null)
+            && request.resource.data.get('companyIds', null) == resource.data.get('companyIds', null));
       allow delete: if isAdmin() || (isStaff() && resource.data.role == 'client');
     }
 

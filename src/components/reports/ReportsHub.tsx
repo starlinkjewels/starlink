@@ -1,5 +1,6 @@
+import { companiesOf, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useMemo, useState } from "react";
-import { BarChart3, CalendarDays, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog, X } from "lucide-react";
+import { Building2, BarChart3, CalendarDays, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { currentUserOrders, costDataReady } from "@/lib/db";
@@ -37,6 +38,12 @@ export function ReportsHub() {
   // Employee-wise analysis — the admin's. An employee's own Reports already
   // cover only their own work, so they have nothing to choose here.
   const [employeeId, setEmployeeId] = useState("all");
+  // Which of our companies — shown once there is more than one.
+  const [companyId, setCompanyId] = useState("all");
+  const multiCo = hasCompanies(db.settings);
+  const coClients = useMemo(() => new Set(companyId === "all" ? [] : db.clients.filter(c => companyIdOfClient(c) === companyId).map(c => c.id)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [companyId, version]);
   const emp = isAdmin && employeeId !== "all" ? db.users.find(u => u.id === employeeId) : undefined;
   const [tab, setTabRaw] = useState<TabKey>(() => read("reports-tab", "overview"));
   const setPeriod = (p: Period) => { setPeriodRaw(p); write("reports-period", p); };
@@ -62,17 +69,20 @@ export function ReportsHub() {
     [emp?.id, version]);
   const empScope = emp ? (o: { assignedEmployeeId?: string; clientId: string }) => o.assignedEmployeeId === emp.id || empClients.has(o.clientId) : undefined;
   const orders = useMemo(
-    () => allOrders.filter(o => (clientId === "all" || o.clientId === clientId) && (!empScope || empScope(o))),
+    () => allOrders.filter(o => (clientId === "all" || o.clientId === clientId) && (!empScope || empScope(o))
+      && (companyId === "all" || coClients.has(o.clientId))),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [allOrders, clientId, emp?.id, empClients],
+    [allOrders, clientId, emp?.id, empClients, companyId, coClients],
   );
   // Whose money counts: the chosen client, or every client this employee looks after.
   const scopeClients = useMemo(() => {
     if (clientId !== "all") return new Set([clientId]);
-    if (!emp) return undefined;
-    return new Set([...empClients, ...orders.map(o => o.clientId)]);
+    if (!emp && companyId === "all") return undefined;
+    let ids = emp ? new Set([...empClients, ...orders.map(o => o.clientId)]) : new Set(db.clients.map(c => c.id));
+    if (companyId !== "all") ids = new Set([...ids].filter(id => coClients.has(id)));
+    return ids;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [clientId, emp?.id, empClients, orders]);
+  }, [clientId, emp?.id, empClients, orders, companyId, coClients]);
   const ctx: ReportCtx = {
     db, orders, period, prev: previousPeriod(period),
     withProfit: isAdmin && costDataReady(), isAdmin,
@@ -84,7 +94,11 @@ export function ReportsHub() {
       + (emp ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
   };
   const preset = presetOf(period);
+  const combinedScope = empScope || companyId !== "all"
+    ? (o: { assignedEmployeeId?: string; clientId: string }) => (!empScope || empScope(o)) && (companyId === "all" || coClients.has(o.clientId))
+    : undefined;
   const clients = [...db.clients]
+    .filter(c => companyId === "all" || coClients.has(c.id))
     .filter(c => !emp || empClients.has(c.id) || allOrders.some(o => o.clientId === c.id && empScope?.(o)))
     .sort((a, b) => a.companyName.localeCompare(b.companyName));
   const staff = db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive").sort((a, b) => a.name.localeCompare(b.name));
@@ -97,6 +111,7 @@ export function ReportsHub() {
           {periodLabel(period)}{ctx.prev ? ` · compared with ${periodLabel(ctx.prev)}` : ""}
           {clientId !== "all" ? ` · ${db.clients.find(c => c.id === clientId)?.companyName}` : ""}
           {emp ? ` · ${emp.name}'s work` : ""}
+          {companyId !== "all" ? ` · ${companyById(db.settings, companyId).name}` : ""}
         </p>
       </div>
 
@@ -119,8 +134,19 @@ export function ReportsHub() {
             <input type="date" value={period.to} min={period.from || undefined} onChange={e => setPeriod({ ...period, to: e.target.value })}
               aria-label="To date" className="h-9 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
+          {multiCo && (
+            <div className="w-full sm:w-48 sm:ml-auto">
+              <Select value={companyId} onValueChange={setCompanyId}>
+                <SelectTrigger className="h-9 rounded-lg text-xs" aria-label="Company"><Building2 className="h-4 w-4 text-primary shrink-0 mr-1" /><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All companies</SelectItem>
+                  {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {isAdmin && (
-            <div className="w-full sm:w-52 sm:ml-auto flex items-center gap-1.5">
+            <div className={`w-full sm:w-52 ${multiCo ? "" : "sm:ml-auto"} flex items-center gap-1.5`}>
               <Select value={employeeId} onValueChange={setEmployeeId}>
                 <SelectTrigger className="h-9 rounded-lg text-xs" aria-label="Employee"><UserCog className="h-4 w-4 text-primary shrink-0 mr-1" /><SelectValue /></SelectTrigger>
                 <SelectContent>
@@ -174,7 +200,7 @@ export function ReportsHub() {
               The company Profit &amp; Loss — running costs, exchange differences, net profit — is for the whole business, so it is not shown for one person. Their profit by client and by item is above.
             </p>
           )}
-          <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={empScope} scopeKey={emp?.id ?? ""} />
+          <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
         </>
       )}
       {activeTab === "clients" && <ClientsTab ctx={ctx} />}
@@ -182,17 +208,17 @@ export function ReportsHub() {
       {activeTab === "production" && (
         <>
           <ProductionTab ctx={ctx} />
-          <ReportSections embedded show={["speed", "stages"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={empScope} scopeKey={emp?.id ?? ""} />
+          <ReportSections embedded show={["speed", "stages"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
         </>
       )}
       {activeTab === "purchases" && (
         <>
           <PurchasesTab ctx={ctx} />
-          <ReportSections embedded show={["purchases", "payments"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={empScope} scopeKey={emp?.id ?? ""} />
+          <ReportSections embedded show={["purchases", "payments"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
         </>
       )}
       {activeTab === "orders" && (
-        <ReportSections embedded show={["orders"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={empScope} scopeKey={emp?.id ?? ""} />
+        <ReportSections embedded show={["orders"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
       )}
     </div>
   );

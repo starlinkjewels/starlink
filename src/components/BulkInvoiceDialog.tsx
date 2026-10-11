@@ -1,3 +1,4 @@
+import { companyIdOfClient } from "@/lib/companies";
 import { useMemo, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
@@ -38,7 +39,9 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
     try {
       // Claim the number in the database first, so two people invoicing at the
       // same moment can never be handed the same one.
-      const number = await reserveInvoiceNumber(db.invoices || []);
+      // Each company numbers its own invoices; the client's decides which series.
+      const companyId = companyIdOfClient(client);
+      const number = await reserveInvoiceNumber(db.invoices || [], db.settings, companyId);
       let created: Invoice | null = null;
       try {
         updateDb(d => {
@@ -49,7 +52,7 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
       } catch (e) {
         // Nothing was written, so the number is unused — hand it back before
         // the error goes up, or the sequence skips one for good.
-        await releaseInvoiceNumber(number);
+        await releaseInvoiceNumber(number, companyId);
         throw e;
       }
       if (created) {
@@ -58,7 +61,7 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
       } else {
         // Nothing written, so the number is unused — hand it back instead of
         // leaving a gap in the sequence.
-        await releaseInvoiceNumber(number);
+        await releaseInvoiceNumber(number, companyId);
         toast.error("Those orders are already invoiced");
       }
     } finally {

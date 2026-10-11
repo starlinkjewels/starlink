@@ -46,6 +46,9 @@ export interface User {
   /** The role an employee holds (StaffRole.id). Unset means Standard staff —
    *  exactly what every employee could do before roles. Ignored for admins. */
   roleId?: string;
+  /** The companies an employee sells for — the ones they may put a new client
+   *  under. Unset or empty = every company (all staff from before companies). */
+  companyIds?: string[];
   createdAt: string;
   // Firebase Auth uid — set only on the admin profile (admins authenticate via
   // Firebase Authentication). Used to match the profile independently of email.
@@ -81,6 +84,10 @@ export interface Client {
   password: string;
   status: "active" | "inactive";
   accountManagerId?: string;
+  /** Which of our companies sells to this client — its invoices, proformas and
+   *  statements carry that company's name, logo, bank and number series. Unset
+   *  = the first company (every client from before there was more than one). */
+  companyId?: string;
   createdAt: string;
   // Overpayment carried forward as advance credit — auto-applied (oldest bill
   // first) whenever a payment is recorded or "Apply Credit" is used.
@@ -514,6 +521,10 @@ export interface Invoice {
   previousNumber?: string;
   amount: number; // snapshot at creation; the UI always recomputes live from the orders
   paid: boolean;
+  /** The company that issued it — fixed when it is raised, so moving the client
+   *  to another company later never changes a bill already sent. Unset = the
+   *  first company (every invoice from before there was more than one). */
+  companyId?: string;
   createdAt: string;
 }
 
@@ -606,9 +617,13 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
     return s + orderTotal(o);
   }, 0);
   const allCleared = eligible.every(oid => balanceDue(d.orders.find(x => x.id === oid)!) <= 0);
+  // Issued by the company the client buys from, and fixed to it from now on.
+  // The first company is left unset, so its invoices keep the shape they always had.
+  const companyId = d.clients.find(c => c.id === clientId)?.companyId;
   const inv: Invoice = {
     id: uid("inv_"), orderId: eligible[0], orderIds: eligible, clientId,
     number: number || nextInvoiceNumber(d), amount, paid: allCleared, createdAt: at,
+    ...(companyId && companyId !== "main" ? { companyId } : {}),
   };
   d.invoices.push(inv);
   return inv;
@@ -738,6 +753,36 @@ export interface Share {
   expiresAt?: string; // ISO; empty/absent = never expires. After this, the public link redirects to the main site.
 }
 
+/**
+ * One of our companies — a separate business, often in another country, with
+ * its own name, branding, bank and invoice number series. The first company is
+ * not stored here: it is the business's own settings (company name, Invoice &
+ * Bill details), so everything from before there was more than one company is
+ * simply the first company's, with nothing to migrate. See companies.ts.
+ */
+export interface Company {
+  id: string;
+  name: string;
+  /** Printed after the name where the bill is signed — INC, LLC, LTD, PVT LTD. */
+  legalSuffix?: string;
+  country?: string;
+  /** For display on its documents — billing itself stays in dollars. */
+  currency?: string;
+  /** Before every invoice number of this company: "SJD" → SJD-0001. */
+  invoicePrefix: string;
+  logoUrl?: string;
+  address1?: string; address2?: string; address3?: string;
+  tel?: string; primary?: string; email?: string; website?: string;
+  taxLabel?: string; taxId?: string;
+  terms?: string;
+  qr1?: string; qr2?: string; stamp?: string;
+  bankImage1?: string; bankImage2?: string;
+  /** Bank / wire details as text, printed when there are no bank images. */
+  bankText?: string;
+  active?: boolean;
+  createdAt: string;
+}
+
 export interface Settings {
   companyName: string;
   currency: string;
@@ -771,6 +816,16 @@ export interface Settings {
    *  client id is public by design and is useless without the authorised origin
    *  that pins it to this app. */
   googleClientId?: string;
+  /** Our other companies — the first company is these settings themselves. */
+  companies?: Company[];
+  /** The first company's extras, alongside its Invoice & Bill details. */
+  companyLegalSuffix?: string; // default "INC"
+  companyLogoUrl?: string;     // default the Starlink logo
+  companyCountry?: string;
+  invoiceTaxLabel?: string;
+  invoiceTaxId?: string;
+  invoiceBankText?: string;
+  invoiceWebsite?: string;
   // Invoice branding
   invoiceAddress1?: string; // Street line
   invoiceAddress2?: string; // City / area

@@ -1,3 +1,4 @@
+import { companiesOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
@@ -112,6 +113,9 @@ export function OrdersPage() {
   // The admin can look at one person's orders: assigned to them, or for a
   // client they manage — the same rule as their own Orders page.
   const [employeeFilter, setEmployeeFilter] = useState<string>("all");
+  // Which of our companies — shown once there is more than one.
+  const [companyFilter, setCompanyFilter] = useState<string>("all");
+  const multiCo = hasCompanies(db.settings);
   const isStaff = user!.role !== "client";
   const can = useCan();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
@@ -135,6 +139,7 @@ export function OrdersPage() {
     else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
+    if (companyFilter !== "all") list = list.filter(o => companyIdOfClient(db.clients.find(c => c.id === o.clientId)) === companyFilter);
     if (employeeFilter !== "all" && user!.role === "admin") {
       const managed = new Set(db.clients.filter(c => c.accountManagerId === employeeFilter).map(c => c.id));
       list = list.filter(o => o.assignedEmployeeId === employeeFilter || managed.has(o.clientId));
@@ -152,7 +157,7 @@ export function OrdersPage() {
     ));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter]);
+  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
@@ -251,6 +256,18 @@ export function OrdersPage() {
               <SelectItem value="all">All clients</SelectItem>
               {[...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c =>
                 <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
+
+        {isStaff && multiCo && (
+          <Select value={companyFilter} onValueChange={setCompanyFilter}>
+            <SelectTrigger className="flex-1 sm:flex-none sm:w-48 h-10 rounded-lg text-sm" aria-label="Company">
+              <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All companies</SelectItem>
+              {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
             </SelectContent>
           </Select>
         )}

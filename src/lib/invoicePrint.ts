@@ -1,5 +1,6 @@
 import type { Order, Client, Settings } from "./db";
-import { totalAdvance, orderTotal, balanceDue, logEvent } from "./db";
+import { totalAdvance, orderTotal, balanceDue, logEvent, loadDb } from "./db";
+import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
 
 function dd(n: number) { return String(n).padStart(2, "0"); }
@@ -66,6 +67,8 @@ function itemRowHtml(sr: number, order: Order, mainShape?: string): string {
       </tr>`;
 }
 
+const esc = (t: string) => t.replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[ch]!));
+
 const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></td><td class="c"></td><td class="c"></td><td class="c"></td><td class="c"></td></tr>`;
 
 /** Client-provided bank/wire details tables, uploaded as images (Settings → Invoice /
@@ -76,6 +79,10 @@ const BLANK_ROW = `<tr class="item-row"><td class="c">&nbsp;</td><td></td><td></
  *  can never change a single row's height, no matter how tall the image is. */
 function bankImagesHtml(settings: Settings): string {
   const imgs = [settings.bankDetailsImage1, settings.bankDetailsImage2].filter((s): s is string => !!s);
+  if (!imgs.length && settings.invoiceBankText) {
+    // A company with its wire details typed in rather than uploaded as a picture.
+    return `<div style="position:absolute;left:0;bottom:0;max-width:260px;font-size:9.5px;line-height:1.45;white-space:pre-line;border:1px solid #ccc;padding:6px 8px;">${esc(settings.invoiceBankText)}</div>`;
+  }
   if (!imgs.length) return "";
   return `<div style="position:absolute;left:0;bottom:0;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
     ${imgs.map(src => `<img src="${src}" style="max-width:190px;max-height:130px;object-fit:contain;" />`).join("\n    ")}
@@ -138,6 +145,9 @@ function buildInvoiceDoc(opts: {
   draft?: boolean;
 }): string {
   const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft } = opts;
+  // The first company prints as it always has, defaults and all; another
+  // company prints only what it has been given.
+  const isMain = ((settings as Partial<BrandSettings>).brandCompanyId ?? MAIN_COMPANY_ID) === MAIN_COMPANY_ID;
 
   /* QR / stamp placeholders — vertical rectangle so a QR-code-plus-logo image
      (Venmo, Zelle, etc.) scales proportionally instead of being squashed into a square. */
@@ -324,14 +334,16 @@ function buildInvoiceDoc(opts: {
 
   <!-- Header -->
   <div class="hdr">
-    <img src="/starlink-logo.png" alt="Starlink Jewels" class="logo" />
+    <img src="${settings.companyLogoUrl || "/starlink-logo.png"}" alt="${esc(settings.companyName || "Starlink Jewels")}" class="logo" />
     <div class="addr">
-      ${settings.invoiceAddress1 || "55 JOHN ST"}<br/>
-      ${settings.invoiceAddress2 || "EAST RUTHERFORD"}<br/>
-      ${settings.invoiceAddress3 || "NEW JERSEY 07073"}<br/>
+      ${isMain ? (settings.invoiceAddress1 || "55 JOHN ST") : esc(settings.invoiceAddress1 || "")}<br/>
+      ${isMain ? (settings.invoiceAddress2 || "EAST RUTHERFORD") : esc(settings.invoiceAddress2 || "")}<br/>
+      ${isMain ? (settings.invoiceAddress3 || "NEW JERSEY 07073") : esc(settings.invoiceAddress3 || "")}<br/>
       ${settings.invoiceTel ? "Tel No: " + settings.invoiceTel + "<br/>" : ""}
       ${settings.invoicePrimary ? "Primary: " + settings.invoicePrimary + "<br/>" : ""}
-      ${settings.invoiceEmail ? "Email: " + settings.invoiceEmail : ""}
+      ${settings.invoiceEmail ? "Email: " + settings.invoiceEmail + (settings.invoiceWebsite || settings.invoiceTaxId ? "<br/>" : "") : ""}
+      ${settings.invoiceWebsite ? esc(settings.invoiceWebsite) + (settings.invoiceTaxId ? "<br/>" : "") : ""}
+      ${settings.invoiceTaxId ? `${esc(settings.invoiceTaxLabel || "Tax ID")}: ${esc(settings.invoiceTaxId)}` : ""}
     </div>
   </div>
 
@@ -407,7 +419,7 @@ function buildInvoiceDoc(opts: {
     </div>
 
     <div class="f-right">
-      <div class="for-co">${(settings.companyName || "STARLINK JEWELS").toUpperCase()} INC</div>
+      <div class="for-co">${esc(`${(settings.companyName || "STARLINK JEWELS").toUpperCase()} ${(settings.companyLegalSuffix ?? "INC").toUpperCase()}`.trim())}</div>
       ${stampHtml}
       <div class="auth">Chop &amp; Authorized Signature</div>
     </div>
@@ -460,8 +472,11 @@ export function printInvoice(
   const ITEM_ROWS = 10;
   const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order, mainShape) : BLANK_ROW).join("\n");
 
+  // A raised invoice prints as the company that issued it; a proforma as the
+  // company the client buys from.
+  const brand = brandForDocument(loadDb(), { clientId: client?.id ?? order.clientId, invoiceNumber: draft ? undefined : invoiceNumber });
   const html = buildInvoiceDoc({
-    client, settings, invoiceNumber, draft,
+    client, settings: brand, invoiceNumber, draft,
     dateLabel: localDate(order.createdAt),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
@@ -498,8 +513,9 @@ export function printBatchInvoice(
     i < orders.length ? itemRowHtml(i + 1, orders[i], mainShapes?.[orders[i].id]) : BLANK_ROW
   ).join("\n");
 
+  const brand = brandForDocument(loadDb(), { clientId: client?.id ?? orders[0]?.clientId, invoiceNumber });
   const html = buildInvoiceDoc({
-    client, settings, invoiceNumber,
+    client, settings: brand, invoiceNumber,
     dateLabel: localDateStr(dateStr),
     itemRows,
     totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
