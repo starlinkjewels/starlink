@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtMoney, type DB, type Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { orderProfit, type CostLine } from "@/lib/orderCost";
+import { orderProfit, inProfitReport, type CostLine } from "@/lib/orderCost";
 import { TrendingUp, TrendingDown, Lock, AlertTriangle, ChevronDown } from "lucide-react";
 
 /**
@@ -128,5 +128,45 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         </p>
       )}
     </div>
+  );
+}
+
+/**
+ * The same figures, one line, for an order's card in the list. ADMIN ONLY —
+ * the caller gates it.
+ *
+ * Profit is only stated for finished work. Before the factory reports back
+ * its charge is not in yet, and a profit worked out without it would read
+ * high on every card in production — so those show what has been spent so far.
+ */
+export function OrderProfitBadge({ db, order, className = "" }: { db: DB; order: Order; className?: string }) {
+  if (order.status === "Rejected") return null;
+  const p = orderProfit(db, order);
+  const finished = inProfitReport(order);
+  const le = p.cost.complete ? "" : "≤ ";
+
+  // Stock builds and unfinished work: what has gone into it so far.
+  if (!finished) {
+    if (p.cost.totalInr <= 0) return null;
+    return (
+      <p className={`text-[11px] font-medium text-amber-700 truncate ${className}`} title="Admin only — cost recorded so far">
+        <Lock className="inline h-2.5 w-2.5 -mt-0.5 mr-0.5" />Cost so far {fmtMoneyInr(p.cost.totalInr)}
+      </p>
+    );
+  }
+  if (p.profitUsd === null) {
+    return (
+      <p className={`text-[11px] font-medium text-amber-700 truncate ${className}`} title="Admin only — set the exchange rate in Settings to see profit">
+        <Lock className="inline h-2.5 w-2.5 -mt-0.5 mr-0.5" />Cost {fmtMoneyInr(p.cost.totalInr)}
+      </p>
+    );
+  }
+  const neg = p.profitUsd < 0;
+  return (
+    <p className={`text-[11px] font-bold truncate ${neg ? "text-destructive" : "text-success"} ${className}`}
+      title={`Admin only — cost ${fmtMoneyInr(p.cost.totalInr)}${p.cost.complete ? "" : " (part not valued yet)"}`}>
+      <Lock className="inline h-2.5 w-2.5 -mt-0.5 mr-0.5" />
+      {neg ? "Loss" : "Profit"} {le}{fmtMoney(p.profitUsd)}{p.marginPct !== null ? ` · ${le}${p.marginPct}%` : ""}
+    </p>
   );
 }

@@ -13,6 +13,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
+import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
@@ -364,6 +365,7 @@ export function OrdersPage() {
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
                     : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
+                  {user!.role === "admin" && <OrderProfitBadge db={db} order={o} />}
                   <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
                   </div>
@@ -426,6 +428,7 @@ export function OrdersPage() {
                     {jobFinished(o) && (
                       <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
                     )}
+                    {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-0.5 text-xs" />}
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <StatusBadge status={o.status} />
