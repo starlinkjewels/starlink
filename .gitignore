@@ -33,3 +33,6 @@ dist-ssr
 .vercel
 .env*
 .tmp-patch/
+
+# Firebase CLI deploy cache — local, regenerated on every deploy
+.firebase/
