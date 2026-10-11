@@ -1245,8 +1245,28 @@ export interface DB {
   readyStock: ReadyStockItem[];
   diamondPackets: DiamondPacket[];
   diamondSales: DiamondSale[];
+  /** ADMIN ONLY — loaded for the admin alone and refused to everyone else by
+   *  the security rules. See AdminRecord. */
+  adminRecords: AdminRecord[];
   session: { userId: string | null };
 }
+
+/**
+ * Figures only the admin may see, kept where only the admin can read them.
+ *
+ * Hiding a number on screen is not the same as keeping it private: anything in
+ * a document a user can read is one browser console away from them. A ready-
+ * stock item's cost sat on the item, which every client can read to browse the
+ * shop — so every client could read what each piece cost. These live in their
+ * own collection, which the rules give to the admin and nobody else, and which
+ * is not even requested for anyone else.
+ *
+ *  • "fx"        — the dated ₹-to-$ rates that turn rupee cost into profit.
+ *  • "stockCost" — what one ready-stock piece cost, in dollars.
+ */
+export type AdminRecord =
+  | { id: "fx"; kind: "fx"; rates: { from: string; rate: number }[]; flat?: number }
+  | { id: string; kind: "stockCost"; itemId: string; cost: number };
 
 const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated on first run)
 
@@ -1300,6 +1320,7 @@ function emptyDb(): DB {
     readyStock: [],
     diamondPackets: [],
     diamondSales: [],
+    adminRecords: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -1745,7 +1766,8 @@ type ArrayCol =
   | "stockMovements"
   | "readyStock"
   | "diamondPackets"
-  | "diamondSales";
+  | "diamondSales"
+  | "adminRecords";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -1775,6 +1797,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "readyStock",
   "diamondPackets",
   "diamondSales",
+  "adminRecords",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
@@ -2062,8 +2085,9 @@ async function persist() {
         console.error(
           `[db] "${c}" was rejected by the security rules, so it will not be attempted again this session. `
           + `Nothing is lost — it stays on this device and goes up once the rules allow it. `
-          + `Run: firebase deploy --only firestore:rules (a collection added in the app but missing from `
-          + `firestore.rules does exactly this), then reload.`,
+          + `Run: firebase deploy --only firestore (a collection added in the app but missing from `
+          + `firestore.rules does exactly this), then reload. Not --only firestore:rules: with the `
+          + `named-database firebase.json that matches nothing and deploys nothing.`,
         );
       }
     }
@@ -2075,6 +2099,17 @@ async function persist() {
     });
     setPending(pendingCount - 1);
   }
+}
+
+/**
+ * Whether the admin-only records can actually be read and written — true once
+ * the security rules for them are deployed and the admin's listener has had a
+ * first answer. Until then everything stays where it always was, because a
+ * write the rules refuse is kept only on this device and gone on reload.
+ */
+let adminStoreLive = false;
+export function adminStoreReady(): boolean {
+  return adminStoreLive && !deniedCols.has("adminRecords");
 }
 
 /** Collections the rules refuse. Skipped for the rest of the session so one
@@ -2192,7 +2227,11 @@ let unsubscribers: Array<() => void> = [];
  *  • "client" — subscribe only to the client's own orders/invoices/messages/
  *               notifications/client-record (enforced identically by the rules).
  */
-export type Scope = { kind: "full" } | { kind: "client"; appId: string; clientId: string };
+export type Scope =
+  /** Staff. `admin` decides whether the admin-only records are requested at
+   *  all — an employee never asks for them, so never sees them. */
+  | { kind: "full"; admin?: boolean }
+  | { kind: "client"; appId: string; clientId: string };
 
 /**
  * Watch the signed-in user's own role-index doc and invoke `onRevoked` the
@@ -2299,7 +2338,12 @@ function subscribeAll(scope: Scope): Promise<void> {
 
   // Build the per-collection queries for this scope.
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
+  const amAdminScope = scope.kind === "full" && !!scope.admin;
+  adminStoreLive = false;
   for (const col of ARRAY_COLS) {
+    // Requested by the admin and nobody else. The rules would refuse it to
+    // anyone else anyway; not asking at all means there is nothing to refuse.
+    if (col === "adminRecords" && !amAdminScope) continue;
     if (client) {
       // Staff-only collections are never loaded for a client.
       if (
@@ -2404,6 +2448,9 @@ function subscribeAll(scope: Scope): Promise<void> {
         onSnapshot(
           q,
           (snap) => {
+            // The rules for the admin-only records are live: they can be
+            // written there from now on rather than in the old places.
+            if (col === "adminRecords") adminStoreLive = true;
             if (writePending[col]) {
               first(col);
               return;
@@ -2418,6 +2465,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           },
           (err) => {
             console.error(`[db] listener ${col} failed:`, err);
+            if (col === "adminRecords") adminStoreLive = false;
             first(col);
           },
         ),
@@ -2681,4 +2729,115 @@ export function mainDiamondShape(d: DB, orderId: string): string | undefined {
     }
   }
   return best?.shape;
+}
+
+/* ── Admin-only figures: where they are read from, and written to ─────────── */
+
+/**
+ * The dated exchange rates. From the admin-only record once the move has been
+ * made; until then from the settings document, where they were first kept.
+ */
+export function fxTableOf(d: DB): { rates: { from: string; rate: number }[]; flat?: number } {
+  const rec = (d.adminRecords ?? []).find(r => r.kind === "fx") as Extract<AdminRecord, { kind: "fx" }> | undefined;
+  if (rec) return { rates: rec.rates ?? [], flat: rec.flat };
+  return { rates: d.settings.fxRates ?? [], flat: d.settings.usdToInr };
+}
+
+/** What a ready-stock piece cost — the admin-only record first, the old field
+ *  on the item until it has been moved. */
+export function stockCostOf(d: DB, item: { id: string; cost?: number }): number | undefined {
+  const rec = (d.adminRecords ?? []).find(r => r.kind === "stockCost" && r.itemId === item.id) as
+    Extract<AdminRecord, { kind: "stockCost" }> | undefined;
+  return rec ? rec.cost : item.cost;
+}
+
+/**
+ * Save the rate table. Into the admin-only record when its rules are live;
+ * otherwise into settings as before — a write the rules refuse would be kept
+ * only on this device and lost on the next reload, which is worse than a rate
+ * staff could have read.
+ */
+export function writeFxTable(d: DB, rates: { from: string; rate: number }[], flat?: number): "private" | "settings" {
+  if (adminStoreReady()) {
+    if (!d.adminRecords) d.adminRecords = [];
+    const i = d.adminRecords.findIndex(r => r.kind === "fx");
+    const rec: AdminRecord = { id: "fx", kind: "fx", rates, ...(flat ? { flat } : {}) };
+    if (i >= 0) d.adminRecords[i] = rec; else d.adminRecords.push(rec);
+    return "private";
+  }
+  d.settings = { ...d.settings, fxRates: rates };
+  return "settings";
+}
+
+/** Save a ready-stock piece's cost, by the same rule. Undefined clears it. */
+export function writeStockCost(d: DB, itemId: string, cost: number | undefined): "private" | "settings" {
+  const item = d.readyStock.find(i => i.id === itemId);
+  if (adminStoreReady()) {
+    if (!d.adminRecords) d.adminRecords = [];
+    d.adminRecords = d.adminRecords.filter(r => !(r.kind === "stockCost" && r.itemId === itemId));
+    if (cost != null && cost > 0) d.adminRecords.push({ id: `rsc_${itemId}`, kind: "stockCost", itemId, cost });
+    // Nothing left on the item for anyone else to read.
+    if (item && item.cost !== undefined) delete item.cost;
+    return "private";
+  }
+  if (item) item.cost = cost;
+  return "settings";
+}
+
+/**
+ * Everything still sitting where others can read it: ready-stock costs on the
+ * items themselves, and the rates in settings. Counted, so the admin can see
+ * whether the move is still owed.
+ */
+export function exposedAdminFigures(d: DB): { stockCosts: number; rates: boolean } {
+  return {
+    stockCosts: d.readyStock.filter(i => i.cost != null).length,
+    rates: !!(d.settings.fxRates?.length || d.settings.usdToInr),
+  };
+}
+
+/**
+ * Copy every exposed figure into the admin-only records. Copying only — the
+ * originals are removed by stripExposedAdminFigures, and only once this copy is
+ * confirmed to have reached the server, so nothing can be lost in between.
+ */
+export function copyAdminFiguresToPrivate(d: DB): number {
+  if (!d.adminRecords) d.adminRecords = [];
+  let n = 0;
+  if (!d.adminRecords.some(r => r.kind === "fx") && (d.settings.fxRates?.length || d.settings.usdToInr)) {
+    d.adminRecords.push({ id: "fx", kind: "fx", rates: d.settings.fxRates ?? [], ...(d.settings.usdToInr ? { flat: d.settings.usdToInr } : {}) });
+    n++;
+  }
+  for (const item of d.readyStock) {
+    if (item.cost == null) continue;
+    if (d.adminRecords.some(r => r.kind === "stockCost" && r.itemId === item.id)) continue;
+    d.adminRecords.push({ id: `rsc_${item.id}`, kind: "stockCost", itemId: item.id, cost: item.cost });
+    n++;
+  }
+  return n;
+}
+
+/** Remove the exposed originals — but only those whose private copy exists. */
+export function stripExposedAdminFigures(d: DB): number {
+  let n = 0;
+  const priv = d.adminRecords ?? [];
+  if (priv.some(r => r.kind === "fx") && (d.settings.fxRates || d.settings.usdToInr)) {
+    const s = { ...d.settings };
+    delete s.fxRates;
+    delete s.usdToInr;
+    d.settings = s;
+    n++;
+  }
+  for (const item of d.readyStock) {
+    if (item.cost == null) continue;
+    if (!priv.some(r => r.kind === "stockCost" && r.itemId === item.id)) continue;
+    delete item.cost;
+    n++;
+  }
+  return n;
+}
+
+/** True when a collection's writes have been refused this session. */
+export function collectionRefused(col: string): boolean {
+  return deniedCols.has(col);
 }

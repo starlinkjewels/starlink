@@ -157,7 +157,11 @@ const STOCK_HEAD = [
 
 /** Cost is admin-only everywhere else in the app, so it is only appended for an
  *  admin — an employee's sheet must not be able to leak the margin. */
-export function exportReadyStockCsv(items: ReadyStockItem[], name: string, withCost: boolean): void {
+export function exportReadyStockCsv(
+  items: ReadyStockItem[], name: string, withCost: boolean,
+  /** Where each piece's cost is read from — the admin-only record once moved. */
+  costOf: (i: ReadyStockItem) => number | undefined = i => i.cost,
+): void {
   const head = withCost ? [...STOCK_HEAD, "Cost ($)", "Profit ($)"] : STOCK_HEAD;
   downloadCsv(name, head, items.map(i => {
     const row: (string | number)[] = [
@@ -166,7 +170,8 @@ export function exportReadyStockCsv(items: ReadyStockItem[], name: string, withC
       i.quantity, i.price, n3(i.price * i.quantity), i.location ?? "",
       i.quantity > 0 ? "Available" : "Sold out", fmtDate(i.createdAt),
     ];
-    if (withCost) row.push(i.cost ?? "", i.cost != null ? n3((i.price - i.cost) * i.quantity) : "");
+    const cost = withCost ? costOf(i) : undefined;
+    if (withCost) row.push(cost ?? "", cost != null ? n3((i.price - cost) * i.quantity) : "");
     return row;
   }));
 }

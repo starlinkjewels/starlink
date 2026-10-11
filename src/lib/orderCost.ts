@@ -1,4 +1,4 @@
-import { orderTotal, dayOf, type DB, type Order, type Purchase } from "@/lib/db";
+import { orderTotal, dayOf, fxTableOf, stockCostOf, type DB, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 
 const fmtRate = (n: number, unit: string) =>
@@ -55,7 +55,8 @@ export interface FxRate {
  * converted rather than converted at a guess.
  */
 export function rateOn(db: DB, iso: string): FxRate | null {
-  const table = [...(db.settings.fxRates ?? [])]
+  const fx = fxTableOf(db);
+  const table = [...fx.rates]
     .filter(r => r.rate > 0 && !!r.from)
     .sort((a, b) => a.from.localeCompare(b.from));
   if (table.length) {
@@ -66,7 +67,7 @@ export function rateOn(db: DB, iso: string): FxRate | null {
       ? { rate: pick.rate, basis: "dated", from: pick.from }
       : { rate: table[0].rate, basis: "earliest", from: table[0].from };
   }
-  const single = db.settings.usdToInr ?? 0;
+  const single = fx.flat ?? 0;
   return single > 0 ? { rate: single, basis: "single" } : null;
 }
 
@@ -254,10 +255,11 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
         amountInr: r2((bc.totalInr / pieces) * sold),
       });
       for (const m of bc.missing) out.missing.push({ label: m.label, reason: `on ${build.orderNumber}: ${m.reason}` });
-    } else if (item?.cost != null && item.cost > 0) {
+    } else if (item && (stockCostOf(db, item) ?? 0) > 0) {
       // The cost typed on the stock item, in dollars like its price.
+      const unitCost = stockCostOf(db, item)!;
       if (rate > 0) {
-        out.other.push({ label: `${name} — cost entered on the stock item ($${item.cost}${sold > 1 ? ` × ${sold}` : ""})`, amountInr: r2(item.cost * sold * rate) });
+        out.other.push({ label: `${name} — cost entered on the stock item ($${unitCost}${sold > 1 ? ` × ${sold}` : ""})`, amountInr: r2(unitCost * sold * rate) });
       } else {
         out.missing.push({ label: name, reason: "its cost is entered in dollars — set the exchange rate to count it" });
       }

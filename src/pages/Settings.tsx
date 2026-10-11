@@ -2,6 +2,11 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { releaseInvoiceNumber, resetSequence } from "@/lib/counters";
+import { useDbVersion } from "@/hooks/useDb";
+import {
+  fxTableOf, writeFxTable, adminStoreReady, exposedAdminFigures, copyAdminFiguresToPrivate,
+  stripExposedAdminFigures, collectionRefused, flush,
+} from "@/lib/db";
 import { GoogleDriveBackup } from "@/components/GoogleDriveBackup";
 import { duplicateOrderNumbers, renumberOrder } from "@/lib/orderNumbers";
 import { duplicateUsers, countReferences, mergeUsers } from "@/lib/mergeUsers";
@@ -102,7 +107,17 @@ export function SettingsPage() {
   // since (this is what wiped a saved locker and a live order). updateDb touches
   // the live cache in place and leaves all other data alone.
   const persistSettings = (msg: string) => {
-    updateDb(d => { d.settings = { ...db.settings }; });
+    updateDb(d => {
+      const s = { ...db.settings };
+      // Once the rates live in the admin-only record, this form's copy of the
+      // old ones must not be written back into settings, where every signed-in
+      // user can read them. The form may still hold them from before the move.
+      if ((d.adminRecords ?? []).some(r => r.kind === "fx")) {
+        delete s.fxRates;
+        delete s.usdToInr;
+      }
+      d.settings = s;
+    });
     toast.success(msg);
   };
   const save = () => persistSettings("Settings saved");
@@ -261,6 +276,9 @@ export function SettingsPage() {
       toast.error(e instanceof Error ? e.message : "Couldn't merge those accounts.");
     } finally { setMergingEmail(null); }
   };
+  // Re-draw when the data moves, so things saved straight to the live record
+  // — a new exchange rate, the result of the privacy move — show at once.
+  useDbVersion();
   const liveDb = loadDb();
   const duplicateGroups = useMemo(() => duplicateOrderNumbers(liveDb.orders), [liveDb.orders, dupScan]);
 
@@ -924,13 +942,16 @@ export function SettingsPage() {
                   not what it fetches today. Add a new rate whenever the bank rate moves enough to matter.
                 </p>
                 {(() => {
-                  const rates = [...(db.settings.fxRates ?? [])].sort((a, b) => b.from.localeCompare(a.from));
-                  // The form's copy and the live record move together. persistSettings
-                  // writes the whole form back, so a rate saved to one and not the
-                  // other would be wiped by the next "Save Pricing Rates".
+                  const table = fxTableOf(liveDb);
+                  const rates = [...table.rates].sort((a, b) => b.from.localeCompare(a.from));
+                  // Saved straight away, to the admin-only record when its rules are
+                  // live and to settings until then. When it lands in settings the
+                  // form's copy follows, or the next "Save Pricing Rates" — which
+                  // writes the whole form back — would put the old list back.
                   const commit = (next: { from: string; rate: number }[]) => {
-                    setDb({ ...db, settings: { ...db.settings, fxRates: next } });
-                    updateDb(d => { d.settings = { ...d.settings, fxRates: next }; });
+                    let where: "private" | "settings" = "settings";
+                    updateDb(d => { where = writeFxTable(d, next, fxTableOf(d).flat); });
+                    if (where === "settings") setDb(prev => ({ ...prev, settings: { ...prev.settings, fxRates: next } }));
                   };
                   return (
                     <>
@@ -947,7 +968,7 @@ export function SettingsPage() {
                                 <button
                                   onClick={() => {
                                     if (!confirm(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`)) return;
-                                    commit((db.settings.fxRates ?? []).filter(x => x.from !== r.from));
+                                    commit(table.rates.filter(x => x.from !== r.from));
                                     toast.success("Rate removed");
                                   }}
                                   className="text-muted-foreground hover:text-destructive" aria-label="Remove rate">
@@ -959,7 +980,7 @@ export function SettingsPage() {
                         </div>
                       ) : (
                         <p className="text-[11px] text-amber-700">
-                          No dated rates yet.{db.settings.usdToInr ? ` A flat rate of ₹${db.settings.usdToInr} is being used for every order until you add one.` : " Profit is not shown until one is added."}
+                          No dated rates yet.{table.flat ? ` A flat rate of ₹${table.flat} is being used for every order until you add one.` : " Profit is not shown until one is added."}
                         </p>
                       )}
                       <div className="flex flex-wrap items-end gap-2">
@@ -978,7 +999,7 @@ export function SettingsPage() {
                             if (!fxFrom) { toast.error("Pick the date the rate applies from"); return; }
                             if (!(rate > 0)) { toast.error("Enter the rate"); return; }
                             // One rate per day: entering a day again corrects it.
-                            const next = [...(db.settings.fxRates ?? []).filter(x => x.from !== fxFrom), { from: fxFrom, rate }];
+                            const next = [...table.rates.filter(x => x.from !== fxFrom), { from: fxFrom, rate }];
                             commit(next);
                             setFxRate("");
                             toast.success(`₹${rate} from ${fmtDate(fxFrom)} saved`);
@@ -991,6 +1012,63 @@ export function SettingsPage() {
                 })()}
               </div>
             )}
+
+            {/* ── Where the cost figures are kept — admin only ── */}
+            {isAdmin && (() => {
+              const ready = adminStoreReady();
+              const exposed = exposedAdminFigures(liveDb);
+              const owed = exposed.stockCosts > 0 || exposed.rates;
+              const move = async () => {
+                if (!confirm(
+                  "Move every ready-stock cost and the exchange rates into the admin-only store?\n\n"
+                  + "They are copied first and only removed from their old places once the copy has reached the server, "
+                  + "so nothing can be lost on the way. Afterwards no employee or client can read them, even from the raw data.",
+                )) return;
+                updateDb(d => { copyAdminFiguresToPrivate(d); });
+                await flush();
+                if (collectionRefused("adminRecords")) {
+                  toast.error("The server refused the admin-only store — nothing was moved. The security update has to be deployed first.");
+                  return;
+                }
+                let removed = 0;
+                updateDb(d => { removed = stripExposedAdminFigures(d); });
+                await flush();
+                // The form still holds the old rates; refresh it so "Save Pricing
+                // Rates" cannot write them back where they came from.
+                setDb(loadDb());
+                toast.success(`Moved — ${removed} figure${removed !== 1 ? "s are" : " is"} now admin-only`);
+              };
+              return (
+                <div className={`col-span-2 rounded-xl border p-3 text-xs ${!ready ? "border-border/60 bg-secondary/30" : owed ? "border-destructive/30 bg-destructive/5" : "border-success/30 bg-success/5"}`}>
+                  <p className="font-semibold text-brand-dark flex items-center gap-1.5 mb-1">
+                    <Lock className="h-3.5 w-3.5" /> Who can read your cost figures
+                  </p>
+                  {!ready ? (
+                    <p className="text-muted-foreground">
+                      The security update that keeps ready-stock costs and exchange rates admin-only is not live yet.
+                      Until it is deployed they stay where they are — rates readable by staff, and ready-stock costs
+                      readable by <span className="font-semibold text-destructive">clients too</span>, from the raw data even
+                      though the screens hide them.
+                    </p>
+                  ) : owed ? (
+                    <>
+                      <p className="text-muted-foreground">
+                        Still readable by others:{" "}
+                        {[
+                          exposed.stockCosts > 0 ? `${exposed.stockCosts} ready-stock cost${exposed.stockCosts !== 1 ? "s" : ""} (clients can read these)` : "",
+                          exposed.rates ? "the exchange rates (staff can read these)" : "",
+                        ].filter(Boolean).join(" and ")}.
+                      </p>
+                      <AsyncButton onClick={move} className="btn-hero rounded-xl h-8 text-xs mt-2">Make them admin-only</AsyncButton>
+                    </>
+                  ) : (
+                    <p className="text-success font-medium">
+                      All ready-stock costs and exchange rates are admin-only — no employee or client can read them.
+                    </p>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Default shipping charge */}
             <div className="space-y-1.5 col-span-2">

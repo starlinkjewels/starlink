@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, type ReadyStockItem, type Order } from "@/lib/db";
+import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, adminStoreReady, stockCostOf, writeStockCost, type ReadyStockItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
@@ -161,7 +161,7 @@ export function ReadyStockPage() {
       netWeight: item.netWeight ? String(item.netWeight) : "",
       diamondWeight: item.diamondWeight ? String(item.diamondWeight) : "",
       diamondType: item.diamondType || "Natural",
-      price: String(item.price), cost: item.cost != null ? String(item.cost) : "", quantity: String(item.quantity),
+      price: String(item.price), cost: stockCostOf(db, item) != null ? String(stockCostOf(db, item)) : "", quantity: String(item.quantity),
       sku: item.sku || "", location: item.location || "US", notes: item.notes || "",
     });
     setImages(item.images || []);
@@ -222,8 +222,10 @@ export function ReadyStockPage() {
           diamondWeight: Number(f.diamondWeight) || undefined,
           diamondType: Number(f.diamondWeight) > 0 ? f.diamondType : undefined,
           price, quantity,
-          // Cost is admin-only. A non-admin edit must never wipe an existing cost.
-          cost: isAdmin ? (Number(f.cost) > 0 ? Number(f.cost) : undefined) : (editingId ? d.readyStock.find(x => x.id === editingId)?.cost : undefined),
+          // Cost is admin-only, and once moved it is not on the item at all —
+          // it is written below, where only the admin can read it. Until then
+          // it stays here, and a non-admin edit must never wipe it.
+          cost: adminStoreReady() ? undefined : (editingId ? d.readyStock.find(x => x.id === editingId)?.cost : undefined),
           images: imageUrls,
           video: videoUrl,
           sku: f.sku.trim() || undefined,
@@ -238,6 +240,7 @@ export function ReadyStockPage() {
         } else {
           d.readyStock.unshift(base);
         }
+        if (isAdmin) writeStockCost(d, base.id, Number(f.cost) > 0 ? Number(f.cost) : undefined);
       });
       toast.success(editingId ? "Item updated" : "Item added to ready stock");
       setOpen(false);
@@ -442,7 +445,7 @@ export function ReadyStockPage() {
               className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileText className="h-4 w-4" /> PDF
             </button>
-            <button onClick={() => exportReadyStockCsv(exportItems, exportName(), isAdmin)}
+            <button onClick={() => exportReadyStockCsv(exportItems, exportName(), isAdmin, i => stockCostOf(db, i))}
               className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </button>
@@ -548,12 +551,12 @@ export function ReadyStockPage() {
                   </span>
                 )}
               </div>
-              {isAdmin && item.cost != null && (
+              {isAdmin && stockCostOf(db, item) != null && (
                 <p className="text-[11px] mt-1.5">
-                  <span className="text-muted-foreground">Cost {fmtMoney(item.cost)}</span>
+                  <span className="text-muted-foreground">Cost {fmtMoney(stockCostOf(db, item)!)}</span>
                   {" · "}
-                  <span className={`font-semibold ${item.price - item.cost >= 0 ? "text-success" : "text-destructive"}`}>
-                    {item.price - item.cost >= 0 ? "Profit" : "Loss"} {fmtMoney(Math.abs(item.price - item.cost))}
+                  <span className={`font-semibold ${item.price - stockCostOf(db, item)! >= 0 ? "text-success" : "text-destructive"}`}>
+                    {item.price - stockCostOf(db, item)! >= 0 ? "Profit" : "Loss"} {fmtMoney(Math.abs(item.price - stockCostOf(db, item)!))}
                   </span>
                 </p>
               )}
@@ -615,9 +618,9 @@ export function ReadyStockPage() {
               </div>
               <div className="text-right shrink-0">
                 <p className="font-display text-lg font-bold text-brand-dark">{fmtMoney(item.price)}</p>
-                {isAdmin && item.cost != null && (
-                  <p className={`text-[10px] font-medium ${item.price - item.cost >= 0 ? "text-success" : "text-destructive"}`}>
-                    {item.price - item.cost >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - item.cost))} {item.price - item.cost >= 0 ? "profit" : "loss"}
+                {isAdmin && stockCostOf(db, item) != null && (
+                  <p className={`text-[10px] font-medium ${item.price - stockCostOf(db, item)! >= 0 ? "text-success" : "text-destructive"}`}>
+                    {item.price - stockCostOf(db, item)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - stockCostOf(db, item)!))} {item.price - stockCostOf(db, item)! >= 0 ? "profit" : "loss"}
                   </p>
                 )}
                 {canManage ? (

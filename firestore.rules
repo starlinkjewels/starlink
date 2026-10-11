@@ -112,6 +112,12 @@ service cloud.firestore {
     // a running integer.
     match /counters/{name} { allow read, write: if isActive(); }
 
+    // Admin-only — what ready-stock pieces cost and the exchange rates that turn
+    // rupee cost into profit. Not staff-only: employees are refused too. The app
+    // does not even request this collection for anyone but the admin, so the
+    // refusal is a backstop, never something a working screen runs into.
+    match /adminRecords/{id} { allow read, write: if isAdmin(); }
+
     // Staff-only collections — clients never load or touch these.
     match /tasks/{id}    { allow read, write: if isStaff(); }
     match /expenses/{id} { allow read, write: if isStaff(); }
