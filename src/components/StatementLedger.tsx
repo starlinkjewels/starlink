@@ -1,7 +1,6 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { fmtDate } from "@/lib/db";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
+import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowDownCircle, ArrowUpCircle, Search, Download } from "lucide-react";
@@ -108,8 +107,11 @@ export function StatementLedger({
     });
   }, [rows, q, from, to, kind]);
 
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, pageSize);
   const active = !!q.trim() || !!from || !!to || kind !== "all";
+  // The last 15 days first, older entries as the reader scrolls; an opening
+  // balance always shows. Balances were worked out over every entry already.
+  const w = useRecentWindow(filtered, r => (r.pinned ? undefined : r.date), { filtered: active, resetKey: [q, from, to, kind] });
+  const paged = w.visible;
   const totalDebit = filtered.reduce((s, r) => s + r.debit, 0);
   const totalCredit = filtered.reduce((s, r) => s + r.credit, 0);
   // A salary ledger only ever pays out — an empty credit label drops the column
@@ -147,16 +149,16 @@ export function StatementLedger({
       <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
         <div className="relative flex-1 min-w-[180px]">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }}
+          <Input value={q} onChange={e => { setQ(e.target.value); }}
             placeholder="Search particulars or reference…" className="rounded-xl h-9 pl-9" />
         </div>
-        <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }}
+        <Input type="date" value={from} onChange={e => { setFrom(e.target.value); }}
           className="rounded-xl h-9 w-auto" />
         <span className="text-xs text-muted-foreground">to</span>
-        <Input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }}
+        <Input type="date" value={to} onChange={e => { setTo(e.target.value); }}
           className="rounded-xl h-9 w-auto" />
         {kinds.length > 1 && (
-          <Select value={kind} onValueChange={v => { setKind(v); setPage(1); }}>
+          <Select value={kind} onValueChange={v => { setKind(v); }}>
             <SelectTrigger className="h-9 rounded-xl w-auto min-w-[130px]"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
@@ -165,7 +167,7 @@ export function StatementLedger({
           </Select>
         )}
         {active && (
-          <button onClick={() => { setQ(""); setFrom(""); setTo(""); setKind("all"); setPage(1); }}
+          <button onClick={() => { setQ(""); setFrom(""); setTo(""); setKind("all"); }}
             className="text-xs text-primary hover:underline">Reset</button>
         )}
       </div>
@@ -228,10 +230,7 @@ export function StatementLedger({
         ))}
       </div>
 
-      <div className="px-5">
-        <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
-          label={filtered.length ? `Showing ${start + 1}–${end} of ${filtered.length}` : undefined} />
-      </div>
+      <LoadOlder w={w} />
     </div>
   );
 }

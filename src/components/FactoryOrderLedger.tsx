@@ -4,6 +4,7 @@ import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order,
 import { fmtMoneyInr, diamondFlow } from "@/lib/manufacturing";
 import { Input } from "@/components/ui/input";
 import { Search, Download } from "lucide-react";
+import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -285,6 +286,10 @@ export function FactoryOrderLedger({
   const hasOther = rows.some(r => r.otherIn);
   const hasQuote = rows.some(r => r.quotedUsd > 0);
   const active = !!q.trim() || !!from || !!to || only !== "all";
+  // The last 15 days first, older orders as the reader scrolls. The cards and
+  // the totals row below still count every row.
+  const w = useRecentWindow(filtered, r => r.date, { filtered: active, resetKey: [q, from, to, only] });
+
 
   const toggle = (id: string) =>
     setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -396,7 +401,7 @@ export function FactoryOrderLedger({
               <tr><td colSpan={15} className="px-5 py-10 text-center text-muted-foreground">
                 {active ? "No order matches that." : "Nothing issued to this factory yet."}
               </td></tr>
-            ) : filtered.map(r => {
+            ) : w.visible.map(r => {
               const goldBal = r.goldOut - r.goldIn;
               const drawnFromPool = !!r.goldFromPool && r.goldOut < 0.0005 && r.goldIn > 0.0005;
               const diaBal = r.diaOut - r.diaIn;
@@ -487,7 +492,7 @@ export function FactoryOrderLedger({
           {filtered.length > 0 && (
             <tfoot>
               <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
-                <td className="px-3 py-2" colSpan={4}>Totals{active ? " (filtered)" : ""}</td>
+                <td className="px-3 py-2" colSpan={4}>Totals{active ? " (filtered)" : ""}{w.hasMore ? ` — all ${filtered.length} orders` : ""}</td>
                 {hasGold && (<>
                   <td className={`${num} border-l border-border/60`}>{g3(T.goldOut)}</td>
                   <td className={num}>{g3(T.goldIn)}</td>
@@ -510,6 +515,7 @@ export function FactoryOrderLedger({
           )}
         </table>
       </div>
+      <LoadOlder w={w} noun="orders" />
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
         Tap a row to see every entry behind it — gold and diamond given, what came back, labour billed and each
         payment made against it.
