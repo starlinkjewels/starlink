@@ -1,3 +1,4 @@
+import { DataTable } from "@/components/DataTable";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
@@ -9,6 +10,7 @@ import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid,
   invoiceOrderIds, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, applyCreditToBills,
+  findInvoiceForOrder,
 } from "@/lib/db";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -114,6 +116,18 @@ export function InvoicesPage() {
       return +new Date(bd) - +new Date(ad);
     });
   const eligibleIds = eligible.map(e => e.o.id);
+  // The client's orders that are not on an invoice and cannot be yet — shown
+  // with the reason, so an empty list never reads as "nothing to do".
+  const notYet = clientFilter === "all" || !isStaff ? [] : db.orders
+    .filter(o => o.clientId === clientFilter && !o.forReadyStock && o.status !== "Rejected" && !findInvoiceForOrder(db.invoices ?? [], o.id))
+    .map(o => ({ o, blocker: invoiceBlocker(db, o) }))
+    .filter(x => x.blocker !== null)
+    .map(({ o, blocker }) => ({
+      o,
+      why: blocker === "Not dispatched yet." ? (o.status === "Ready" ? "Ready — dispatch it to bill it" : `${o.status} — not dispatched yet`)
+        : blocker === "No price set on this order." ? "No price set" : blocker!.replace(/\.$/, ""),
+    }))
+    .sort((a, b) => +new Date(b.o.createdAt) - +new Date(a.o.createdAt));
   const selectedTotal = eligible.filter(e => selected.has(e.o.id)).reduce((s, e) => s + orderTotal(e.o), 0);
 
   const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
@@ -223,6 +237,8 @@ export function InvoicesPage() {
   const totalOutstanding = invOrders.reduce((s, o) => s + balanceDue(o), 0);
 
   const PAGE_SIZE = 10;
+  // Each invoice's live figures, worked out once for the table.
+  const invRows = list.map(inv => ({ inv, client: db.clients.find(c => c.id === inv.clientId), ...invLive(inv) }));
   const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE, "inv");
   const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE, "led");
 
@@ -295,7 +311,7 @@ export function InvoicesPage() {
               </SelectContent>
             </Select>
           )}
-          {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {invStart + 1}–{invEnd} of {list.length}</p>}
+          {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">{list.length} invoice{list.length !== 1 ? "s" : ""}</p>}
         </div>
 
         {/* ── Create invoice from dispatched orders (staff) ── */}
@@ -309,7 +325,25 @@ export function InvoicesPage() {
 
             {clientFilter !== "all" && (
               eligible.length === 0 ? (
-                <p className="text-xs text-muted-foreground mt-2">No un-invoiced orders for this client — every priced order is already on an invoice.</p>
+                notYet.length === 0 ? (
+                  <p className="text-xs text-muted-foreground mt-2">Nothing left to bill — every order of this client is already on an invoice.</p>
+                ) : (
+                  <div className="mt-2 space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Nothing ready to bill yet. An order is invoiced once it is <span className="font-semibold text-brand-dark">priced and dispatched</span> —
+                      {" "}{notYet.length} order{notYet.length !== 1 ? "s" : ""} of this client {notYet.length !== 1 ? "are" : "is"} still on the way:
+                    </p>
+                    <div className="grid gap-1 max-h-48 overflow-y-auto pr-1">
+                      {notYet.map(({ o, why }) => (
+                        <Link key={o.id} to={`/orders/${o.id}`} className="flex items-center gap-3 p-2 rounded-lg border border-border/70 bg-white hover:bg-secondary/50 transition-colors">
+                          <span className="font-mono text-xs font-semibold text-primary">{o.orderNumber}</span>
+                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.status}</span>
+                          <span className="ml-auto text-[11px] font-medium text-amber-700 shrink-0">{why}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )
               ) : (
                 <div className="mt-3 space-y-2">
                   <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer">
@@ -341,56 +375,35 @@ export function InvoicesPage() {
           </div>
         )}
 
-        {/* Desktop table */}
-        <div className="hidden md:block">
-          <table className="table-luxe w-full text-sm">
-            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left px-5 py-3">Invoice</th>
-                <th className="text-left px-4 py-3">Client</th>
-                <th className="text-left px-4 py-3">Orders</th>
-                <th className="text-left px-4 py-3">Date</th>
-                <th className="text-center px-4 py-3">Amount</th>
-                <th className="text-center px-4 py-3">Received</th>
-                <th className="text-center px-4 py-3">Balance</th>
-                <th className="text-center px-4 py-3">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagedInvoices.map(inv => {
-                const { orders, amount, adv, bal, paid } = invLive(inv);
-                const client = db.clients.find(c => c.id === inv.clientId);
-                return (
-                  <tr key={inv.id} onClick={() => { setDetailInvId(inv.id); setPayOrderId(null); }} className="border-t border-border/40 hover:bg-secondary/30 transition-colors cursor-pointer">
-                    <td className="px-5 py-3.5">
-                      <div className="flex items-center gap-2">
-                        <FileText className="h-4 w-4 text-primary shrink-0" />
-                        <span className="font-medium">{inv.number}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3.5 font-medium max-w-[160px] truncate">{client?.companyName || "—"}</td>
-                    <td className="px-4 py-3.5">
-                      {orders.length === 1
-                        ? <Link to={`/orders/${orders[0].id}`} onClick={e => e.stopPropagation()} className="text-primary hover:underline font-mono text-xs">{orders[0].orderNumber}</Link>
-                        : <span className="text-xs text-muted-foreground">{orders.length} orders</span>}
-                    </td>
-                    <td className="px-4 py-3.5 text-muted-foreground text-xs">{fmtDate(inv.createdAt)}</td>
-                    <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(amount)}</td>
-                    <td className="px-4 py-3.5 text-center">{adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span> : <span className="text-muted-foreground text-xs">—</span>}</td>
-                    <td className="px-4 py-3.5 text-center"><span className={`text-xs font-medium ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "Cleared"}</span></td>
-                    <td className="px-4 py-3.5 text-center">
-                      {paid
-                        ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
-                        : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span>}
-                    </td>
-                  </tr>
-                );
-              })}
-              {list.length === 0 && (
-                <tr><td colSpan={8} className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet — select dispatched orders above to create one."}</td></tr>
-              )}
-            </tbody>
-          </table>
+        {/* Desktop: click any heading to sort (amounts and dates high → low first) */}
+        <div className="hidden md:block p-4">
+          <DataTable
+            id="invoices"
+            rows={invRows}
+            rowKey={r => r.inv.id}
+            onRowClick={r => { setDetailInvId(r.inv.id); setPayOrderId(null); }}
+            defaultSort={{ key: "date", dir: "desc" }}
+            pageSizes={[25, 50, 100]}
+            emptyText={ql ? "No invoices match your search." : "No invoices yet — select dispatched orders above to create one."}
+            columns={[
+              { key: "number", header: "Invoice", always: true, kind: "number", sortFirst: "desc",
+                sortValue: r => { const parts = r.inv.number.split("-"); const n = parseInt(parts[parts.length - 1], 10); return isNaN(n) ? r.inv.number : n; },
+                cell: r => <span className="inline-flex items-center gap-2"><FileText className="h-4 w-4 text-primary shrink-0" /><span className="font-semibold">{r.inv.number}</span></span> },
+              { key: "client", header: "Client", sortValue: r => r.client?.companyName ?? "", cell: r => <span className="font-medium max-w-[180px] truncate block">{r.client?.companyName || "—"}</span> },
+              { key: "orders", header: "Orders", kind: "number", sortValue: r => r.orders.length,
+                cell: r => r.orders.length === 1
+                  ? <Link to={`/orders/${r.orders[0].id}`} onClick={e => e.stopPropagation()} className="text-primary hover:underline font-mono text-xs">{r.orders[0].orderNumber}</Link>
+                  : <span className="text-xs text-muted-foreground">{r.orders.length} orders</span> },
+              { key: "date", header: "Date", kind: "date", sortValue: r => r.inv.createdAt, cell: r => <span className="font-semibold text-brand-dark text-xs whitespace-nowrap">{fmtDate(r.inv.createdAt)}</span> },
+              { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount, cell: r => <span className="font-semibold">{fmtMoney(r.amount)}</span> },
+              { key: "received", header: "Received", align: "right", sortValue: r => r.adv, cell: r => (r.adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(r.adv)}</span> : <span className="text-muted-foreground text-xs">—</span>) },
+              { key: "balance", header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs font-semibold ${r.bal > 0 ? "text-destructive" : "text-success"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
+              { key: "status", header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
+                cell: r => r.paid
+                  ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
+                  : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span> },
+            ]}
+          />
         </div>
 
         {/* Mobile cards */}
@@ -438,7 +451,7 @@ export function InvoicesPage() {
 
         {invTotalPages > 1 && (
           <div className="px-5 border-t border-border/60">
-            <PaginationBar page={invPage} totalPages={invTotalPages} onPageChange={setInvPage} label={`${invStart + 1}–${invEnd} of ${list.length} invoices`} />
+            <div className="md:hidden"><PaginationBar page={invPage} totalPages={invTotalPages} onPageChange={setInvPage} label={`${invStart + 1}–${invEnd} of ${list.length} invoices`} /></div>
           </div>
         )}
       </div>
