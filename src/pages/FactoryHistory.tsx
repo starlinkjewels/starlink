@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 import {
   factoryAccount, issuancePaid, issuancePending, issuanceUsed, issuanceWastage, fmtMoneyInr,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, factoryFineGoldBalance, lockerBalance, fmtLockerAmount,
-  groupPaymentsAsMade,
+  groupPaymentsAsMade, diamondFlow,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { Button } from "@/components/ui/button";
@@ -508,9 +508,15 @@ export function FactoryHistoryPage() {
         }
       }
       // Diamond issued in / used-in-piece + returned out.
+      // Counted by the same rule as the Factory Account card (diamondFlow): a
+      // pool draw is not new stones, and a received piece's stones are
+      // accounted for before the issue closes.
       if (mi.material === "diamond") {
-        rows.push({ ...zero(), id: mi.id + "-din", date: mi.issuedAt, ref, particular: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`, drDia: mi.quantityIssued });
-        if (mi.status === "closed") {
+        const flow = diamondFlow(mi);
+        if (flow.out > 0) rows.push({ ...zero(), id: mi.id + "-din", date: mi.issuedAt, ref, particular: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`, drDia: flow.out });
+        if (mi.source === "factoryPool" || mi.status !== "closed") {
+          if (flow.in > 0) rows.push({ ...zero(), id: mi.id + "-dused", date: mi.issuedAt, ref, particular: mi.source === "factoryPool" ? "Diamond from the factory's pool set in piece" : "Diamond set in received piece", crDia: flow.in });
+        } else {
           const returned = mi.diamondKind === "certified" ? (mi.finishDisposition === "returned" ? mi.quantityIssued : 0) : (mi.finishReturnedCt || 0);
           const used = Math.round((mi.quantityIssued - returned) * 1000) / 1000;
           if (used > 0) rows.push({ ...zero(), id: mi.id + "-dused", date: mi.issuedAt, ref, particular: `Diamond used in piece`, crDia: used });
@@ -661,7 +667,9 @@ export function FactoryHistoryPage() {
         { label: (factory.openingFineGold || 0) + T.goldOut - T.goldIn < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${q3(Math.abs((factory.openingFineGold || 0) + T.goldOut - T.goldIn))} g fine` },
         { label: "Diamond not accounted", value: `${q3(T.diaOut - T.diaIn)} ct` },
         { label: "Labour billed", value: fmtInrPlain(T.labour) },
-        { label: "Labour pending", value: fmtInrPlain(Math.max(0, T.labour - T.paid)) },
+        // The whole account (opening balance and advances in) when nothing is
+        // filtered — the same figure the page shows. Filtered: these rows only.
+        { label: from || to || orderNo ? "Pending on these rows" : "Labour pending", value: fmtInrPlain(from || to || orderNo ? Math.max(0, T.labour - T.paid) : account.chargesPending) },
       ],
       landscape: true,
       columns,
@@ -711,7 +719,8 @@ export function FactoryHistoryPage() {
 
   const exportCombinedPdf = (from: Date | null, to: Date | null, orderNo?: string) => {
     const iss = issuancesForOrder(orderNo);
-    const acct = factoryAccount(iss, orderNo ? undefined : factory);
+    // Advances settle the factory's account as a whole, not one order.
+    const acct = factoryAccount(iss, orderNo ? undefined : factory, orderNo ? [] : advances);
     const rows = flattenMovements(
       buildUnifiedLedger(iss, !orderNo).filter(r => inDateRange(r.date, from, to)),
     );
@@ -972,6 +981,7 @@ export function FactoryHistoryPage() {
         rows={orderRows}
         factoryName={factory.name}
         openingFineGold={factory.openingFineGold || 0}
+        account={account}
         onExport={() => setShowExport(true)}
       />
 
