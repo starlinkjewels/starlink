@@ -65,7 +65,10 @@ export function InvoicesPage() {
       const orders = invoiceOrderIds(inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
       const client = db.clients.find(c => c.id === inv.clientId);
       const statusText = inv.paid ? "paid" : "pending";
+      // The number it used to carry counts too — a client ringing up about the
+      // copy they hold quotes the old one.
       return inv.number.toLowerCase().includes(ql)
+        || (inv.previousNumber ?? "").toLowerCase().includes(ql)
         || orders.some(o => o.orderNumber.toLowerCase().includes(ql))
         || (client?.companyName ?? "").toLowerCase().includes(ql)
         || statusText.includes(ql);
@@ -512,6 +515,10 @@ export function InvoicesPage() {
                 <DialogHeader>
                   <DialogTitle className="font-display text-2xl flex items-center gap-2">
                     <FileText className="h-5 w-5 text-primary" /> Invoice {detailInv.number}
+                    {/* What a client holding the earlier copy would quote. */}
+                    {detailInv.previousNumber && (
+                      <span className="text-xs font-normal text-muted-foreground">(was {detailInv.previousNumber})</span>
+                    )}
                   </DialogTitle>
                 </DialogHeader>
                 <div className="space-y-4 mt-1">

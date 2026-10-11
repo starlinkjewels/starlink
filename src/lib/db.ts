@@ -488,6 +488,10 @@ export interface Invoice {
   orderIds?: string[]; // all orders billed on this invoice (dispatch-batch invoicing)
   clientId: string;
   number: string;
+  /** The number this invoice carried before the book was renumbered. Kept so a
+   *  client holding the old copy can still be matched — search finds either.
+   *  Same idea as Order.previousOrderNumber. */
+  previousNumber?: string;
   amount: number; // snapshot at creation; the UI always recomputes live from the orders
   paid: boolean;
   createdAt: string;

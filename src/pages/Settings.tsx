@@ -77,6 +77,12 @@ const SHOW_REPAIR_TOOLS = false;
 // switched off, not deleted, so one word brings them back when one is needed.
 const SHOW_ADMIN_TOOLS = false;
 
+// …except the invoice numbering tool, which is the one of the three that puts
+// something right rather than throwing it away: it renumbers the book so the
+// sequence runs straight through, keeping every amount, order link and payment
+// exactly where it is. Deleting an invoice and restoring a backup stay hidden.
+const SHOW_INVOICE_NUMBER_TOOL = true;
+
 export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
@@ -318,19 +324,33 @@ export function SettingsPage() {
     const list = [...(liveDb.invoices ?? [])].sort(
       (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) || a.number.localeCompare(b.number));
     if (!list.length) return;
+    // Show exactly which number becomes which before anything is written — the
+    // point of the whole exercise is that the book reads differently afterwards.
+    const moves = list
+      .map((inv, i) => ({ from: inv.number, to: String(i + 1).padStart(4, "0") }))
+      .filter(m => m.from !== m.to);
+    if (!moves.length) {
+      toast.success("The sequence already runs straight through — nothing to renumber");
+      return;
+    }
+    const preview = moves.slice(0, 12).map(m => `  ${m.from}  →  ${m.to}`).join("\n")
+      + (moves.length > 12 ? `\n  …and ${moves.length - 12} more` : "");
     if (!confirm(
-      `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?
-
-`
-      + "Only the numbers change — every amount, order link and payment stays exactly as it is. "
-      + "Do this only if an invoice has been cancelled and the sequence has a hole in it; anything already "
-      + "sent to a client will no longer match the copy they hold."
+      `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?\n\n`
+      + `${moves.length} will change:\n${preview}\n\n`
+      + "Every amount, order link and payment stays exactly as it is — only the numbers move. "
+      + "Each invoice keeps its old number on record, so a client holding the old copy can still be found by "
+      + "searching for it."
     )) return;
     updateDb(d => {
       const byId = new Map(list.map((inv, i) => [inv.id, String(i + 1).padStart(4, "0")]));
       for (const inv of d.invoices ?? []) {
         const n = byId.get(inv.id);
-        if (n) inv.number = n;
+        if (!n || n === inv.number) continue;
+        // Keep the first number it ever carried, not the one from the last
+        // renumber — that is the one on the paperwork a client holds.
+        if (!inv.previousNumber) inv.previousNumber = inv.number;
+        inv.number = n;
       }
     });
     // The book now runs 1..N, so the counter has to follow it. Left where it
@@ -1608,7 +1628,7 @@ export function SettingsPage() {
 
 
         {/* ── Invoice numbering (admin only) ── */}
-        {SHOW_ADMIN_TOOLS && isAdminUser && (
+        {SHOW_INVOICE_NUMBER_TOOL && isAdminUser && (
           <div className="rounded-xl border border-border/70 p-4 mt-2">
             <div className="flex items-center gap-2">
               <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${invoiceGaps.length ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
@@ -1626,9 +1646,14 @@ export function SettingsPage() {
             {invoiceGaps.length > 0 && (
               <>
                 <p className="mt-3 text-[11px] text-muted-foreground">
-                  Renumbering puts every invoice back in date order starting at 0001. Only the numbers change —
-                  amounts, order links and payments stay exactly as they are. Do not do this if a client already
-                  holds a copy of an invoice, because their number will no longer match yours.
+                  Renumbering puts every invoice back in date order starting at 0001, so the book reads
+                  0001, 0002, 0003 with nothing missing. Only the numbers move — every amount, order link
+                  and payment stays exactly where it is, and the next invoice carries on from the end.
+                </p>
+                <p className="mt-2 text-[11px] text-muted-foreground">
+                  Each invoice keeps the number it had before, so a client holding the old copy can still be
+                  found by searching for that number. You will see exactly which numbers change before anything
+                  is written.
                 </p>
                 <Button size="sm" variant="outline" onClick={renumberInvoices} className="rounded-xl h-9 mt-3">
                   Renumber invoices in date order
