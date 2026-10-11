@@ -54,7 +54,7 @@ export function AccountSummary({
         >
           <span className={`absolute left-0 top-0 h-full w-1 ${c.bar}`} aria-hidden="true" />
           <div className="flex items-center gap-2">
-            <span className={`h-7 w-7 sm:h-9 sm:w-9 rounded-xl grid place-items-center shrink-0 ${c.chip}`}>
+            <span className={`hidden sm:grid h-9 w-9 rounded-xl place-items-center shrink-0 ${c.chip}`}>
               <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
             </span>
             {/* Phones get the short name — "Total…" cut off said nothing. */}
