@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
@@ -33,6 +34,7 @@ function plainAmt(n: number, currency?: "INR" | "USD"): string {
 export function LockerPage() {
   const { user } = useAuth();
   const db = useDb();
+  const can = useCan();
   const [open, setOpen] = useState(false);
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<{ name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string }>({
@@ -377,9 +379,11 @@ export function LockerPage() {
           <p className="text-sm text-muted-foreground">Bank &amp; cash accounts — {lockers.length} locker{lockers.length !== 1 ? "s" : ""}</p>
         </div>
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
-          </DialogTrigger>
+          {can("locker", "add") && (
+            <DialogTrigger asChild>
+              <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-md rounded-2xl">
             <DialogHeader><DialogTitle className="font-display text-2xl">Add Locker</DialogTitle></DialogHeader>
             <div className="space-y-3 mt-2">
@@ -438,13 +442,13 @@ export function LockerPage() {
               onKeyDown={e => { if (e.key === "Enter") { setSelectedId(isSelected ? null : l.id); setTxnMode(false); } }}
               className={`card-luxe p-5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
             >
-              <button
+              {can("locker", "edit") && <button
                 onClick={e => { e.stopPropagation(); openEditLocker(l); }}
                 className="absolute top-4 right-4 h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Edit locker"
               >
                 <Pencil className="h-3.5 w-3.5" />
-              </button>
+              </button>}
               <div className="flex items-center gap-3 pr-8">
                 <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 grid place-items-center shrink-0">
                   {l.type === "bank" ? <Landmark className="h-5 w-5 text-primary" /> : <Wallet className="h-5 w-5 text-primary" />}
@@ -486,9 +490,11 @@ export function LockerPage() {
                 { label: "Ledger — PDF", sublabel: "Transactions with running balance", kind: "pdf", run: exportPdf },
                 { label: "Ledger — Excel", sublabel: "Transactions with running balance", kind: "excel", run: exportCsv },
               ]} />
-              <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
-                <Plus className="h-4 w-4" /> Record Transaction
-              </Button>
+              {can("locker", "add") && (
+                <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
+                  <Plus className="h-4 w-4" /> Record Transaction
+                </Button>
+              )}
             </div>
           </div>
 
@@ -669,7 +675,7 @@ export function LockerPage() {
                     {t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}
                   </p>
                   <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
-                  {t.type === "income" && t.refType !== "clientPayment" && (
+                  {t.type === "income" && t.refType !== "clientPayment" && can("locker", "edit") && (
                     <button onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
                       className="text-[11px] text-primary hover:underline mt-0.5">
                       Apply to a client’s bill

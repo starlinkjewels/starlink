@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import {
@@ -59,6 +60,7 @@ function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], l
  */
 export function PaymentsPage() {
   const db = useDb();
+  const can = useCan();
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
   const [mode, setMode] = useState<Mode>("daybook");
@@ -98,7 +100,12 @@ export function PaymentsPage() {
 
       {/* Form first, then the table underneath at full width — the entries are
           what people come back to read, so they get the whole page. */}
-      {mode !== "daybook" && (
+      {mode !== "daybook" && !can("payments", "add") && (
+        <div className="card-luxe p-4 text-sm text-muted-foreground">
+          Your role lets you look at these entries but not record new ones.
+        </div>
+      )}
+      {mode !== "daybook" && can("payments", "add") && (
       <div className="card-luxe p-6">
         {mode === "client" && <ReceiveFromClient />}
         {mode === "supplier" && <PaySupplier />}

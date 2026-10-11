@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { Fragment, useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -50,6 +51,7 @@ interface Row {
 export function StockActivityLedger() {
   const db = useDb();
   const { user } = useAuth();
+  const can = useCan();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -392,17 +394,21 @@ export function StockActivityLedger() {
                         made, not here. */}
                     <td className="px-5 py-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
                       {r.kind === "Assigned to factory" ? (
-                        <button onClick={() => removeAssignment(r.id)} disabled={removingId === r.id}
-                          title="Cancel this assignment — the material goes back into stock"
-                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <>{can("buyAssign", "delete") && (
+                          <button onClick={() => removeAssignment(r.id)} disabled={removingId === r.id}
+                            title="Cancel this assignment — the material goes back into stock"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}</>
                       ) : r.kind === "Diamond sold" ? (
-                        <button onClick={() => removeSale(r.id)} disabled={removingId === r.id}
-                          title="Cancel this sale — reverses the stone, the sale and the money"
-                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <>{can("buyAssign", "delete") && (
+                          <button onClick={() => removeSale(r.id)} disabled={removingId === r.id}
+                            title="Cancel this sale — reverses the stone, the sale and the money"
+                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}</>
                       ) : r.kind !== "Purchase" ? (
                         // An opening balance is a starting figure, not an event;
                         // it is corrected on the Stock page where it was set.
@@ -411,15 +417,19 @@ export function StockActivityLedger() {
                         <span className="text-[11px] text-muted-foreground">{isOpen ? "per item ↓" : "open to edit"}</span>
                       ) : (
                         <span className="inline-flex items-center gap-1">
-                          <button onClick={() => openEdit(r.items![0].id)} title="Correct this purchase"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button onClick={() => remove(r.items![0].id)} disabled={removingId === r.items![0].id}
-                            title="Remove this purchase — reverses the supplier due, stock and factory issue"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <>{can("buyAssign", "edit") && (
+                            <button onClick={() => openEdit(r.items![0].id)} title="Correct this purchase"
+                              className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          )}</>
+                          <>{can("buyAssign", "delete") && (
+                            <button onClick={() => remove(r.items![0].id)} disabled={removingId === r.items![0].id}
+                              title="Remove this purchase — reverses the supplier due, stock and factory issue"
+                              className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}</>
                         </span>
                       )}
                     </td>
@@ -436,15 +446,19 @@ export function StockActivityLedger() {
                       <td className="px-3 py-1.5" />
                       <td className="px-5 py-1.5 text-right whitespace-nowrap">
                         <span className="inline-flex items-center gap-1">
-                          <button onClick={() => openEdit(it.id)} title="Correct this item"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button onClick={() => remove(it.id)} disabled={removingId === it.id}
-                            title="Remove this item — reverses the supplier due, stock and factory issue"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <>{can("buyAssign", "edit") && (
+                            <button onClick={() => openEdit(it.id)} title="Correct this item"
+                              className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          )}</>
+                          <>{can("buyAssign", "delete") && (
+                            <button onClick={() => remove(it.id)} disabled={removingId === it.id}
+                              title="Remove this item — reverses the supplier due, stock and factory issue"
+                              className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          )}</>
                         </span>
                       </td>
                     </tr>

@@ -1,3 +1,5 @@
+import { useCan } from "@/hooks/useCan";
+import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAuth } from "@/lib/auth";
@@ -22,6 +24,7 @@ const putPhoto = (file: File, folder: string) =>
     : compressImg(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY).then(d => uploadDataUrl(d, folder));
 
 async function downloadOne(fileUrl: string, filename: string) {
+  if (!exportAllowed()) return;
   try {
     const res = await fetch(fileUrl);
     const blob = await res.blob();
@@ -215,6 +218,11 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
 /* Staff-built: create category folders → product folders → upload images/videos. */
 function LibraryView({ isStaff }: { isStaff: boolean }) {
   const { user } = useAuth();
+  const can = useCan();
+  const canAdd = isStaff && can("productPhotos", "add");
+  const canEdit = isStaff && can("productPhotos", "edit");
+  const canDelete = isStaff && can("productPhotos", "delete");
+  const canShare = isStaff && can("productPhotos", "export");
   const db = useDb();
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(null);
   const [showNewFolder, setShowNewFolder] = useState(false);
@@ -394,8 +402,9 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
           ))}
         </nav>
 
-        {isStaff && (
+        {(canAdd || canShare) && (
           <div className="flex items-center gap-2 shrink-0 flex-wrap">
+            {canAdd && (<>
             <button onClick={() => { setShowNewFolder(v => !v); setNewFolderName(""); }} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark"><FolderPlus className="h-4 w-4" /> {atRoot ? "New Category" : "New Folder"}</button>
             {/* Whole folder from the PC — works at the top level too, where it
                 becomes a new category. */}
@@ -413,20 +422,23 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
               {folderProgress ? <Loader2 className="h-4 w-4 animate-spin" /> : <FolderUp className="h-4 w-4" />}
               {folderProgress ? `Uploading ${folderProgress.done}/${folderProgress.total}…` : "Upload Folder"}
             </button>
+            </>)}
             {!atRoot && currentFolderId && (
               <>
+                {canAdd && (<>
                 <input ref={imgRef} type="file" accept="image/*" multiple className="hidden" onChange={async e => { if (e.target.files?.length) await uploadImages(e.target.files); e.target.value = ""; }} />
                 <button onClick={() => imgRef.current?.click()} disabled={uploading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl btn-hero text-xs font-medium disabled:opacity-60">{uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />} {uploading ? "Uploading…" : "Add Images"}</button>
                 <input ref={vidRef} type="file" accept="video/*" className="hidden" onChange={async e => { const f = e.target.files?.[0]; if (f) await uploadVideo(f); e.target.value = ""; }} />
                 <button onClick={() => vidRef.current?.click()} disabled={videoUploading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark disabled:opacity-60">{videoUploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Video className="h-4 w-4" />} {videoUploading ? "Uploading…" : "Add Video"}</button>
-                <ShareFolderButton kind="productPhotos" folderId={currentFolderId} folderName={path[path.length - 1]?.name ?? "Folder"} compact />
+                </>)}
+                {canShare && <ShareFolderButton kind="productPhotos" folderId={currentFolderId} folderName={path[path.length - 1]?.name ?? "Folder"} compact />}
               </>
             )}
           </div>
         )}
       </div>
 
-      {isStaff && showNewFolder && (
+      {canAdd && showNewFolder && (
         <div className="card-luxe p-3 flex items-center gap-2">
           <FolderPlus className="h-4 w-4 text-fuchsia-500 shrink-0" />
           <input autoFocus value={newFolderName} onChange={e => setNewFolderName(e.target.value)}
@@ -456,8 +468,8 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
               </div>
             ) : (
               <FolderCard key={f.id} label={f.name} sub={sub} cover={coverFor(f.id)} onClick={() => goTo(f.id)}
-                onRename={isStaff ? () => { setRenamingId(f.id); setRenameVal(f.name); } : undefined}
-                onDelete={isStaff ? () => deleteFolder(f.id) : undefined} />
+                onRename={canEdit ? () => { setRenamingId(f.id); setRenameVal(f.name); } : undefined}
+                onDelete={canDelete ? () => deleteFolder(f.id) : undefined} />
             );
           })}
         </div>
@@ -465,14 +477,14 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
 
       {gallery.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
-          {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={isStaff ? () => deleteItem(item.id) : undefined} />)}
+          {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={canDelete ? () => deleteItem(item.id) : undefined} />)}
         </div>
       )}
 
       {subfolders.length === 0 && gallery.length === 0 && (
         <div className="card-luxe p-12 text-center text-muted-foreground">
           <Camera className="h-10 w-10 mx-auto mb-3 opacity-20" />
-          {isStaff
+          {canAdd
             ? atRoot
               ? <p>No categories yet. Tap <span className="font-medium text-foreground">New Category</span> to create one (e.g. Rings), then add product folders and upload photos/videos inside.</p>
               : <p>This folder is empty. Create a <span className="font-medium text-foreground">product folder</span> inside, or use <span className="font-medium text-foreground">Add Images</span> / <span className="font-medium text-foreground">Add Video</span> to upload here.</p>

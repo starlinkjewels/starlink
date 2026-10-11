@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -101,6 +102,7 @@ export function OrdersPage() {
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
   const [clientFilter, setClientFilter] = useState<string>("all");
   const isStaff = user!.role !== "client";
+  const can = useCan();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
   // List vs Grid (image) view — remembered per device.
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -192,7 +194,7 @@ export function OrdersPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Orders</h1>
           <p className="text-sm text-muted-foreground">{total} order{total !== 1 ? "s" : ""}</p>
         </div>
-        {(user!.role === "client" || user!.role === "admin" || user!.role === "employee") && (
+        {(user!.role === "client" || user!.role === "admin" || (user!.role === "employee" && can("orders", "add"))) && (
           <Button asChild className="btn-hero h-10 rounded-xl px-4 text-sm">
             <Link to="/orders/new"><Plus className="h-4 w-4 mr-1.5" />New Order</Link>
           </Button>
@@ -283,6 +285,7 @@ export function OrdersPage() {
           <div className="ml-auto flex items-center gap-2">
             {chosen.length > 0 && (
               <>
+                {can("orders", "edit") && (<>
                 <button onClick={() => setBulkDispatch(true)}
                   className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-semibold text-blue-700 hover:bg-blue-500/20">
                   <Truck className="h-3.5 w-3.5" /> Dispatch
@@ -291,14 +294,15 @@ export function OrdersPage() {
                   className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/10 border border-success/30 text-xs font-semibold text-success hover:bg-success/20">
                   <PackageCheck className="h-3.5 w-3.5" /> Delivered
                 </button>
+                </>)}
                 {/* An invoice covers one client, so this stays out of reach until
                     the selection is down to one — with the reason said, not just
                     a dead button. */}
-                <button onClick={() => setBulkInvoice(true)} disabled={!oneClient}
+                {can("invoices", "add") && <button onClick={() => setBulkInvoice(true)} disabled={!oneClient}
                   title={oneClient ? "Bill these orders on one invoice" : "Select orders from a single client"}
                   className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-primary/10 border border-primary/30 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed">
                   <FileText className="h-3.5 w-3.5" /> Invoice
-                </button>
+                </button>}
               </>
             )}
             {!allShown && (

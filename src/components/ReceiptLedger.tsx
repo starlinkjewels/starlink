@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -27,6 +28,7 @@ const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
  */
 export function ReceiptLedger() {
   const { user } = useAuth();
+  const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
@@ -236,8 +238,8 @@ export function ReceiptLedger() {
                     )}
                   </td>
                   <td className="px-5 py-2.5 text-right whitespace-nowrap">
-                    <button onClick={() => open(r.id)} className="text-primary hover:underline text-xs mr-3">Edit</button>
-                    <button onClick={() => remove(r.id)} className="text-destructive hover:underline text-xs">Delete</button>
+                    {can("payments", "edit") && <button onClick={() => open(r.id)} className="text-primary hover:underline text-xs mr-3">Edit</button>}
+                    {can("payments", "delete") && <button onClick={() => remove(r.id)} className="text-destructive hover:underline text-xs">Delete</button>}
                   </td>
                 </tr>
               );
@@ -302,10 +304,12 @@ export function ReceiptLedger() {
             </div>
           </div>
           <div className="flex gap-2 mt-3 flex-wrap">
-            <Button variant="outline" onClick={() => editing && remove(editing.id)}
-              className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
-              Cancel receipt
-            </Button>
+            {can("payments", "delete") && (
+              <Button variant="outline" onClick={() => editing && remove(editing.id)}
+                className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
+                Cancel receipt
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setEditId(null)} className="rounded-xl ml-auto">Close</Button>
             <Button onClick={save} className="btn-hero rounded-xl">Save</Button>
           </div>

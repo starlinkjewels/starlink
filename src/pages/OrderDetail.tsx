@@ -1,3 +1,5 @@
+import { useCan } from "@/hooks/useCan";
+import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -136,6 +138,7 @@ async function compressImage(file: File): Promise<string> {
 export function OrderDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
+  const can = useCan();
   const nav = useNavigate();
 
   // Barcode band modal state
@@ -1015,9 +1018,11 @@ export function OrderDetailPage() {
   };
 
   // Admin, or the employee who owns this order (assigned to them OR the account
-  // manager of the order's client) — full control of their own clients' orders.
+  // manager of the order's client) — full control of their own clients' orders,
+  // as long as their role lets them change orders at all.
   const canEditStage = () => user!.role === "admin"
-    || (user!.role === "employee" && (order.assignedEmployeeId === user!.id || client?.accountManagerId === user!.id));
+    || (user!.role === "employee" && can("orders", "edit")
+      && (order.assignedEmployeeId === user!.id || client?.accountManagerId === user!.id));
 
   // "Final Approval" can't be marked complete until the gold/diamond this
   // order actually needs has been issued to a factory — admins can still
@@ -1637,6 +1642,7 @@ export function OrderDetailPage() {
   // Force a real download (Storage URLs otherwise open in a tab). Fetch the blob
   // and save it with a friendly filename; fall back to opening the URL on error.
   const downloadOne = async (fileUrl: string, filename: string) => {
+    if (!exportAllowed()) return;
     try {
       const res = await fetch(fileUrl);
       const blob = await res.blob();
@@ -2645,7 +2651,7 @@ export function OrderDetailPage() {
               </p>
             </div>
           </div>
-          {canEditStage() && balance > 0 && (
+          {canEditStage() && balance > 0 && (user!.role === "admin" || can("payments", "add")) && (
             <Button size="sm" onClick={() => setShowAdvForm(v => !v)} className="btn-hero rounded-xl gap-2">
               <Plus className="h-4 w-4" /> {advances.length === 0 ? "Add Advance" : "Collect Payment"}
             </Button>

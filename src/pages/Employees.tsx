@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, flush, uid, type User } from "@/lib/db";
+import { RolesPanel, EmployeeAccessControls } from "@/components/RolesAccess";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -196,6 +197,8 @@ export function EmployeesPage() {
         </Dialog>
       </div>
 
+      <RolesPanel />
+
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employees..." className="pl-9 h-11 rounded-xl" />
@@ -256,6 +259,9 @@ export function EmployeesPage() {
                   )}
                 </Button>
               </div>
+              {/* Role, and admin or not */}
+              <EmployeeAccessControls u={u} />
+
               {/* Owner/Admin: no deactivate / reset / delete from here (avoid locking yourself out) */}
               {u.role !== "admin" && (
                 <div className="flex items-center gap-2 mt-2">

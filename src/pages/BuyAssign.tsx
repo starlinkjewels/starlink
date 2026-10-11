@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger } from "@/components/StockActivityLedger";
@@ -26,6 +27,7 @@ type Mode = "buy" | "assign" | "sell" | "opening";
  */
 export function BuyAssignPage() {
   const [mode, setMode] = useState<Mode>("buy");
+  const can = useCan();
   return (
     <div className="max-w-6xl mx-auto space-y-5">
       <div>
@@ -49,9 +51,15 @@ export function BuyAssignPage() {
         ))}
       </div>
 
-      <div className="card-luxe p-6 max-w-3xl">
-        {mode === "buy" ? <BuyMaterialForm /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
-      </div>
+      {can("buyAssign", "add") ? (
+        <div className="card-luxe p-6 max-w-3xl">
+          {mode === "buy" ? <BuyMaterialForm /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
+        </div>
+      ) : (
+        <div className="card-luxe p-4 max-w-3xl text-sm text-muted-foreground">
+          Your role lets you look at these entries but not record new ones.
+        </div>
+      )}
 
       {/* Everything the four tabs above have done, so a day's entries can be
           checked afterwards instead of disappearing into four different places. */}
