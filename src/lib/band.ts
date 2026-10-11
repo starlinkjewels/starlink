@@ -4,10 +4,11 @@
 //   • "label" — a 50×30mm spec label (barcode + type/metal/weights + optional price).
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
+import { pieceWeights } from "./weights";
 import { jsPDF } from "jspdf";
 import { exportAllowed } from "./access";
 import JsBarcode from "jsbarcode";
-import { orderTotal, fmtMoney, CARAT_TO_GRAM, logEvent, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
+import { orderTotal, fmtMoney, CARAT_TO_GRAM, logEvent, loadDb, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
 
 export type BandStyle = "tag" | "label";
 export type BandMode = "print" | "download";
@@ -103,9 +104,7 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
 
 /** Band for an order (barcode = order number). */
 export function generateBand(order: Order, settings: Settings, opts: BandOpts): void {
-  const gross = order.actualGrossWeight ?? order.estimatedGrossWeight ?? 0;
-  const net = order.actualNetWeight ?? order.estimatedNetWeight ?? 0;
-  const diaCt = order.actualDiamondWeight ?? order.diamondWeight ?? 0;
+  const { gross, net, diamondCt: diaCt } = pieceWeights(order, loadDb().materialIssuances ?? []);
   runBand({
     code: order.orderNumber,
     label: order.designNumber ? `#${order.designNumber}` : "",

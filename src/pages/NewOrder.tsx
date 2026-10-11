@@ -1,3 +1,5 @@
+import { WeightCheck } from "@/components/WeightCheck";
+import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
@@ -223,6 +225,12 @@ export function NewOrderPage() {
     if (needSpecs && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
     if (needSpecs && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
     if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
+    // Gross is the whole piece, net the metal only: an estimate that says
+    // otherwise is a typing slip, and it would carry onto every card and band.
+    if (needSpecs) {
+      const wp = weightProblem({ gross: Number(f.estimatedGrossWeight), net: Number(f.estimatedNetWeight), diamondCt: Number(f.diamondWeight) });
+      if (wp) { toast.error(wp); return; }
+    }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
       if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
@@ -645,6 +653,7 @@ export function NewOrderPage() {
                     onChange={e => set("estimatedNetWeight", +e.target.value)}
                     className="rounded-xl h-11" placeholder="0.000" />
                 </Field>
+                <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight)} net={Number(f.estimatedNetWeight)} diamondCt={Number(f.diamondWeight)} />
               </>
             )}
           </div>

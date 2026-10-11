@@ -1,3 +1,4 @@
+import { pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -400,10 +401,12 @@ export function OrdersPage() {
           const diaIssued = orderIssuances.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
           // Weights — prefer actual (post-production), then estimate, then the
           // finished-piece net weight recorded on the factory issuance.
-          const finishIss = orderIssuances.find(i => i.material === "gold" && i.finishedNetWeight != null);
-          const grossWt = o.actualGrossWeight ?? o.estimatedGrossWeight;
-          const netWt = o.actualNetWeight ?? o.estimatedNetWeight ?? finishIss?.finishedNetWeight;
-          const diaWt = o.actualDiamondWeight ?? o.diamondWeight;
+          // One reading of the piece's weights, shared with the band, the
+          // exports and Ready Stock — so the card never disagrees with them.
+          const pw = pieceWeights(o, orderIssuances);
+          const grossWt = pw.gross || undefined;
+          const netWt = pw.net || undefined;
+          const diaWt = pw.diamondCt || undefined;
 
           return (
             <Link
@@ -446,6 +449,9 @@ export function OrdersPage() {
                     {grossWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Gross {grossWt}g</span> : null}
                     {netWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Net {netWt}g</span> : null}
                     {diaWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Dia {diaWt}ct</span> : null}
+                    {pw.problem && user!.role !== "client" && (
+                      <span title={pw.problem} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive">⚠ Check weights</span>
+                    )}
                   </div>
                 )}
 

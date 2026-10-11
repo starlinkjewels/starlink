@@ -1,3 +1,6 @@
+
+import { WeightCheck } from "@/components/WeightCheck";
+import { weightProblem, pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
@@ -251,7 +254,8 @@ export function OrderDetailPage() {
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
-  const [estGold, setEstGold] = useState("");
+  const [estGold, setEstGold] = useState(""); // estimated GROSS weight (g)
+  const [estNet, setEstNet] = useState("");   // estimated NET weight — the gold (g)
   const [estDia, setEstDia] = useState("");
   const [estMaking, setEstMaking] = useState("");
   const [diaSource, setDiaSource] = useState<"stock" | "buy">("stock");
@@ -790,16 +794,20 @@ export function OrderDetailPage() {
 
   const openEstimate = () => {
     setEstGold(order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "");
+    setEstNet(order.estimatedNetWeight?.toString() ?? "");
     setEstDia(order.diamondWeight?.toString() ?? "");
     setEstMaking(order.estimatedMakingCharges?.toString() ?? "");
     setShowEstimate(true);
   };
 
   const saveEstimate = () => {
+    const wp = weightProblem({ gross: Number(estGold), net: Number(estNet), diamondCt: Number(estDia || order.diamondWeight) });
+    if (wp) { toast.error(wp); return; }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id);
       if (!o) return;
       o.estimatedGrossWeight = estGold ? Number(estGold) : undefined;
+      o.estimatedNetWeight = estNet ? Number(estNet) : undefined;
       if (estDia) o.diamondWeight = Number(estDia);
       o.estimatedMakingCharges = estMaking ? Number(estMaking) : undefined;
     });
@@ -1100,7 +1108,7 @@ export function OrderDetailPage() {
   const openFinalApproval = (idx: number) => {
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
-    setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
+    setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedNetWeight?.toString() ?? order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
     // Prefill the purity the FACTORY works to for this karat (14KT = 595, not the
     // textbook 583). That is what actually gets entered; the textbook figure is
     // the fallback for a karat not in that table.
@@ -1271,6 +1279,13 @@ export function OrderDetailPage() {
         o.factoryBillNo = faBillNo.trim() || undefined;
         o.actualDiamondWeight = usedDiaCt > 0 ? usedDiaCt : undefined;
         o.diamondWeightAdjust = diaAdjust !== 0 ? diaAdjust : undefined;
+        // The piece's weights as this screen showed them: net = the gold, and
+        // gross = gold + second metal + diamonds at 0.2 g a carat. Saved on the
+        // order so the card, the band and every export read the same figures
+        // instead of the estimate from the day it was ordered.
+        if (hasNet) o.actualNetWeight = netW;
+        const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
+        if (hasNet || faOtherW > 0) o.actualGrossWeight = faGross;
         const diaPcsN = Math.round(Number(faDiaPcs) || 0);
         o.actualDiamondPcs = diaPcsN > 0 ? diaPcsN : undefined;
 
@@ -1676,6 +1691,21 @@ export function OrderDetailPage() {
     ? `https://starlink360.vercel.app/?file=${encodeURIComponent(order.cad3dmUrl)}&embed=true`
     : "";
 
+  /** The piece's weights as they will be once the Actual Details form is saved. */
+  const actualWeightsAfter = () => {
+    const keep = (typed: string, onFile: number | undefined) => {
+      const n = parseFloat(typed);
+      return !isNaN(n) && n > 0 ? n : onFile;
+    };
+    const finishNet = db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.finishedNetWeight != null)?.finishedNetWeight;
+    return {
+      gross: keep(actGrossW, order.actualGrossWeight),
+      net: keep(actNetW, order.actualNetWeight ?? finishNet),
+      other: order.otherMetal ? order.otherMetalWeight : undefined,
+      diamondCt: keep(actDiamW, order.actualDiamondWeight ?? (order.diamondWeight || undefined)),
+    };
+  };
+
   const saveActualDetails = () => {
     // Every field is optional — update only what was actually filled in, and
     // never overwrite an existing value with a blank.
@@ -1692,6 +1722,10 @@ export function OrderDetailPage() {
       toast.error("Enter at least one value to update");
       return;
     }
+    // A blank box keeps what is recorded, so check the weights as they will
+    // stand after saving — a new net against the gross already on file too.
+    const wp = weightProblem(actualWeightsAfter());
+    if (wp) { toast.error(wp); return; }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (has(gw)) o.actualGrossWeight   = gw;
@@ -1865,7 +1899,9 @@ export function OrderDetailPage() {
     ].join("\n"))) return;
     const itemId = uid("rs_");
     const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
-    const diaWt = order.actualDiamondWeight ?? (order.diamondWeight || undefined);
+    const pw = pieceWeights(order, db.materialIssuances);
+    if (pw.problem) { toast.error(`Fix the weights first — ${pw.problem}`); return; }
+    const diaWt = pw.diamondCt || undefined;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (o.readyStockCreatedId) return;
@@ -1876,8 +1912,8 @@ export function OrderDetailPage() {
         jewelleryType: o.jewelleryType,
         metal: o.metal,
         productKarats: o.productKarats,
-        grossWeight: o.actualGrossWeight ?? o.estimatedGrossWeight,
-        netWeight: o.actualNetWeight ?? o.estimatedNetWeight,
+        grossWeight: pw.gross || undefined,
+        netWeight: pw.net || undefined,
         diamondWeight: diaWt,
         diamondType: diaWt ? o.diamondType : undefined,
         price: 0, // admin sets the selling price in Ready Stock
@@ -2155,6 +2191,17 @@ export function OrderDetailPage() {
             )}
           </div>
 
+          {/* Weights already on file that contradict each other — recorded
+              before these checks existed, or put out of step by a later edit. */}
+          {(() => {
+            const wp = pieceWeights(order, db.materialIssuances).problem;
+            return wp && user!.role !== "client" ? (
+              <p className="rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-xs text-destructive">
+                <span className="font-semibold">Check the weights:</span> {wp}
+              </p>
+            ) : null;
+          })()}
+
           {/* Estimated vs actual comparison */}
           {(order.estimatedGrossWeight || order.estimatedNetWeight || order.diamondWeight || order.estimatedMakingCharges != null) && (
             <div className="rounded-xl bg-secondary/60 p-3">
@@ -2284,6 +2331,7 @@ export function OrderDetailPage() {
                           className="rounded-xl h-10" placeholder="0.000" />
                       </div>
                     </div>
+                    <WeightCheck className="mt-2" {...actualWeightsAfter()} />
                   </div>
                   <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Pricing</p>
@@ -3046,7 +3094,8 @@ export function OrderDetailPage() {
               );
             })() : (
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-                <span>Est. gold: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ?? order.metalWeight ?? "—"}{(order.estimatedGrossWeight ?? order.metalWeight) != null ? " g" : ""}</span></span>
+                <span>Est. gross: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ?? order.metalWeight ?? "—"}{(order.estimatedGrossWeight ?? order.metalWeight) != null ? " g" : ""}</span></span>
+                <span>Est. net (gold): <span className="font-semibold text-foreground">{order.estimatedNetWeight != null ? `${order.estimatedNetWeight} g` : "—"}</span></span>
                 <span>Est. diamond: <span className="font-semibold text-foreground">{order.diamondWeight ? `${order.diamondWeight} ct` : "—"}</span></span>
                 <span>Est. making: <span className="font-semibold text-foreground">{order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—"}</span></span>
               </div>
@@ -3054,10 +3103,14 @@ export function OrderDetailPage() {
 
             {/* Estimate editor */}
             {showEstimate && !faDone && (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <div>
-                  <Label className="text-[11px]">Est. Gold Weight (g)</Label>
-                  <Input type="number" min={0} step="0.01" value={estGold} onChange={e => setEstGold(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
+                  <Label className="text-[11px]">Est. Gross Weight (g)</Label>
+                  <Input type="number" min={0} step="0.001" value={estGold} onChange={e => setEstGold(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
+                </div>
+                <div>
+                  <Label className="text-[11px]">Est. Net Weight — gold (g)</Label>
+                  <Input type="number" min={0} step="0.001" value={estNet} onChange={e => setEstNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
                 </div>
                 <div>
                   <Label className="text-[11px]">Est. Diamond (ct)</Label>
@@ -3067,7 +3120,8 @@ export function OrderDetailPage() {
                   <Label className="text-[11px]">Est. Making Charge ($)</Label>
                   <Input type="number" min={0} step="0.01" value={estMaking} onChange={e => setEstMaking(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
                 </div>
-                <div className="sm:col-span-3 flex justify-end">
+                <WeightCheck className="col-span-2 sm:col-span-4" gross={Number(estGold)} net={Number(estNet)} diamondCt={Number(estDia || order.diamondWeight)} />
+                <div className="col-span-2 sm:col-span-4 flex justify-end">
                   <Button size="sm" onClick={saveEstimate} className="btn-hero rounded-lg h-9 gap-1.5 text-xs">Save Estimate</Button>
                 </div>
               </div>
