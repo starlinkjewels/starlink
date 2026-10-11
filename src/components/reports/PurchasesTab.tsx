@@ -33,6 +33,9 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
 
   return (
     <div className="space-y-4">
+      {(ctx.employeeId || ctx.clientIds) && (
+        <p className="text-[11px] text-muted-foreground px-1">Purchases and what suppliers and factories are owed are for the whole business — they are not split by client or employee.</p>
+      )}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />
         <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}`} tone="sky" />
