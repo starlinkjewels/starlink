@@ -1,3 +1,5 @@
+import { WeightCheck } from "@/components/WeightCheck";
+import { weightProblem } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
 import { useRef, useState } from "react";
 import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, adminStoreReady, stockCostOf, writeStockCost, type ReadyStockItem, type Order } from "@/lib/db";
@@ -203,6 +205,8 @@ export function ReadyStockPage() {
     const price = Number(f.price);
     if (!price || price <= 0) { toast.error("Enter a valid price"); return; }
     const quantity = Math.max(0, Math.round(Number(f.quantity) || 0));
+    const wp = weightProblem({ gross: Number(f.grossWeight), net: Number(f.netWeight), diamondCt: Number(f.diamondWeight) });
+    if (wp) { toast.error(wp); return; }
     setSaving(true);
     try {
       const itemId = editingId || uid("rs_");
@@ -357,15 +361,16 @@ export function ReadyStockPage() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <Label className="text-xs">Gross Weight (g)</Label>
-                  <Input type="number" min={0} value={f.grossWeight} onChange={e => setF({ ...f, grossWeight: e.target.value })} className="rounded-xl mt-1" />
+                  <Input type="number" min={0} step="0.001" value={f.grossWeight} onChange={e => setF({ ...f, grossWeight: e.target.value })} className="rounded-xl mt-1" />
                 </div>
                 <div>
                   <Label className="text-xs">Net Weight (g)</Label>
-                  <Input type="number" min={0} value={f.netWeight} onChange={e => setF({ ...f, netWeight: e.target.value })} className="rounded-xl mt-1" />
+                  <Input type="number" min={0} step="0.001" value={f.netWeight} onChange={e => setF({ ...f, netWeight: e.target.value })} className="rounded-xl mt-1" />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
+                <WeightCheck className="col-span-2" gross={Number(f.grossWeight)} net={Number(f.netWeight)} diamondCt={Number(f.diamondWeight)} />
                 <div>
                   <Label className="text-xs">Diamond Weight (ct, optional)</Label>
                   <Input type="number" min={0} step="0.01" value={f.diamondWeight} onChange={e => setF({ ...f, diamondWeight: e.target.value })} className="rounded-xl mt-1" />

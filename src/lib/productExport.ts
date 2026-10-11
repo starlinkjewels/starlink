@@ -1,3 +1,4 @@
+import { pieceWeights } from "@/lib/weights";
 import {
   fmtDate, fmtMoney, orderTotal, totalAdvance, balanceDue, mainDiamondShape, costDataReady,
   CARAT_TO_GRAM, type DB, type Order, type ReadyStockItem,
@@ -50,14 +51,10 @@ const n3 = (x: number) => Math.round(x * 1000) / 1000;
 
 export function buildProductRows(db: DB, orders: Order[]): ProductRow[] {
   return orders.map(o => {
-    const dia = o.actualDiamondWeight ?? o.diamondWeight ?? 0;
-    const net = o.actualNetWeight ?? o.estimatedNetWeight ?? 0;
-    const other = o.otherMetalWeight ?? 0;
-    // A gross recorded at Final Approval wins. Otherwise it is built the same
-    // way the approval screen builds it: metal plus the diamond's own weight.
-    const gross = o.actualGrossWeight
-      ?? (net + other + dia * CARAT_TO_GRAM > 0 ? n3(net + other + dia * CARAT_TO_GRAM) : (o.estimatedGrossWeight ?? 0));
-    const estimated = o.actualNetWeight == null || o.actualDiamondWeight == null;
+    // The same reading of the weights the cards, bands and Ready Stock use.
+    const pw = pieceWeights(o, db.materialIssuances ?? []);
+    const dia = pw.diamondCt, net = pw.net, other = pw.other, gross = pw.gross;
+    const estimated = pw.estimated || o.actualDiamondWeight == null;
     const value = orderTotal(o) - (o.shippingCharge ?? 0);
     return {
       orderNumber: o.orderNumber,
