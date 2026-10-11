@@ -4,6 +4,8 @@ import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
+import { profitReport, inProfitReport } from "@/lib/orderCost";
+import { exportProfitCsv } from "@/lib/productExport";
 import {
   BarChart, Bar, XAxis, YAxis, ResponsiveContainer, Tooltip,
 } from "recharts";
@@ -141,6 +143,9 @@ export function ReportsPage() {
   const [payTo,   setPayTo]       = useState("");
   const [salesFrom, setSalesFrom] = useState("");
   const [salesTo,   setSalesTo]   = useState("");
+  const [profitFrom, setProfitFrom] = useState("");
+  const [profitTo,   setProfitTo]   = useState("");
+  const [profitBy,   setProfitBy]   = useState<"client" | "month" | "type">("client");
   const makeInRange = (from: string, to: string) => (iso: string) => {
     const k = ymd(iso);
     if (from && k < from) return false;
@@ -333,6 +338,21 @@ export function ReportsPage() {
       byClient: [...map.values()].sort((a, b) => b.billed - a.billed),
     };
   }, [db.orders, clients, salesFrom, salesTo, canSeeAll]);
+
+  /* ── Profit — ADMIN ONLY. Same period basis as Sales / Billing (the date the
+     order was placed), so the two reports can be read side by side and agree
+     on which orders they cover. Finished work only: see inProfitReport. ── */
+  const profit = useMemo(() => {
+    if (!isAdmin) return null;
+    const inRange = makeInRange(profitFrom, profitTo);
+    return profitReport(db, (db.orders ?? []).filter(o => inProfitReport(o) && inRange(o.createdAt)));
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db.orders, db.purchases, db.materialIssuances, db.stockMovements, db.diamondPackets, db.settings, profitFrom, profitTo, isAdmin]);
+  const profitPeriodLabel = periodLabel(profitFrom, profitTo);
+  const monthLabel = (k: string) => {
+    const [y, m] = k.split("-").map(Number);
+    return new Date(y, (m || 1) - 1, 1).toLocaleDateString("en-US", { month: "short", year: "numeric" });
+  };
 
   /* ── Payments report exports ── */
   function exportPaymentsPdf() {
@@ -1212,6 +1232,130 @@ export function ReportsPage() {
             </div>
           ) : (
             <div className="py-8 text-center text-sm text-muted-foreground"><TrendingUp className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No orders placed in this period.</div>
+          )}
+        </div>
+      )}
+
+      {/* ── Profit Report — admin only ── */}
+      {isAdmin && profit && (
+        <div className="card-luxe p-4 sm:p-5 space-y-4 border-amber-500/30">
+          <div className="flex items-start justify-between gap-3 flex-wrap">
+            <div className="flex items-center gap-3">
+              <div className="h-10 w-10 rounded-2xl bg-amber-500/10 grid place-items-center shrink-0"><TrendingUp className="h-5 w-5 text-amber-600" /></div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Admin only</p>
+                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Profit Report</h3>
+                <p className="text-[11px] text-muted-foreground mt-0.5">Finished orders placed in period · {profitPeriodLabel}</p>
+              </div>
+            </div>
+            <button
+              onClick={() => exportProfitCsv(db, profit.rows.map(r => r.order), `Starlink-Profit-${profitFrom || "all"}`)}
+              disabled={!profit.rows.length}
+              className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark disabled:opacity-40">
+              <Download className="h-3.5 w-3.5" /> Excel
+            </button>
+          </div>
+
+          <PeriodBar from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo} />
+
+          {!profit.rate && (
+            <p className="text-xs rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-amber-800">
+              Set the rupee-to-dollar rate in <span className="font-semibold">Settings → Pricing</span> to see profit.
+              Until then only the rupee cost is shown.
+            </p>
+          )}
+
+          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground">Sales ({profit.totals.count})</p>
+              <p className="font-display text-xl text-brand-dark mt-1">{fmtMoney(profit.totals.sellingUsd)}</p>
+            </div>
+            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
+              <p className="text-[11px] text-muted-foreground">Cost</p>
+              <p className="font-display text-xl text-brand-dark mt-1">{profit.totals.costUsd !== null ? fmtMoney(profit.totals.costUsd) : fmtMoneyInr(profit.totals.costInr)}</p>
+              {profit.totals.costUsd !== null && <p className="text-[10px] text-muted-foreground mt-0.5">{fmtMoneyInr(profit.totals.costInr)}</p>}
+            </div>
+            <div className={`rounded-2xl border p-4 ${(profit.totals.profitUsd ?? 0) < 0 ? "border-destructive/20 bg-destructive/5" : "border-success/20 bg-success/5"}`}>
+              <p className="text-[11px] text-muted-foreground">Profit</p>
+              <p className={`font-display text-xl mt-1 ${(profit.totals.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>
+                {profit.totals.profitUsd === null ? "—" : `${profit.totals.incomplete ? "≤ " : ""}${fmtMoney(profit.totals.profitUsd)}`}
+              </p>
+            </div>
+            <div className={`rounded-2xl border p-4 ${(profit.totals.profitUsd ?? 0) < 0 ? "border-destructive/20 bg-destructive/5" : "border-success/20 bg-success/5"}`}>
+              <p className="text-[11px] text-muted-foreground">Margin</p>
+              <p className={`font-display text-xl mt-1 ${(profit.totals.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>
+                {profit.totals.marginPct === null ? "—" : `${profit.totals.incomplete ? "≤ " : ""}${profit.totals.marginPct}%`}
+              </p>
+            </div>
+          </div>
+
+          {profit.totals.incomplete > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              <span className="font-semibold text-amber-700">{profit.totals.incomplete} order{profit.totals.incomplete !== 1 ? "s" : ""}</span>{" "}
+              still {profit.totals.incomplete !== 1 ? "have" : "has"} part of the cost unknown, so profit is shown as at most (≤). The Excel
+              lists exactly what is missing on each.
+            </p>
+          )}
+
+          {profit.rows.length > 0 ? (
+            <>
+              <div className="inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+                {([["client", "By client"], ["month", "By month"], ["type", "By item"]] as const).map(([k, label]) => (
+                  <button key={k} onClick={() => setProfitBy(k)}
+                    className={`h-8 px-3 rounded-md text-xs font-medium transition-colors ${profitBy === k ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-xl border border-border/60">
+                <table className="table-luxe w-full text-xs sm:text-sm">
+                  <thead className="sticky top-0 bg-white z-10">
+                    <tr className="border-b border-border/60">
+                      {[profitBy === "client" ? "Client" : profitBy === "month" ? "Month" : "Item", "Orders", "Sales", "Cost", "Profit", "Margin"].map(h =>
+                        <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border/40">
+                    {(profitBy === "client" ? profit.byClient : profitBy === "month" ? profit.byMonth : profit.byType).map(g => {
+                      const neg = (g.profitUsd ?? 0) < 0;
+                      const le = g.incomplete ? "≤ " : "";
+                      return (
+                        <tr key={g.key} className="hover:bg-secondary/30 transition-colors">
+                          <td className="px-3 py-2 font-medium text-brand-dark whitespace-nowrap">{profitBy === "month" ? monthLabel(g.key) : g.key}</td>
+                          <td className="px-3 py-2">{g.count}{g.incomplete > 0 && <span className="text-amber-600" title="cost not fully known"> · {g.incomplete}?</span>}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{fmtMoney(g.sellingUsd)}</td>
+                          <td className="px-3 py-2 whitespace-nowrap">{g.costUsd !== null ? fmtMoney(g.costUsd) : fmtMoneyInr(g.costInr)}</td>
+                          <td className={`px-3 py-2 whitespace-nowrap font-semibold ${neg ? "text-destructive" : "text-success"}`}>{g.profitUsd === null ? "—" : le + fmtMoney(g.profitUsd)}</td>
+                          <td className={`px-3 py-2 whitespace-nowrap ${neg ? "text-destructive" : "text-success"}`}>{g.marginPct === null ? "—" : `${le}${g.marginPct}%`}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Sold for less than they cost — the first thing worth knowing. */}
+              {profit.losses.length > 0 && (
+                <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-3">
+                  <p className="text-xs font-semibold text-destructive mb-1.5">
+                    {profit.losses.length} order{profit.losses.length !== 1 ? "s" : ""} sold below cost
+                  </p>
+                  <ul className="space-y-0.5">
+                    {profit.losses.slice(0, 10).map(r => (
+                      <li key={r.order.id} className="flex items-baseline justify-between gap-3 text-xs">
+                        <span>
+                          <span className="font-medium text-brand-dark">{r.order.orderNumber}</span>
+                          <span className="text-muted-foreground"> · {clients.find(c => c.id === r.order.clientId)?.companyName ?? ""} · sold {fmtMoney(r.sellingUsd)}</span>
+                        </span>
+                        <span className="font-semibold text-destructive tabular-nums">{fmtMoney(r.profitUsd!)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="py-8 text-center text-sm text-muted-foreground"><TrendingUp className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No finished orders in this period.</div>
           )}
         </div>
       )}

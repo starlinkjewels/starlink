@@ -221,3 +221,94 @@ export function orderProfit(db: DB, order: Order): OrderProfit {
   const marginPct = sellingUsd > 0 ? Math.round((profitUsd / sellingUsd) * 1000) / 10 : null;
   return { cost, sellingUsd, costUsd, profitUsd, marginPct };
 }
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Profit across many orders — the report, and the admin's spreadsheet.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+/**
+ * Finished client work: the factory has reported back, so its charge is in and
+ * the cost is as known as it will get. An order still being made has no
+ * factory charge yet, and its profit would read high — counting those would
+ * flatter every total in the report.
+ */
+export function inProfitReport(o: Order): boolean {
+  return !o.forReadyStock && o.status !== "Rejected" && o.amount > 0
+    && (o.status === "Ready" || o.status === "Dispatched" || o.status === "Delivered");
+}
+
+export interface ProfitRow {
+  order: Order;
+  sellingUsd: number;
+  costInr: number;
+  costUsd: number | null;
+  profitUsd: number | null;
+  marginPct: number | null;
+  complete: boolean;
+  missing: MissingCost[];
+}
+
+export interface ProfitGroup {
+  key: string;
+  count: number;
+  sellingUsd: number;
+  costInr: number;
+  costUsd: number | null;
+  profitUsd: number | null;
+  marginPct: number | null;
+  /** Orders in the group whose cost is not fully known. */
+  incomplete: number;
+}
+
+function summarise(key: string, rows: ProfitRow[], rate: number): ProfitGroup {
+  const sellingUsd = r2(rows.reduce((s, r) => s + r.sellingUsd, 0));
+  const costInr = r2(rows.reduce((s, r) => s + r.costInr, 0));
+  const costUsd = rate > 0 ? r2(costInr / rate) : null;
+  const profitUsd = costUsd === null ? null : r2(sellingUsd - costUsd);
+  const marginPct = profitUsd === null || sellingUsd <= 0 ? null : Math.round((profitUsd / sellingUsd) * 1000) / 10;
+  return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, incomplete: rows.filter(r => !r.complete).length };
+}
+
+function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string, rate: number): ProfitGroup[] {
+  const map = new Map<string, ProfitRow[]>();
+  for (const r of rows) {
+    const k = keyOf(r);
+    const list = map.get(k) ?? [];
+    list.push(r);
+    map.set(k, list);
+  }
+  return [...map.entries()].map(([k, rs]) => summarise(k, rs, rate));
+}
+
+/**
+ * Profit for a set of orders, totalled and broken down by client, by month
+ * and by kind of piece. Group totals are summed in rupees and converted once,
+ * rather than adding up figures already rounded to the cent.
+ */
+export function profitReport(db: DB, orders: Order[]) {
+  const rate = db.settings.usdToInr ?? 0;
+  const rows: ProfitRow[] = orders.map(o => {
+    const p = orderProfit(db, o);
+    return {
+      order: o, sellingUsd: p.sellingUsd, costInr: p.cost.totalInr, costUsd: p.costUsd,
+      profitUsd: p.profitUsd, marginPct: p.marginPct, complete: p.cost.complete, missing: p.cost.missing,
+    };
+  });
+  const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "Unknown";
+  const monthOf = (iso: string) => {
+    const d = new Date(iso);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  };
+  const bySelling = (a: ProfitGroup, b: ProfitGroup) => b.sellingUsd - a.sellingUsd;
+  return {
+    rate,
+    rows: [...rows].sort((a, b) => +new Date(b.order.createdAt) - +new Date(a.order.createdAt)),
+    totals: summarise("All", rows, rate),
+    byClient: groupBy(rows, r => clientName(r.order.clientId), rate).sort(bySelling),
+    // Newest month first, the way every other ledger in the app reads.
+    byMonth: groupBy(rows, r => monthOf(r.order.createdAt), rate).sort((a, b) => b.key.localeCompare(a.key)),
+    byType: groupBy(rows, r => r.order.jewelleryType, rate).sort(bySelling),
+    /** Sold for less than they cost — the ones worth looking at first. */
+    losses: rows.filter(r => r.profitUsd !== null && r.profitUsd < 0).sort((a, b) => a.profitUsd! - b.profitUsd!),
+  };
+}

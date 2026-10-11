@@ -3,6 +3,7 @@ import {
   CARAT_TO_GRAM, type DB, type Order, type ReadyStockItem,
 } from "@/lib/db";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { orderProfit } from "@/lib/orderCost";
 
 /**
  * The finished pieces, with the weights a sale is priced from.
@@ -202,4 +203,35 @@ export function exportReadyStockPdf(items: ReadyStockItem[], name: string, subje
     ]),
     filename: name,
   });
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ * Profit — ADMIN ONLY.
+ *
+ * Kept apart from the product sheet above on purpose. That one is sent to
+ * customers to price a bulk sale; a cost column added to it would go out to a
+ * customer the first time somebody forwarded it without looking. This sheet
+ * has its own button, shown to the admin alone, and its name says what it is.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+const PROFIT_HEAD = [
+  "Order", "Design", "Client", "Item", "Metal", "Status", "Date",
+  "Selling ($)", "Gold cost (₹)", "Diamond cost (₹)", "Factory (₹)", "Total cost (₹)",
+  "Rate (₹/$)", "Cost ($)", "Profit ($)", "Margin %", "Cost complete", "Not yet valued",
+];
+
+export function exportProfitCsv(db: DB, orders: Order[], name: string): void {
+  const rate = db.settings.usdToInr ?? 0;
+  const sum = (ls: { amountInr: number }[]) => Math.round(ls.reduce((s, l) => s + l.amountInr, 0) * 100) / 100;
+  downloadCsv(`${name}-PROFIT-ADMIN`, PROFIT_HEAD, orders.map(o => {
+    const p = orderProfit(db, o);
+    const c = p.cost;
+    return [
+      o.orderNumber, o.designNumber ?? "", db.clients.find(x => x.id === o.clientId)?.companyName ?? (o.forReadyStock ? "Ready stock" : ""),
+      o.jewelleryType, `${o.metal}${o.productKarats ? ` ${o.productKarats}` : ""}`, o.status, fmtDate(o.createdAt),
+      o.forReadyStock ? "" : p.sellingUsd, sum(c.gold), sum(c.diamond), sum(c.labour), c.totalInr,
+      rate > 0 ? rate : "", p.costUsd ?? "", o.forReadyStock ? "" : p.profitUsd ?? "", o.forReadyStock ? "" : p.marginPct ?? "",
+      c.complete ? "yes" : "NO", c.missing.map(m => `${m.label} (${m.reason})`).join("; "),
+    ];
+  }));
 }
