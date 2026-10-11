@@ -37,7 +37,8 @@ export const num = (n: number | null | undefined, unit = "") => (n == null || !i
 /** ▲ / ▼ against the previous period. `goodWhenDown` for costs and days. */
 export function Delta({ value, goodWhenDown = false, label = "vs previous" }: { value: number | null | undefined; goodWhenDown?: boolean; label?: string }) {
   if (value === undefined) return null;
-  if (value === null) return <span className="text-[10px] text-muted-foreground">new · {label}</span>;
+  // Nothing to compare with: the earlier period had none of it.
+  if (value === null) return <span className="text-[10px] text-muted-foreground" title="The previous period had nothing to compare with">no data before</span>;
   const flat = Math.abs(value) < 0.05;
   const up = value > 0;
   const good = flat ? null : goodWhenDown ? !up : up;
