@@ -1,3 +1,4 @@
+import { middleStages } from "@/lib/stages";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
@@ -320,7 +321,9 @@ export function NewOrderPage() {
           lockerId: f.advanceLockerId || undefined,
           lockerAmount: f.advanceLockerId ? Number(f.advanceLockerAmount) : undefined,
         }] : [],
-        timeline: (forReadyStock ? buildReadyStockTimelineSteps() : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes", f.metal === DIAMOND_ONLY_METAL)).map((s, i) => ({
+        // The stages in the admin's order (Settings → Production timeline), fixed onto
+        // the order now — changing the setting later never reshuffles it.
+        timeline: (forReadyStock ? buildReadyStockTimelineSteps(middleStages(loadDb().settings)) : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes", f.metal === DIAMOND_ONLY_METAL, middleStages(loadDb().settings))).map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,

@@ -1,3 +1,4 @@
+import { OrderBoard } from "@/components/OrderBoard";
 import { pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
@@ -9,7 +10,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
@@ -105,11 +106,14 @@ export function OrdersPage() {
   const isStaff = user!.role !== "client";
   const can = useCan();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
-  // List vs Grid (image) view — remembered per device.
-  const [view, setView] = useState<"list" | "grid">(() => {
-    try { return (localStorage.getItem("orders-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  // List, Grid (image) or Board (stage columns) — remembered per device. The
+  // board moves orders between stages, so it is for staff; a client who had it
+  // remembered on a shared device sees the grid.
+  const [viewPref, setView] = useState<"list" | "grid" | "board">(() => {
+    try { return (localStorage.getItem("orders-view") as "list" | "grid" | "board") || "grid"; } catch { return "grid"; }
   });
-  const saveView = (v: "list" | "grid") => {
+  const view = viewPref === "board" && !isStaff ? "grid" : viewPref;
+  const saveView = (v: "list" | "grid" | "board") => {
     setView(v);
     try { localStorage.setItem("orders-view", v); } catch { /* ignore */ }
   };
@@ -268,6 +272,12 @@ export function OrdersPage() {
             className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
             <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
           </button>
+          {isStaff && (
+            <button onClick={() => saveView("board")} aria-label="Board view"
+              className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "board" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              <Columns3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Board</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -532,12 +542,15 @@ export function OrdersPage() {
       </div>
       )}
 
-      <PaginationBar
+      {/* Board: every order in its stage column — all of them, not one page. */}
+      {view === "board" && total > 0 && <OrderBoard orders={orders} />}
+
+      {view !== "board" && <PaginationBar
         page={page}
         totalPages={totalPages}
         onPageChange={setPage}
         label={total > 0 ? `Showing ${start + 1}–${end} of ${total} orders` : undefined}
-      />
+      />}
 
       <TrackingModal order={trackingOrder} onClose={() => setTrackingOrder(null)} />
 
