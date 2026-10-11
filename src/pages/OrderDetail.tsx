@@ -1,4 +1,5 @@
 
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
@@ -164,6 +165,7 @@ export function OrderDetailPage() {
   const { id } = useParams();
   const { user } = useAuth();
   const can = useCan();
+  const addNew = useAddNew();
   const nav = useNavigate();
 
   // Barcode band modal state
@@ -2884,11 +2886,11 @@ export function OrderDetailPage() {
                 <div className="grid md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Deposited to Locker *</Label>
-                    <Select value={advLockerId} onValueChange={setAdvLockerId}>
+                    <Select value={advLockerId} onValueChange={addNew("locker", setAdvLockerId)}>
                       <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                       <SelectContent>
                         {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
-                      </SelectContent>
+                      <AddNewItem kind="locker" /></SelectContent>
                     </Select>
                   </div>
                   {advLockerId && (
@@ -3059,12 +3061,12 @@ export function OrderDetailPage() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-brand-dark shrink-0">{faDone ? "Manufacturing (actual)" : "① Assign & Estimate"}</span>
-                <Select value={order.assignedFactoryId || "__none"} onValueChange={v => assignFactory(v === "__none" ? "" : v)}>
+                <Select value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
                   <SelectTrigger className="h-8 w-52 rounded-lg text-xs"><SelectValue placeholder="Choose factory" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Not assigned</SelectItem>
                     {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-                  </SelectContent>
+                  <AddNewItem kind="factory" /></SelectContent>
                 </Select>
               </div>
               {canEditStage() && faStepIdx < 0 && (
@@ -3253,9 +3255,9 @@ export function OrderDetailPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <Select value={bill.supplierId} onValueChange={v => updateBill(bi, { supplierId: v })}>
+                    <Select value={bill.supplierId} onValueChange={addNew("supplier", v => updateBill(bi, { supplierId: v }))}>
                       <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-                      <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+                      <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
                     </Select>
                     <Input value={bill.billNo} onChange={e => updateBill(bi, { billNo: e.target.value })}
                       className="rounded-xl h-10 bg-white" placeholder="Supplier's bill no. *" />
@@ -3626,9 +3628,9 @@ export function OrderDetailPage() {
                   <p className="text-xs text-muted-foreground">Add or remove gold/diamond and record the factory’s rework charge. Added gold normally comes out of the gold the factory already holds of ours; removed material returns to stock — the factory ledger &amp; stock update automatically.</p>
                   <div>
                     <Label className="text-xs">Factory</Label>
-                    <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={setRwFactoryId}>
+                    <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={addNew("factory", setRwFactoryId)}>
                       <SelectTrigger className="rounded-xl mt-1 h-10"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-                      <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+                      <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
                     </Select>
                   </div>
                   <div className="rounded-xl bg-secondary/40 p-3 space-y-2">

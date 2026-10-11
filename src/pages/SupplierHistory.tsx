@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
@@ -91,6 +92,7 @@ export function SupplierHistoryPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
 
   const supplier = db.suppliers.find(s => s.id === id);
   if (!supplier) {
@@ -820,9 +822,9 @@ export function SupplierHistoryPage() {
             <p className="text-sm font-medium text-brand-dark">Record Payment</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount (₹)" />
-              <Select value={payLockerId} onValueChange={setPayLockerId}>
+              <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
               </Select>
               <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
@@ -849,9 +851,9 @@ export function SupplierHistoryPage() {
             <p className="text-xs text-muted-foreground -mt-1.5">Money the supplier gave back (refund / return credit). It goes into a locker and reduces what you owe them.</p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
               <Input type="number" min={1} value={rcvAmount} onChange={e => setRcvAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount received (₹)" />
-              <Select value={rcvLockerId} onValueChange={setRcvLockerId}>
+              <Select value={rcvLockerId} onValueChange={addNew("locker", setRcvLockerId)}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Into which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
               </Select>
             </div>
             <Input value={rcvNote} onChange={e => setRcvNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (e.g. refund for returned goods)" />

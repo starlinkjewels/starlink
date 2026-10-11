@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
@@ -34,6 +35,7 @@ export function ClientHistoryPage() {
   const { user } = useAuth();
   const can = useCan();
   const db = useDb();
+  const addNew = useAddNew();
 
   const client = db.clients.find(c => c.id === id);
 
@@ -596,11 +598,11 @@ export function ClientHistoryPage() {
                 No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
               </p>
             )}
-            <Select value={payLockerId} onValueChange={setPayLockerId}>
+            <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
               <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
               <SelectContent>
                 {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
-              </SelectContent>
+              <AddNewItem kind="locker" /></SelectContent>
             </Select>
 
             {payNeedsRate && (

@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
@@ -37,6 +38,7 @@ export function FactoryHistoryPage() {
   const navigate = useNavigate();
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
 
   const factory = db.factories.find(f => f.id === id);
   if (!factory) {
@@ -1054,9 +1056,9 @@ export function FactoryHistoryPage() {
               {isActive && activeIssuance.action === "pay" && (
                 <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                   <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="rounded-xl h-9" placeholder="Amount (₹)" />
-                  <Select value={payLockerId} onValueChange={setPayLockerId}>
+                  <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
                     <SelectTrigger className="h-9 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                    <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+                    <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
                   </Select>
                   <div className="flex gap-2">
                     <AsyncButton onClick={() => payCharge(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>

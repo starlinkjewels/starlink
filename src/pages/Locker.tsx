@@ -1,3 +1,4 @@
+import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
@@ -11,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -36,10 +37,6 @@ export function LockerPage() {
   const db = useDb();
   const can = useCan();
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [f, setF] = useState<{ name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string }>({
-    name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0",
-  });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showExport, setShowExport] = useState(false);
@@ -98,24 +95,6 @@ export function LockerPage() {
 
 
 
-  const createLocker = () => {
-    if (!f.name.trim()) { toast.error("Enter an account name"); return; }
-    setSaving(true);
-    try {
-      updateDb(d => {
-        if (!d.lockers) d.lockers = [];
-        d.lockers.unshift({
-          id: uid("lk_"), name: f.name.trim(), type: f.type, currency: f.currency,
-          accountNumberLast4: f.accountNumberLast4.trim() || undefined,
-          openingBalance: Math.max(0, Number(f.openingBalance) || 0),
-          createdAt: new Date().toISOString(), active: true,
-        });
-      });
-      toast.success("Locker created");
-      setOpen(false);
-      setF({ name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0" });
-    } finally { setSaving(false); }
-  };
 
   // ── Edit locker ──
   const [editId, setEditId] = useState<string | null>(null);
@@ -378,55 +357,12 @@ export function LockerPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Locker</h1>
           <p className="text-sm text-muted-foreground">Bank &amp; cash accounts — {lockers.length} locker{lockers.length !== 1 ? "s" : ""}</p>
         </div>
-        <Dialog open={open} onOpenChange={setOpen}>
-          {can("locker", "add") && (
-            <DialogTrigger asChild>
-              <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
-            </DialogTrigger>
-          )}
-          <DialogContent className="max-w-md rounded-2xl">
-            <DialogHeader><DialogTitle className="font-display text-2xl">Add Locker</DialogTitle></DialogHeader>
-            <div className="space-y-3 mt-2">
-              <div>
-                <Label className="text-xs">Account Name</Label>
-                <Input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="rounded-xl mt-1" placeholder="HDFC Current A/c" />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Type</Label>
-                  <Select value={f.type} onValueChange={v => setF({ ...f, type: v as LockerType })}>
-                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="bank">Bank</SelectItem>
-                      <SelectItem value="cash">Cash</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs">Currency</Label>
-                  <Select value={f.currency} onValueChange={v => setF({ ...f, currency: v as "INR" | "USD" })}>
-                    <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="INR">INR (₹)</SelectItem>
-                      <SelectItem value="USD">USD ($)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              {f.type === "bank" && (
-                <div>
-                  <Label className="text-xs">Account Number (last 4, optional)</Label>
-                  <Input value={f.accountNumberLast4} onChange={e => setF({ ...f, accountNumberLast4: e.target.value })} maxLength={4} className="rounded-xl mt-1" />
-                </div>
-              )}
-              <div>
-                <Label className="text-xs">Opening Balance ({f.currency === "USD" ? "$" : "₹"})</Label>
-                <Input type="number" min={0} value={f.openingBalance} onChange={e => setF({ ...f, openingBalance: e.target.value })} className="rounded-xl mt-1" />
-              </div>
-              <Button onClick={createLocker} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create Locker"}</Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        {can("locker", "add") && (
+          <>
+            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
+            <LockerCreateDialog open={open} onOpenChange={setOpen} />
+          </>
+        )}
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">

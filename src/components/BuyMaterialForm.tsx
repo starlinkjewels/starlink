@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -57,6 +58,7 @@ function lineBase(l: Line): number {
 export function BuyMaterialForm() {
   const { user } = useAuth();
   const db = useDb();
+  const addNew = useAddNew();
   const [supplierId, setSupplierId] = useState("");
   const [date, setDate] = useState(todayLocal());
   const [billNo, setBillNo] = useState("");
@@ -169,9 +171,9 @@ export function BuyMaterialForm() {
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
         <div className="sm:col-span-2">
           <Label className="text-xs">Supplier</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
+          <Select value={supplierId} onValueChange={addNew("supplier", setSupplierId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}</SelectContent>
+            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
           </Select>
         </div>
         <div>

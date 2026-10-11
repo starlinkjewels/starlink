@@ -1,3 +1,4 @@
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { middleStages } from "@/lib/stages";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
@@ -62,6 +63,7 @@ export function NewOrderPage() {
   const { user } = useAuth();
   const nav = useNavigate();
   const db = useDb();
+  const addNew = useAddNew();
   const isAdmin    = user?.role === "admin";
   const isEmployee = user?.role === "employee";
   const isClient   = user?.role === "client";
@@ -460,7 +462,7 @@ export function NewOrderPage() {
         {(isAdmin || isEmployee) && (
           <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Select the client — or build a piece for your own Ready Stock">
             <Field label="Select Client *">
-              <Select value={f.clientId} onValueChange={v => set("clientId", v)} required>
+              <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value={READY_STOCK_CLIENT}>
@@ -473,7 +475,7 @@ export function NewOrderPage() {
                       <span className="text-muted-foreground ml-2 text-xs">{c.ownerName}</span>
                     </SelectItem>
                   ))}
-                </SelectContent>
+                <AddNewItem kind="client" /></SelectContent>
               </Select>
             </Field>
 
@@ -872,12 +874,12 @@ export function NewOrderPage() {
             a diamond-only sale — nothing is being manufactured. ══ */}
         {!isClient && !isDiamondOnly && !isReadyStockSale && (
           <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional — which factory will make this piece">
-            <Select value={f.assignedFactoryId || "__none"} onValueChange={v => set("assignedFactoryId", v === "__none" ? "" : v)}>
+            <Select value={f.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => set("assignedFactoryId", v === "__none" ? "" : v))}>
               <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">Not assigned yet</SelectItem>
                 {db.factories.filter(fac => fac.active !== false).map(fac => <SelectItem key={fac.id} value={fac.id}>{fac.name}</SelectItem>)}
-              </SelectContent>
+              <AddNewItem kind="factory" /></SelectContent>
             </Select>
           </SectionCard>
         )}
@@ -1015,14 +1017,14 @@ export function NewOrderPage() {
               {Number(f.advanceAmount) > 0 && (
                 <div className="grid md:grid-cols-2 gap-3">
                   <Field label="Deposited to Locker *">
-                    <Select value={f.advanceLockerId} onValueChange={v => {
-                      const l = db.lockers.find(x => x.id === v);
+                    <Select value={f.advanceLockerId} onValueChange={addNew("locker", v => {
+                      const l = loadDb().lockers.find(x => x.id === v);
                       setF(prev => ({ ...prev, advanceLockerId: v, advanceLockerAmount: l?.currency === "USD" ? String(prev.advanceAmount) : "" }));
-                    }}>
+                    })}>
                       <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                       <SelectContent>
                         {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
-                      </SelectContent>
+                      <AddNewItem kind="locker" /></SelectContent>
                     </Select>
                   </Field>
                   {f.advanceLockerId && (

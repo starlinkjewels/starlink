@@ -1,3 +1,4 @@
+import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
@@ -5,12 +6,11 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { factoryAccount, factoryPoolBuckets, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
-import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -28,8 +28,6 @@ export function FactoriesPage() {
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [f, setF] = useState<Partial<Factory>>({ name: "", contactPerson: "", phone: "", address: "" });
 
   // Every factory's account, worked out once — rows, sort and totals share it.
   const accounts = new Map(db.factories.map(fac => [
@@ -61,19 +59,6 @@ export function FactoriesPage() {
     return acc;
   }, { payable: 0, receivable: 0 });
 
-  const create = () => {
-    if (!f.name?.trim()) { toast.error("Enter a factory name"); return; }
-    setSaving(true);
-    try {
-      updateDb(d => {
-        if (!d.factories) d.factories = [];
-        d.factories.unshift({ ...f, name: f.name!.trim(), id: uid("fac_"), active: true, createdAt: new Date().toISOString() } as Factory);
-      });
-      toast.success("Factory added");
-      setOpen(false);
-      setF({ name: "", contactPerson: "", phone: "", address: "" });
-    } finally { setSaving(false); }
-  };
 
   const toggle = (fac: Factory) => {
     updateDb(d => { const x = d.factories.find(x => x.id === fac.id); if (x) x.active = !x.active; });
@@ -94,53 +79,10 @@ export function FactoriesPage() {
           <p className="text-sm text-muted-foreground">{total} factory{total !== 1 ? "ies" : ""}</p>
         </div>
         {isAdmin && (
-        <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Factory</Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-lg rounded-2xl">
-            <DialogHeader><DialogTitle className="font-display text-2xl">Add Factory</DialogTitle></DialogHeader>
-            <div className="grid grid-cols-2 gap-3 mt-2">
-              {(["name", "contactPerson", "phone", "address"] as const).map(k => (
-                <div key={k} className={k === "address" || k === "name" ? "col-span-2" : ""}>
-                  <Label className="text-xs capitalize">{k === "contactPerson" ? "Contact Person / Karigar" : k.replace(/([A-Z])/g, " $1")}</Label>
-                  <Input value={(f as Record<string, string>)[k] || ""} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
-                </div>
-              ))}
-              <OpeningBalanceFields
-                amount={f.openingBalance != null ? String(f.openingBalance) : ""}
-                dir={f.openingDir || "credit"}
-                date={f.openingDate || ""}
-                onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
-                onDir={v => setF({ ...f, openingDir: v })}
-                onDate={v => setF({ ...f, openingDate: v || undefined })}
-                debitLabel="Factory owes us (Debit)"
-                creditLabel="We owe factory (Credit)"
-                title="Opening Making-Charge Balance"
-                hint="Unpaid labour / making charges with this factory when you started using this app (₹)."
-              />
-              <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
-                <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <Label className="text-[11px]">Fine gold at factory (24KT grams)</Label>
-                    <Input type="number" min={0} step="0.001" value={f.openingFineGold != null ? String(f.openingFineGold) : ""}
-                      onChange={e => setF({ ...f, openingFineGold: e.target.value === "" ? undefined : Number(e.target.value) })}
-                      placeholder="0.000" className="rounded-lg mt-1 h-9" />
-                  </div>
-                  <div>
-                    <Label className="text-[11px]">As of date</Label>
-                    <Input type="date" value={f.openingFineGoldDate || ""}
-                      onChange={e => setF({ ...f, openingFineGoldDate: e.target.value || undefined })}
-                      className="rounded-lg mt-1 h-9" />
-                  </div>
-                </div>
-                <p className="text-[11px] text-muted-foreground">Pure (24KT) gold already lying with this factory. Added onto their Fine Gold balance.</p>
-              </div>
-            </div>
-            <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Factory"}</Button>
-          </DialogContent>
-        </Dialog>
+          <>
+            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Factory</Button>
+            <FactoryCreateDialog open={open} onOpenChange={setOpen} />
+          </>
         )}
       </div>
 
