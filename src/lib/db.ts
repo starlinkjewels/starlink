@@ -1426,10 +1426,13 @@ export function cashbackPercentFor(d: DB, client: Client | undefined): number {
 
 
 /**
- * Fill the given orders IN THE ORDER GIVEN, each up to its balance. Separate
- * from allocatePaymentFIFO because that one re-sorts by date — which is right
- * for "oldest bill first" and wrong when the caller has deliberately put one
- * invoice at the front. Returns the leftover.
+ * Fill the given orders IN THE ORDER GIVEN, each up to its balance, and return
+ * whatever is left over.
+ *
+ * The order is the caller's decision and this never second-guesses it: the
+ * orders on one invoice when money was sent for that invoice, oldest bill first
+ * when somebody has asked for their credit to be spread. Nothing re-sorts by
+ * date behind the caller's back any more.
  */
 export function allocateInOrder(
   orders: Order[],
