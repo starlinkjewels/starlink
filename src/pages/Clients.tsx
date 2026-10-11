@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, uid, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
 import { AccountSummary } from "@/components/AccountSummary";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
@@ -239,6 +239,10 @@ export function ClientsPage() {
           status: "active", clientId: id, createdAt: new Date().toISOString(),
         });
       });
+      // Wait for the login's permission record to reach the server before
+      // saying it is done. It goes up just after the profile; close the tab in
+      // between and the account can sign in to nothing.
+      await flush();
       toast.success(`Client created — they can sign in with their email & password${f.accountManagerId ? "" : " · handled by Admin"}`);
       setOpen(false);
       setF({ companyName: "", ownerName: "", email: "", phone: "", country: "USA", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: undefined });

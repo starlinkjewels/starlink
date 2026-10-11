@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, uid, type User } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { auth, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -76,6 +76,10 @@ export function EmployeesPage() {
         openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
         openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
       } as User));
+      // Wait for the login's permission record to reach the server before
+      // saying it is done. It goes up just after the profile; close the tab in
+      // between and the account can sign in to nothing.
+      await flush();
       toast.success(needsLogin ? "Employee created — they can sign in with their email & password" : "Employee added for salary — no login created");
       setOpen(false);
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
