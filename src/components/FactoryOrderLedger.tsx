@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory } from "@/lib/db";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtMoneyInr, diamondFlow } from "@/lib/manufacturing";
 import { Input } from "@/components/ui/input";
 import { Search, Download } from "lucide-react";
 
@@ -69,6 +69,8 @@ export function buildFactoryOrderRows(
   orders: Order[],
 ): FactoryOrderRow[] {
   const byOrder = new Map<string, FactoryOrderRow>();
+  /** Rows with a real diamond issue — only the others may show the order's estimate. */
+  const hasDiaIssue = new Set<string>();
   for (const mi of issuances) {
     // Material handed over in BULK has no order. Each delivery is its own row —
     // lumping them into a single "pool" line hid when each one was given and how
@@ -111,12 +113,13 @@ export function buildFactoryOrderRows(
       }
     }
     if (mi.material === "diamond") {
-      row.diaOut += mi.quantityIssued;
-      if (mi.status === "closed") {
-        // Everything is accounted for once closed: what went into the piece
-        // plus whatever came back to stock.
-        row.diaIn += mi.quantityIssued;
-      }
+      // The same rule as the Factory Account card (diamondFlow): a pool draw is
+      // not new stones, and a received piece's stones are accounted for before
+      // the issue is closed. Counting either differently made the two disagree.
+      const f = diamondFlow(mi);
+      row.diaOut += f.out;
+      row.diaIn += f.in;
+      hasDiaIssue.add(key);
     }
     // Keep the entries behind the figures so the row can be opened up.
     if (mi.material === "gold") {
@@ -141,7 +144,9 @@ export function buildFactoryOrderRows(
     if (mi.material === "diamond") {
       row.entries.push({
         id: mi.id + "-din", date: mi.issuedAt, kind: "out",
-        text: `Diamond given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`,
+        text: mi.source === "factoryPool"
+          ? `Diamond taken from the factory's pool — ${mi.purityOrQuality} (already counted when the pool was delivered)`
+          : `Diamond given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`,
         qty: `${mi.quantityIssued} ct`,
       });
       if (mi.status === "closed") {
@@ -190,7 +195,7 @@ export function buildFactoryOrderRows(
         row.goldEstimated = true;
       }
     }
-    if (row.diaOut === 0 && order.diamondWeight > 0) {
+    if (!hasDiaIssue.has(row.orderId) && row.diaOut === 0 && order.diamondWeight > 0) {
       row.diaOut = order.diamondWeight;
       row.diaEstimated = true;
     }
@@ -216,13 +221,17 @@ export function buildFactoryOrderRows(
 }
 
 export function FactoryOrderLedger({
-  rows, factoryName, openingFineGold = 0, onExport,
+  rows, factoryName, openingFineGold = 0, onExport, account,
 }: {
   rows: FactoryOrderRow[];
   factoryName: string;
   /** Fine gold the factory already held at migration. The Factory Account card
    *  counts it, so this summary has to as well or the two disagree. */
   openingFineGold?: number;
+  /** The factory's whole account. Unfiltered, the labour still owed is this
+   *  figure — it counts the opening balance and advances that settle no one
+   *  order, which a sum of order rows cannot see. */
+  account?: { chargesPending: number; chargesOverpaid: number };
   onExport?: () => void;
 }) {
   const [q, setQ] = useState("");
@@ -318,10 +327,22 @@ export function FactoryOrderLedger({
           <p className="text-[10px] uppercase tracking-wider opacity-70">Labour billed</p>
           <p className="text-base font-semibold mt-0.5">{fmtMoneyInr(T.labour)}</p>
         </div>
-        <div className={`rounded-xl p-3 text-center ${T.labour - T.paid > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-          <p className="text-[10px] uppercase tracking-wider opacity-80">Labour pending</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoneyInr(Math.max(0, T.labour - T.paid))}</p>
-        </div>
+        {(() => {
+          // The whole factory: the account's figure, same as the card above. A
+          // filtered view: what the rows shown still owe.
+          const whole = !active && account;
+          const pending = whole ? account.chargesPending : Math.max(0, T.labour - T.paid);
+          const credit = whole && account.chargesPending === 0 ? account.chargesOverpaid : 0;
+          return (
+            <div className={`rounded-xl p-3 text-center ${pending > 0 ? "bg-destructive/10 text-destructive" : credit > 0 ? "bg-primary/10 text-primary" : "bg-success/10 text-success"}`}>
+              <p className="text-[10px] uppercase tracking-wider opacity-80">{credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows"}</p>
+              <p className="text-base font-semibold mt-0.5">{fmtMoneyInr(credit > 0 ? credit : pending)}</p>
+              {whole && pending > 0 && Math.round(pending) !== Math.round(Math.max(0, T.labour - T.paid)) && (
+                <p className="text-[10px] opacity-70">after opening balance & advances</p>
+              )}
+            </div>
+          );
+        })()}
       </div>
 
       <div className="px-5 py-3 flex items-center gap-2 flex-wrap">

@@ -168,6 +168,10 @@ export function FactoriesPage() {
           const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
           const account = accounts.get(fac.id)!;
           const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
+          // Fine (24KT) gold with the opening balance — the figure the factory's
+          // own page shows. Raw grams in minus grams out mixed karats and left
+          // the opening gold out, so the card could read −144 g for 18 g held.
+          const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id, fac.openingFineGold);
           const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
           return (
             <div key={fac.id} className="card-luxe card-hover p-5 flex flex-col">
@@ -189,12 +193,12 @@ export function FactoriesPage() {
 
               <div className="mt-4 grid grid-cols-3 gap-2">
                 <div className="p-2.5 rounded-xl bg-secondary text-center">
-                  <p className="text-[10px] text-muted-foreground">Gold Out</p>
-                  <p className="text-xs font-semibold">{account.goldOutstanding.toLocaleString()} g</p>
+                  <p className="text-[10px] text-muted-foreground">Fine Gold</p>
+                  <p className={`text-xs font-semibold ${fineGold < 0 ? "text-destructive" : ""}`}>{fineGold.toLocaleString()} g</p>
                 </div>
                 <div className="p-2.5 rounded-xl bg-secondary text-center">
-                  <p className="text-[10px] text-muted-foreground">Diamond Out</p>
-                  <p className="text-xs font-semibold">{account.diamondOutstanding.toLocaleString()} ct</p>
+                  <p className="text-[10px] text-muted-foreground">Diamond</p>
+                  <p className={`text-xs font-semibold ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding.toLocaleString()} ct</p>
                 </div>
                 <div className={`p-2.5 rounded-xl text-center ${account.chargesPending > 0 ? "bg-destructive/5" : account.chargesOverpaid > 0 ? "bg-blue-500/5" : "bg-success/8"}`}>
                   <p className="text-[10px] text-muted-foreground">{account.chargesOverpaid > 0 && account.chargesPending === 0 ? "Advance Paid" : "Charges Due"}</p>

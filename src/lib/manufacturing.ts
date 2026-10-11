@@ -246,6 +246,33 @@ export function issuanceUsed(i: MaterialIssuance): number {
   return (i.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
 }
 
+/**
+ * A diamond issue's carats, as every factory figure counts them — the Factory
+ * Account card, the factory's card on the list, and the Factory Ledger all use
+ * this, so they can never quote two different "diamond at the factory" numbers.
+ *
+ *   out — carats that reached the factory. A draw from the factory's own pool
+ *         adds nothing: those stones were counted when the pool was delivered.
+ *   in  — carats the factory has accounted for. Once the issue is closed, all
+ *         of it (set in the piece, returned to stock, or written off at Final
+ *         Approval). Before that, what is set in a received piece plus what has
+ *         come back. For a pool draw, only what was set in the piece (as the
+ *         account always counted it) — the rest is still in the factory's pool.
+ */
+export function diamondFlow(i: MaterialIssuance): { out: number; in: number } {
+  const pool = i.source === "factoryPool";
+  const out = pool ? 0 : i.quantityIssued;
+  const used = issuanceUsed(i);
+  const returned = i.diamondKind === "certified"
+    ? (i.finishDisposition === "returned" ? i.quantityIssued : 0)
+    : (i.finishReturnedCt || 0);
+  let accounted: number;
+  if (pool) accounted = i.finishDisposition === "returned" ? 0 : used;
+  else accounted = i.status === "closed" ? i.quantityIssued : Math.min(i.quantityIssued, used + returned);
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  return { out: r3(out), in: r3(Math.max(0, accounted)) };
+}
+
 /** Only meaningful once `status === "closed"` — material not yet accounted for is still "in progress" until then. */
 export function issuanceWastage(i: MaterialIssuance): number {
   return i.quantityIssued - issuanceUsed(i);
@@ -412,7 +439,7 @@ export function factoryAccount(
   for (const i of issuances) {
     const isPoolDraw = i.source === "factoryPool";
     if (i.material === "gold") { if (!isPoolDraw) goldIssued += i.quantityIssued; goldUsed += issuanceUsed(i); }
-    else { if (!isPoolDraw) diamondIssued += i.quantityIssued; diamondUsed += issuanceUsed(i); }
+    else { const f = diamondFlow(i); diamondIssued += f.out; diamondUsed += f.in; }
     chargesTotal += i.makingCharges.amountInr;
     const paid = issuancePaid(i);
     chargesPaid += paid;
@@ -443,9 +470,10 @@ export function factoryAccount(
     goldIssued,
     goldUsed,
     goldOutstanding: goldIssued - goldUsed,
-    diamondIssued,
-    diamondUsed,
-    diamondOutstanding: diamondIssued - diamondUsed,
+    diamondIssued: Math.round(diamondIssued * 1000) / 1000,
+    /** Carats accounted for — set in pieces, returned, or settled at Final Approval. */
+    diamondUsed: Math.round(diamondUsed * 1000) / 1000,
+    diamondOutstanding: Math.round((diamondIssued - diamondUsed) * 1000) / 1000,
     chargesTotal: r0(chargesTotal),
     chargesPaid: r0(chargesPaid),
     chargesPending: r0(chargesPending),
