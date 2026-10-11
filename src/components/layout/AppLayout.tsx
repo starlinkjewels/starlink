@@ -1,4 +1,5 @@
 import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
+import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
@@ -185,6 +186,14 @@ export function AppLayout() {
   // it is applied when it changes and not on every redraw.
   const tableUiKey = JSON.stringify(db.settings?.tableUi ?? null);
   useEffect(() => { applyTableUi(tableUiOf(db.settings?.tableUi as Partial<TableUi> | undefined)); }, [tableUiKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The look chosen in Settings → Appearance, the same way — and remembered on
+  // this device so the next start opens in it.
+  const appearanceKey = JSON.stringify(db.settings?.appearance ?? null);
+  useEffect(() => {
+    const a = appearanceOf(db.settings?.appearance as Partial<AppearanceUi> | undefined);
+    applyAppearance(a);
+    rememberAppearance(a);
+  }, [appearanceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate();
   const loc = useLocation();
   const [unread, setUnread] = useState(0);
@@ -272,9 +281,9 @@ export function AppLayout() {
   });
 
   return (
-    <div className="h-[100dvh] overflow-hidden bg-background flex">
+    <div className="app-shell h-[100dvh] overflow-hidden bg-background flex">
       {/* ── Sidebar (desktop) ── */}
-      <aside className="hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen" style={{ width: '16rem', minWidth: '16rem' }}>
+      <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen" style={{ width: '16rem', minWidth: '16rem' }}>
         <div className="px-5 py-5 flex items-center">
           <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-auto object-contain" />
         </div>
@@ -346,7 +355,7 @@ export function AppLayout() {
             fixed positioning is anchored directly to the viewport and doesn't
             have that issue. Desktop keeps the original sticky-in-flow behavior
             (no toolbar, no issue, and the sidebar layout depends on flow). */}
-        <header className="fixed inset-x-0 top-0 md:sticky md:inset-auto shrink-0 z-30 glass border-b px-4 md:px-6 flex items-center gap-4"
+        <header className="app-header fixed inset-x-0 top-0 md:sticky md:inset-auto shrink-0 z-30 glass border-b px-4 md:px-6 flex items-center gap-4"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 0px)", height: "calc(env(safe-area-inset-top) + 4rem)" }}>
 
           {/* Mobile logo */}
@@ -368,8 +377,10 @@ export function AppLayout() {
           {/* Search bar */}
           <button
             onClick={() => navigate("/search")}
-            className="flex-1 max-w-xs md:max-w-sm flex items-center gap-2 px-3 h-9 rounded-xl border border-border/80 bg-white/70 text-sm text-muted-foreground hover:border-primary hover:bg-white transition-all ml-auto md:ml-0">
-            <Search className="h-3.5 w-3.5 shrink-0" />
+            aria-label="Search"
+            className="flex-1 max-w-xs md:max-w-sm flex items-center gap-2 px-3 h-9 rounded-xl border border-border/80 bg-white/70 text-sm text-muted-foreground hover:border-primary hover:bg-white transition-all ml-auto md:ml-0
+              max-sm:flex-none max-sm:w-9 max-sm:px-0 max-sm:justify-center max-sm:border-transparent max-sm:bg-transparent max-sm:text-foreground max-sm:hover:bg-secondary">
+            <Search className="h-[18px] w-[18px] sm:h-3.5 sm:w-3.5 shrink-0" />
             <span className="hidden sm:inline truncate">Search orders, clients…</span>
           </button>
 
@@ -509,14 +520,14 @@ export function AppLayout() {
 
         {/* ── Bottom nav (mobile) — 5 items: 4 tabs + More ── */}
         <nav
-          className="md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t flex items-center justify-around"
+          className="app-tabbar md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t flex items-center justify-around"
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)", paddingTop: "0.5rem" }}>
 
           {MOBILE_NAV.map(item => (
             <NavLink key={item.to} to={item.to} end={item.to === "/"}
               className={({ isActive }) =>
-                `flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-medium transition relative
-                 ${isActive ? "text-primary" : "text-muted-foreground"}`}>
+                `flex flex-col items-center gap-0.5 min-w-[56px] px-3 py-1.5 rounded-2xl text-[10px] font-medium transition relative
+                 ${isActive ? "text-primary bg-primary/10" : "text-muted-foreground"}`}>
               <div className="relative">
                 <item.icon className="h-5 w-5" />
                 {item.to === "/notifications" && unread > 0 && (
@@ -532,8 +543,8 @@ export function AppLayout() {
           {/* More button */}
           <button
             onClick={() => setMoreOpen(true)}
-            className={`flex flex-col items-center gap-0.5 px-3 py-1 rounded-xl text-[10px] font-medium transition
-              ${isMoreActive ? "text-primary" : "text-muted-foreground"}`}>
+            className={`flex flex-col items-center gap-0.5 min-w-[56px] px-3 py-1.5 rounded-2xl text-[10px] font-medium transition
+              ${isMoreActive ? "text-primary bg-primary/10" : "text-muted-foreground"}`}>
             <MoreHorizontal className="h-5 w-5" />
             More
           </button>
@@ -561,7 +572,7 @@ export function AppLayout() {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.2 }}
-              className="md:hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+              className="ui-scrim md:hidden fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
               onClick={() => setMoreOpen(false)}
             />
 
@@ -572,7 +583,7 @@ export function AppLayout() {
               animate={{ y: 0 }}
               exit={{ y: "100%" }}
               transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="md:hidden fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-3xl shadow-2xl flex flex-col"
+              className="ui-dialog app-more-sheet md:hidden fixed bottom-0 inset-x-0 z-50 bg-white rounded-t-3xl shadow-2xl flex flex-col"
               style={{ maxHeight: "90vh" }}
             >
               {/* Handle bar */}

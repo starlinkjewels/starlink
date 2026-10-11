@@ -1,5 +1,6 @@
 import { TableStyleSettings } from "@/components/TableStyleSettings";
-import { Table2 } from "lucide-react";
+import { AppearanceSettings } from "@/components/AppearanceSettings";
+import { Table2, Palette } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
@@ -681,6 +682,7 @@ export function SettingsPage() {
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
+    { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin },
     { id: "tables", label: "Table Style", icon: Table2, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
     { id: "data", label: "Data & Backup", icon: Database, show: true },
@@ -1321,6 +1323,7 @@ export function SettingsPage() {
       )}
 
       {/* Table style — admin only */}
+      {activeId === "appearance" && <AppearanceSettings />}
       {activeId === "tables" && <TableStyleSettings />}
 
       {/* Companies — admin only */}
