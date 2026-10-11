@@ -718,6 +718,10 @@ export interface Settings {
   notifications: boolean;
   diamondRate: number; // $ per carat
   metalRate: number; // $ per gram
+  /** ₹ to the $ — converts an order's rupee cost so it can be set against its
+   *  dollar selling price. ADMIN ONLY, like everything profit touches. Unset
+   *  means no profit is stated at all rather than one worked out at a guess. */
+  usdToInr?: number;
   defaultShippingCharge: number; // $ flat default per order
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25

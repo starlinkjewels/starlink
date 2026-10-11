@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
+import { OrderProfitCard } from "@/components/OrderProfitCard";
 import {
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
@@ -2611,6 +2612,11 @@ export function OrderDetailPage() {
           )}
         </div>
       )}
+
+      {/* ── Cost & Profit — the admin's eyes only. Employees can open this
+          page, and the client portal renders it too, so the gate is the role
+          itself, never the page. */}
+      {user!.role === "admin" && <OrderProfitCard db={db} order={order} />}
 
       {/* ── Advance Payment Card ── */}
       <div className="card-luxe p-6 space-y-4">

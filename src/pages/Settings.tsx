@@ -39,6 +39,7 @@ import {
   DollarSign,
   Building2,
   Database,
+  Lock,
   Boxes,
   SlidersHorizontal,
   Hash,
@@ -905,6 +906,38 @@ export function SettingsPage() {
               </div>
               <p className="text-[11px] text-muted-foreground">per gram</p>
             </div>
+
+            {/* ₹ to $ — admin only: it is what turns an order's rupee cost into a
+                profit, and profit is not for anyone else's screen. */}
+            {isAdmin && (
+              <div className="space-y-1.5 col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3">
+                <Label className="text-xs flex items-center gap-1.5">
+                  <Lock className="h-3.5 w-3.5 text-amber-600" />
+                  Exchange Rate for Profit (₹ per $1) — admin only
+                </Label>
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
+                  <Input
+                    type="number"
+                    min={0}
+                    step={0.01}
+                    value={db.settings.usdToInr ?? ""}
+                    placeholder="e.g. 84.50"
+                    onChange={(e) =>
+                      setDb({
+                        ...db,
+                        settings: { ...db.settings, usdToInr: e.target.value === "" ? undefined : Math.max(0, Number(e.target.value)) },
+                      })
+                    }
+                    className="rounded-xl pl-7"
+                  />
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Order costs are kept in rupees and orders are sold in dollars. This converts one to the other so
+                  each order can show its profit. Left blank, cost is shown in rupees and no profit is stated.
+                </p>
+              </div>
+            )}
 
             {/* Default shipping charge */}
             <div className="space-y-1.5 col-span-2">
