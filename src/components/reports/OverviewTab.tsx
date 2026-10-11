@@ -52,7 +52,13 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
         )}
         <KpiCard icon={Wallet} label="Money collected" value={usd(k.collectedUsd, true)} sub="Received from clients" delta={d(k.collectedUsd, kp?.collectedUsd)} tone="gold" />
         <KpiCard icon={HandCoins} label="Owed to us" value={usd(data.owed.total, true)} sub={data.owed.d90 ? `${usd(data.owed.d90, true)} over 90 days` : "Nothing over 90 days"} tone="rose" hint="Unpaid on shipped work, as of today." />
-        <KpiCard icon={Landmark} label="We owe" value={inr(data.pay.suppliersInr + data.pay.factoriesInr, true)} sub={`Suppliers ${inr(data.pay.suppliersInr, true)} · factories ${inr(data.pay.factoriesInr, true)}`} tone="violet" hint="As of today." />
+        {ctx.employeeId ? (
+          // What the business owes suppliers is nobody's own figure — for one
+          // person, the work they have in hand stands in its place.
+          <KpiCard icon={Landmark} label="Open orders" value={num(data.pipe.reduce((s, x) => s + x.count, 0))} sub={`${usd(data.pipe.reduce((s, x) => s + x.value, 0), true)} not yet delivered`} tone="violet" />
+        ) : (
+          <KpiCard icon={Landmark} label="We owe" value={inr(data.pay.suppliersInr + data.pay.factoriesInr, true)} sub={`Suppliers ${inr(data.pay.suppliersInr, true)} · factories ${inr(data.pay.factoriesInr, true)}`} tone="violet" hint="As of today." />
+        )}
         <KpiCard icon={Timer} label="Order to dispatch" value={num(k.avgCycleDays, " days")} sub={k.medianCycleDays != null ? `Median ${num(k.medianCycleDays)} days` : "Average"} delta={d(k.avgCycleDays, kp?.avgCycleDays)} goodWhenDown tone="sky" />
         <KpiCard icon={BadgeCheck} label="On-time dispatch" value={pct(k.onTimePct)} sub="Shipped by the promised date" delta={d(k.onTimePct, kp?.onTimePct)} tone="success" />
       </div>
