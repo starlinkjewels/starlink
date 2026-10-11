@@ -47,10 +47,15 @@ const DialogContent = React.forwardRef<
     >
       <div aria-hidden className="sm:hidden pointer-events-none absolute z-30 left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-foreground/15" />
       {children}
-      <DialogPrimitive.Close className="ui-dialog-close absolute z-20 right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-muted-foreground opacity-80 ring-offset-background cursor-pointer transition hover:opacity-100 hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
-        <X className="h-4 w-4" />
-        <span className="sr-only">Close</span>
-      </DialogPrimitive.Close>
+      {/* Last for the keyboard (the first field still gets the cursor), first on
+          screen: a zero-height strip pinned to the top, so the close button
+          stays in the corner however far the dialog scrolls. */}
+      <div className="ui-dialog-close-wrap order-first sticky -top-6 z-20 h-0 -mb-4 pointer-events-none">
+        <DialogPrimitive.Close className="ui-dialog-close pointer-events-auto absolute -right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-[var(--dlg-bg,transparent)] text-muted-foreground opacity-80 ring-offset-background cursor-pointer transition hover:opacity-100 hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+          <X className="h-4 w-4" />
+          <span className="sr-only">Close</span>
+        </DialogPrimitive.Close>
+      </div>
     </DialogPrimitive.Content>
   </DialogPortal>
 ));
