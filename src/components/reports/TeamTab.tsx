@@ -1,9 +1,10 @@
+import { DataTable } from "@/components/DataTable";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
 import { UserCog, Trophy } from "lucide-react";
 import { downloadCsv } from "@/lib/ledgerExport";
-import { teamTable } from "@/lib/analytics";
+import { teamTable, type TeamRow } from "@/lib/analytics";
 import { C, Panel, ChartTip, Bar, ExportButton, Table, Empty, usd, inr, pct, num } from "./ui";
 import type { ReportCtx } from "./context";
 
@@ -56,31 +57,30 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
       </Panel>
 
       <Panel title="Team scorecard" subtitle="In the period · open orders and tasks as of today" icon={UserCog} actions={<ExportButton onClick={exportTeam} />}>
-        <Table minWidth={withProfit ? 1000 : 900} head={
-          <tr className="border-b border-border/60">
-            <th className="text-left py-2">Person</th><th className="text-right px-2">Clients</th><th className="text-right px-2">In</th><th className="text-right px-2">Shipped</th>
-            <th className="text-left px-2 w-40">Sales</th>{withProfit && <th className="text-right px-2">Profit</th>}
-            <th className="text-right px-2">Collected</th><th className="text-right px-2">Expenses</th><th className="text-right px-2">Open</th>
-            <th className="text-right px-2">Days to ship</th><th className="text-right px-2">On time</th><th className="text-right pl-2">Tasks</th>
-          </tr>}>
-          {active.map(r => (
-            <tr key={r.id} className="hover:bg-secondary/40">
-              <td className="py-2"><Link to={`/employees/${r.id}`} className="font-medium text-brand-dark hover:text-primary">{r.name}</Link><span className="block text-[10px] text-muted-foreground capitalize">{r.role}</span></td>
-              <td className="text-right px-2">{r.clients || "—"}</td>
-              <td className="text-right px-2">{r.received || "—"}</td>
-              <td className="text-right px-2">{r.sold || "—"}</td>
-              <td className="px-2"><div className="flex items-center gap-2"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div></td>
-              {withProfit && <td className={`text-right px-2 font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</td>}
-              <td className="text-right px-2">{r.collectedUsd ? usd(r.collectedUsd, true) : "—"}</td>
-              <td className="text-right px-2">{r.expensesInr ? inr(r.expensesInr, true) : "—"}</td>
-              <td className="text-right px-2">{r.open || "—"}</td>
-              <td className="text-right px-2">{num(r.avgCycleDays, "d")}</td>
-              <td className="text-right px-2">{pct(r.onTimePct)}</td>
-              <td className="text-right pl-2">{r.tasksDone}<span className="text-muted-foreground"> done · {r.tasksOpen} open</span></td>
-            </tr>
-          ))}
-        </Table>
-        {!active.length && <Empty>No activity by anyone in this period.</Empty>}
+        <DataTable
+          id="reports-team"
+          rows={active}
+          rowKey={r => r.id}
+          defaultSort={{ key: "sales", dir: "desc" }}
+          searchText={r => r.name}
+          emptyText="No activity by anyone in this period."
+          columns={[
+            { key: "name", header: "Person", always: true, sortValue: r => r.name, cell: r => <><Link to={`/employees/${r.id}`} className="font-medium text-brand-dark hover:text-primary">{r.name}</Link><span className="block text-[10px] text-muted-foreground capitalize">{r.role}</span></> },
+            { key: "clients", header: "Clients", align: "right", sortValue: r => r.clients, cell: r => r.clients || "—" },
+            { key: "in", header: "Orders in", align: "right", sortValue: r => r.received, cell: r => r.received || "—" },
+            { key: "sold", header: "Shipped", align: "right", sortValue: r => r.sold, cell: r => r.sold || "—" },
+            { key: "sales", header: "Sales", sortValue: r => r.salesUsd, cell: r => (
+              <div className="flex items-center gap-2 min-w-[150px]"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div>
+            ) },
+            ...(withProfit ? [{ key: "profit", header: "Profit", align: "right" as const, sortValue: (r: TeamRow) => (r.sold ? r.profitUsd : null), cell: (r: TeamRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</span> }] : []),
+            { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },
+            { key: "expenses", header: "Expenses", align: "right", sortValue: r => r.expensesInr, cell: r => (r.expensesInr ? inr(r.expensesInr, true) : "—") },
+            { key: "open", header: "Open", align: "right", sortValue: r => r.open, cell: r => r.open || "—" },
+            { key: "days", header: "Days to ship", align: "right", sortValue: r => r.avgCycleDays, cell: r => num(r.avgCycleDays, "d") },
+            { key: "ontime", header: "On time", align: "right", sortValue: r => r.onTimePct, cell: r => pct(r.onTimePct) },
+            { key: "tasks", header: "Tasks", align: "right", sortValue: r => r.tasksOpen, cell: r => <>{r.tasksDone}<span className="text-muted-foreground"> done · {r.tasksOpen} open</span></> },
+          ]}
+        />
         <p className="text-[11px] text-muted-foreground mt-3">
           Collected counts receipts each person recorded. An order counts for both the person it is assigned to and the client's account manager when they differ.
         </p>

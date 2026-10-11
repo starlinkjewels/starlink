@@ -1,3 +1,4 @@
+import { DataTable } from "@/components/DataTable";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, Tooltip, Cell } from "recharts";
@@ -8,12 +9,9 @@ import { fmtDate } from "@/lib/db";
 import { C, KpiCard, Panel, ChartTip, Bar, ExportButton, Table, Empty, usd, pct } from "./ui";
 import type { ReportCtx } from "./context";
 
-type SortKey = "sales" | "owed" | "margin" | "last" | "name";
 
 export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
   const { db, orders, period, withProfit, version, fileTag } = ctx;
-  const [q, setQ] = useState("");
-  const [sort, setSort] = useState<SortKey>("sales");
 
   const data = useMemo(() => {
     const rows = clientTable(db, orders, period, withProfit).filter(r => !ctx.clientIds || ctx.clientIds.has(r.id));
@@ -42,15 +40,8 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, orders, period.from, period.to, withProfit, version]);
 
-  const ql = q.trim().toLowerCase();
-  const sorters: Record<SortKey, (a: ClientRow, b: ClientRow) => number> = {
-    sales: (a, b) => b.salesUsd - a.salesUsd || b.outstandingUsd - a.outstandingUsd,
-    owed: (a, b) => b.outstandingUsd - a.outstandingUsd,
-    margin: (a, b) => (b.marginPct ?? -1e9) - (a.marginPct ?? -1e9),
-    last: (a, b) => (a.daysSinceLast ?? 1e9) - (b.daysSinceLast ?? 1e9),
-    name: (a, b) => a.name.localeCompare(b.name),
-  };
-  const list = data.rows.filter(r => !ql || r.name.toLowerCase().includes(ql)).sort(sorters[sort]);
+  // Sorting and searching are the table's own; the export takes every client by sales.
+  const list = [...data.rows].sort((a, b) => b.salesUsd - a.salesUsd || b.outstandingUsd - a.outstandingUsd);
   const maxSales = Math.max(0, ...list.map(r => r.salesUsd));
   const ageing = [
     { key: "0–30 days", value: data.owed.current, tone: C.success },
@@ -93,42 +84,31 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
 
       <Panel title="Every client" subtitle="Sales and margin in the period · money owed and last order as of today" icon={Table2}
         actions={<ExportButton onClick={exportClients} />}>
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          <div className="relative flex-1 min-w-[180px]">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients" className="h-8 w-full rounded-lg border border-border bg-white pl-8 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
-          <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-secondary text-[11px]">
-            {([["sales", "Sales"], ["owed", "Owed"], ...(withProfit ? [["margin", "Margin"]] : []), ["last", "Recent"], ["name", "A–Z"]] as [SortKey, string][]).map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setSort(k)} className={`h-7 px-2.5 rounded-md font-medium ${sort === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>{l}</button>
-            ))}
-          </div>
-        </div>
-        <Table minWidth={withProfit ? 900 : 760} head={
-          <tr className="border-b border-border/60">
-            <th className="text-left py-2">Client</th><th className="text-right px-2">In</th><th className="text-right px-2">Shipped</th>
-            <th className="text-left px-2 w-40">Sales</th>
-            {withProfit && <><th className="text-right px-2">Profit</th><th className="text-right px-2">Margin</th></>}
-            <th className="text-right px-2">Collected</th><th className="text-right px-2">Owed</th><th className="text-right px-2">Avg order</th><th className="text-right pl-2">Last order</th>
-          </tr>}>
-          {list.map(r => (
-            <tr key={r.id} className="hover:bg-secondary/40">
-              <td className="py-2 max-w-[200px]"><Link to={`/clients/${r.id}`} className="font-medium text-brand-dark hover:text-primary truncate block">{r.name}</Link></td>
-              <td className="text-right px-2">{r.received || "—"}</td>
-              <td className="text-right px-2">{r.sold || "—"}</td>
-              <td className="px-2"><div className="flex items-center gap-2"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div></td>
-              {withProfit && <>
-                <td className={`text-right px-2 font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</td>
-                <td className="text-right px-2">{r.sold ? pct(r.marginPct) : "—"}</td>
-              </>}
-              <td className="text-right px-2">{r.collectedUsd ? usd(r.collectedUsd, true) : "—"}</td>
-              <td className={`text-right px-2 ${r.overdue90Usd > 0 ? "text-destructive font-semibold" : ""}`} title={r.overdue90Usd ? `${usd(r.overdue90Usd)} over 90 days` : undefined}>{r.outstandingUsd ? usd(r.outstandingUsd, true) : "—"}</td>
-              <td className="text-right px-2">{usd(r.avgOrderUsd, true)}</td>
-              <td className={`text-right pl-2 ${(r.daysSinceLast ?? 0) > 60 ? "text-amber-600" : "text-muted-foreground"}`}>{r.lastOrder ? `${r.daysSinceLast}d ago` : "never"}</td>
-            </tr>
-          ))}
-        </Table>
-        {!list.length && <Empty>No client matches.</Empty>}
+        <DataTable
+          id="reports-clients"
+          rows={list}
+          rowKey={r => r.id}
+          defaultSort={{ key: "sales", dir: "desc" }}
+          searchText={r => r.name}
+          emptyText="No clients."
+          columns={[
+            { key: "name", header: "Client", always: true, sortValue: r => r.name, cell: r => <Link to={`/clients/${r.id}`} className="font-medium text-brand-dark hover:text-primary truncate block max-w-[200px]">{r.name}</Link> },
+            { key: "in", header: "Orders in", align: "right", sortValue: r => r.received, cell: r => r.received || "—" },
+            { key: "sold", header: "Shipped", align: "right", sortValue: r => r.sold, cell: r => r.sold || "—" },
+            { key: "sales", header: "Sales", sortValue: r => r.salesUsd, cell: r => (
+              <div className="flex items-center gap-2 min-w-[150px]"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div>
+            ) },
+            ...(withProfit ? [
+              { key: "profit", header: "Profit", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.profitUsd : null), cell: (r: ClientRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</span> },
+              { key: "margin", header: "Margin", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.marginPct : null), cell: (r: ClientRow) => (r.sold ? pct(r.marginPct) : "—") },
+            ] : []),
+            { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },
+            { key: "owed", header: "Owed", align: "right", sortValue: r => r.outstandingUsd, cell: r => <span className={r.overdue90Usd > 0 ? "text-destructive font-semibold" : ""} title={r.overdue90Usd ? `${usd(r.overdue90Usd)} over 90 days` : undefined}>{r.outstandingUsd ? usd(r.outstandingUsd, true) : "—"}</span> },
+            { key: "owed90", header: "Owed 90+ days", align: "right", hidden: true, sortValue: r => r.overdue90Usd, cell: r => (r.overdue90Usd ? usd(r.overdue90Usd, true) : "—") },
+            { key: "avg", header: "Avg order", align: "right", sortValue: r => r.avgOrderUsd, cell: r => usd(r.avgOrderUsd, true) },
+            { key: "last", header: "Last order", align: "right", sortValue: r => r.daysSinceLast, cell: r => <span className={(r.daysSinceLast ?? 0) > 60 ? "text-amber-600" : "text-muted-foreground"}>{r.lastOrder ? `${r.daysSinceLast}d ago` : "never"}</span> },
+          ]}
+        />
       </Panel>
     </div>
   );

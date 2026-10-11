@@ -1,3 +1,4 @@
+import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
@@ -180,6 +181,10 @@ const ICON_COLORS: Record<string, string> = {
 export function AppLayout() {
   const { user, logout } = useAuth();
   const db = useDb();
+  // The table style chosen in Settings, on every page. Keyed on its value, so
+  // it is applied when it changes and not on every redraw.
+  const tableUiKey = JSON.stringify(db.settings?.tableUi ?? null);
+  useEffect(() => { applyTableUi(tableUiOf(db.settings?.tableUi as Partial<TableUi> | undefined)); }, [tableUiKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate();
   const loc = useLocation();
   const [unread, setUnread] = useState(0);

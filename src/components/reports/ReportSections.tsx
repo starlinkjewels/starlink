@@ -1,3 +1,4 @@
+import { DataTable } from "@/components/DataTable";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
@@ -1660,38 +1661,29 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             </button>
           </div>
 
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto max-h-[28rem] overflow-y-auto">
-            <table className="table-luxe w-full text-sm">
-              <thead className="sticky top-0 bg-white z-10">
-                <tr className="border-b border-border/60">
-                  {["Order #","Client","Type","Status","Qty","Order Value","Advance","Balance","Date"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-muted-foreground pb-2 pr-4 pt-1 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {[...filtered].sort((a,b) => +new Date(b.createdAt) - +new Date(a.createdAt)).map(o => {
-                  const c = clients.find(cl => cl.id === o.clientId);
-                  const bal = balanceDue(o);
-                  return (
-                    <tr key={o.id} className="hover:bg-secondary/30 transition-colors">
-                      <td className="py-2.5 pr-4 font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</td>
-                      <td className="py-2.5 pr-4 whitespace-nowrap">{c?.companyName ?? "—"}</td>
-                      <td className="py-2.5 pr-4 whitespace-nowrap">{o.jewelleryType}</td>
-                      <td className="py-2.5 pr-4">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span>
-                      </td>
-                      <td className="py-2.5 pr-4">{o.quantity}</td>
-                      <td className="py-2.5 pr-4 font-semibold text-brand-dark whitespace-nowrap">{fmtMoney(o.amount)}</td>
-                      <td className="py-2.5 pr-4 text-success whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</td>
-                      <td className={`py-2.5 pr-4 font-semibold whitespace-nowrap ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</td>
-                      <td className="py-2.5 pr-4 text-muted-foreground text-xs whitespace-nowrap">{fmtDate(o.createdAt)}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {/* Desktop: sortable, searchable, columns to choose */}
+          <div className="hidden sm:block">
+            <DataTable
+              id="reports-all-orders"
+              rows={filtered}
+              rowKey={o => o.id}
+              maxHeight="32rem"
+              defaultSort={{ key: "date", dir: "desc" }}
+              searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${o.metal} ${o.status}`}
+              columns={[
+                { key: "no", header: "Order #", always: true, sortValue: o => o.orderNumber, cell: o => <span className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</span> },
+                { key: "design", header: "Design #", hidden: true, sortValue: o => o.designNumber ?? "", cell: o => o.designNumber || "—" },
+                { key: "client", header: "Client", sortValue: o => clients.find(cl => cl.id === o.clientId)?.companyName ?? "", cell: o => <span className="whitespace-nowrap">{clients.find(cl => cl.id === o.clientId)?.companyName ?? "—"}</span> },
+                { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
+                { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{o.metal}</span> },
+                { key: "status", header: "Status", sortValue: o => o.status, cell: o => <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span> },
+                { key: "qty", header: "Qty", align: "right", sortValue: o => o.quantity, cell: o => o.quantity },
+                { key: "value", header: "Order Value", align: "right", sortValue: o => o.amount || 0, cell: o => <span className="font-semibold text-brand-dark whitespace-nowrap">{fmtMoney(o.amount)}</span> },
+                { key: "adv", header: "Advance", align: "right", sortValue: o => totalAdvance(o), cell: o => <span className="text-success whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</span> },
+                { key: "bal", header: "Balance", align: "right", sortValue: o => balanceDue(o), cell: o => { const bal = balanceDue(o); return <span className={`font-semibold whitespace-nowrap ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</span>; } },
+                { key: "date", header: "Date", align: "right", sortValue: o => o.createdAt, cell: o => <span className="text-muted-foreground text-xs whitespace-nowrap">{fmtDate(o.createdAt)}</span> },
+              ]}
+            />
           </div>
 
           {/* Mobile cards */}
