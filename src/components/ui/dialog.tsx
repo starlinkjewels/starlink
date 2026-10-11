@@ -45,9 +45,9 @@ const DialogContent = React.forwardRef<
       )}
       {...props}
     >
-      <div aria-hidden className="sm:hidden pointer-events-none absolute left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-foreground/15" />
+      <div aria-hidden className="sm:hidden pointer-events-none absolute z-30 left-1/2 top-2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-foreground/15" />
       {children}
-      <DialogPrimitive.Close className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-muted-foreground opacity-80 ring-offset-background cursor-pointer transition hover:opacity-100 hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
+      <DialogPrimitive.Close className="ui-dialog-close absolute z-20 right-3 top-3 grid h-8 w-8 place-items-center rounded-full text-muted-foreground opacity-80 ring-offset-background cursor-pointer transition hover:opacity-100 hover:bg-secondary hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none">
         <X className="h-4 w-4" />
         <span className="sr-only">Close</span>
       </DialogPrimitive.Close>
@@ -57,13 +57,13 @@ const DialogContent = React.forwardRef<
 DialogContent.displayName = DialogPrimitive.Content.displayName;
 
 const DialogHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col space-y-1.5 text-center sm:text-left", className)} {...props} />
+  <div className={cn("ui-dialog-header flex flex-col space-y-1.5 text-center sm:text-left", className)} {...props} />
 );
 DialogHeader.displayName = "DialogHeader";
 
 const DialogFooter = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
   <div
-    className={cn("flex flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2", className)}
+    className={cn("ui-dialog-footer flex flex-col-reverse sm:flex-row sm:justify-end gap-2", className)}
     {...props}
   />
 );

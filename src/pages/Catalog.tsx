@@ -1173,7 +1173,7 @@ export function CatalogPage() {
             Folders · {subfolders.length}
           </p>
         )}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
           {subfolders.map((folder) => {
             const count = folderCounts[folder.id] ?? null;
             const coverUrl = folder.bannerUrl ?? folderThumbs[folder.id]?.data;
@@ -1557,7 +1557,7 @@ export function CatalogPage() {
         <>
           {/* Root: Favourites virtual card + real folders in one grid */}
           {isRoot && (subfolders.length > 0 || favoriteItems.length > 0) && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
               <FavoritesFolderCard />
               {subfolders.map((folder) => {
                 const count = folderCounts[folder.id] ?? null;

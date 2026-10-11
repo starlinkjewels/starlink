@@ -74,7 +74,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
             <p className="text-[11px] text-muted-foreground">Pure (24KT) gold already lying with this factory. Added onto their Fine Gold balance.</p>
           </div>
         </div>
-        <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Factory"}</Button>
+        <div className="flex justify-end"><Button onClick={create} disabled={saving} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{saving ? "Creating…" : "Create Factory"}</Button></div>
       </DialogContent>
     </Dialog>
   );

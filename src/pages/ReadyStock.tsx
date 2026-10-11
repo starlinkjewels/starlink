@@ -498,7 +498,7 @@ export function ReadyStockPage() {
       )}
 
       {view === "grid" && (
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-auto-cards">
         {paged.map(item => (
           <div key={item.id} className={`card-luxe card-hover overflow-hidden flex flex-col ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
             <div className="aspect-square bg-secondary relative">

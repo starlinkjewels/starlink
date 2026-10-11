@@ -141,7 +141,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           ) : (
             <p className="text-xs text-muted-foreground mt-3">This client will be added under your account — you'll manage them and their orders.</p>
           )}
-          <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Client"}</Button>
+          <div className="flex justify-end"><Button onClick={create} disabled={saving} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{saving ? "Creating…" : "Create Client"}</Button></div>
         </DialogContent>
     </Dialog>
   );

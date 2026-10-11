@@ -116,6 +116,8 @@ export function AppearanceSettings() {
           <Segmented value={ui.corners} onChange={v => set("corners", v)} options={[["sharp", "Sharp"], ["default", "Normal"], ["round", "Round"]]} />)}
         {row("Headings", "Elegant serif, or a clean modern sans",
           <Segmented value={ui.headings} onChange={v => set("headings", v)} options={[["serif", "Elegant"], ["sans", "Modern"]]} />)}
+        {row("Page width", "Fit screen uses all of a big monitor; Centred keeps pages at a reading width",
+          <Segmented value={ui.width} onChange={v => set("width", v)} options={[["fit", "Fit screen"], ["centered", "Centred"]]} />)}
         {row("Animation", "Calm makes everything appear in place — kinder on slow phones",
           <Segmented value={ui.motion} onChange={v => set("motion", v)} options={[["full", "Smooth"], ["calm", "Calm"]]} />)}
       </div>

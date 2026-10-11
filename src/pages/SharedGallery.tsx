@@ -209,7 +209,7 @@ export function SharedGalleryPage() {
             </div>
 
             {subFolders.length > 0 && (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4 mb-6">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4 mb-6">
                 {subFolders.map(f => {
                   const cover = allItems.find(it => it.folderId === f.id && it.type === "image");
                   return (
@@ -236,7 +236,7 @@ export function SharedGalleryPage() {
             {items.length === 0 && subFolders.length === 0 ? (
               <div className="py-20 text-center text-muted-foreground">This folder is empty.</div>
             ) : items.length === 0 ? null : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
                 {items.map((it, i) => (
                   <motion.div key={i} whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col">
                     <button onClick={() => setLightbox(i)} className="block w-full aspect-square bg-secondary/30 overflow-hidden relative">

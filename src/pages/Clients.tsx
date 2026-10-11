@@ -346,7 +346,7 @@ export function ClientsPage() {
               </Select>
             </div>
           )}
-          <Button onClick={saveEdit} disabled={savingEdit} className="btn-hero rounded-xl mt-3">{savingEdit ? "Saving…" : "Save Changes"}</Button>
+          <div className="flex justify-end"><Button onClick={saveEdit} disabled={savingEdit} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{savingEdit ? "Saving…" : "Save Changes"}</Button></div>
         </DialogContent>
       </Dialog>
 
@@ -445,7 +445,7 @@ export function ClientsPage() {
       )}
 
       {view === "grid" && (
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(c => {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;

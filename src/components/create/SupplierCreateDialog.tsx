@@ -65,7 +65,7 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
             hint="Amount outstanding with this supplier when you started using this app (₹). Shown as the first line of their ledger."
           />
         </div>
-        <Button onClick={create} disabled={saving} className="btn-hero rounded-xl mt-3">{saving ? "Creating…" : "Create Supplier"}</Button>
+        <div className="flex justify-end"><Button onClick={create} disabled={saving} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{saving ? "Creating…" : "Create Supplier"}</Button></div>
       </DialogContent>
     </Dialog>
   );
