@@ -841,8 +841,9 @@ export function OrderDetailPage() {
   };
 
   const openEstimate = () => {
-    setEstGold(order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "");
-    setEstNet(order.estimatedNetWeight?.toString() ?? "");
+    // metalWeight is the old single "gold weight" field — metal only, so net.
+    setEstGold(order.estimatedGrossWeight?.toString() ?? "");
+    setEstNet(order.estimatedNetWeight?.toString() ?? (order.metalWeight ? String(order.metalWeight) : ""));
     setEstDia(order.diamondWeight?.toString() ?? "");
     setEstMaking(order.estimatedMakingCharges?.toString() ?? "");
     setShowEstimate(true);
@@ -3142,8 +3143,8 @@ export function OrderDetailPage() {
               );
             })() : (
               <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-                <span>Est. gross: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ?? order.metalWeight ?? "—"}{(order.estimatedGrossWeight ?? order.metalWeight) != null ? " g" : ""}</span></span>
-                <span>Est. net (gold): <span className="font-semibold text-foreground">{order.estimatedNetWeight != null ? `${order.estimatedNetWeight} g` : "—"}</span></span>
+                <span>Est. gross: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : "—"}</span></span>
+                <span>Est. net (gold): <span className="font-semibold text-foreground">{(order.estimatedNetWeight || order.metalWeight) ? `${order.estimatedNetWeight || order.metalWeight} g` : "—"}</span></span>
                 <span>Est. diamond: <span className="font-semibold text-foreground">{order.diamondWeight ? `${order.diamondWeight} ct` : "—"}</span></span>
                 <span>Est. making: <span className="font-semibold text-foreground">{order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—"}</span></span>
               </div>
