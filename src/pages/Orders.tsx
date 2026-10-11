@@ -1,3 +1,6 @@
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { OrderBoard } from "@/components/OrderBoard";
 import { pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
@@ -10,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
@@ -106,6 +109,9 @@ export function OrdersPage() {
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
   const [clientFilter, setClientFilter] = useState<string>("all");
+  // The admin can look at one person's orders: assigned to them, or for a
+  // client they manage — the same rule as their own Orders page.
+  const [employeeFilter, setEmployeeFilter] = useState<string>("all");
   const isStaff = user!.role !== "client";
   const can = useCan();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
@@ -129,6 +135,10 @@ export function OrdersPage() {
     else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
+    if (employeeFilter !== "all" && user!.role === "admin") {
+      const managed = new Set(db.clients.filter(c => c.accountManagerId === employeeFilter).map(c => c.id));
+      list = list.filter(o => o.assignedEmployeeId === employeeFilter || managed.has(o.clientId));
+    }
     // Commas separate alternatives: "1090, 1091" means either, not both. A
     // handful of order or design numbers read off a list can be pasted in as
     // they were written — trailing comma and all — and the ledger drawn from
@@ -142,7 +152,7 @@ export function OrdersPage() {
     ));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, dbVersion, user, q, status, clientFilter]);
+  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
@@ -183,6 +193,7 @@ export function OrdersPage() {
 
   const exportName = () => {
     if (chosen.length) return `Products-Selected-${chosen.length}`;
+    // The product sheet goes to customers, so it never names who handled the work.
     const who = clientFilter === "all" ? "" : `-${(db.clients.find(c => c.id === clientFilter)?.companyName ?? "").replace(/\s+/g, "_")}`;
     return `Products${who}${status === "all" ? "" : `-${status.replace(/\s+/g, "_")}`}`;
   };
@@ -244,45 +255,67 @@ export function OrdersPage() {
           </Select>
         )}
 
-        {isStaff && orders.length > 0 && (
-          <div className="flex items-center gap-2 shrink-0">
-            <button onClick={() => exportProductsPdf(db, exportRows, exportName(), exportSubject())}
-              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-              <FileText className="h-4 w-4" /> PDF
-            </button>
-            <button onClick={() => exportProductsCsv(db, exportRows, exportName())}
-              className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
-              <FileSpreadsheet className="h-4 w-4" /> Excel
-            </button>
-            {/* Its own button, and the admin's alone. The Excel beside it is the
-                sheet customers are sent for a bulk sale — cost must never be
-                one forward away from reaching one. */}
-            {user!.role === "admin" && (
-              <button onClick={() => exportProfitCsv(db, exportRows, exportName())}
-                title="Cost and profit per order — admin only, never send this to a customer"
-                className="flex items-center gap-1.5 h-10 px-3 rounded-lg border border-amber-500/40 bg-amber-500/10 hover:bg-amber-500/20 text-xs font-semibold text-amber-800">
-                <TrendingUp className="h-4 w-4" /> Profit
-              </button>
-            )}
-          </div>
+        {user!.role === "admin" && (
+          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+            <SelectTrigger className="flex-1 sm:flex-none sm:w-48 h-10 rounded-lg text-sm" aria-label="Employee">
+              <UserCog className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All employees</SelectItem>
+              {db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive")
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.role === "admin" ? " (admin)" : ""}</SelectItem>)}
+            </SelectContent>
+          </Select>
         )}
 
-        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
-          <button onClick={() => saveView("list")} aria-label="List view"
-            className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
-          </button>
-          <button onClick={() => saveView("grid")} aria-label="Grid view"
-            className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
-          </button>
-          {isStaff && (
-            <button onClick={() => saveView("board")} aria-label="Board view"
-              className={`flex items-center gap-1 h-8 px-2.5 rounded-md text-xs font-medium transition-colors ${view === "board" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-              <Columns3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Board</span>
-            </button>
-          )}
-        </div>
+        {isStaff && orders.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button type="button" aria-label="Export"
+                className="shrink-0 flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark data-[state=open]:border-primary/50 data-[state=open]:text-primary">
+                <Download className="h-4 w-4" /> Export{chosen.length ? ` (${chosen.length})` : ""} <ChevronDown className="h-3.5 w-3.5" />
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64 rounded-xl p-1.5">
+              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2 py-1">
+                Product sheet · {chosen.length ? `${chosen.length} selected` : `${orders.length} shown`}
+              </DropdownMenuLabel>
+              <DropdownMenuItem onSelect={() => exportProductsPdf(db, exportRows, exportName(), exportSubject())} className="rounded-lg px-2 py-2 cursor-pointer gap-2">
+                <FileText className="h-4 w-4 text-primary" />
+                <span><span className="block text-xs font-medium">PDF</span><span className="block text-[10px] text-muted-foreground">Weights, diamonds and value — for a customer</span></span>
+              </DropdownMenuItem>
+              <DropdownMenuItem onSelect={() => exportProductsCsv(db, exportRows, exportName())} className="rounded-lg px-2 py-2 cursor-pointer gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-primary" />
+                <span><span className="block text-xs font-medium">Excel</span><span className="block text-[10px] text-muted-foreground">The same sheet, to edit or send</span></span>
+              </DropdownMenuItem>
+              {/* Kept apart and marked: the sheets above go to customers for a
+                  bulk sale, and cost must never be one forward away from one. */}
+              {user!.role === "admin" && (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold px-2 py-1">Admin only — never send to a customer</DropdownMenuLabel>
+                  <DropdownMenuItem onSelect={() => exportProfitCsv(db, exportRows, exportName())} className="rounded-lg px-2 py-2 cursor-pointer gap-2 bg-amber-500/5 focus:bg-amber-500/15">
+                    <TrendingUp className="h-4 w-4 text-amber-700" />
+                    <span><span className="block text-xs font-semibold text-amber-800">Profit — Excel</span><span className="block text-[10px] text-muted-foreground">Cost and profit per order</span></span>
+                  </DropdownMenuItem>
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        <Select value={view} onValueChange={v => saveView(v as "list" | "grid" | "board")}>
+          <SelectTrigger className="shrink-0 w-[7.5rem] h-10 rounded-lg text-sm" aria-label="View">
+            {view === "list" ? <Rows3 className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : view === "grid" ? <LayoutGrid className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : <Columns3 className="h-3.5 w-3.5 mr-1.5 shrink-0" />}
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="list">List</SelectItem>
+            <SelectItem value="grid">Grid</SelectItem>
+            {isStaff && <SelectItem value="board">Board</SelectItem>}
+          </SelectContent>
+        </Select>
       </div>
 
       {/* ── What is ticked, and what the download will hold ── */}
