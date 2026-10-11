@@ -6,7 +6,10 @@
 // access is governed by Firestore/Storage security rules, not by hiding this.
 import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
+  terminate, clearIndexedDbPersistence, waitForPendingWrites, type Firestore,
+} from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { getFunctions, type Functions } from "firebase/functions";
 import { getMessaging, isSupported as isMessagingSupported, type Messaging } from "firebase/messaging";
@@ -72,8 +75,53 @@ if (RECAPTCHA_SITE_KEY) {
   }
 }
 
-// getFirestore(app, databaseId) targets the named database instead of "(default)".
-export const db: Firestore = getFirestore(app, DATABASE_ID);
+/**
+ * The device keeps a copy of what it has downloaded (IndexedDB, shared by every
+ * open tab), so opening the app again soon after fetches only what changed
+ * instead of everything. db.ts still waits for the server's answer before it
+ * shows or saves anything — see serverFirst() there — so a saved copy is never
+ * edited and written back over newer work.
+ *
+ * Where the browser cannot keep one (private windows, some in-app browsers) it
+ * runs from memory exactly as before. On a device where it ever misbehaves,
+ * localStorage "sl-no-device-cache" = "1" turns it off for that device.
+ */
+let deviceCacheOn = false;
+function makeFirestore(): Firestore {
+  let off = false;
+  try { off = typeof localStorage !== "undefined" && localStorage.getItem("sl-no-device-cache") === "1"; } catch { /* no storage */ }
+  if (!off && typeof indexedDB !== "undefined") {
+    try {
+      // initializeFirestore(app, settings, databaseId) targets the named database instead of "(default)".
+      const f = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }, DATABASE_ID);
+      deviceCacheOn = true;
+      return f;
+    } catch (e) {
+      console.warn("[firebase] device cache unavailable — running from memory:", e);
+    }
+  }
+  return getFirestore(app, DATABASE_ID);
+}
+export const db: Firestore = makeFirestore();
+
+/**
+ * Wipe this device's copy — at sign-out, so the next person on a shared
+ * computer finds none of the last one's data in the browser. Waits briefly for
+ * saves still on their way up. The Firestore instance cannot be used after
+ * this, so the caller reloads the page.
+ */
+export async function clearDeviceCache(): Promise<boolean> {
+  if (!deviceCacheOn) return false;
+  try { await Promise.race([waitForPendingWrites(db), new Promise(r => setTimeout(r, 4000))]); } catch { /* offline — nothing to wait for */ }
+  try {
+    await terminate(db);
+    await clearIndexedDbPersistence(db);
+  } catch (e) {
+    // Another tab still holding it: that tab clears it as it signs out too.
+    console.warn("[firebase] could not clear the device cache:", e);
+  }
+  return true;
+}
 
 export const storage: FirebaseStorage = getStorage(app);
 
