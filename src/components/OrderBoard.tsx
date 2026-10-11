@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { Lock, Package, CalendarClock, FileSignature, Truck, PackageCheck, CheckCircle2, BadgeCheck, Boxes } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { useDb } from "@/hooks/useDb";
+import { useDb, useDbVersion } from "@/hooks/useDb";
 import { useCan } from "@/hooks/useCan";
 import { loadDb, updateDbAs, fmtDate, type Order } from "@/lib/db";
 import { sendMail, orderApprovedEmail } from "@/lib/email";
@@ -55,6 +55,9 @@ function columnHint(step: string): string {
 export function OrderBoard({ orders }: { orders: Order[] }) {
   const { user } = useAuth();
   const db = useDb();
+  // The store is edited in place — a moved order is the same object with a new
+  // timeline — so the columns are keyed on this, not on the arrays themselves.
+  const version = useDbVersion();
   const can = useCan();
   const nav = useNavigate();
   const [dragId, setDragId] = useState<string | null>(null);
@@ -63,9 +66,11 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
   const [deliverFor, setDeliverFor] = useState<Order | null>(null);
   const [allDone, setAllDone] = useState(false);
 
-  const active = useMemo(() => orders.filter(o => o.status !== "Rejected"), [orders]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const active = useMemo(() => orders.filter(o => o.status !== "Rejected"), [orders, version]);
   const rejected = orders.length - active.length;
-  const cols = useMemo(() => boardColumns(db.settings, active), [db.settings, active]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const cols = useMemo(() => boardColumns(db.settings, active), [db.settings, active, version]);
   const byCol = useMemo(() => {
     const m = new Map<string, Order[]>(cols.map(c => [c, []]));
     for (const o of active) m.get(boardColumnOf(o))?.push(o);
@@ -76,7 +81,8 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
         || (a.expectedDelivery || "9999").localeCompare(b.expectedDelivery || "9999"));
     }
     return m;
-  }, [cols, active]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cols, active, version]);
 
   const mayEdit = can("orders", "edit");
   const blockedFor = (o: Order) => stagePermission(db, user!, o, mayEdit);
