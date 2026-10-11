@@ -92,7 +92,8 @@ export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): Piec
   const finish = issuances.find(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
   const diamondCt = pos(o.actualDiamondWeight ?? o.diamondWeight);
   const actualNet = o.actualNetWeight ?? finish?.finishedNetWeight;
-  const net = pos(actualNet ?? o.estimatedNetWeight);
+  // metalWeight: the old single "gold weight" estimate — metal only, so net.
+  const net = pos(actualNet ?? (o.estimatedNetWeight || o.metalWeight));
   const other = pos(o.otherMetalWeight);
   const built = net + other + diamondCt * CARAT_TO_GRAM;
   let gross: number;
