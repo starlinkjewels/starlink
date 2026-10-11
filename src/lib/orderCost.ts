@@ -1,5 +1,8 @@
 import { orderTotal, type DB, type Order, type Purchase } from "@/lib/db";
 
+const fmtRate = (n: number, unit: string) =>
+  `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/${unit}`;
+
 /**
  * What an order cost to make, against what it sold for. ADMIN ONLY.
  *
@@ -38,6 +41,58 @@ export interface OrderCost {
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const qtyOf = (p: Purchase) => (p.material === "gold" ? p.gold?.weightGrams ?? 0 : p.diamond?.carat ?? 0);
+
+/**
+ * What a gram (or carat) of pooled stock cost, as it stood on a given day.
+ *
+ * Stock is one pool per purity or shape: 50g of 14K bought at three different
+ * prices, and 3.9g of it sent out to an order. Which gram went is unknowable,
+ * so the pool is valued the way the trade values it — at its weighted average.
+ *
+ * A running average, not a plain one. Every priced arrival moves it by its
+ * share of what is then in the pool; issues out of the pool do not move it at
+ * all. So a cheap old lot that has already been used up stops dragging the
+ * price down, which a simple average of every purchase ever made would not.
+ *
+ * Priced arrivals are the ones the stock ledger itself prices: a purchase at
+ * its own bill's rate, and opening stock at the value it was entered with.
+ * Material bought for one particular order is left out — it goes straight to
+ * that order and never sits in the pool. An arrival with no price (a manual
+ * top-up) adds to the pool at the current average.
+ *
+ * Null when nothing in the pool has ever had a price.
+ */
+export function stockAverageRate(db: DB, material: "gold" | "diamond", bucket: string, at: string): number | null {
+  const purchases = new Map((db.purchases ?? []).map(p => [p.id, p]));
+  const cutoff = +new Date(at);
+  const moves = (db.stockMovements ?? [])
+    .filter(m => m.material === material && m.purityOrQuality === bucket && +new Date(m.createdAt) <= cutoff)
+    .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+
+  let bal = 0;
+  let avg: number | null = null;
+  for (const m of moves) {
+    const q = Math.abs(m.quantity);
+    if (m.type === "order_direct_use") continue;
+    const incoming = m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0);
+    if (!incoming) { bal = Math.max(0, bal - q); continue; }
+
+    let rate: number | null = null;
+    if (m.refType === "purchase" && m.refId) {
+      const p = purchases.get(m.refId);
+      if (p?.orderId) continue; // bought for one order, never in the pool
+      const pq = p ? qtyOf(p) : 0;
+      if (p && pq > 0) rate = p.totalInr / pq;
+    } else if (m.refType === "opening" && m.valueInr != null && q > 0) {
+      rate = m.valueInr / q;
+    }
+
+    if (rate === null) { bal += q; continue; } // unpriced: joins at the current average
+    avg = avg === null || bal <= 0 ? rate : (avg * bal + rate * q) / (bal + q);
+    bal += q;
+  }
+  return avg === null ? null : r2(avg);
+}
 
 export function orderCost(db: DB, order: Order): OrderCost {
   const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, missing: [], complete: true };
@@ -94,10 +149,22 @@ export function orderCost(db: DB, order: Order): OrderCost {
     }
 
     // Issued out of our own pooled stock, or out of gold already held at the
-    // factory. The pool has no single price per gram yet, so it is not guessed.
-    out.missing.push({
-      label: `${used}${unit} ${mi.purityOrQuality}`,
-      reason: mi.source === "factoryPool" ? "taken from gold held at the factory — not valued yet" : "issued from stock — not valued yet",
+    // factory — which is our gold too, sent there earlier from the same pool.
+    // Valued at the pool's average on the day it went out. If our stock of
+    // that purity has never had a price on it, it is reported, not guessed.
+    const avg = stockAverageRate(db, mi.material, mi.purityOrQuality, mi.issuedAt)
+      ?? stockAverageRate(db, mi.material, mi.purityOrQuality, new Date().toISOString());
+    const where = mi.source === "factoryPool" ? "from gold held at the factory" : "from stock";
+    if (avg === null) {
+      out.missing.push({
+        label: `${used}${unit} ${mi.purityOrQuality}`,
+        reason: `${where} — no ${mi.purityOrQuality} has ever been bought with a price to value it by`,
+      });
+      continue;
+    }
+    bucket.push({
+      label: `${used}${unit} ${mi.purityOrQuality} · ${where}, at average cost ${fmtRate(avg, unit)}`,
+      amountInr: r2(avg * used),
     });
   }
 
