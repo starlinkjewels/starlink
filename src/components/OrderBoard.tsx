@@ -220,7 +220,16 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                     .filter(c => c !== col && (c === DONE_COLUMN || o.timeline.some(t => t.step === c)))
                     .map(c => ({ col: c, plan: planMove(o, c) }))
                     .filter(t => !t.plan.none && !t.plan.blocked);
-                  const ahead = targets.filter(t => t.plan.revertFrom == null);
+                  // Ahead: the stages it can really reach, then the one stage that
+                  // hands over (a form, or the order) — not every later column,
+                  // which would all stop at that same place.
+                  const ahead: typeof targets = [];
+                  for (const t of targets.filter(t => t.plan.revertFrom == null)) {
+                    const doNow = t.plan.approve || t.plan.complete.length > 0;
+                    if (t.plan.then && doNow && (t.plan.then === "finalApproval" || t.plan.then === "readyStock")) break;
+                    ahead.push(t);
+                    if (t.plan.then) break;
+                  }
                   const back = targets.filter(t => t.plan.revertFrom != null);
                   return (
                     <div key={o.id}
