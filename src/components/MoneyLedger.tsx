@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -41,6 +42,7 @@ const PARTY_LABEL: Record<EntryKind, string> = {
  */
 export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const { user } = useAuth();
+  const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
@@ -241,8 +243,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
                       </span>
                     ) : (
                       <>
-                        <button onClick={() => open(e)} className="text-primary hover:underline text-xs mr-3">Edit</button>
-                        <button onClick={() => remove(e)} className="text-destructive hover:underline text-xs">Delete</button>
+                        {can("payments", "edit") && <button onClick={() => open(e)} className="text-primary hover:underline text-xs mr-3">Edit</button>}
+                        {can("payments", "delete") && <button onClick={() => remove(e)} className="text-destructive hover:underline text-xs">Delete</button>}
                       </>
                     )}
                   </td>
@@ -333,10 +335,12 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
             <Input value={ef.note} onChange={e => setEf({ ...ef, note: e.target.value })} className="rounded-xl h-10 mt-1" />
           </div>
           <div className="flex gap-2 mt-3 flex-wrap">
-            <Button variant="outline" onClick={() => editing && remove(editing)}
-              className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
-              Cancel entry
-            </Button>
+            {can("payments", "delete") && (
+              <Button variant="outline" onClick={() => editing && remove(editing)}
+                className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
+                Cancel entry
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setEditing(null)} className="rounded-xl ml-auto">Close</Button>
             <Button onClick={save} className="btn-hero rounded-xl">Save</Button>
           </div>

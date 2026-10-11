@@ -27,6 +27,7 @@ import {
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
+import type { StaffRole } from "./permissions";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -42,6 +43,9 @@ export interface User {
   status: "active" | "inactive";
   department?: string;
   clientId?: string;
+  /** The role an employee holds (StaffRole.id). Unset means Standard staff —
+   *  exactly what every employee could do before roles. Ignored for admins. */
+  roleId?: string;
   createdAt: string;
   // Firebase Auth uid — set only on the admin profile (admins authenticate via
   // Firebase Authentication). Used to match the profile independently of email.
@@ -1251,6 +1255,8 @@ export interface DB {
   /** ADMIN ONLY — loaded for the admin alone and refused to everyone else by
    *  the security rules. See AdminRecord. */
   adminRecords: AdminRecord[];
+  /** Staff roles — named sets of what a holder may see and do. */
+  roles: StaffRole[];
   session: { userId: string | null };
 }
 
@@ -1324,6 +1330,7 @@ function emptyDb(): DB {
     diamondPackets: [],
     diamondSales: [],
     adminRecords: [],
+    roles: [],
     settings: defaultSettings(),
     session: { userId: null },
   };
@@ -1770,7 +1777,8 @@ type ArrayCol =
   | "readyStock"
   | "diamondPackets"
   | "diamondSales"
-  | "adminRecords";
+  | "adminRecords"
+  | "roles";
 const ARRAY_COLS: ArrayCol[] = [
   "users",
   "clients",
@@ -1801,6 +1809,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "diamondPackets",
   "diamondSales",
   "adminRecords",
+  "roles",
 ];
 const SETTINGS_COL = "meta";
 const SETTINGS_DOC = "settings";
@@ -2007,7 +2016,9 @@ async function persist() {
   // client lost the real data write riding along with it and saw "Couldn't save
   // your last change" over and over. Mirror the rule exactly here, and commit
   // whatever survives in its own batch so the index can never take data down.
-  const amAdmin = isAdminEmail(fbAuth.currentUser?.email);
+  // An owner (by email) or an admin made in the app — the rules recognise both.
+  const meNow = cache.users.find(u => u.authUid === fbAuth.currentUser?.uid);
+  const amAdmin = isAdminEmail(fbAuth.currentUser?.email) || (meNow?.role === "admin" && meNow.status === "active");
   const amStaff = messagesScopeIsFull; // non-client scope == staff session
   const idxWrites: Record<string, IndexDoc> = {};
   const idxDeletes: string[] = [];
@@ -2126,6 +2137,12 @@ async function persist() {
  * write the rules refuse is kept only on this device and gone on reload.
  */
 let adminStoreLive = false;
+/** Whether roles can be saved — true once the rules for them are deployed. */
+let rolesStoreLive = false;
+export function rolesStoreReady(): boolean {
+  return rolesStoreLive && !deniedCols.has("roles");
+}
+
 /** Whether this session is the admin's — decides which collections it waits on. */
 let adminScope = false;
 
@@ -2406,6 +2423,8 @@ export async function resolveScope(authUid: string): Promise<Scope> {
       const d = s.data() as IndexDoc;
       if (d.role === "client" && d.clientId)
         return { kind: "client", appId: d.appId, clientId: d.clientId };
+      // An admin made in the app rather than by the owners' email list.
+      if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true };
     }
   } catch (e) {
     console.error("[db] resolveScope failed:", e);
@@ -2517,6 +2536,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   const specs: { col: ArrayCol; q: Query<DocumentData> }[] = [];
   const amAdminScope = scope.kind === "full" && !!scope.admin;
   adminStoreLive = false;
+  rolesStoreLive = false;
   adminScope = amAdminScope;
   loadedCols.clear();
   for (const col of ARRAY_COLS) {
@@ -2543,7 +2563,8 @@ function subscribeAll(scope: Scope): Promise<void> {
         // client sign-in — nothing leaked, but each refusal was a console error
         // and a round trip the client's first screen waited behind.
         col === "diamondPackets" ||
-        col === "diamondSales"
+        col === "diamondSales" ||
+        col === "roles"
       )
         continue;
       if (col === "messages") continue; // handled specially (two-sided)
@@ -2581,7 +2602,9 @@ function subscribeAll(scope: Scope): Promise<void> {
     // of documents, and until they have answered nothing knows whether the
     // private store is live — so an admin who acted in the first second used
     // to save cost figures back where everyone could read them.
-    names.filter((n) => n === "users" || n === "clients" || n === "orders" || n === SETTINGS_COL || n === "adminRecords"),
+    // Roles too: the sidebar is drawn from them, and drawn without them an
+    // employee would see sections they are about to lose.
+    names.filter((n) => n === "users" || n === "clients" || n === "orders" || n === SETTINGS_COL || n === "adminRecords" || n === "roles"),
   );
 
   // How long the whole load actually takes, logged once everything is in.
@@ -2640,6 +2663,7 @@ function subscribeAll(scope: Scope): Promise<void> {
             // The rules for the admin-only records are live: they can be
             // written there from now on rather than in the old places.
             if (col === "adminRecords") adminStoreLive = true;
+            if (col === "roles") rolesStoreLive = true;
             if (writePending[col]) {
               first(col);
               return;
@@ -2655,6 +2679,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           (err) => {
             console.error(`[db] listener ${col} failed:`, err);
             if (col === "adminRecords") adminStoreLive = false;
+            if (col === "roles") rolesStoreLive = false;
             first(col);
           },
         ),

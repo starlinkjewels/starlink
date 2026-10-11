@@ -1,5 +1,6 @@
 import JSZip from "jszip";
 import { logEvent } from "./db";
+import { exportAllowed } from "./access";
 
 /**
  * Download a set of files as one zip.
@@ -15,6 +16,7 @@ export async function downloadAsZip(
   zipName: string,
   onProgress?: (done: number, total: number) => void,
 ): Promise<{ added: number; failed: string[] }> {
+  if (!exportAllowed()) return { added: 0, failed: [] };
   const zip = new JSZip();
   const failed: string[] = [];
   const used = new Set<string>();

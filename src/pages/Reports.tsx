@@ -7,6 +7,7 @@ import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal } from "@/lib/orderCost";
 import { exportProfitCsv } from "@/lib/productExport";
 import { useDbVersion } from "@/hooks/useDb";
+import { exportAllowed } from "@/lib/access";
 import { costDataReady } from "@/lib/db";
 import { FreightBacklog } from "@/components/FreightBacklog";
 import {
@@ -250,6 +251,7 @@ export function ReportsPage() {
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
       doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${money(r.grand)}`, 152, y + 3);
+      if (!exportAllowed()) return;
       logEvent("export", `Downloaded ${`Starlink-Material-Purchase-${matFrom || "all"}.pdf`}`);
       doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
@@ -284,6 +286,7 @@ export function ReportsPage() {
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url; a.download = `Starlink-Material-Purchase-${matFrom || "all"}.csv`;
+      if (!exportAllowed()) return;
       logEvent("export", `Downloaded ${`Starlink-Material-Purchase-${matFrom || "all"}.csv`}`);
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
@@ -298,6 +301,7 @@ export function ReportsPage() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url; a.download = name;
+    if (!exportAllowed()) return;
     logEvent("export", `Downloaded ${name}`);
     document.body.appendChild(a); a.click(); a.remove();
     URL.revokeObjectURL(url);
@@ -404,6 +408,7 @@ export function ReportsPage() {
         y += 5;
         if (y > 280) { doc.addPage(); y = 20; }
       });
+      if (!exportAllowed()) return;
       logEvent("export", `Downloaded ${`Starlink-Payments-${payFrom || "all"}.pdf`}`);
       doc.save(`Starlink-Payments-${payFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
@@ -464,6 +469,7 @@ export function ReportsPage() {
         doc.text(fmtMoney(balanceDue(o)), 176, y);
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
+      if (!exportAllowed()) return;
       logEvent("export", `Downloaded ${`Starlink-Sales-${salesFrom || "all"}.pdf`}`);
       doc.save(`Starlink-Sales-${salesFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
@@ -808,6 +814,7 @@ export function ReportsPage() {
         if (y > 270) { doc.addPage(); y = 20; }
       });
     }
+    if (!exportAllowed()) return;
     logEvent("export", `Downloaded ${"Starlink-Report.pdf"}`);
     doc.save("Starlink-Report.pdf");
    } catch { toast.error("Couldn't generate the PDF file."); }
@@ -841,6 +848,7 @@ export function ReportsPage() {
     const a = document.createElement("a");
     a.href = url;
     a.download = `Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    if (!exportAllowed()) return;
     logEvent("export", `Downloaded ${`Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`}`);
     document.body.appendChild(a);
     a.click();

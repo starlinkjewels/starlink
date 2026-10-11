@@ -56,3 +56,17 @@ export function moduleForPath(pathname: string): ModuleKey {
   if (first === "/giftcard") return "giftCards";
   return "dashboard";
 }
+
+/**
+ * The section a page belongs to and what opening it requires — or null for a
+ * page that is not a section at all (alerts, profile, search), which nobody's
+ * role should ever hide. "/orders/new" is the orders section, and needs Add.
+ */
+export function pageRequirement(pathname: string): { module: ModuleKey; action: "view" | "add" } | null {
+  const parts = pathname.split("/").filter(Boolean);
+  if (parts[0] === "orders" && parts[1] === "new") return { module: "orders", action: "add" };
+  const first = "/" + (parts[0] ?? "");
+  if (first === "/") return null; // the dashboard is open to everyone
+  const m = MODULES.find(x => x.path === first);
+  return m ? { module: m.key, action: "view" } : null;
+}

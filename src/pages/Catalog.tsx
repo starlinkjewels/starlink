@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -277,7 +278,7 @@ function Lightbox({
 /* ─────────────────────────────────────────────────────────────── */
 /*  Folder action menu                                             */
 /* ─────────────────────────────────────────────────────────────── */
-function FolderMenu({ onRename, onDelete }: { onRename(): void; onDelete(): void }) {
+function FolderMenu({ onRename, onDelete }: { onRename?(): void; onDelete?(): void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -310,24 +311,28 @@ function FolderMenu({ onRename, onDelete }: { onRename(): void; onDelete(): void
             transition={{ duration: 0.12 }}
             className="absolute right-0 top-9 z-30 w-36 bg-white rounded-xl border border-border/60 shadow-lg overflow-hidden"
           >
-            <button
-              onClick={() => {
-                setOpen(false);
-                onRename();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-foreground hover:bg-secondary active:bg-secondary"
-            >
-              <Edit2 className="h-3.5 w-3.5 text-muted-foreground" /> Rename
-            </button>
-            <button
-              onClick={() => {
-                setOpen(false);
-                onDelete();
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 active:bg-destructive/10"
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </button>
+            {onRename && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onRename();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-foreground hover:bg-secondary active:bg-secondary"
+              >
+                <Edit2 className="h-3.5 w-3.5 text-muted-foreground" /> Rename
+              </button>
+            )}
+            {onDelete && (
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onDelete();
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 active:bg-destructive/10"
+              >
+                <Trash2 className="h-3.5 w-3.5" /> Delete
+              </button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>
@@ -535,6 +540,7 @@ function FavoritesGallery({
   favoriteItems,
   folders,
   canEdit,
+  canDelete = canEdit,
   onOpen,
   onToggleFav,
   onDelete,
@@ -542,6 +548,8 @@ function FavoritesGallery({
   favoriteItems: CatalogItem[];
   folders: CatalogFolder[];
   canEdit: boolean;
+  /** Whether the delete button shows; follows canEdit unless a role says otherwise. */
+  canDelete?: boolean;
   onOpen(items: CatalogItem[], idx: number): void;
   onToggleFav(id: string): void;
   onDelete(id: string): void;
@@ -576,11 +584,11 @@ function FavoritesGallery({
             <ItemCard
               item={item}
               isFav={true}
-              canEdit={canEdit}
+              canEdit={canEdit || canDelete}
               folderName={folder?.name}
               onOpen={() => onOpen(favoriteItems, i)}
               onToggleFav={() => onToggleFav(item.id)}
-              onDelete={canEdit ? () => onDelete(item.id) : undefined}
+              onDelete={canDelete ? () => onDelete(item.id) : undefined}
             />
           );
         }}
@@ -600,6 +608,7 @@ function ItemGallery({
   itemsLoading,
   itemsHasMore,
   canEdit,
+  canDelete = canEdit,
   favIds,
   bannerItemId,
   sort,
@@ -614,6 +623,8 @@ function ItemGallery({
   itemsLoading: boolean;
   itemsHasMore: boolean;
   canEdit: boolean;
+  /** Whether the delete button shows; follows canEdit unless a role says otherwise. */
+  canDelete?: boolean;
   favIds: Set<string>;
   bannerItemId?: string;
   sort: CatalogSort;
@@ -655,11 +666,11 @@ function ItemGallery({
               <ItemCard
                 item={item}
                 isFav={favIds.has(item.id)}
-                canEdit={canEdit}
+                canEdit={canEdit || canDelete}
                 isBanner={bannerItemId === item.id}
                 onOpen={() => onOpen(items, i)}
                 onToggleFav={() => onToggleFav(item.id)}
-                onDelete={canEdit ? () => onDelete(item.id) : undefined}
+                onDelete={canDelete ? () => onDelete(item.id) : undefined}
                 onSetBanner={canEdit ? () => onSetBanner(item) : undefined}
               />
             )}
@@ -682,7 +693,13 @@ function ItemGallery({
 /* ─────────────────────────────────────────────────────────────── */
 export function CatalogPage() {
   const { user } = useAuth();
-  const canEdit = user?.role === "admin" || user?.role === "employee";
+  const can = useCan();
+  const isStaff = user?.role === "admin" || user?.role === "employee";
+  // Upload and new folders; rename and banner; delete — each as the role allows.
+  const canAdd = isStaff && can("catalog", "add");
+  const canEdit = isStaff && can("catalog", "edit");
+  const canDelete = isStaff && can("catalog", "delete");
+  const canShare = isStaff && can("catalog", "export");
 
   const [folders, setFolders] = useState<CatalogFolder[]>([]);
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
@@ -1208,14 +1225,14 @@ export function CatalogPage() {
                     {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                   </div>
                 </button>
-                {canEdit && !isRenaming && (
+                {(canEdit || canDelete) && !isRenaming && (
                   <div className="absolute top-2 right-2">
                     <FolderMenu
-                      onRename={() => {
+                      onRename={!canEdit ? undefined : () => {
                         setRenamingId(folder.id);
                         setRenameVal(folder.name);
                       }}
-                      onDelete={() => setDeleteConfirm(folder.id)}
+                      onDelete={canDelete ? () => setDeleteConfirm(folder.id) : undefined}
                     />
                   </div>
                 )}
@@ -1392,10 +1409,10 @@ export function CatalogPage() {
                   .join(" · ") || "Empty"}
           </p>
         </div>
-        {canEdit && (
+        {(canAdd || canShare) && (
           <div className="flex items-center gap-2 shrink-0">
             {/* Upload — only shown when inside a folder */}
-            {currentFolderId && (
+            {canAdd && currentFolderId && (
               <>
                 <input
                   id="catalog-upload-input"
@@ -1428,6 +1445,7 @@ export function CatalogPage() {
             )}
             {/* Upload Folder works at the top level too — the picked folder and
                 everything under it is recreated here as catalog folders. */}
+            {canAdd && (<>
             <input
               id="catalog-upload-folder-input"
               type="file"
@@ -1450,22 +1468,25 @@ export function CatalogPage() {
               <FolderPlus className="h-4 w-4" />
               Upload Folder
             </button>
-            {currentFolderId && (
+            </>)}
+            {canShare && currentFolderId && (
               <ShareFolderButton
                 kind="catalog"
                 folderId={currentFolderId}
                 folderName={folders.find((f) => f.id === currentFolderId)?.name ?? "Folder"}
               />
             )}
-            <button
-              onClick={() => {
-                setShowNewFolder((v) => !v);
-                setNewFolderName("");
-              }}
-              className="flex items-center gap-2 px-4 h-10 rounded-xl btn-hero text-sm font-medium"
-            >
-              <Plus className="h-4 w-4" /> New Folder
-            </button>
+            {canAdd && (
+              <button
+                onClick={() => {
+                  setShowNewFolder((v) => !v);
+                  setNewFolderName("");
+                }}
+                className="flex items-center gap-2 px-4 h-10 rounded-xl btn-hero text-sm font-medium"
+              >
+                <Plus className="h-4 w-4" /> New Folder
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -1524,6 +1545,7 @@ export function CatalogPage() {
           favoriteItems={favoriteItems}
           folders={folders}
           canEdit={canEdit}
+          canDelete={canDelete}
           onOpen={(its, idx) => setLightbox({ items: its, idx })}
           onToggleFav={toggleFavorite}
           onDelete={(id) => setDeleteConfirm(id)}
@@ -1588,14 +1610,14 @@ export function CatalogPage() {
                         {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                       </div>
                     </button>
-                    {canEdit && !isRenaming && (
+                    {(canEdit || canDelete) && !isRenaming && (
                       <div className="absolute top-2 right-2">
                         <FolderMenu
-                          onRename={() => {
+                          onRename={!canEdit ? undefined : () => {
                             setRenamingId(folder.id);
                             setRenameVal(folder.name);
                           }}
-                          onDelete={() => setDeleteConfirm(folder.id)}
+                          onDelete={canDelete ? () => setDeleteConfirm(folder.id) : undefined}
                         />
                       </div>
                     )}
@@ -1639,12 +1661,12 @@ export function CatalogPage() {
               <div>
                 <p className="font-semibold text-brand-dark">No folders yet</p>
                 <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-                  {canEdit
+                  {canAdd
                     ? "Create a folder to start organising your product catalog."
                     : "No catalog folders have been created yet."}
                 </p>
               </div>
-              {canEdit && (
+              {canAdd && (
                 <button
                   onClick={() => setShowNewFolder(true)}
                   className="flex items-center gap-2 px-5 h-11 rounded-xl btn-hero text-sm font-medium"
@@ -1668,7 +1690,7 @@ export function CatalogPage() {
                 <div>
                   <p className="font-semibold text-brand-dark">This folder is empty</p>
                   <p className="text-sm text-muted-foreground mt-0.5">
-                    {canEdit ? "Create a subfolder or upload files below." : "No items here yet."}
+                    {canAdd ? "Create a subfolder or upload files below." : "No items here yet."}
                   </p>
                 </div>
               </div>
@@ -1680,6 +1702,7 @@ export function CatalogPage() {
             itemsLoading={itemsLoading}
             itemsHasMore={itemsHasMore}
             canEdit={canEdit}
+            canDelete={canDelete}
             favIds={favIds}
             bannerItemId={folders.find((f) => f.id === currentFolderId)?.bannerItemId}
             sort={itemsSort}

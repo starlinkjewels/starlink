@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -30,6 +31,7 @@ export function ClientHistoryPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const can = useCan();
   const db = useDb();
 
   const client = db.clients.find(c => c.id === id);
@@ -496,14 +498,16 @@ export function ClientHistoryPage() {
               { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
               { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
             ]} />
-            {account.credit > 0 && account.outstanding > 0 && (
+            {account.credit > 0 && account.outstanding > 0 && can("payments", "edit") && (
               <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Apply Credit
               </Button>
             )}
-            <Button onClick={() => setShowPayForm(v => !v)} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> Record Payment
-            </Button>
+            {can("payments", "add") && (
+              <Button onClick={() => setShowPayForm(v => !v)} className="btn-hero rounded-xl gap-2">
+                <Plus className="h-4 w-4" /> Record Payment
+              </Button>
+            )}
           </div>
         </div>
 

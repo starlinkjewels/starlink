@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, flush, uid, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
@@ -115,6 +116,7 @@ function printLabel(c: Client) {
 
 export function ClientsPage() {
   const { user } = useAuth();
+  const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
@@ -293,7 +295,7 @@ export function ClientsPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Clients</h1>
           <p className="text-sm text-muted-foreground">{total} client{total !== 1 ? "s" : ""}</p>
         </div>
-        {user!.role !== "client" && (
+        {user!.role !== "client" && can("clients", "add") && (
           <Dialog open={open} onOpenChange={setOpen}>
             <DialogTrigger asChild>
               <Button className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Client</Button>
@@ -593,10 +595,10 @@ export function ClientsPage() {
 
               {user!.role !== "client" && (
                 <div className="flex gap-2 mt-2">
-                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
                     {c.status === "active" ? "Deactivate" : "Activate"}
-                  </AsyncButton>
-                  <AsyncButton
+                  </AsyncButton>}
+                  {can("clients", "edit") && <AsyncButton
                     size="sm" variant="outline" onClick={() => togglePhotoAccess(c)}
                     className={`rounded-lg w-9 px-0 ${c.productPhotoAccess
                       ? "text-success border-success/40 bg-success/5 hover:text-success hover:bg-success/10"
@@ -604,16 +606,16 @@ export function ClientsPage() {
                     title={c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant"}
                   >
                     <Camera className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-9 px-0" title="Edit client details">
+                  </AsyncButton>}
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-9 px-0" title="Edit client details">
                     <Pencil className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
+                  </AsyncButton>}
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
                     <KeyRound className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
+                  </AsyncButton>}
+                  {can("clients", "delete") && <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
                     <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>
+                  </AsyncButton>}
                 </div>
               )}
             </div>

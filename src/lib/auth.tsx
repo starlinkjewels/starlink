@@ -118,9 +118,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     clearAccessWatch();
     if (!fb) { stopDb(); setUser(null); return; }
     let scope = await resolveScope(fb.uid); // client → scoped reads; staff → full
-    // The admin alone loads the admin-only records. Decided by the same email
-    // allowlist the security rules use, so the two can never disagree.
-    if (scope.kind === "full") scope = { kind: "full", admin: isAdminEmail(fb.email) };
+    // An admin loads the admin-only records: an owner (by the email list) or
+    // an admin made in the app (by their index entry). The security rules
+    // recognise exactly the same two, so the app and the server agree.
+    if (scope.kind === "full") scope = { kind: "full", admin: isAdminEmail(fb.email) || !!scope.admin };
     await startDb(scope);                      // load Firestore data (now authenticated)
     const profile = resolveProfile(fb);
     if (!profile) {

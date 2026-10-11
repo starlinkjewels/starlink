@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useRef, useState } from "react";
 import { updateDb, uid, fmtDate, fmtMoney, READY_STOCK_LOCATIONS, adminStoreReady, stockCostOf, writeStockCost, type ReadyStockItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -91,6 +92,7 @@ export function ReadyStockPage() {
   const { user } = useAuth();
   const isAdmin = user?.role === "admin"; // cost + profit/loss are admin-only
   const canManage = user?.role === "admin" || user?.role === "employee"; // clients get a read-only shop view
+  const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
   const [avail, setAvail] = useState<"all" | "available" | "sold">("all"); // stock availability filter
@@ -271,9 +273,11 @@ export function ReadyStockPage() {
         </div>
         {canManage && (
         <Dialog open={open} onOpenChange={setOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={openAdd} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />Add Item</Button>
-          </DialogTrigger>
+          {can("readyStock", "add") && (
+            <DialogTrigger asChild>
+              <Button onClick={openAdd} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />Add Item</Button>
+            </DialogTrigger>
+          )}
           <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
             <DialogHeader><DialogTitle className="font-display text-2xl">{editingId ? "Edit Item" : "Add Ready Stock Item"}</DialogTitle></DialogHeader>
             <div className="space-y-3 mt-2">
@@ -510,7 +514,7 @@ export function ReadyStockPage() {
                   <Play className="h-3.5 w-3.5 fill-current" /> Video
                 </button>
               )}
-              {canManage && (
+              {canManage && can("readyStock", "edit") && (
                 <button onClick={() => openEdit(item)} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 hover:bg-white grid place-items-center text-muted-foreground hover:text-primary transition-colors shadow-sm">
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -539,7 +543,7 @@ export function ReadyStockPage() {
               )}
               <div className="flex items-center justify-between mt-3">
                 <p className="font-display text-xl font-bold text-brand-dark">{fmtMoney(item.price)}</p>
-                {canManage ? (
+                {canManage && can("readyStock", "edit") ? (
                   <div className="flex items-center gap-1.5">
                     <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-7 w-7 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
                     <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
@@ -568,9 +572,11 @@ export function ReadyStockPage() {
                       <Tag className="h-3.5 w-3.5" /> Band
                     </AsyncButton>
                   )}
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg flex-1 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
-                    <Trash2 className="h-3.5 w-3.5" /> Delete
-                  </AsyncButton>
+                  {can("readyStock", "delete") && (
+                    <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg flex-1 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </AsyncButton>
+                  )}
                 </div>
               )}
             </div>
@@ -623,7 +629,7 @@ export function ReadyStockPage() {
                     {item.price - stockCostOf(db, item)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - stockCostOf(db, item)!))} {item.price - stockCostOf(db, item)! >= 0 ? "profit" : "loss"}
                   </p>
                 )}
-                {canManage ? (
+                {canManage && can("readyStock", "edit") ? (
                   <div className="flex items-center gap-1.5 justify-end mt-1">
                     <button onClick={() => adjustQty(item, -1)} disabled={item.quantity === 0} className="h-6 w-6 rounded-lg border border-border grid place-items-center hover:bg-secondary disabled:opacity-30 transition-colors"><Minus className="h-3 w-3" /></button>
                     <span className="text-sm font-semibold w-6 text-center">{item.quantity}</span>
@@ -637,11 +643,11 @@ export function ReadyStockPage() {
               </div>
               {canManage && (
                 <div className="flex flex-col gap-1 shrink-0">
-                  <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+                  {can("readyStock", "edit") && <button onClick={() => openEdit(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>}
                   {db.settings.barcodeBandEnabled !== false && (
                     <button onClick={() => setBandItem(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground hover:text-primary hover:bg-secondary transition-colors" title="Print band"><Tag className="h-3.5 w-3.5" /></button>
                   )}
-                  <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors" title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>
+                  {can("readyStock", "delete") && <button onClick={() => del(item)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-destructive hover:bg-destructive/10 transition-colors" title="Delete"><Trash2 className="h-3.5 w-3.5" /></button>}
                 </div>
               )}
             </div>

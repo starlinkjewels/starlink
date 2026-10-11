@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
@@ -34,6 +35,7 @@ function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
 
 export function InvoicesPage() {
   const { user } = useAuth();
+  const can = useCan();
   const db = useDb();
   const isStaff = user!.role !== "client";
   // Arriving from an order's invoice badge: open with that invoice already
@@ -278,7 +280,7 @@ export function InvoicesPage() {
         </div>
 
         {/* ── Create invoice from dispatched orders (staff) ── */}
-        {isStaff && (
+        {isStaff && can("invoices", "add") && (
           <div className="px-5 py-3 border-b border-border/60 bg-secondary/20">
             <div className="flex items-center gap-2 flex-wrap">
               <Plus className="h-3.5 w-3.5 text-primary shrink-0" />
@@ -553,7 +555,7 @@ export function InvoicesPage() {
                   {/* Credit is money the client has sent that no invoice has
                       claimed yet. It sits on their account until somebody puts
                       it somewhere — nothing is allocated on its own. */}
-                  {isStaff && bal > 0 && (db.clients.find(c => c.id === detailInv.clientId)?.creditBalance || 0) > 0 && (
+                  {isStaff && can("payments", "edit") && bal > 0 && (db.clients.find(c => c.id === detailInv.clientId)?.creditBalance || 0) > 0 && (
                     <div className="rounded-xl border border-primary/30 bg-primary/5 p-3">
                       <p className="text-xs font-semibold text-brand-dark">
                         {fmtMoney(db.clients.find(c => c.id === detailInv.clientId)?.creditBalance || 0)} of unapplied credit on this client&rsquo;s account
@@ -587,7 +589,7 @@ export function InvoicesPage() {
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className={`text-xs font-semibold ${oBal > 0 ? "text-destructive" : "text-success"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
-                              {isStaff && oBal > 0 && payOrderId !== o.id && (
+                              {isStaff && can("payments", "add") && oBal > 0 && payOrderId !== o.id && (
                                 <Button size="sm" variant="outline" onClick={() => startPay(o.id)} className="rounded-lg h-8 gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Receive</Button>
                               )}
                             </div>

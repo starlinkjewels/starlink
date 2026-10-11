@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid } from "@/lib/db";
@@ -8,6 +9,9 @@ import { Send, ArrowLeft, Trash2 } from "lucide-react";
 
 export function MessagesPage() {
   const { user } = useAuth();
+  const can = useCan();
+  // Clients are outside roles; an employee sends only if their role allows it.
+  const maySend = user!.role !== "employee" || can("messages", "add");
   const [db, setDb] = useState(loadDb());
   useEffect(() => { const h = () => setDb(loadDb()); window.addEventListener("starlink-db-updated", h); return () => window.removeEventListener("starlink-db-updated", h); }, []);
 
@@ -135,10 +139,10 @@ export function MessagesPage() {
             })}
             <div ref={endRef} />
           </div>
-          <div className="p-3 border-t flex gap-2">
+          {maySend ? <div className="p-3 border-t flex gap-2">
             <Input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder="Type a message..." className="rounded-xl h-11" />
             <AsyncButton onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></AsyncButton>
-          </div>
+          </div> : <ReadOnlyNote />}
         </div>
       </div>
 
@@ -226,13 +230,21 @@ export function MessagesPage() {
               })}
               <div ref={endRef} />
             </div>
-            <div className="p-3 border-t flex gap-2 shrink-0">
+            {maySend ? <div className="p-3 border-t flex gap-2 shrink-0">
               <Input value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === "Enter" && send()} placeholder="Type a message..." className="rounded-xl h-11" />
               <AsyncButton onClick={send} className="btn-hero rounded-xl h-11 w-11 p-0"><Send className="h-4 w-4" /></AsyncButton>
-            </div>
+            </div> : <ReadOnlyNote />}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ReadOnlyNote() {
+  return (
+    <div className="p-3 border-t text-xs text-muted-foreground text-center">
+      Your role lets you read messages but not send them.
     </div>
   );
 }

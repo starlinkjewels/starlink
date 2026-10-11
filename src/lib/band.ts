@@ -5,6 +5,7 @@
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
 import { jsPDF } from "jspdf";
+import { exportAllowed } from "./access";
 import JsBarcode from "jsbarcode";
 import { orderTotal, fmtMoney, CARAT_TO_GRAM, logEvent, type Order, type ReadyStockItem, type Settings, type LabelPreset } from "./db";
 
@@ -94,6 +95,7 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
     doc.autoPrint();
     window.open(doc.output("bloburl") as unknown as string, "_blank");
   } else {
+    if (!exportAllowed()) return;
     logEvent("print", `Printed barcode band ${d.code}`, { code: d.code });
     doc.save(`Band-${d.code}-${opts.style}.pdf`);
   }

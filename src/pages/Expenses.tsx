@@ -1,3 +1,4 @@
+import { useCan } from "@/hooks/useCan";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
@@ -70,6 +71,7 @@ export function ExpensesPage() {
   }, []);
 
   const isAdmin = user?.role === "admin";
+  const can = useCan();
   const isEmployee = user?.role === "employee";
 
   // Inclusive local-day range filter on an expense's date (blank = open-ended).
@@ -233,13 +235,15 @@ export function ExpensesPage() {
               : "Log your expenses and track your net profit."}
           </p>
         </div>
-        <button
-          onClick={() => setShowAdd(true)}
-          className="btn-hero flex items-center gap-2 px-4 h-10 rounded-xl text-sm font-semibold shrink-0"
-        >
-          <Plus className="h-4 w-4" />
-          Add Expense
-        </button>
+        {can("expenses", "add") && (
+          <button
+            onClick={() => setShowAdd(true)}
+            className="btn-hero flex items-center gap-2 px-4 h-10 rounded-xl text-sm font-semibold shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            Add Expense
+          </button>
+        )}
       </div>
 
       {/* ── Employee profit summary ── */}
@@ -366,6 +370,7 @@ export function ExpensesPage() {
             users={db.users}
             clients={db.clients}
             onDelete={handleDelete}
+            mayDelete={can("expenses", "delete")}
             currentUserId={user!.id}
           />
         </div>
@@ -456,6 +461,7 @@ export function ExpensesPage() {
             users={db.users}
             clients={db.clients}
             onDelete={handleDelete}
+            mayDelete={can("expenses", "delete")}
             currentUserId={user!.id}
           />
         </div>
@@ -646,9 +652,11 @@ interface ExpenseListProps {
   clients: any[];
   onDelete: (id: string) => void;
   currentUserId: string;
+  /** Whether this person's role lets them delete expenses at all. */
+  mayDelete: boolean;
 }
 
-function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId }: ExpenseListProps) {
+function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
   const { paged, page, setPage, totalPages, start, end } = usePagination(expenses, 12);
   // Format the total in the shared currency; fall back to ₹ when mixed/legacy.
   const listCurrency: "INR" | "USD" = expenses.length && expenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
@@ -682,7 +690,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
           const addedBy = users.find(u => u.id === exp.employeeId);
           const relatedClient = exp.clientId ? clients.find(c => c.id === exp.clientId) : null;
           const paidTo = exp.paidToEmployeeId ? users.find(u => u.id === exp.paidToEmployeeId) : null;
-          const canDelete = exp.employeeId === currentUserId;
+          const canDelete = mayDelete && exp.employeeId === currentUserId;
           return (
             <motion.div
               key={exp.id}
