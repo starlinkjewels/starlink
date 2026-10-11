@@ -569,3 +569,52 @@
     background: var(--color-card); backdrop-filter: none; border-color: var(--color-border);
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Screen-size layout — nothing fixed. Pages fill the screen they are on,
+   card grids fit as many columns as the width allows, dialogs keep their
+   title and actions in view whatever their height.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* Card grids: a column for every minimum card width that fits. */
+@utility grid-auto-cards { grid-template-columns: repeat(auto-fill, minmax(min(20rem, 100%), 1fr)); }
+@utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(15.5rem, 100%), 1fr)); }
+@utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11.5rem, 100%), 1fr)); }
+
+/* The page frame (AppLayout). "Fit screen" by default; Settings → Appearance
+   → Page width can centre it at a comfortable reading width instead. */
+.app-page { width: 100%; max-width: var(--page-max, none); margin-inline: auto; }
+:root[data-width="centered"] { --page-max: 80rem; }
+/* Wide pages fill the frame — they were capped at 1152–1280px, leaving empty
+   bands on a PC. Form-like pages keep a readable width that grows with the screen. */
+.app-page > :is(.max-w-6xl, .max-w-7xl) { max-width: none; }
+.app-page > .max-w-3xl { max-width: clamp(48rem, 52vw, 64rem); }
+
+/* ── Dialogs: the title stays at the top and the actions at the bottom while
+   the middle scrolls. Only dialogs with the standard padding (p-6) — a
+   dialog laid out its own way is left alone. ── */
+.ui-dialog { --dlg-bg: var(--color-background); --dlg-pb: 1.5rem; --dlg-line: color-mix(in oklab, var(--color-border) 70%, transparent); }
+@media (max-width: 639.98px) { .ui-dialog { --dlg-pb: calc(1.5rem + env(safe-area-inset-bottom)); } }
+:root[data-ui="glass"] .ui-dialog { --dlg-bg: color-mix(in oklab, white 94%, transparent); }
+:root[data-ui="ivory"] .ui-dialog { --dlg-bg: oklch(0.992 0.006 85); }
+
+.ui-dialog.p-6 > .ui-dialog-header {
+  position: sticky; top: 0; z-index: 10;
+  margin: -1.5rem -1.5rem 0;
+  padding: 1.5rem 3.5rem 1rem 1.5rem; /* room on the right for the close button */
+  background: var(--dlg-bg);
+  border-bottom: 1px solid var(--dlg-line);
+}
+/* The last row of buttons — the dialog's actions — or a DialogFooter. A block
+   that also holds fields is the dialog's body, not its footer. */
+.ui-dialog.p-6 > :is(div:has(+ .ui-dialog-close):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) {
+  position: sticky; bottom: 0; z-index: 10;
+  margin: 0 -1.5rem calc(-1 * var(--dlg-pb));
+  padding: 1rem 1.5rem var(--dlg-pb);
+  background: var(--dlg-bg);
+  border-top: 1px solid var(--dlg-line);
+}
+:root[data-ui="glass"] .ui-dialog.p-6 > :is(.ui-dialog-header, div:has(+ .ui-dialog-close):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) { backdrop-filter: blur(20px) saturate(160%); }
+/* The close button stays in the corner while the dialog scrolls (the dialog
+   is moved into place with a transform, so "fixed" means fixed to it). */
+.ui-dialog > .ui-dialog-close { position: fixed; }

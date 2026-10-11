@@ -494,7 +494,7 @@ export function AppLayout() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
+          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
               only while a page's chunk is fetched the first time. */}
@@ -503,6 +503,9 @@ export function AppLayout() {
                 role does not allow is refused here, whatever was typed. */}
             {/* "+ Add new …" in a dropdown opens the real form, from any page. */}
             <QuickCreateProvider>
+            {/* One frame for every page: as wide as the screen allows (Settings →
+                Appearance → Page width), the same on every page. */}
+            <div className="app-page">
             {roleAllows(loc.pathname) ? <Outlet /> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
@@ -512,6 +515,7 @@ export function AppLayout() {
                 </p>
               </div>
             )}
+            </div>
             </QuickCreateProvider>
           </Suspense>
         </motion.main>

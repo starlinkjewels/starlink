@@ -9,6 +9,7 @@ export type UiAccent = "royal" | "sapphire" | "emerald" | "gold" | "ruby" | "gra
 export type UiCorners = "sharp" | "default" | "round";
 export type UiHeadings = "serif" | "sans";
 export type UiMotion = "full" | "calm";
+export type UiWidth = "fit" | "centered";
 
 export interface AppearanceUi {
   look: UiLook;
@@ -16,6 +17,7 @@ export interface AppearanceUi {
   corners: UiCorners;
   headings: UiHeadings;
   motion: UiMotion;
+  width: UiWidth;
 }
 
 export const UI_LOOKS: { key: UiLook; name: string; hint: string }[] = [
@@ -35,7 +37,7 @@ export const UI_ACCENTS: { key: UiAccent; name: string; swatch: string }[] = [
   { key: "graphite", name: "Graphite", swatch: "oklch(0.36 0.02 260)" },
 ];
 
-export const DEFAULT_APPEARANCE: AppearanceUi = { look: "classic", accent: "royal", corners: "default", headings: "serif", motion: "full" };
+export const DEFAULT_APPEARANCE: AppearanceUi = { look: "classic", accent: "royal", corners: "default", headings: "serif", motion: "full", width: "fit" };
 
 const pick = <T extends string>(v: unknown, ok: readonly T[], dflt: T): T => (ok.includes(v as T) ? (v as T) : dflt);
 
@@ -47,6 +49,7 @@ export function appearanceOf(v: Partial<AppearanceUi> | undefined | null): Appea
     corners: pick(v?.corners, ["sharp", "default", "round"] as const, "default"),
     headings: pick(v?.headings, ["serif", "sans"] as const, "serif"),
     motion: pick(v?.motion, ["full", "calm"] as const, "full"),
+    width: pick(v?.width, ["fit", "centered"] as const, "fit"),
   };
 }
 
@@ -62,6 +65,7 @@ export function applyAppearance(a: AppearanceUi, root: HTMLElement = document.do
   set("data-corners", a.corners === "default" ? null : a.corners);
   set("data-headings", a.headings === "serif" ? null : a.headings);
   set("data-motion", a.motion === "full" ? null : a.motion);
+  set("data-width", a.width === "fit" ? null : a.width);
 }
 
 /** Remember the look on this device, so the next start (and the sign-in page) opens in it. */

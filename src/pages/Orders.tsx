@@ -394,7 +394,7 @@ export function OrdersPage() {
 
       {/* ── Grid (image) view ── */}
       {view === "grid" && total > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-auto-tiles gap-3">
           {paged.map(o => {
             const client = db.clients.find(c => c.id === o.clientId);
             const done = o.timeline.filter(t => t.status === "done").length;

@@ -365,7 +365,7 @@ export function LockerPage() {
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {lockers.map(l => {
           const bal = lockerBalance(l, db.lockerTransactions);
           const isSelected = selectedId === l.id;

@@ -84,7 +84,7 @@ export function EmployeesPage() {
         <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employees..." className="pl-9 h-11 rounded-xl" />
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(u => {
           const pending = pendingCount(u.id);
           const initials = u.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase();

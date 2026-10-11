@@ -163,7 +163,7 @@ export function FactoriesPage() {
       )}
 
       {view === "grid" && (
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(fac => {
           const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
           const account = accounts.get(fac.id)!;

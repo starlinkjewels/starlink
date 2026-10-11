@@ -179,7 +179,7 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
 
       {!category && (categories.length === 0
         ? <div className="card-luxe p-12 text-center text-muted-foreground"><Camera className="h-10 w-10 mx-auto mb-3 opacity-20" /><p>No order photos yet. Photos uploaded on a dispatched order appear here automatically.</p></div>
-        : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+        : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
             {categories.map(cat => {
               const designCount = new Set(cat.orders.map(o => (o.designNumber || o.orderNumber || "Unlabelled").trim())).size;
               const cover = cat.orders.flatMap(o => o.productPhotos ?? [])[0] ?? cat.orders.find(o => o.cadImage)?.cadImage;
@@ -188,7 +188,7 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
           </div>)}
 
       {category && !design && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
           {designs.map(d => {
             const cover = d.orders.flatMap(o => o.productPhotos ?? [])[0] ?? d.orders.find(o => o.cadImage)?.cadImage;
             const clientNames = isStaff ? [...new Set(d.orders.map(o => db.clients.find(c => c.id === o.clientId)?.companyName).filter(Boolean))] : [];
@@ -203,7 +203,7 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
             {isStaff && <p className="text-xs text-muted-foreground truncate min-w-0">{designOrders.map(o => o.orderNumber).join(", ")} · {[...new Set(designOrders.map(o => db.clients.find(c => c.id === o.clientId)?.companyName).filter(Boolean))].join(", ")}</p>}
             {items.length > 0 && <button onClick={downloadAll} disabled={downloading} className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border text-xs font-medium hover:bg-secondary disabled:opacity-60 shrink-0"><Download className="h-3.5 w-3.5" /> {downloading ? "Downloading…" : "Download All"}</button>}
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
             {items.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} />)}
           </div>
         </div>
@@ -457,7 +457,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
       )}
 
       {subfolders.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
           {subfolders.map(f => {
             const kids = childCount(f.id), media = mediaCount(f.id);
             const sub = [kids > 0 ? `${kids} folder${kids !== 1 ? "s" : ""}` : "", media > 0 ? `${media} item${media !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" · ") || "Empty";
@@ -476,7 +476,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
       )}
 
       {gallery.length > 0 && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3 sm:gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
           {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={canDelete ? () => deleteItem(item.id) : undefined} />)}
         </div>
       )}

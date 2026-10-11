@@ -821,7 +821,7 @@ export interface Settings {
   /** How every table in the app looks — Settings → Table Style. See tableStyle.ts. */
   tableUi?: { style: string; density: string; zebra: boolean; hover: boolean; lines: boolean; sticky: boolean };
   /** Settings → Appearance: the look of the whole app (see lib/appearance.ts). Absent = Classic. */
-  appearance?: { look: string; accent: string; corners: string; headings: string; motion: string };
+  appearance?: { look: string; accent: string; corners: string; headings: string; motion: string; width?: string };
   /** The first company's extras, alongside its Invoice & Bill details. */
   companyLegalSuffix?: string; // default "INC"
   companyLogoUrl?: string;     // default the Starlink logo

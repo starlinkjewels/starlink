@@ -221,7 +221,7 @@ function ReceiveFromClient() {
     <div className="space-y-3">
       {/* Fields spread across the width instead of one long column — the card is
           full-page now that the receipts table sits underneath it. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-auto-cards gap-3">
         <div>
           <Label className="text-xs">Client</Label>
           <Select value={clientId} onValueChange={addNew("client", setClientId)}>
