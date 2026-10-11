@@ -81,7 +81,7 @@ function bankImagesHtml(settings: Settings): string {
   const imgs = [settings.bankDetailsImage1, settings.bankDetailsImage2].filter((s): s is string => !!s);
   if (!imgs.length && settings.invoiceBankText) {
     // A company with its wire details typed in rather than uploaded as a picture.
-    return `<div style="position:absolute;left:0;bottom:0;max-width:260px;font-size:9.5px;line-height:1.45;white-space:pre-line;border:1px solid #ccc;padding:6px 8px;">${esc(settings.invoiceBankText)}</div>`;
+    return `<div style="position:absolute;left:0;bottom:0;max-width:260px;font-size:9.5px;line-height:1.45;white-space:pre-line;border:1px solid #ccc;padding:6px 8px;background:#fff;">${esc(settings.invoiceBankText)}</div>`;
   }
   if (!imgs.length) return "";
   return `<div style="position:absolute;left:0;bottom:0;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
@@ -334,11 +334,14 @@ function buildInvoiceDoc(opts: {
 
   <!-- Header -->
   <div class="hdr">
-    <img src="${settings.companyLogoUrl || "/starlink-logo.png"}" alt="${esc(settings.companyName || "Starlink Jewels")}" class="logo" />
+    ${settings.companyLogoUrl || isMain
+      ? `<img src="${settings.companyLogoUrl || "/starlink-logo.png"}" alt="${esc(settings.companyName || "Starlink Jewels")}" class="logo" />`
+      // Another company with no logo yet prints its name — never the first company's logo.
+      : `<div style="font-size:22px;font-weight:800;letter-spacing:1.5px;color:#1e3a8a;line-height:1.1;max-width:60%;">${esc((settings.companyName || "").toUpperCase())}</div>`}
     <div class="addr">
-      ${isMain ? (settings.invoiceAddress1 || "55 JOHN ST") : esc(settings.invoiceAddress1 || "")}<br/>
-      ${isMain ? (settings.invoiceAddress2 || "EAST RUTHERFORD") : esc(settings.invoiceAddress2 || "")}<br/>
-      ${isMain ? (settings.invoiceAddress3 || "NEW JERSEY 07073") : esc(settings.invoiceAddress3 || "")}<br/>
+      ${isMain
+        ? `${settings.invoiceAddress1 || "55 JOHN ST"}<br/>${settings.invoiceAddress2 || "EAST RUTHERFORD"}<br/>${settings.invoiceAddress3 || "NEW JERSEY 07073"}<br/>`
+        : [settings.invoiceAddress1, settings.invoiceAddress2, settings.invoiceAddress3].filter(Boolean).map(l => `${esc(l!)}<br/>`).join("")}
       ${settings.invoiceTel ? "Tel No: " + settings.invoiceTel + "<br/>" : ""}
       ${settings.invoicePrimary ? "Primary: " + settings.invoicePrimary + "<br/>" : ""}
       ${settings.invoiceEmail ? "Email: " + settings.invoiceEmail + (settings.invoiceWebsite || settings.invoiceTaxId ? "<br/>" : "") : ""}
