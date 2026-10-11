@@ -1,3 +1,4 @@
+import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
@@ -35,6 +36,14 @@ export function ClientHistoryPage() {
   const db = useDb();
 
   const client = db.clients.find(c => c.id === id);
+
+  // A client's statements carry the company that sells to them; the first
+
+  // company's stay exactly as they always were.
+
+  const statementCompany = client && hasCompanies(db.settings) && companyIdOfClient(client) !== MAIN_COMPANY_ID
+
+    ? companyById(db.settings, companyIdOfClient(client)).name : undefined;
   // Employees may only open clients assigned to them — not the whole client base.
   const forbidden = client && user!.role === "employee" && client.accountManagerId !== user!.id;
   if (!client || forbidden) {
@@ -302,6 +311,7 @@ export function ClientHistoryPage() {
     }));
 
     downloadLedgerPdfMulti({
+      company: statementCompany,
       title: "Client Account Statement",
       subjectLines: [
         client.companyName,
@@ -350,6 +360,7 @@ export function ClientHistoryPage() {
     const value = rows.reduce((s, o) => s + orderTotal(o), 0);
     const paid = rows.reduce((s, o) => s + totalAdvance(o), 0);
     downloadLedgerPdf({
+      company: statementCompany,
       title: "Client Order Report",
       subjectLines: [
         client.companyName,

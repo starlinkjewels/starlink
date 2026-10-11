@@ -11,6 +11,8 @@
 // never guarantee this, so these live in their own tiny direct-Firestore doc.
 import { doc, runTransaction } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
+import { MAIN_COMPANY_ID, companyById, formatInvoiceNumber, invoiceSequenceName, invoicesOfCompany } from "./companies";
+import type { Invoice, Settings } from "./db";
 
 const COL = "counters";
 
@@ -94,11 +96,23 @@ export async function reserveOrderNumber(orders: { orderNumber?: string }[]): Pr
   return `SLJ-${new Date().getFullYear()}-${String(seq).padStart(4, "0")}`;
 }
 
-/** Reserve a globally-unique invoice number ("0042"). */
-export async function reserveInvoiceNumber(invoices: { number?: string }[]): Promise<string> {
-  const floor = highestSuffix(invoices.map((i) => i.number), 0) + 1;
-  const seq = await reserveSequence("invoiceNumber", floor);
-  return String(seq).padStart(4, "0");
+/**
+ * Reserve the next invoice number of a company. Each company keeps its own
+ * series: the first company's run on exactly as they always have ("0042"),
+ * every other company's carry its prefix and start at 1 ("SJD-0001"). Only the
+ * company's own invoices set the floor, so one company's bills can never push
+ * another's numbers forward.
+ */
+export async function reserveInvoiceNumber(
+  invoices: Pick<Invoice, "number" | "companyId">[],
+  settings?: Settings,
+  companyId: string = MAIN_COMPANY_ID,
+): Promise<string> {
+  const own = invoicesOfCompany(invoices as Invoice[], companyId);
+  const floor = highestSuffix(own.map((i) => i.number), 0) + 1;
+  const seq = await reserveSequence(invoiceSequenceName(companyId), floor);
+  if (companyId === MAIN_COMPANY_ID || !settings) return String(seq).padStart(4, "0");
+  return formatInvoiceNumber(companyById(settings, companyId), seq);
 }
 
 /**
@@ -109,10 +123,11 @@ export async function reserveInvoiceNumber(invoices: { number?: string }[]): Pro
  * leave a hole in the sequence for good. That is where 0009, 0010, 0014, 0015
  * and 0017 went.
  */
-export async function releaseInvoiceNumber(number: string): Promise<void> {
-  const n = parseInt(number, 10);
+export async function releaseInvoiceNumber(number: string, companyId: string = MAIN_COMPANY_ID): Promise<void> {
+  const parts = String(number).split("-");
+  const n = parseInt(parts[parts.length - 1], 10);
   if (!Number.isFinite(n)) return;
-  await releaseSequence("invoiceNumber", n);
+  await releaseSequence(invoiceSequenceName(companyId), n);
 }
 
 /**

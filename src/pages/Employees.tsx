@@ -1,3 +1,4 @@
+import { CompanyTicks, EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, flush, uid, rolesStoreReady, type User } from "@/lib/db";
@@ -37,6 +38,8 @@ export function EmployeesPage() {
   // or a full admin — a partner in the business. Only offered once roles are
   // live on the server, since until then the server would not honour an admin.
   const [access, setAccess] = useState<string>(STANDARD_STAFF.id);
+  // The companies a new employee sells for — none ticked = every company.
+  const [coIds, setCoIds] = useState<string[]>([]);
   const rolesLive = rolesStoreReady();
   // Opening salary already paid before the app (migration) — optional.
   const [openingPaid, setOpeningPaid] = useState("");
@@ -85,6 +88,7 @@ export function EmployeesPage() {
       updateDb(d => d.users.push({
         id: uid("u_"), role: asAdmin ? "admin" : "employee", status: "active", createdAt: new Date().toISOString(),
         ...(roleId ? { roleId } : {}),
+        ...(!asAdmin && coIds.length ? { companyIds: coIds } : {}),
         authUid, username: email, email, password: "",
         // A department says where on the floor someone works; an admin partner
         // runs the whole business, so they are not given one.
@@ -104,6 +108,7 @@ export function EmployeesPage() {
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
       setNeedsLogin(true);
       setAccess(STANDARD_STAFF.id);
+      setCoIds([]);
       setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
     } catch (e) {
       toast.error(authErrorMessage(e));
@@ -197,6 +202,7 @@ export function EmployeesPage() {
                   </p>
                 </div>
               )}
+              {!(needsLogin && rolesLive && access === "admin") && <CompanyTicks value={coIds} onChange={setCoIds} />}
               {!(needsLogin && rolesLive && access === "admin") && (
                 <div>
                   <Label className="text-xs">Department</Label>
@@ -300,6 +306,7 @@ export function EmployeesPage() {
               </div>
               {/* Role, and admin or not */}
               <EmployeeAccessControls u={u} />
+              <EmployeeCompaniesControl u={u} />
 
               {/* Owner/Admin: no deactivate / reset / delete from here (avoid locking yourself out) */}
               {u.role !== "admin" && (

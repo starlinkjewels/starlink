@@ -1,3 +1,4 @@
+import { MAIN_COMPANY_ID, companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies, worksFor } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
@@ -15,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, ChevronRight } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, ChevronRight, Building2 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -116,6 +117,12 @@ function printLabel(c: Client) {
 
 export function ClientsPage() {
   const { user } = useAuth();
+  // Our companies — asked about only once there is more than one.
+  const dbNow = loadDb();
+  const multiCo = hasCompanies(dbNow.settings);
+  const meUser = dbNow.users.find(u => u.id === user!.id) ?? user!;
+  const myCompanies = companiesForUser(dbNow.settings, meUser);
+  const [coFilter, setCoFilter] = useState("all");
   const can = useCan();
   const db = useDb();
   const [q, setQ] = useState("");
@@ -151,6 +158,7 @@ export function ClientsPage() {
       companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
       country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address,
       accountManagerId: c.accountManagerId,
+      companyId: companyIdOfClient(c),
       openingBalance: c.openingBalance, openingDir: c.openingDir, openingDate: c.openingDate,
     });
     setEditingId(c.id);
@@ -174,6 +182,11 @@ export function ClientsPage() {
         c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
         c.openingDate = ef.openingBalance ? (ef.openingDate || undefined) : undefined;
         if (user!.role === "admin") c.accountManagerId = ef.accountManagerId;
+        // Moving a client to another company changes who bills them from now
+        // on; every invoice already raised keeps the company that issued it.
+        if (user!.role === "admin" && ef.companyId) {
+          if (ef.companyId === MAIN_COMPANY_ID) delete c.companyId; else c.companyId = ef.companyId;
+        }
         const u = d.users.find(u => u.clientId === c.id);
         if (u) { u.name = c.ownerName || c.companyName; u.phone = c.phone; }
       });
@@ -203,6 +216,7 @@ export function ClientsPage() {
     return a ? Math.max(a.outstanding, a.credit) : 0;
   };
   const list = scoped
+    .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
     .filter(c =>
       c.companyName.toLowerCase().includes(q.toLowerCase()) ||
       c.ownerName.toLowerCase().includes(q.toLowerCase())
@@ -223,6 +237,10 @@ export function ClientsPage() {
 
   const create = async () => {
     if (!f.companyName || !f.email || !f.password) { toast.error("Fill company, email and password"); return; }
+    // Which of our companies sells to them. One to choose from: that one.
+    const sellerId = f.companyId || (myCompanies.length === 1 ? myCompanies[0].id : "");
+    if (multiCo && !sellerId) { toast.error("Choose which of our companies this client buys from"); return; }
+    if (multiCo && !myCompanies.some(c => c.id === sellerId)) { toast.error("You don't sell for that company"); return; }
     const email = f.email!.trim().toLowerCase();
     if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
     setSaving(true);
@@ -234,7 +252,12 @@ export function ClientsPage() {
       // can see and work with it). Admin keeps whatever manager was selected.
       const accountManagerId = user!.role === "employee" ? user!.id : f.accountManagerId;
       updateDb(d => {
-        d.clients.unshift({ ...f, id, accountManagerId, username: email, email, status: "active", createdAt: new Date().toISOString() } as Client);
+        const { companyId: _picked, ...rest } = f;
+        void _picked;
+        d.clients.unshift({
+          ...rest, id, accountManagerId, username: email, email, status: "active", createdAt: new Date().toISOString(),
+          ...(sellerId && sellerId !== MAIN_COMPANY_ID ? { companyId: sellerId } : {}),
+        } as Client);
         d.users.push({
           id: uid("u_"), authUid, username: email, password: "", role: "client",
           name: f.ownerName || f.companyName!, email, phone: f.phone,
@@ -330,6 +353,18 @@ export function ClientsPage() {
                   hint="What this client already owed you (or prepaid) when you started using this app. Shown as the first line of their ledger."
                 />
               </div>
+              {multiCo && (
+                <div className="mt-3">
+                  <Label className="text-xs">Our company — who bills this client *</Label>
+                  <Select value={f.companyId || (myCompanies.length === 1 ? myCompanies[0].id : "")} onValueChange={v => setF({ ...f, companyId: v })}>
+                    <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Choose the company" /></SelectTrigger>
+                    <SelectContent>
+                      {myCompanies.map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground mt-1">Their invoices, proformas and statements carry this company's name, logo, bank details and invoice numbers.</p>
+                </div>
+              )}
               {user!.role === "admin" ? (
                 <div className="mt-3">
                   <Label className="text-xs">Assign Employee (optional)</Label>
@@ -340,7 +375,7 @@ export function ClientsPage() {
                     <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-                      {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+                      {employees.filter(e => !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground mt-1">
@@ -389,6 +424,20 @@ export function ClientsPage() {
               hint="Adjust the balance carried in from your previous system. Shown as the first line of their ledger."
             />
           </div>
+          {user!.role === "admin" && multiCo && (
+            <div className="mt-3">
+              <Label className="text-xs">Our company — who bills this client</Label>
+              <Select value={ef.companyId || MAIN_COMPANY_ID} onValueChange={v => setEf({ ...ef, companyId: v })}>
+                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {companiesOf(dbNow.settings).filter(co => co.active !== false || co.id === ef.companyId).map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              {editingId && ef.companyId !== companyIdOfClient(dbNow.clients.find(x => x.id === editingId)) && (
+                <p className="text-[11px] text-amber-700 mt-1">From now on their new invoices come from this company. Invoices already raised keep the company that issued them.</p>
+              )}
+            </div>
+          )}
           {user!.role === "admin" && (
             <div className="mt-3">
               <Label className="text-xs">Assign Employee</Label>
@@ -421,6 +470,15 @@ export function ClientsPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." className="pl-9 h-11 rounded-xl" />
         </div>
+        {multiCo && (
+          <Select value={coFilter} onValueChange={setCoFilter}>
+            <SelectTrigger className="w-40 sm:w-52 h-11 rounded-xl text-sm shrink-0" aria-label="Company"><Building2 className="h-4 w-4 mr-1.5 shrink-0 text-primary" /><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All companies</SelectItem>
+              {companiesOf(dbNow.settings).map(co => <SelectItem key={co.id} value={co.id}>{co.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        )}
         <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
           <button onClick={() => saveView("list")} aria-label="List view"
             className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
@@ -453,7 +511,7 @@ export function ClientsPage() {
                   />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-medium text-brand-dark truncate">{c.companyName}{c.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
+                  <p className="font-medium text-brand-dark truncate">{c.companyName}{c.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}{multiCo && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{companyById(dbNow.settings, companyIdOfClient(c)).name}</span>}</p>
                   <p className="text-xs text-muted-foreground truncate">
                     {c.ownerName || c.email || c.phone || "—"}
                     {clientUser && (
@@ -514,6 +572,7 @@ export function ClientsPage() {
                 <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
                   <div className="min-w-0">
                     <p className="font-display text-lg text-brand-dark truncate leading-tight">{c.companyName}</p>
+                    {multiCo && <p className="text-[10px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
                     <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
                     {clientUser && (
                       <p className={`text-[11px] mt-0.5 ${online ? "text-success font-medium" : "text-muted-foreground"}`}>

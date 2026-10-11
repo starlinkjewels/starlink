@@ -1,3 +1,5 @@
+import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
+import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
 import { ListOrdered } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -110,18 +112,36 @@ export function SettingsPage() {
   // every other collection to that moment — silently deleting anything created
   // since (this is what wiped a saved locker and a live order). updateDb touches
   // the live cache in place and leaves all other data alone.
+  //
+  // And only the fields changed on this page. The form's copy of the settings
+  // was taken when the page opened; writing all of it back reverted whatever
+  // else had been saved since — the production timeline and companies (saved
+  // by their own sections), categories, another admin's edits, even the
+  // diamond stock-number counter. So the form is compared with what it
+  // started from, and only what was actually changed here is written.
+  const baseline = useRef(loadDb().settings);
   const persistSettings = (msg: string) => {
+    const now = db.settings as unknown as Record<string, unknown>;
+    const was = baseline.current as unknown as Record<string, unknown>;
+    const changed: Record<string, unknown> = {};
+    const removed: string[] = [];
+    for (const k of new Set([...Object.keys(now), ...Object.keys(was)])) {
+      if (JSON.stringify(now[k]) === JSON.stringify(was[k])) continue;
+      if (now[k] === undefined) removed.push(k); else changed[k] = now[k];
+    }
     updateDb(d => {
-      const s = { ...db.settings };
+      const next = { ...(d.settings as unknown as Record<string, unknown>), ...changed };
+      for (const k of removed) delete next[k];
       // Once the rates live in the admin-only record, this form's copy of the
       // old ones must not be written back into settings, where every signed-in
       // user can read them. The form may still hold them from before the move.
       if ((d.adminRecords ?? []).some(r => r.kind === "fx")) {
-        delete s.fxRates;
-        delete s.usdToInr;
+        delete next.fxRates;
+        delete next.usdToInr;
       }
-      d.settings = s;
+      d.settings = next as unknown as typeof d.settings;
     });
+    baseline.current = { ...db.settings };
     toast.success(msg);
   };
   const save = () => persistSettings("Settings saved");
@@ -326,19 +346,23 @@ export function SettingsPage() {
 
   async function deleteInvoice(id: string, number: string) {
     if (!confirm(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`)) return;
+    const companyId = companyIdOfInvoice((liveDb.invoices ?? []).find(i => i.id === id));
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
     // If this was the newest number, hand it back so the next invoice takes it
     // instead of the book skipping one. Older numbers are left alone — their
-    // hole can only be closed by renumbering.
-    await releaseInvoiceNumber(number);
+    // hole can only be closed by renumbering. Each company has its own series.
+    await releaseInvoiceNumber(number, companyId);
     toast.success(`Invoice ${number} deleted`);
   }
 
   // ── Invoice numbers: close a gap left by a cancelled invoice ───────────────
   // Deleting an invoice leaves a hole (0001, 0003) and the atomic counter never
   // hands a number back, so the book reads wrong for good unless it is renumbered.
+  // Company 1's series only — every other company numbers its own invoices,
+  // with its prefix, and is never pulled into this one.
+  const mainInvoices = (liveDb.invoices ?? []).filter(i => companyIdOfInvoice(i) === MAIN_COMPANY_ID);
   const invoiceGaps = useMemo(() => {
-    const nums = (liveDb.invoices ?? [])
+    const nums = mainInvoices
       .map(i => parseInt(i.number, 10))
       .filter(n => Number.isFinite(n))
       .sort((a, b) => a - b);
@@ -350,7 +374,7 @@ export function SettingsPage() {
   }, [liveDb.invoices]);
 
   function renumberInvoices() {
-    const list = [...(liveDb.invoices ?? [])].sort(
+    const list = [...mainInvoices].sort(
       (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) || a.number.localeCompare(b.number));
     if (!list.length) return;
     // Show exactly which number becomes which before anything is written — the
@@ -656,6 +680,7 @@ export function SettingsPage() {
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
+    { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
     { id: "data", label: "Data & Backup", icon: Database, show: true },
   ].filter((s) => s.show);
@@ -1338,6 +1363,9 @@ export function SettingsPage() {
           </AsyncButton>
         </div>
       )}
+
+      {/* Companies — admin only */}
+      {activeId === "companies" && <CompaniesSettings />}
 
       {/* Production timeline — admin only */}
       {activeId === "timeline" && <TimelineSettings />}

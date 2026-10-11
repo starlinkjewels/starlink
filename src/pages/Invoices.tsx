@@ -1,3 +1,5 @@
+import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
+import { companyIdOfClient } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { receiptForAdvance } from "@/lib/receipts";
@@ -43,6 +45,9 @@ export function InvoicesPage() {
   const [sp] = useSearchParams();
   const [q, setQ] = useState(sp.get("q") ?? "");
   const [clientFilter, setClientFilter] = useState("all");
+  // Each company bills on its own; shown once there is more than one.
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const multiCo = hasCompanies(db.settings);
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
 
@@ -60,6 +65,7 @@ export function InvoicesPage() {
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
   if (isStaff && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
+  if (isStaff && companyFilter !== "all") list = list.filter(i => companyIdOfInvoice(i) === companyFilter);
 
   const ql = q.trim().toLowerCase();
   if (ql) {
@@ -118,13 +124,15 @@ export function InvoicesPage() {
     let created: Invoice | null = null;
     // Claim the number in the database first, so two people invoicing at the same
     // moment can never be handed the same invoice number.
-    const number = await reserveInvoiceNumber(db.invoices || []);
+    // Each company numbers its own invoices; the client's decides which series.
+    const companyId = companyIdOfClient(db.clients.find(c => c.id === clientFilter));
+    const number = await reserveInvoiceNumber(db.invoices || [], db.settings, companyId);
     try {
       updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString(), number); });
     } catch (e) {
       // The write blew up, so the number was never used. Give it back before
       // the error goes up, or the sequence skips one for good.
-      await releaseInvoiceNumber(number);
+      await releaseInvoiceNumber(number, companyId);
       throw e;
     }
     if (created) {
@@ -133,7 +141,7 @@ export function InvoicesPage() {
     } else {
       // Nothing was written, so the number was never used — give it back
       // rather than leave a hole in the sequence.
-      await releaseInvoiceNumber(number);
+      await releaseInvoiceNumber(number, companyId);
       toast.error("Those orders are already invoiced");
     }
   };
@@ -273,6 +281,15 @@ export function InvoicesPage() {
               <SelectContent>
                 <SelectItem value="all">All Clients</SelectItem>
                 {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+          {isStaff && multiCo && (
+            <Select value={companyFilter} onValueChange={setCompanyFilter}>
+              <SelectTrigger className="h-9 w-[170px] rounded-xl" aria-label="Company"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All companies</SelectItem>
+                {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
               </SelectContent>
             </Select>
           )}

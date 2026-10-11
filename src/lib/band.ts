@@ -4,6 +4,7 @@
 //   • "label" — a 50×30mm spec label (barcode + type/metal/weights + optional price).
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
+import { brandFor, companyIdOfClient } from "./companies";
 import { pieceWeights } from "./weights";
 import { jsPDF } from "jspdf";
 import { exportAllowed } from "./access";
@@ -104,11 +105,14 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
 
 /** Band for an order (barcode = order number). */
 export function generateBand(order: Order, settings: Settings, opts: BandOpts): void {
-  const { gross, net, diamondCt: diaCt } = pieceWeights(order, loadDb().materialIssuances ?? []);
+  const d = loadDb();
+  const { gross, net, diamondCt: diaCt } = pieceWeights(order, d.materialIssuances ?? []);
+  // The tag names the company selling the piece — the client's.
+  const seller = brandFor(settings, companyIdOfClient(d.clients.find(c => c.id === order.clientId)));
   runBand({
     code: order.orderNumber,
     label: order.designNumber ? `#${order.designNumber}` : "",
-    company: settings.companyName || "STARLINK JEWELS",
+    company: seller.companyName || "STARLINK JEWELS",
     jewelleryType: order.jewelleryType,
     metalLine: `${order.metal}${order.productKarats ? ` ${order.productKarats}` : ""}`,
     gross, net, less: lessWeight(gross, net, diaCt), diaCt, price: orderTotal(order),
