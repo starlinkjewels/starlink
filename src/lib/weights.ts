@@ -46,7 +46,7 @@ export function weightProblem(w: WeightInput): string | null {
   const stonesG = n3(ct * CARAT_TO_GRAM);
   const least = n3(net + other + stonesG);
   if (least > gross + TOLERANCE_G) {
-    const parts = [net ? `net ${n3(net)} g` : "", other ? `second metal ${n3(other)} g` : "", ct ? `diamond ${n3(ct)} ct × 0.2 = ${stonesG} g` : ""].filter(Boolean);
+    const parts = [net ? `net ${n3(net)} g` : "", other ? `second metal ${n3(other)} g` : "", ct ? `diamond ${n3(ct)} ct (${stonesG} g)` : ""].filter(Boolean);
     return `Gross weight (${n3(gross)} g) is less than what is in the piece: ${parts.join(" + ")} = ${least} g. Check the gross, the net or the diamond weight.`;
   }
   return null;
