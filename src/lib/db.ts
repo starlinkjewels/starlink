@@ -2444,7 +2444,7 @@ let unsubscribers: Array<() => void> = [];
 export type Scope =
   /** Staff. `admin` decides whether the admin-only records are requested at
    *  all — an employee never asks for them, so never sees them. */
-  | { kind: "full"; admin?: boolean }
+  | { kind: "full"; admin?: boolean; /** The person's own app id (User.id), when their index has it. */ appId?: string }
   | { kind: "client"; appId: string; clientId: string };
 
 /**
@@ -2480,7 +2480,8 @@ export async function resolveScope(authUid: string): Promise<Scope> {
       if (d.role === "client" && d.clientId)
         return { kind: "client", appId: d.appId, clientId: d.clientId };
       // An admin made in the app rather than by the owners' email list.
-      if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true };
+      if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true, appId: d.appId || undefined };
+      return { kind: "full", appId: d.appId || undefined };
     }
   } catch (e) {
     console.error("[db] resolveScope failed:", e);
@@ -2684,6 +2685,12 @@ function subscribeAll(scope: Scope): Promise<void> {
       else if (col === "clients")
         specs.push({ col, q: query(c, where(documentId(), "==", client.clientId)) });
       else specs.push({ col, q: c }); // users, catalog* — shared / names
+    } else if (col === "notifications" && scope.kind === "full" && scope.appId) {
+      // Every screen shows only the signed-in person's own alerts, yet staff
+      // downloaded everyone's — the largest collection of all. Only their own
+      // now. Alerts for others are still created as before (new documents);
+      // nothing is ever inferred deleted (deletes are intent-only).
+      specs.push({ col, q: query(collection(fsdb, col), where("userId", "==", scope.appId)) });
     } else {
       specs.push({ col, q: collection(fsdb, col) });
     }
