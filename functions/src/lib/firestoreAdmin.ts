@@ -5,5 +5,6 @@ import { getFirestore } from "firebase-admin/firestore";
 // Firestore database ("diamondflow"), not the "(default)" database.
 const DATABASE_ID = "diamondflow";
 
-const app = initializeApp();
+// The one Admin app for every function — summaries.ts uses it too.
+export const app = initializeApp();
 export const db = getFirestore(app, DATABASE_ID);

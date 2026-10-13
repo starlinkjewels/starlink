@@ -180,6 +180,9 @@ service cloud.firestore {
     // certified packet) rather than set into an order. Same staff-only access as
     // every other manufacturing record.
     match /diamondSales/{id}        { allow read, write: if isStaff(); }
+    // Totals kept by the server (functions/src/summaries.ts) — read by staff,
+    // written only by the server, which the rules do not govern.
+    match /summaries/{id}           { allow read: if isStaff(); allow write: if false; }
     match /stockMovements/{id}     { allow read, write: if isStaff(); }
     // Singleton running stock balance — mutated only via a transaction in
     // src/lib/stock.ts; this rule is defense-in-depth, not the primary
