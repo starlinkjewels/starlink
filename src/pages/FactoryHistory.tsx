@@ -1,7 +1,7 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -33,7 +33,28 @@ const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
 type IssuanceAction = "piece" | "charge" | "pay" | "return" | null;
 
+/**
+ * The page waits for its record before drawing anything that holds state. The
+ * data behind the first screen arrives a moment after the page opens, and a
+ * page that returned early on its first draw and then ran all its hooks on the
+ * next crashed (React #310) whenever it was opened or refreshed directly.
+ */
 export function FactoryHistoryPage() {
+  const { id } = useParams();
+  const db = useDb();
+  if (!(db.factories.some(f => f.id === id))) {
+    return (
+      <div className="text-center py-20 text-muted-foreground">
+        {collectionLoaded("factories") ? "Factory not found." : "Loading…"}{" "}
+        <Link to="/factories" className="text-primary underline">Back</Link>
+      </div>
+    );
+  }
+  // Keyed by the record, so moving straight to another one starts it afresh.
+  return <FactoryHistoryPageBody key={id} />;
+}
+
+function FactoryHistoryPageBody() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();

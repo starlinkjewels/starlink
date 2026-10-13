@@ -4,7 +4,7 @@ import { useCan } from "@/hooks/useCan";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
+import { collectionLoaded, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -29,7 +29,32 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
 
+/**
+ * The page waits for its record before drawing anything that holds state. The
+ * data behind the first screen arrives a moment after the page opens, and a
+ * page that returned early on its first draw and then ran all its hooks on the
+ * next crashed (React #310) whenever it was opened or refreshed directly.
+ */
 export function ClientHistoryPage() {
+  const { id } = useParams();
+  const db = useDb();
+  const { user } = useAuth();
+  const client = db.clients.find(c => c.id === id);
+  // Employees may only open clients assigned to them — same rule as the page itself.
+  const forbidden = !!client && user?.role === "employee" && client.accountManagerId !== user.id;
+  if (!(!!client && !forbidden)) {
+    return (
+      <div className="text-center py-20 text-muted-foreground">
+        {forbidden ? "You don't have access to this client." : collectionLoaded("clients") ? "Client not found." : "Loading…"}{" "}
+        <Link to="/clients" className="text-primary underline">Back</Link>
+      </div>
+    );
+  }
+  // Keyed by the record, so moving straight to another one starts it afresh.
+  return <ClientHistoryPageBody key={id} />;
+}
+
+function ClientHistoryPageBody() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
