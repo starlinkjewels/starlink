@@ -78,6 +78,8 @@ export function buildFactoryOrderRows(
   const byOrder = new Map<string, FactoryOrderRow>();
   /** Rows with a real diamond issue — only the others may show the order's estimate. */
   const hasDiaIssue = new Set<string>();
+  /** Net weight the factory issues recorded for each row's finished piece. */
+  const issueNet = new Map<string, number>();
   for (const mi of issuances) {
     // Material handed over in BULK has no order. Each delivery is its own row —
     // lumping them into a single "pool" line hid when each one was given and how
@@ -115,6 +117,7 @@ export function buildFactoryOrderRows(
       if (mi.source === "factoryPool") row.goldFromPool = true;
       if (mi.source !== "factoryPool") row.goldOut += toPureGold(mi.quantityIssued, mi.purityOrQuality);
       if (mi.finishedNetWeight != null) {
+        issueNet.set(key, (issueNet.get(key) ?? 0) + mi.finishedNetWeight);
         row.goldIn += mi.finishedPurity != null
           ? pureFromPurity(mi.finishedNetWeight, mi.finishedPurity)
           : toPureGold(mi.finishedNetWeight, mi.finishedKarat || "24K");
@@ -191,10 +194,12 @@ export function buildFactoryOrderRows(
     row.quotedUsd = order.estimatedMakingCharges || 0;
     row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
     row.designNo = order.designNumber?.trim() || undefined;
-    // The piece's net weight: the real one once Final Approval has recorded it,
-    // the order's estimate before (marked, and kept out of the total).
+    // The piece's net weight: the real one once it is recorded — on the order
+    // at Final Approval, or (one older path) only on the factory issue — and the
+    // order's estimate before that (marked, and kept out of the total).
     if (/gold|platinum|silver/i.test(order.metal)) {
-      if (order.actualNetWeight) row.netWeight = order.actualNetWeight;
+      const recorded = order.actualNetWeight || issueNet.get(row.orderId || "") || 0;
+      if (recorded) row.netWeight = Math.round(recorded * 1000) / 1000;
       else if (order.estimatedNetWeight) { row.netWeight = order.estimatedNetWeight; row.netEstimated = true; }
     }
 

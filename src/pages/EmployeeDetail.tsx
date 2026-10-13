@@ -198,7 +198,7 @@ export function EmployeeDetailPage() {
               <p className="text-xs text-muted-foreground mt-0.5">{salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""}{opening > 0 ? " (incl. opening)" : ""}</p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
               <p className="text-[11px] text-muted-foreground">This year</p>
               <p className="font-semibold text-sm text-brand-dark">{fmtExpenseAmount(salaryTotals.thisYear, salaryCur)}</p>
