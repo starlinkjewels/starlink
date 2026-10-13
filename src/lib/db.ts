@@ -116,25 +116,18 @@ export type LedgerDir = "debit" | "credit";
 /** Opening balance an entity (client/supplier/factory) carried in from a
  *  previous system. Stored once at migration; folded into that entity's
  *  account summary AND shown as the first, dated line of its ledger. */
+// Pure helpers, kept with the account calculations so the server can use the
+// very same code (see src/lib/pure). Re-exported so nothing that imports them
+// from here changes.
+import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
+export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
+
 export interface OpeningBalanceInfo {
   openingBalance?: number;
   openingDir?: LedgerDir;
   openingDate?: string;
 }
 
-/** Opening amount the counterparty owes US (debit side), else 0. */
-export function openingDebitAmt(e?: OpeningBalanceInfo): number {
-  return e?.openingBalance && e.openingDir !== "credit" ? Math.abs(e.openingBalance) : 0;
-}
-/** Opening amount WE owe the counterparty (credit / their advance), else 0. */
-export function openingCreditAmt(e?: OpeningBalanceInfo): number {
-  return e?.openingBalance && e.openingDir === "credit" ? Math.abs(e.openingBalance) : 0;
-}
-/** True when a non-zero opening balance is set — used to decide whether to
- *  render the opening ledger line. */
-export function hasOpeningBalance(e?: OpeningBalanceInfo): boolean {
-  return !!e?.openingBalance && Math.abs(e.openingBalance) > 0;
-}
 
 // Streamlined production stages. "Certification" is only added for orders that
 // are certified (see buildTimelineSteps). Names "CAD Designing", "Final Approval",
@@ -174,23 +167,8 @@ export const FACTORY_PURITY: Record<string, number> = {
 };
 
 
-export const KARAT_PURITY: Record<number, number> = {
-  9: 0.375, 10: 0.417, 14: 0.585, 18: 0.75, 22: 0.916, 24: 1,
-};
 
-/** Grams of a given karat → grams of pure (24KT) gold. Unknown karat → treat as pure. */
-export function toPureGold(grams: number, karat: string | number): number {
-  const n = typeof karat === "number" ? karat : parseInt(String(karat), 10);
-  const pct = KARAT_PURITY[n] ?? 1;
-  return Math.round(grams * pct * 1000) / 1000;
-}
 
-/** Grams at an explicit purity (parts-per-1000, e.g. 750 for 18K, or 748 for a
- *  factory's measured touch) → pure (24KT) grams. Lets staff enter the real
- *  purity the factory reports instead of the textbook karat percentage. */
-export function pureFromPurity(grams: number, purityPerMille: number): number {
-  return Math.round(grams * (purityPerMille / 1000) * 1000) / 1000;
-}
 
 /** 1 carat = 0.2 grams — for gross-weight (gold + diamond) maths. */
 export const CARAT_TO_GRAM = 0.2;

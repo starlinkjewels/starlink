@@ -7,6 +7,17 @@
 // Stock levels are NOT here — see src/lib/stock.ts, which needs a genuinely
 // different, transactional write path for correctness (this file only
 // contains pure, side-effect-free summary/allocator functions).
+// The account calculations live in src/lib/pure so the server works every total
+// out with exactly this code. Re-exported: nothing that imports them from here changes.
+import {
+  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
+  factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+} from "./pure/accounts";
+export {
+  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
+  factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+};
+const r0 = (n: number) => Math.round(n);
 import {
   uid,
   fmtMoney,
@@ -31,7 +42,6 @@ import {
   isDiamondOnlyOrder,
 } from "./db";
 
-const r0 = (n: number) => Math.round(n);
 
 /** Format a Locker/LockerTransaction amount in its own currency (undefined = INR). */
 export function fmtLockerAmount(n: number, currency?: "INR" | "USD"): string {
@@ -92,9 +102,6 @@ export function fmtMoneyInr(n: number): string {
 
 // ── Purchases / Suppliers ──────────────────────────────────────────────────
 
-export function purchasePaid(p: Purchase): number {
-  return (p.payments || []).reduce((s, x) => s + x.amountInr, 0);
-}
 
 export function purchasePending(p: Purchase): number {
   return Math.max(0, p.totalInr - purchasePaid(p));
@@ -151,56 +158,6 @@ export function groupPaymentsAsMade<T extends { id: string; lockerId?: string; c
   return [...byKey.values()];
 }
 
-export function supplierAccount(
-  purchases: Purchase[],
-  receipts: SupplierReceipt[] = [],
-  opening?: OpeningBalanceInfo,
-  /** Payments that settle no particular bill — advances and loans. */
-  standalonePayments: SupplierPayment[] = [],
-) {
-  let totalPurchased = 0,
-    totalPaid = 0,
-    balanceOwed = 0,
-    overpaid = 0;
-  for (const p of purchases) {
-    totalPurchased += p.totalInr;
-    const paid = purchasePaid(p);
-    totalPaid += paid;
-    balanceOwed += Math.max(0, p.totalInr - paid);
-    overpaid += Math.max(0, paid - p.totalInr);
-  }
-  // Opening balance from migration: credit = we owe them (like an old unpaid
-  // bill), debit = they owe us (offsets, same side as a refund received).
-  const oCredit = openingCreditAmt(opening), oDebit = openingDebitAmt(opening);
-  totalPurchased += oCredit;
-  balanceOwed += oCredit;
-  // Cash the supplier handed BACK to us. It is money moving the other way, so
-  // it raises the net exactly as a payment out lowers it: pay an advance of
-  // ₹2,00,000 and get all of it back and the account returns to zero.
-  //
-  // This used to be subtracted, and folded the opening debit in with it. The
-  // two run in opposite directions — an opening debit is money the supplier
-  // owes us, cash received is money they have handed over — so a returned
-  // ₹2,00,000 was counted as a second ₹2,00,000 paid out, leaving an account
-  // that should have been square reading −₹4,00,000.
-  const received = receipts.reduce((s, r) => s + r.amountInr, 0);
-  // An advance or loan settles no bill, so it cannot reduce any one purchase's
-  // balance — it reduces the net position. Pay a supplier you owe nothing and
-  // the net goes negative: they are now holding your money.
-  const advanced = standalonePayments.reduce((s, p) => s + p.amountInr, 0);
-  totalPaid += advanced;
-  // Net position: > 0 we still owe them; < 0 they hold money of ours.
-  //
-  // Overpaying a bill leaves money with the supplier just as an advance does,
-  // so it belongs in the net for the same reason. It was left out, which made
-  // an overpayment invisible: pay ₹5,00,000 against ₹4,00,000 of bills and the
-  // account still read square.
-  const net = Math.round((balanceOwed - overpaid - oDebit + received - advanced) * 100) / 100;
-  return {
-    totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed),
-    overpaid: r0(overpaid), received: r0(received), advanced: r0(advanced), net: r0(net),
-  };
-}
 
 /**
  * Secondary convenience for "paid the supplier a lump sum, unspecified which
@@ -234,44 +191,9 @@ export function allocateSupplierPaymentFIFO(
 
 // ── Material Issuances / Factories ─────────────────────────────────────────
 
-export function issuancePaid(i: MaterialIssuance): number {
-  return (i.makingCharges.payments || []).reduce((s, x) => s + x.amountInr, 0);
-}
 
-export function issuancePending(i: MaterialIssuance): number {
-  return Math.max(0, i.makingCharges.amountInr - issuancePaid(i));
-}
 
-export function issuanceUsed(i: MaterialIssuance): number {
-  return (i.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
-}
 
-/**
- * A diamond issue's carats, as every factory figure counts them — the Factory
- * Account card, the factory's card on the list, and the Factory Ledger all use
- * this, so they can never quote two different "diamond at the factory" numbers.
- *
- *   out — carats that reached the factory. A draw from the factory's own pool
- *         adds nothing: those stones were counted when the pool was delivered.
- *   in  — carats the factory has accounted for. Once the issue is closed, all
- *         of it (set in the piece, returned to stock, or written off at Final
- *         Approval). Before that, what is set in a received piece plus what has
- *         come back. For a pool draw, only what was set in the piece (as the
- *         account always counted it) — the rest is still in the factory's pool.
- */
-export function diamondFlow(i: MaterialIssuance): { out: number; in: number } {
-  const pool = i.source === "factoryPool";
-  const out = pool ? 0 : i.quantityIssued;
-  const used = issuanceUsed(i);
-  const returned = i.diamondKind === "certified"
-    ? (i.finishDisposition === "returned" ? i.quantityIssued : 0)
-    : (i.finishReturnedCt || 0);
-  let accounted: number;
-  if (pool) accounted = i.finishDisposition === "returned" ? 0 : used;
-  else accounted = i.status === "closed" ? i.quantityIssued : Math.min(i.quantityIssued, used + returned);
-  const r3 = (n: number) => Math.round(n * 1000) / 1000;
-  return { out: r3(out), in: r3(Math.max(0, accounted)) };
-}
 
 /** Only meaningful once `status === "closed"` — material not yet accounted for is still "in progress" until then. */
 export function issuanceWastage(i: MaterialIssuance): number {
@@ -312,31 +234,6 @@ export function factoryPoolBalance(
   return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
 }
 
-/**
- * The factory's gold expressed in PURE / fine (24KT) grams — the client's
- * "factory gold stock". Gold ARRIVES as fine gold (each issuance's grams ×
- * its karat purity, for every gold issuance EXCEPT internal factoryPool draws,
- * which are just moving already-counted gold around within the factory) and
- * LEAVES as the pure-gold equivalent of each finished piece's net weight once
- * it's received back (finishedNetWeight × its karat). Balance = fine gold still
- * physically in the factory's hands. Derived, never stored (same trust level as
- * factoryPoolBalance above).
- */
-export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0): number {
-  let inFine = 0, outFine = 0;
-  for (const i of issuances) {
-    if (i.factoryId !== factoryId || i.material !== "gold") continue;
-    if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
-    if (i.finishedNetWeight != null) {
-      // Prefer the actual purity entered at Final Approval; fall back to karat.
-      outFine += i.finishedPurity != null
-        ? pureFromPurity(i.finishedNetWeight, i.finishedPurity)
-        : i.finishedKarat ? toPureGold(i.finishedNetWeight, i.finishedKarat) : 0;
-    }
-  }
-  // Fine gold physically at the factory at migration adds straight onto the balance.
-  return Math.round((inFine - outFine + (openingFineGold || 0)) * 1000) / 1000;
-}
 
 /**
  * The structured labour value (factory payable) from an issuance's labour
@@ -415,71 +312,6 @@ export function estimatedPureGoldNeeded(
   return Math.round(weight * karatRatio(order.productKarats) * 100) / 100;
 }
 
-/** Factory account summary across all their material issuances. Gold and
- *  diamond are tracked separately since their quantities are different units
- *  (grams vs carats) — making charges are combined (always INR). A
- *  source:"factoryPool" draw is NOT a new physical delivery (the material was
- *  already counted when it was bulk-delivered) — only its actual consumption
- *  (finishedPieces) counts toward goldUsed/diamondUsed, or goldOutstanding
- *  would double-count the moment any order draws from a factory's pool. */
-export function factoryAccount(
-  issuances: MaterialIssuance[],
-  opening?: OpeningBalanceInfo,
-  /** Payments that settle no particular job — advances and loans. */
-  standalonePayments: FactoryPayment[] = [],
-) {
-  let goldIssued = 0,
-    goldUsed = 0,
-    diamondIssued = 0,
-    diamondUsed = 0,
-    chargesTotal = 0,
-    chargesPaid = 0,
-    chargesPending = 0,
-    chargesOverpaid = 0;
-  for (const i of issuances) {
-    const isPoolDraw = i.source === "factoryPool";
-    if (i.material === "gold") { if (!isPoolDraw) goldIssued += i.quantityIssued; goldUsed += issuanceUsed(i); }
-    else { const f = diamondFlow(i); diamondIssued += f.out; diamondUsed += f.in; }
-    chargesTotal += i.makingCharges.amountInr;
-    const paid = issuancePaid(i);
-    chargesPaid += paid;
-    chargesPending += issuancePending(i);
-    chargesOverpaid += Math.max(0, paid - i.makingCharges.amountInr);
-  }
-  // Opening making-charge balance from migration: credit = we owe the factory
-  // (adds to what's due), debit = the factory owes us (offsets the pending, any
-  // remainder shows as overpaid/credit in our favour).
-  const oCredit = openingCreditAmt(opening), oDebit = openingDebitAmt(opening);
-  chargesTotal += oCredit;
-  chargesPending += oCredit;
-  if (oDebit) {
-    const applied = Math.min(oDebit, chargesPending);
-    chargesPending -= applied;
-    chargesOverpaid += oDebit - applied;
-  }
-  // An advance settles no one job, so it comes off what is still due; pay more
-  // than is due and the rest stands as money the factory is holding for us.
-  const advanced = standalonePayments.reduce((s, p) => s + p.amountInr, 0);
-  if (advanced) {
-    chargesPaid += advanced;
-    const applied = Math.min(advanced, chargesPending);
-    chargesPending -= applied;
-    chargesOverpaid += advanced - applied;
-  }
-  return {
-    goldIssued,
-    goldUsed,
-    goldOutstanding: goldIssued - goldUsed,
-    diamondIssued: Math.round(diamondIssued * 1000) / 1000,
-    /** Carats accounted for — set in pieces, returned, or settled at Final Approval. */
-    diamondUsed: Math.round(diamondUsed * 1000) / 1000,
-    diamondOutstanding: Math.round((diamondIssued - diamondUsed) * 1000) / 1000,
-    chargesTotal: r0(chargesTotal),
-    chargesPaid: r0(chargesPaid),
-    chargesPending: r0(chargesPending),
-    chargesOverpaid: r0(chargesOverpaid),
-  };
-}
 
 export function allocateFactoryChargePaymentFIFO(
   issuances: MaterialIssuance[],
@@ -670,16 +502,6 @@ export function materialLedger(
 
 // ── Lockers (bank/cash accounts) ───────────────────────────────────────────
 
-/** Running balance for one Locker — opening balance + income − expenses, netted with transfers. */
-export function lockerBalance(locker: Locker, transactions: LockerTransaction[]): number {
-  let bal = locker.openingBalance || 0;
-  for (const t of transactions) {
-    if (t.lockerId !== locker.id) continue;
-    if (t.type === "income" || t.type === "transfer_in") bal += t.amountInr;
-    else bal -= t.amountInr; // "expense" | "transfer_out"
-  }
-  return r0(bal);
-}
 
 /**
  * Record a payment OUT of a Locker for a Purchase/MaterialIssuance settlement,

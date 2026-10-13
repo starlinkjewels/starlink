@@ -9,6 +9,12 @@ import { executeTool } from "./tools/execute";
 
 export { sendNotificationPush } from "./notifications";
 
+// Totals kept on the server (see summaries.ts). The DEMO database's set only,
+// until its figures are proven to match the app's; production's set follows.
+// Deployed by name: firebase deploy --only functions:sumDemo
+import { makeSummaries } from "./summaries";
+export const sumDemo = makeSummaries("ssdiamdemo");
+
 const SARVAM_API_KEY = defineSecret("SARVAM_API_KEY");
 
 const MAX_MESSAGE_CHARS = 2000;

@@ -1,12 +1,13 @@
 {
   "name": "functions",
-  "description": "Starlink Jewels — Cloud Functions (Starlink AI backend)",
+  "description": "Starlink Jewels \u00e2\u20ac\u201d Cloud Functions (Starlink AI backend)",
   "scripts": {
     "build": "tsc",
     "build:watch": "tsc --watch",
     "serve": "npm run build && firebase emulators:start --only functions,firestore",
     "shell": "npm run build && firebase functions:shell",
-    "deploy": "npm run build && firebase deploy --only functions"
+    "deploy": "npm run build && firebase deploy --only functions",
+    "prebuild": "node scripts/sync-shared.cjs"
   },
   "engines": {
     "node": "20"
