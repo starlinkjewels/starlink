@@ -546,26 +546,28 @@ export function ClientsPage() {
               </div>
 
               {user!.role !== "client" && (
-                <div className="flex gap-2 mt-2">
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1">
+                // Fits a 360px phone: the label button may shrink, the icons are a
+                // touch smaller there. It did not, and pushed the card off-screen.
+                <div className="flex gap-1.5 sm:gap-2 mt-2">
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1 min-w-0 px-2">
                     {c.status === "active" ? "Deactivate" : "Activate"}
                   </AsyncButton>}
                   {can("clients", "edit") && <AsyncButton
                     size="sm" variant="outline" onClick={() => togglePhotoAccess(c)}
-                    className={`rounded-lg w-9 px-0 ${c.productPhotoAccess
+                    className={`rounded-lg w-8 sm:w-9 shrink-0 px-0 ${c.productPhotoAccess
                       ? "text-success border-success/40 bg-success/5 hover:text-success hover:bg-success/10"
                       : "text-destructive border-destructive/40 bg-destructive/5 hover:text-destructive hover:bg-destructive/10"}`}
                     title={c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant"}
                   >
                     <Camera className="h-3.5 w-3.5" />
                   </AsyncButton>}
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-9 px-0" title="Edit client details">
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title="Edit client details">
                     <Pencil className="h-3.5 w-3.5" />
                   </AsyncButton>}
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-9 px-0" title="Send password reset email">
+                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title="Send password reset email">
                     <KeyRound className="h-3.5 w-3.5" />
                   </AsyncButton>}
-                  {can("clients", "delete") && <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
+                  {can("clients", "delete") && <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
                     <Trash2 className="h-3.5 w-3.5" />
                   </AsyncButton>}
                 </div>
