@@ -1,4 +1,4 @@
-// GENERATED from src/lib/pure/basics.ts by functions/scripts/sync-shared.cjs — do not edit here.
+// GENERATED from src/lib/pure/basics.ts by functions/scripts/sync-shared.cjs - do not edit here.
 /**
  * Pure helpers — no Firebase, no app state, nothing but arithmetic — shared by
  * the app and the server (functions/), so both work a figure out the same way.

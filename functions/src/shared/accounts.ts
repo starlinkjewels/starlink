@@ -1,4 +1,4 @@
-// GENERATED from src/lib/pure/accounts.ts by functions/scripts/sync-shared.cjs — do not edit here.
+// GENERATED from src/lib/pure/accounts.ts by functions/scripts/sync-shared.cjs - do not edit here.
 /**
  * Account calculations — factory, supplier, locker — as pure functions: records
  * in, figures out, nothing else. The app (through lib/manufacturing.ts) and the

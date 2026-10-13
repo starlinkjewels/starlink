@@ -12,7 +12,9 @@ const from = path.join(__dirname, "..", "..", "src", "lib", "pure");
 const to = path.join(__dirname, "..", "src", "shared");
 for (const f of fs.readdirSync(from).filter(n => n.endsWith(".ts"))) {
   const src = fs.readFileSync(path.join(from, f), "utf8").replace(/from "\.\.\/db"/g, 'from "./types"');
-  const head = "// GENERATED from src/lib/pure/" + f + " by functions/scripts/sync-shared.cjs — do not edit here.\n";
+  // Keep the source's line endings, or git sees a change on every build.
+  const nl = src.includes("\r\n") ? "\r\n" : "\n";
+  const head = "// GENERATED from src/lib/pure/" + f + " by functions/scripts/sync-shared.cjs - do not edit here." + nl;
   fs.writeFileSync(path.join(to, f), head + src);
   console.log("shared:", f);
 }
