@@ -654,6 +654,7 @@ function FactoryHistoryPageBody() {
       { header: "Order", w: 30 },
       { header: "Date", w: 22 },
       { header: "Item", w: 40 },
+      { header: "Net wt / Design", w: 26, right: true },
       ...(hasGold ? [
         { header: "Gold given", w: 20, right: true },
         { header: "In piece", w: 20, right: true },
@@ -697,6 +698,7 @@ function FactoryHistoryPageBody() {
       align,
       rows: rows.map(r => [
         r.orderNo, fmtDate(r.date), fit([r.jewellery, r.metalNote].filter(Boolean).join(" · "), 40 * scale),
+        fit([r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "", r.designNo ? `#${r.designNo}` : ""].filter(Boolean).join(" · "), 26 * scale),
         ...(hasGold ? [(r.goldEstimated ? "~" : "") + (q3(r.goldOut) || ""), q3(r.goldIn) || "", q3(r.goldOut - r.goldIn) || "0"] : []),
         ...(hasDia ? [r.diaOut ? (r.diaEstimated ? "~" : "") + r.diaOut.toFixed(2) : "", r.diaIn ? r.diaIn.toFixed(2) : "", (r.diaOut - r.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [q3(r.silverIn) || ""] : []),
@@ -707,6 +709,7 @@ function FactoryHistoryPageBody() {
       ].map(String)),
       totalsRow: [
         "", "", "Totals",
+        (() => { const t = rows.reduce((s, r) => s + (r.netEstimated ? 0 : r.netWeight), 0); return t ? t.toFixed(3) : ""; })(),
         ...(hasGold ? [String(q3(T.goldOut)), String(q3(T.goldIn)), String(q3(T.goldOut - T.goldIn))] : []),
         ...(hasDia ? [T.diaOut.toFixed(2), T.diaIn.toFixed(2), (T.diaOut - T.diaIn).toFixed(2)] : []),
         ...(hasSilver ? [String(q3(rows.reduce((s, r) => s + r.silverIn, 0)))] : []),
@@ -721,11 +724,12 @@ function FactoryHistoryPageBody() {
     const rows = orderRowsFor(from, to, orderNo);
     downloadCsv(
       `Factory-${factory.name.replace(/\s+/g, "_")}${ordSuffix(orderNo)}-Orders`,
-      ["Order", "Date", "Item", "Gold given by us (g fine)", "Gold in the piece (g fine)", "Gold balance (g fine)",
+      ["Order", "Date", "Item", "Net weight (g)", "Design number", "Gold given by us (g fine)", "Gold in the piece (g fine)", "Gold balance (g fine)",
        "Diamond issued (ct)", "Diamond accounted (ct)", "Diamond open (ct)", "Silver (g)", "Other metal (g)",
        "Labour billed (INR)", "Labour paid (INR)", "Labour pending (INR)", "Quoted (USD)", "Estimated?", "Status"],
       rows.map(r => [
         r.orderNo, fmtDate(r.date), r.jewellery,
+        r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "", r.designNo ?? "",
         q3(r.goldOut), q3(r.goldIn), q3(r.goldOut - r.goldIn),
         q3(r.diaOut), q3(r.diaIn), q3(r.diaOut - r.diaIn),
         q3(r.silverIn), q3(r.otherIn),

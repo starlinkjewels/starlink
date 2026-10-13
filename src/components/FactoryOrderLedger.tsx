@@ -41,6 +41,12 @@ export interface FactoryOrderRow {
   orderStatus: string;
   /** "14K White Gold" — what the piece is made of, for the Item column. */
   metalNote?: string;
+  /** The finished piece's net weight in grams, as recorded at Final Approval;
+   *  before that, the order's estimate (netEstimated). 0 = none. */
+  netWeight: number;
+  netEstimated?: boolean;
+  /** The order's design number, shown under the net weight. */
+  designNo?: string;
   /** True when the gold figure is the ESTIMATE taken at order creation rather
    *  than a weight actually issued. An order still in production has no real
    *  weight yet, and showing nothing left the ledger looking broken. */
@@ -91,6 +97,7 @@ export function buildFactoryOrderRows(
         factoryBillNo: order?.factoryBillNo || undefined,
         quotedUsd: 0, entries: [],
         metalNote: undefined,
+        netWeight: 0,
         receivedDate: undefined,
       };
       byOrder.set(key, row);
@@ -183,6 +190,13 @@ export function buildFactoryOrderRows(
     if (!order) continue;
     row.quotedUsd = order.estimatedMakingCharges || 0;
     row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
+    row.designNo = order.designNumber?.trim() || undefined;
+    // The piece's net weight: the real one once Final Approval has recorded it,
+    // the order's estimate before (marked, and kept out of the total).
+    if (/gold|platinum|silver/i.test(order.metal)) {
+      if (order.actualNetWeight) row.netWeight = order.actualNetWeight;
+      else if (order.estimatedNetWeight) { row.netWeight = order.estimatedNetWeight; row.netEstimated = true; }
+    }
 
     // Gold figures the ISSUANCES do not have. The Factory Account card is
     // computed from issuances alone, so anything read off the order is marked
@@ -380,6 +394,7 @@ export function FactoryOrderLedger({
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Factory bill</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Date</th>
               <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Item</th>
+              <th className="px-2 py-2 text-right font-semibold whitespace-nowrap" rowSpan={2}>Net wt (g)</th>
               {hasGold && <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Gold (g fine)</th>}
               {hasDia && <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Diamond (ct)</th>}
               {hasSilver && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Silver g</th>}
@@ -398,7 +413,7 @@ export function FactoryOrderLedger({
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={15} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={16} className="px-5 py-10 text-center text-muted-foreground">
                 {active ? "No order matches that." : "Nothing issued to this factory yet."}
               </td></tr>
             ) : w.visible.map(r => {
@@ -408,7 +423,7 @@ export function FactoryOrderLedger({
               const pending = r.labour - r.paid;
               const key = r.orderId || r.orderNo;
               const isOpen = open.has(key);
-              const cols = 4 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
+              const cols = 5 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
               return (
                 <>
                 <tr key={key} onClick={() => toggle(key)} className="border-t border-border/40 hover:bg-secondary/30 cursor-pointer">
@@ -436,6 +451,12 @@ export function FactoryOrderLedger({
                   <td className="px-2 py-2 min-w-[150px]">
                     {r.jewellery || "—"}
                     {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
+                  </td>
+                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                    <span className={r.netEstimated ? "italic text-muted-foreground" : "font-medium"} title={r.netEstimated ? "Estimate — not yet finally approved" : undefined}>
+                      {r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "—"}
+                    </span>
+                    {r.designNo && <span className="block text-[10px] text-muted-foreground">#{r.designNo}</span>}
                   </td>
                   {hasGold && (<>
                     <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
@@ -493,6 +514,9 @@ export function FactoryOrderLedger({
             <tfoot>
               <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
                 <td className="px-3 py-2" colSpan={4}>Totals{active ? " (filtered)" : ""}{w.hasMore ? ` — all ${filtered.length} orders` : ""}</td>
+                <td className="px-2 py-2 text-right whitespace-nowrap" title="Net weight of finally approved pieces; estimates are not counted">
+                  {(() => { const t = filtered.reduce((s, r) => s + (r.netEstimated ? 0 : r.netWeight), 0); return t ? t.toFixed(3) : "—"; })()}
+                </td>
                 {hasGold && (<>
                   <td className={`${num} border-l border-border/60`}>{g3(T.goldOut)}</td>
                   <td className={num}>{g3(T.goldIn)}</td>
