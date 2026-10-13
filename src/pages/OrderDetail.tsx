@@ -10,7 +10,7 @@ import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
-import {
+import { collectionLoaded,
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
@@ -161,7 +161,28 @@ async function compressImage(file: File): Promise<string> {
   });
 }
 
+/**
+ * The page waits for its record before drawing anything that holds state. The
+ * data behind the first screen arrives a moment after the page opens, and a
+ * page that returned early on its first draw and then ran all its hooks on the
+ * next crashed (React #310) whenever it was opened or refreshed directly.
+ */
 export function OrderDetailPage() {
+  const { id } = useParams();
+  const db = useDb();
+  if (!(db.orders.some(o => o.id === id))) {
+    return (
+      <div className="text-center py-20 text-muted-foreground">
+        {collectionLoaded("orders") ? "Order not found." : "Loading…"}{" "}
+        <Link to="/orders" className="text-primary underline">Back</Link>
+      </div>
+    );
+  }
+  // Keyed by the record, so moving straight to another one starts it afresh.
+  return <OrderDetailPageBody key={id} />;
+}
+
+function OrderDetailPageBody() {
   const { id } = useParams();
   const { user } = useAuth();
   const can = useCan();

@@ -1,7 +1,7 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -87,7 +87,28 @@ function purchaseLineTotalInr(line: PurchaseLine): number {
     : Math.round(computed);
 }
 
+/**
+ * The page waits for its record before drawing anything that holds state. The
+ * data behind the first screen arrives a moment after the page opens, and a
+ * page that returned early on its first draw and then ran all its hooks on the
+ * next crashed (React #310) whenever it was opened or refreshed directly.
+ */
 export function SupplierHistoryPage() {
+  const { id } = useParams();
+  const db = useDb();
+  if (!(db.suppliers.some(s => s.id === id))) {
+    return (
+      <div className="text-center py-20 text-muted-foreground">
+        {collectionLoaded("suppliers") ? "Supplier not found." : "Loading…"}{" "}
+        <Link to="/suppliers" className="text-primary underline">Back</Link>
+      </div>
+    );
+  }
+  // Keyed by the record, so moving straight to another one starts it afresh.
+  return <SupplierHistoryPageBody key={id} />;
+}
+
+function SupplierHistoryPageBody() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
