@@ -9,11 +9,13 @@ import { executeTool } from "./tools/execute";
 
 export { sendNotificationPush } from "./notifications";
 
-// Totals kept on the server (see summaries.ts). The DEMO database's set only,
-// until its figures are proven to match the app's; production's set follows.
-// Deployed by name: firebase deploy --only functions:sumDemo
+// Totals kept on the server (see summaries.ts), one set per database, each
+// deployed by its own name so one is never redeployed with the other:
+//   firebase deploy --only functions:sumDemo   (demo database)
+//   firebase deploy --only functions:sumProd   (production database)
 import { makeSummaries } from "./summaries";
 export const sumDemo = makeSummaries("ssdiamdemo");
+export const sumProd = makeSummaries("diamondflow");
 
 const SARVAM_API_KEY = defineSecret("SARVAM_API_KEY");
 
