@@ -191,6 +191,10 @@
         {
           "fieldPath": "type",
           "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "amountInr",
+          "order": "ASCENDING"
         }
       ]
     }
