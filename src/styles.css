@@ -581,6 +581,12 @@
 @utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); }
 @utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11rem, 100%), 1fr)); }
 
+/* A card in a grid never grows past its column. One row of buttons that could
+   not shrink made a client's card wider than a 360px phone, and the whole page
+   with it — so every card sat off to the right. The card's own content now
+   wraps or truncates inside it instead. */
+.app-page .grid > .card-luxe { min-width: 0; }
+
 /* The page frame (AppLayout). "Fit screen" by default; Settings → Appearance
    → Page width can centre it at a comfortable reading width instead. */
 .app-page { width: 100%; max-width: var(--page-max, none); margin-inline: auto; }
