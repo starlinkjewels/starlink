@@ -84,6 +84,9 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
   else if (o.materialSourcing === "readyStock") plan.blocked = "This was sold from Ready Stock — nothing was made for it.";
   else if (o.readyStockCreatedId) plan.blocked = "This piece is already in Ready Stock. Take it out of Ready Stock first.";
   else if (!fin && !(o.actualNetWeight || o.actualGrossWeight)) plan.blocked = "Record the factory's actual details (Final Approval) first — the melt gives back what the piece really holds.";
+  // Without the finished piece in the factory's books, its gold still counts as
+  // at the factory — handing the melted gold back would count it twice.
+  else if (!fin) plan.blocked = "The factory's books don't show this piece as received back. Open Final Approval, make sure the factory is set, and save it — then melt.";
   else if (inv) plan.blocked = `This order is on invoice ${inv.number}. Take it off the invoice first.`;
   else if (net <= 0 && !stones.length && !packetIds.length) plan.blocked = "The piece has no gold or diamonds recorded.";
   if (!plan.blocked && ["Dispatched", "Delivered"].includes(o.status)) plan.warning = "This piece was sent out — make sure it has come back before melting it.";
