@@ -74,7 +74,7 @@ export function AssignOrderField({ order }: { order: Order }) {
       <p className="text-xs text-muted-foreground">Assigned to</p>
       <Select value={order.assignedEmployeeId && current ? order.assignedEmployeeId : NOBODY} onValueChange={change}>
         <SelectTrigger className="mt-1 h-9 rounded-lg text-sm w-full max-w-xs" aria-label="Assigned to">
-          <UserCog className="h-3.5 w-3.5 mr-1.5 text-primary shrink-0" /><SelectValue />
+          <span className="flex items-center gap-1.5 min-w-0 truncate"><UserCog className="h-3.5 w-3.5 text-primary shrink-0" /><SelectValue /></span>
         </SelectTrigger>
         <SelectContent><StaffOptions db={db} /></SelectContent>
       </Select>
