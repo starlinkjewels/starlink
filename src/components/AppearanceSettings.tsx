@@ -4,10 +4,32 @@ import { toast } from "sonner";
 import { loadDb, updateDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  UI_LOOKS, UI_ACCENTS, DEFAULT_APPEARANCE, appearanceOf, applyAppearance, isDefaultAppearance,
-  type AppearanceUi, type UiLook,
+  UI_LOOKS, UI_ACCENTS, DEFAULT_APPEARANCE, TEXT_FONTS, HEADING_SERIFS, appearanceOf, applyAppearance, isDefaultAppearance, loadFontPreviews,
+  type AppearanceUi, type UiLook, type UiFont, type UiHeadingFont, type UiFontDef,
 } from "@/lib/appearance";
+
+/** A font in the list, drawn in itself, with what it is like. */
+function FontItem({ f }: { f: UiFontDef }) {
+  return (
+    <SelectItem value={f.key} className="py-2">
+      <span className="flex flex-col">
+        <span className="text-[15px] font-semibold leading-tight" style={{ fontFamily: f.stack }}>{f.name}</span>
+        <span className="text-[10px] text-muted-foreground font-normal" style={{ fontFamily: "var(--font-sans)" }}>{f.hint}</span>
+      </span>
+    </SelectItem>
+  );
+}
+
+/** The chosen font's name, drawn in it, on the closed picker. */
+function FontTrigger({ label, f }: { label: string; f?: UiFontDef }) {
+  return (
+    <SelectTrigger className="h-11 w-full sm:w-64 rounded-xl" aria-label={label}>
+      <SelectValue>{f ? <span className="font-semibold" style={{ fontFamily: f.stack }}>{f.name}</span> : null}</SelectValue>
+    </SelectTrigger>
+  );
+}
 
 /** A drawn miniature of each look — so it shows before it is applied. */
 function Thumb({ k }: { k: UiLook }) {
@@ -116,8 +138,40 @@ export function AppearanceSettings() {
           </div>)}
         {row("Corners", "How round cards, buttons and boxes are",
           <Segmented value={ui.corners} onChange={v => set("corners", v)} options={[["sharp", "Sharp"], ["default", "Normal"], ["round", "Round"]]} />)}
-        {row("Headings", "Elegant serif, or a clean modern sans",
-          <Segmented value={ui.headings} onChange={v => set("headings", v)} options={[["serif", "Elegant"], ["sans", "Modern"]]} />)}
+        {row("Text font", "Everything you read — lists, forms, tables and buttons",
+          <Select value={ui.font} onValueChange={v => set("font", v as UiFont)} onOpenChange={o => o && loadFontPreviews()}>
+            <FontTrigger label="Text font" f={TEXT_FONTS.find(f => f.key === ui.font)} />
+            <SelectContent className="max-h-[22rem]">
+              {TEXT_FONTS.map(f => <FontItem key={f.key} f={f} />)}
+            </SelectContent>
+          </Select>)}
+        {row("Heading font", "Page titles, card titles and the big figures",
+          <Select value={ui.headingFont}
+            onValueChange={v => setUi(prev => ({ ...prev, headingFont: v as UiHeadingFont, headings: HEADING_SERIFS.some(f => f.key === v) ? "serif" : "sans" }))}
+            onOpenChange={o => o && loadFontPreviews()}>
+            <FontTrigger label="Heading font"
+              f={ui.headingFont === "same"
+                ? { key: "same", name: "Same as text", spec: null, stack: TEXT_FONTS.find(f => f.key === ui.font)?.stack ?? "inherit", hint: "" }
+                : [...HEADING_SERIFS, ...TEXT_FONTS].find(f => f.key === ui.headingFont)} />
+            <SelectContent className="max-h-[22rem]">
+              <SelectItem value="same" className="py-2">
+                <span className="flex flex-col">
+                  <span className="text-[15px] font-semibold leading-tight">Same as text</span>
+                  <span className="text-[10px] text-muted-foreground font-normal">One font everywhere — clean and modern</span>
+                </span>
+              </SelectItem>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Serif — elegant</SelectLabel>
+                {HEADING_SERIFS.map(f => <FontItem key={f.key} f={f} />)}
+              </SelectGroup>
+              <SelectSeparator />
+              <SelectGroup>
+                <SelectLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Sans — modern</SelectLabel>
+                {TEXT_FONTS.filter(f => f.key !== "system").map(f => <FontItem key={f.key} f={f} />)}
+              </SelectGroup>
+            </SelectContent>
+          </Select>)}
         {row("Page width", "Fit screen uses all of a big monitor; Centred keeps pages at a reading width",
           <Segmented value={ui.width} onChange={v => set("width", v)} options={[["fit", "Fit screen"], ["centered", "Centred"]]} />)}
         {row("Animation", "Calm makes everything appear in place — kinder on slow phones",

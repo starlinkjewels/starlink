@@ -1,7 +1,7 @@
 import {
   stampFor, uid, isDiamondOnlyOrder, isProductionStep, statusFromTimeline,
-  orderTotal, balanceDue, cashbackPercentFor, issueGiftCard, fmtMoney,
-  type DB, type Order,
+  orderTotal, balanceDue, cashbackPercentFor, issueGiftCard, fmtMoney, worksOnOrder,
+  type DB, type Order, type Worker,
 } from "@/lib/db";
 
 /**
@@ -65,14 +65,14 @@ export function dispatchBlocker(o: Order): string | null {
  * Whether this person may dispatch this order at all.
  *
  * The same rule the single-order screen enforces: an admin may move any order,
- * an employee only the ones assigned to them or belonging to a client they
- * manage. Dispatching several at once must not become a way around it.
+ * an employee the ones within their work (worksOnOrder — every order, when
+ * their role reaches all). Dispatching several at once must not become a way
+ * around it.
  */
-export function dispatchPermission(db: DB, user: { id: string; role: string }, o: Order): string | null {
+export function dispatchPermission(db: DB, user: Worker, o: Order): string | null {
   if (user.role === "admin") return null;
   if (user.role !== "employee") return "You cannot dispatch orders.";
-  const client = db.clients.find(c => c.id === o.clientId);
-  if (o.assignedEmployeeId === user.id || client?.accountManagerId === user.id) return null;
+  if (worksOnOrder(db, user, o)) return null;
   return "Not assigned to you — ask the admin or the account manager.";
 }
 
@@ -93,7 +93,7 @@ export interface DispatchPlan {
 }
 
 /** Sort the selection into what will happen to each piece, before anything does. */
-export function planDispatch(orders: Order[], db: DB, user: { id: string; role: string }): DispatchPlan {
+export function planDispatch(orders: Order[], db: DB, user: Worker): DispatchPlan {
   const plan: DispatchPlan = { go: [], update: [], skip: [], unpaid: [] };
   for (const o of orders) {
     const reason = dispatchPermission(db, user, o) ?? dispatchBlocker(o);
@@ -117,7 +117,7 @@ export function applyDispatch(
   d: DB,
   orderId: string,
   det: DispatchDetails,
-  by: { id: string; role: string; department?: string },
+  by: Worker & { department?: string },
 ): "dispatched" | "updated" | "skipped" {
   const o = d.orders.find(x => x.id === orderId);
   if (!o) return "skipped";
@@ -217,7 +217,7 @@ export function deliveryBlocker(o: Order): string | null {
 }
 
 /** Sort the selection into what will happen to each piece, before anything does. */
-export function planDelivery(orders: Order[], db: DB, user: { id: string; role: string }): DispatchPlan {
+export function planDelivery(orders: Order[], db: DB, user: Worker): DispatchPlan {
   const plan: DispatchPlan = { go: [], update: [], skip: [], unpaid: [] };
   for (const o of orders) {
     const reason = dispatchPermission(db, user, o) ?? deliveryBlocker(o);
@@ -241,7 +241,7 @@ export function applyDelivery(
   d: DB,
   orderId: string,
   day: string,
-  by: { id: string; role: string; department?: string },
+  by: Worker & { department?: string },
 ): "delivered" | "updated" | "skipped" {
   const o = d.orders.find(x => x.id === orderId);
   if (!o) return "skipped";

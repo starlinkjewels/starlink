@@ -1,6 +1,6 @@
 import {
-  TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, statusFromTimeline, uid,
-  type DB, type Order, type Settings,
+  TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, statusFromTimeline, uid, worksOnOrder,
+  type DB, type Order, type Settings, type Worker,
 } from "./db";
 
 /**
@@ -181,12 +181,11 @@ export function planMove(o: Order, target: string): MovePlan {
 }
 
 /** Whether this person may move this order's stages — the same rule as the order screen. */
-export function stagePermission(db: DB, user: { id: string; role: string }, o: Order, mayEditOrders: boolean): string | null {
+export function stagePermission(db: DB, user: Worker, o: Order, mayEditOrders: boolean): string | null {
   if (user.role === "admin") return null;
   if (user.role !== "employee") return "Only staff move orders.";
   if (!mayEditOrders) return "Your role does not let you change orders.";
-  const client = db.clients.find(c => c.id === o.clientId);
-  if (o.assignedEmployeeId === user.id || client?.accountManagerId === user.id) return null;
+  if (worksOnOrder(db, user, o)) return null;
   return "Not assigned to you — ask the admin or the account manager.";
 }
 

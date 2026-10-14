@@ -12,6 +12,7 @@ import {
   mainDiamondShape, applyCreditToBills,
   findInvoiceForOrder,
 } from "@/lib/db";
+import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useSearchParams } from "react-router-dom";
@@ -219,7 +220,7 @@ export function InvoicesPage() {
   // Orders with advances — the Advance Payment Ledger below.
   let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
   if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
-  if (user!.role === "employee") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.assignedEmployeeId === user!.id);
+  if (user!.role === "employee" && reachOf(user, db.roles ?? []) !== "all") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.assignedEmployeeId === user!.id);
   let ordersWithAdvance = ordersWithAdvanceBase;
   if (isStaff && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
   const lq = ledgerQ.trim().toLowerCase();

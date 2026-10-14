@@ -4,7 +4,7 @@ import { MAIN_COMPANY_ID, companiesOf, companiesForUser, companyById, companyIdO
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, fmtMoney, clientAccount, isOnline, timeAgo, type Client } from "@/lib/db";
+import { loadDb, updateDb, fmtMoney, clientAccount, isOnline, timeAgo, currentUserClients, type Client } from "@/lib/db";
 import { AccountSummary } from "@/components/AccountSummary";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
@@ -195,10 +195,9 @@ export function ClientsPage() {
 
   const employees = db.users.filter(u => u.role === "employee");
 
-  // Employee: only their own assigned clients. Admin: everyone.
-  const scoped = user!.role === "employee"
-    ? db.clients.filter(c => c.accountManagerId === user!.id)
-    : db.clients;
+  // Employee: the clients within their work (their own, or all when their
+  // role reaches every client). Admin: everyone.
+  const scoped = user!.role === "employee" ? currentUserClients(db, user!) : db.clients;
 
   // Every client's account, worked out once — the rows, the sort and the grand
   // totals all read the same figures.

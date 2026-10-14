@@ -25,11 +25,28 @@ export const ACTION_LABEL: Record<PermAction, string> = {
 export type PermSet = Partial<Record<PermAction, boolean>>;
 export type PermMatrix = Partial<Record<ModuleKey, PermSet>>;
 
+/**
+ * Whose work a role reaches.
+ *  • own — the orders assigned to them, and every order of a client they are
+ *          the account manager of. What every employee saw before roles; right
+ *          for sales, who should see their own customers and no one else's.
+ *  • all — every order and every client: production, quality, accounts, a
+ *          manager — anyone whose job is the whole order book.
+ * The sections and actions (the matrix) still decide what they may DO there.
+ */
+export type RoleReach = "own" | "all";
+export const REACH_LABEL: Record<RoleReach, string> = {
+  own: "Their own orders & clients",
+  all: "Every order & client",
+};
+
 export interface StaffRole {
   id: string;
   name: string;
   description?: string;
   perms: PermMatrix;
+  /** Unset means "own" — exactly what every role reached before this existed. */
+  reach?: RoleReach;
   /** Shipped with the app and not editable — Standard staff. */
   builtIn?: boolean;
   createdAt: string;
@@ -90,13 +107,15 @@ export const STANDARD_STAFF: StaffRole = {
   builtIn: true,
   createdAt: "2026-10-11T00:00:00.000Z",
   perms: Object.fromEntries(ROLE_MODULES.map(m => [m.key, fullSet(m.key)])) as PermMatrix,
+  reach: "own",
 };
 
 /** Starting points for a new role. Edited freely once created. */
-export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMatrix }[] = [
+export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMatrix; reach: RoleReach }[] = [
   {
     name: "Sales",
-    description: "Clients, orders and the catalog; sees invoices and payments but does not touch money.",
+    description: "Their own clients and orders, and the catalog; sees invoices and payments but does not touch money.",
+    reach: "own",
     perms: {
       dashboard: { view: true }, catalog: fullSet("catalog"), productPhotos: fullSet("productPhotos"),
       orders: { view: true, add: true, edit: true, export: true }, clients: { view: true, add: true, edit: true, export: true },
@@ -107,6 +126,7 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
   {
     name: "Accounts",
     description: "Money in and out — payments, invoices, the locker, expenses; sees suppliers' and factories' books.",
+    reach: "all",
     perms: {
       dashboard: { view: true }, orders: { view: true, export: true }, clients: { view: true, export: true },
       invoices: fullSet("invoices"), payments: fullSet("payments"), passbook: fullSet("passbook"),
@@ -117,7 +137,8 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
   },
   {
     name: "Production",
-    description: "Making the pieces — orders, factories, stock, buying material; no money and no clients' books.",
+    description: "Making the pieces — every order, factories, stock, buying material; no money and no clients' books.",
+    reach: "all",
     perms: {
       dashboard: { view: true }, orders: { view: true, edit: true }, factories: { view: true },
       stock: { view: true }, buyAssign: fullSet("buyAssign"), suppliers: { view: true },
@@ -126,8 +147,15 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
     },
   },
   {
+    name: "Order updates",
+    description: "Moves every order along — stages, factory details, dispatch; adds nothing, sees no money.",
+    reach: "all",
+    perms: { dashboard: { view: true }, orders: { view: true, edit: true }, readyStock: { view: true }, catalog: { view: true }, productPhotos: { view: true, add: true, edit: true }, messages: fullSet("messages") },
+  },
+  {
     name: "View only",
-    description: "Can look at every section, change nothing and download nothing.",
+    description: "Can look at every order and section, change nothing and download nothing.",
+    reach: "all",
     perms: Object.fromEntries(ROLE_MODULES.map(m => [m.key, { view: true }])) as PermMatrix,
   },
 ];
@@ -141,6 +169,15 @@ export interface PermUser {
  *  one they held has since been deleted. */
 export function roleOf(user: PermUser, roles: StaffRole[]): StaffRole {
   return (user.roleId && roles.find(r => r.id === user.roleId)) || STANDARD_STAFF;
+}
+
+/** Whose work this person reaches — an admin everything; an employee as their
+ *  role says ("own" when it says nothing); a client only their own. */
+export function reachOf(user: PermUser | null | undefined, roles: StaffRole[]): RoleReach {
+  if (!user) return "own";
+  if (user.role === "admin") return "all";
+  if (user.role !== "employee") return "own";
+  return roleOf(user, roles).reach ?? "own";
 }
 
 /**

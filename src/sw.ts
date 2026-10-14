@@ -7,7 +7,7 @@
 /// <reference lib="webworker" />
 import { precacheAndRoute, createHandlerBoundToURL, cleanupOutdatedCaches } from "workbox-precaching";
 import { registerRoute, NavigationRoute } from "workbox-routing";
-import { CacheFirst } from "workbox-strategies";
+import { CacheFirst, StaleWhileRevalidate } from "workbox-strategies";
 import { ExpirationPlugin } from "workbox-expiration";
 import { CacheableResponsePlugin } from "workbox-cacheable-response";
 import { initializeApp } from "firebase/app";
@@ -40,6 +40,27 @@ registerRoute(
         maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
         purgeOnQuotaError: true,
       }),
+    ],
+  }),
+);
+
+// ── Google Fonts — the font chosen in Settings → Appearance, offline too:
+// the small stylesheet refreshed in the background, the font files (which
+// never change at a given address) kept for a year. ──
+registerRoute(
+  ({ url }) => url.origin === "https://fonts.googleapis.com",
+  new StaleWhileRevalidate({
+    cacheName: "sl-google-fonts-css",
+    plugins: [new ExpirationPlugin({ maxEntries: 20, purgeOnQuotaError: true })],
+  }),
+);
+registerRoute(
+  ({ url }) => url.origin === "https://fonts.gstatic.com",
+  new CacheFirst({
+    cacheName: "sl-google-fonts",
+    plugins: [
+      new CacheableResponsePlugin({ statuses: [0, 200] }),
+      new ExpirationPlugin({ maxEntries: 80, maxAgeSeconds: 60 * 60 * 24 * 365, purgeOnQuotaError: true }),
     ],
   }),
 );

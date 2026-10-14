@@ -1,7 +1,7 @@
 import { useCan } from "@/hooks/useCan";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid } from "@/lib/db";
+import { loadDb, updateDb, uid, worksOnClient } from "@/lib/db";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -16,7 +16,7 @@ export function MessagesPage() {
   useEffect(() => { const h = () => setDb(loadDb()); window.addEventListener("starlink-db-updated", h); return () => window.removeEventListener("starlink-db-updated", h); }, []);
 
   // Client: only Admin(s) + the employee assigned to their account (if any).
-  // Employee: only Admin(s) + the clients assigned to them.
+  // Employee: only Admin(s) + the clients within their work (all, when their role reaches every client).
   // Admin: everyone.
   const myClient = user!.role === "client" ? db.clients.find(c => c.id === user!.clientId) : undefined;
 
@@ -24,7 +24,7 @@ export function MessagesPage() {
     ? [...db.users.filter(u => u.id !== user!.id)]
     : user!.role === "client"
     ? db.users.filter(u => u.role === "admin" || (u.role === "employee" && u.id === myClient?.accountManagerId))
-    : db.users.filter(u => u.role === "admin" || (u.role === "client" && db.clients.find(c => c.id === u.clientId)?.accountManagerId === user!.id));
+    : db.users.filter(u => u.role === "admin" || (u.role === "client" && (() => { const c = db.clients.find(x => x.id === u.clientId); return !!c && worksOnClient(db, user!, c); })()));
 
   const [selected, setSelected] = useState<string | null>(contacts[0]?.id || null);
   const [text, setText] = useState("");

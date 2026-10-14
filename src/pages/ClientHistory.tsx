@@ -4,7 +4,7 @@ import { useCan } from "@/hooks/useCan";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
+import { collectionLoaded, worksOnClient, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -40,8 +40,8 @@ export function ClientHistoryPage() {
   const db = useDb();
   const { user } = useAuth();
   const client = db.clients.find(c => c.id === id);
-  // Employees may only open clients assigned to them — same rule as the page itself.
-  const forbidden = !!client && user?.role === "employee" && client.accountManagerId !== user.id;
+  // Employees may only open clients within their work — same rule as the page itself.
+  const forbidden = !!client && !!user && user.role === "employee" && !worksOnClient(db, user, client);
   if (!(!!client && !forbidden)) {
     return (
       <div className="text-center py-20 text-muted-foreground">
@@ -71,8 +71,9 @@ function ClientHistoryPageBody() {
   const statementCompany = client && hasCompanies(db.settings) && companyIdOfClient(client) !== MAIN_COMPANY_ID
 
     ? companyById(db.settings, companyIdOfClient(client)).name : undefined;
-  // Employees may only open clients assigned to them — not the whole client base.
-  const forbidden = client && user!.role === "employee" && client.accountManagerId !== user!.id;
+  // Employees may only open clients within their work — not the whole client
+  // base, unless their role reaches every client.
+  const forbidden = client && user!.role === "employee" && !worksOnClient(db, user!, client);
   if (!client || forbidden) {
     return (
       <div className="text-center py-20 text-muted-foreground">
