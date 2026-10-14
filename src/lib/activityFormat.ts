@@ -208,10 +208,15 @@ export function summarise(changes: LoggedChange[]): { summary: string; module: M
 export function undoBlocker(changes: LoggedChange[], truncated: boolean): string | undefined {
   if (truncated) return "Too large to keep a full copy, so it cannot be put back automatically.";
   if (changes.length > 60) return "Too many records changed at once to undo as a single step.";
+  // A melt put stones (and perhaps gold) back in stock, which an undo here
+  // cannot take out again.
+  if (changes.some(c => c.col === "orders" && c.after?.melted && !c.before?.melted)) {
+    return "A melt put metal and stones back in stock. It cannot be undone from here.";
+  }
   if (changes.some(c => c.col === "stockMovements")) {
     return "Stock levels moved with this. Reverse it with the record's own Remove or Cancel, which puts the stock back too.";
   }
-  if (changes.some(c => c.col === "users" && c.op === "add" && c.after?.authUid)) {
+  if (changes.some(c => c.col === "users" && c.after?.authUid && (c.op === "add" || !c.before?.authUid))) {
     return "A sign-in was created with this. Deactivate the person instead — a login cannot be removed from here.";
   }
   if (changes.some(c => (c.col === "orders" || c.col === "giftCards") && c.op === "add")) {

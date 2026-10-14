@@ -368,7 +368,7 @@ function FactoryHistoryPageBody() {
     try {
       // Only material that CAME from stock goes back to stock. A purchase bought
       // for this order never entered stock, so returning it must not inflate the pool.
-      if (issuance.source === "stock") {
+      if (issuance.source === "stock" || issuance.source === "melt") {
         await increaseStock({
           material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: qty,
           refType: "manual", createdBy: user!.id,
@@ -389,7 +389,7 @@ function FactoryHistoryPageBody() {
           });
         }
       });
-      toast.success(issuance.source === "stock" ? `${qty}${unit} returned to stock` : `${qty}${unit} returned (was bought for this order — not added to stock)`);
+      toast.success(issuance.source === "stock" || issuance.source === "melt" ? `${qty}${unit} returned to stock` : `${qty}${unit} returned (was bought for this order — not added to stock)`);
       setActiveIssuance({ id: "", action: null });
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to return material");
@@ -509,10 +509,11 @@ function FactoryHistoryPageBody() {
     }
     for (const mi of iss) {
       const order = db.orders.find(o => o.id === mi.orderId);
-      const ref = order?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
+      const melted = mi.source === "melt" ? db.orders.find(o => o.id === mi.meltOf) : undefined;
+      const ref = order?.orderNumber || melted?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
       // Gold given to the factory (fine 24KT, matching the "Fine Gold at Factory" card).
       if (mi.material === "gold" && mi.source !== "factoryPool") {
-        rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
+        rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}` : `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
       }
       // Finished piece returned by the factory (converted to fine 24KT).
       if (mi.material === "gold" && mi.finishedNetWeight != null) {
@@ -1026,7 +1027,9 @@ function FactoryHistoryPageBody() {
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                   <p className="font-semibold text-sm">
-                    {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : (
+                    {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — back in the factory's pool</span>
+                    ) : (
                       <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
                     )}
                     <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{mi.status === "open" ? "In progress" : "Closed"}</span>

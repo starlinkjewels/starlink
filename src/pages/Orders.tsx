@@ -421,6 +421,12 @@ export function OrdersPage() {
             return (
               <Link key={o.id} to={`/orders/${o.id}`}
                 className={`card-luxe card-hover overflow-hidden block min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
+                {/* Status and the tick box sit above the photo, never on it —
+                    a CAD sheet's measurements run right to its corners. */}
+                <div className="flex items-center justify-between gap-2 px-2.5 py-2">
+                  <StatusBadge status={o.status} />
+                  {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
+                </div>
                 <div className={`relative aspect-square overflow-hidden ${img ? "bg-secondary animate-pulse" : "bg-secondary/50"}`}>
                   {img ? (
                     <img
@@ -435,17 +441,15 @@ export function OrdersPage() {
                   ) : (
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}
-                  <div className="absolute top-2 left-2 z-20 flex flex-col items-start gap-1">
-                    <StatusBadge status={o.status} />
-                  </div>
-                  {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 right-2" />}
                 </div>
                 <div className="p-3">
                   <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
                   <p className="text-[11px] text-muted-foreground truncate mt-0.5">
                     {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
-                  {jobFinished(o) && (
+                  {o.melted ? (
+                    <p className="text-[11px] font-bold text-destructive truncate">MELTED</p>
+                  ) : jobFinished(o) && (
                     <p className="text-[11px] font-bold text-destructive truncate">JOB FINISH</p>
                   )}
                   {user!.role !== "client" && (o.forReadyStock
@@ -504,7 +508,6 @@ export function OrdersPage() {
             >
               {/* ── Left: full-height product / CAD photo ── */}
               <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">
-                {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 left-2" />}
                 {rowImg
                   ? <img src={rowImg} alt={o.orderNumber} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
                   : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40"><Package className="h-9 w-9" /></div>}
@@ -520,13 +523,16 @@ export function OrdersPage() {
                       {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
                       {o.designNumber ? ` · #${o.designNumber}` : ""}
                     </p>
-                    {jobFinished(o) && (
+                    {o.melted ? (
+                      <p className="text-xs font-bold text-destructive mt-0.5">MELTED — {o.melted.reason || "piece melted"}</p>
+                    ) : jobFinished(o) && (
                       <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
                     )}
                     {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-0.5 text-xs" />}
                   </div>
-                  <div className="flex flex-col items-end gap-1 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <StatusBadge status={o.status} />
+                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
                   </div>
                 </div>
 
