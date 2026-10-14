@@ -10,6 +10,8 @@ export type UiCorners = "sharp" | "default" | "round";
 export type UiHeadings = "serif" | "sans";
 export type UiMotion = "full" | "calm";
 export type UiWidth = "fit" | "centered";
+/** light: as built · dark · system: follows each device's own setting. */
+export type UiTheme = "light" | "dark" | "system";
 
 export interface AppearanceUi {
   look: UiLook;
@@ -18,6 +20,7 @@ export interface AppearanceUi {
   headings: UiHeadings;
   motion: UiMotion;
   width: UiWidth;
+  theme: UiTheme;
 }
 
 export const UI_LOOKS: { key: UiLook; name: string; hint: string }[] = [
@@ -37,7 +40,7 @@ export const UI_ACCENTS: { key: UiAccent; name: string; swatch: string }[] = [
   { key: "graphite", name: "Graphite", swatch: "oklch(0.36 0.02 260)" },
 ];
 
-export const DEFAULT_APPEARANCE: AppearanceUi = { look: "classic", accent: "royal", corners: "default", headings: "serif", motion: "full", width: "fit" };
+export const DEFAULT_APPEARANCE: AppearanceUi = { look: "classic", accent: "royal", corners: "default", headings: "serif", motion: "full", width: "fit", theme: "light" };
 
 const pick = <T extends string>(v: unknown, ok: readonly T[], dflt: T): T => (ok.includes(v as T) ? (v as T) : dflt);
 
@@ -50,6 +53,7 @@ export function appearanceOf(v: Partial<AppearanceUi> | undefined | null): Appea
     headings: pick(v?.headings, ["serif", "sans"] as const, "serif"),
     motion: pick(v?.motion, ["full", "calm"] as const, "full"),
     width: pick(v?.width, ["fit", "centered"] as const, "fit"),
+    theme: pick(v?.theme, ["light", "dark", "system"] as const, "light"),
   };
 }
 
@@ -66,6 +70,22 @@ export function applyAppearance(a: AppearanceUi, root: HTMLElement = document.do
   set("data-headings", a.headings === "serif" ? null : a.headings);
   set("data-motion", a.motion === "full" ? null : a.motion);
   set("data-width", a.width === "fit" ? null : a.width);
+  currentTheme = a.theme;
+  applyTheme(root);
+}
+
+/** The theme in force, and the device's own preference while it is "system". */
+let currentTheme: UiTheme = "light";
+let watching = false;
+function applyTheme(root: HTMLElement = document.documentElement) {
+  const deviceDark = typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches;
+  const dark = currentTheme === "dark" || (currentTheme === "system" && deviceDark);
+  root.classList.toggle("dark", dark);
+  // Follow the device as it changes (evening mode, a manual switch) — once.
+  if (currentTheme === "system" && !watching && typeof matchMedia !== "undefined") {
+    watching = true;
+    matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme());
+  }
 }
 
 /** Remember the look on this device, so the next start (and the sign-in page) opens in it. */
