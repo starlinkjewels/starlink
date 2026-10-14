@@ -31,7 +31,11 @@ function isIn(t: LockerTransaction) {
 export function DayBook() {
   const db = useDb();
   const lockers = db.lockers.filter(l => l.active !== false);
-  const [lockerId, setLockerId] = useState(lockers[0]?.id ?? "");
+  // The account picked, or the first one. Taking the first one ONCE, when the
+  // page drew, left the book on "no account" whenever the accounts arrived a
+  // moment after the page — it said "Nothing on this account yet" over ₹27 lakh.
+  const [picked, setLockerId] = useState("");
+  const lockerId = lockers.some(l => l.id === picked) ? picked : (lockers[0]?.id ?? "");
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
