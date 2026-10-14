@@ -89,9 +89,11 @@ const DialogContent = React.forwardRef<
           {header && <div className="ui-dialog-head shrink-0 px-6 pt-6 pb-4 pr-16 max-sm:pt-7">{header}</div>}
           {parts.length > 0 && (
             <div className={cn(
-              "ui-dialog-body flex-1 min-h-0 overflow-y-auto overscroll-contain px-6 [&>*]:min-w-0",
+              "ui-dialog-body flex-1 min-h-0 overflow-y-auto overscroll-contain px-6",
               header ? "pt-1" : "pt-6 pr-16", footer ? "pb-5" : "pb-6 max-sm:pb-[calc(1.5rem+env(safe-area-inset-bottom))]",
-              spacing ? spacing : "grid gap-4 content-start",
+              // Stacked like the old grid, but nothing in it ever shrinks: a
+              // table in its own scroll box was being squeezed to a sliver.
+              spacing ? spacing : "flex flex-col gap-4 [&>*]:shrink-0 [&>*]:min-w-0",
             )}>
               {parts}
             </div>
