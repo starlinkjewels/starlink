@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -54,7 +55,7 @@ export function ReceiptLedger() {
       || r.method.toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || clientId || acct || mode);
-  const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE);
+  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.date, { filtered, resetKey: [ql, from, to, clientId, acct, mode] });
   const reset = () => { setQ(""); setFrom(""); setTo(""); setClientId(""); setAcct(""); setMode(""); setPage(1); };
   const totalReceived = rows.reduce((s, r) => s + r.amountUsd, 0);
   // Only clients who actually have a receipt — a list of every client would be
@@ -247,8 +248,7 @@ export function ReceiptLedger() {
           </tbody>
         </table>
       </div>
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
-        label={rows.length ? `Showing ${start + 1}–${end} of ${rows.length}` : undefined} />
+      <LoadOlder w={w} noun="receipts" />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditId(null); }}>
         <DialogContent className="max-w-md rounded-2xl">

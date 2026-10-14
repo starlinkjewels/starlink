@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
@@ -657,7 +658,8 @@ interface ExpenseListProps {
 }
 
 function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
-  const { paged, page, setPage, totalPages, start, end } = usePagination(expenses, 12);
+  // The last 15 days first, older expenses as you scroll; the total counts them all.
+  const { w, paged } = useScrollPages(expenses, e => e.createdAt, { resetKey: expenses.length });
   // Format the total in the shared currency; fall back to ₹ when mixed/legacy.
   const listCurrency: "INR" | "USD" = expenses.length && expenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
   return (
@@ -753,16 +755,7 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
         })}
       </div>
 
-      {expenses.length > 0 && (
-        <div className="px-4 py-3 border-t border-border/40">
-          <PaginationBar
-            page={page}
-            totalPages={totalPages}
-            onPageChange={setPage}
-            label={`Showing ${start + 1}–${end} of ${expenses.length}`}
-          />
-        </div>
-      )}
+      <LoadOlder w={w} noun="expenses" />
     </div>
   );
 }

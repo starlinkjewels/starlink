@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -70,7 +71,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       || (e.note ?? "").toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || party || acct || dir);
-  const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE);
+  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, e => e.date, { filtered, resetKey: [kind, ql, from, to, party, acct, dir] });
   const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); setPage(1); };
 
   const totalOut = rows.filter(r => r.direction === "out").reduce((s, r) => s + r.amount, 0);
@@ -254,8 +255,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           </tbody>
         </table>
       </div>
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
-        label={rows.length ? `Showing ${start + 1}–${end} of ${rows.length}` : undefined} />
+      <LoadOlder w={w} />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditing(null); }}>
         <DialogContent className="max-w-md rounded-2xl">

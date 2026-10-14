@@ -88,3 +88,26 @@ export function LoadOlder({ w, noun = "entries" }: { w: Pick<RecentWindow, "visi
     </div>
   );
 }
+
+/**
+ * useRecentWindow shaped like usePagination, so a paged list switches to
+ * "the last 15 days, older ones as you scroll" without rewriting it: one page
+ * holding what is shown (page 1 of 1, or of 2 while more is waiting), and
+ * setPage a no-op — a new filter starts the window afresh by itself.
+ */
+export function useScrollPages<T>(
+  rows: T[],
+  dateOf: (r: T) => string | number | Date | undefined,
+  opts: { filtered?: boolean; resetKey?: unknown } = {},
+) {
+  const w = useRecentWindow(rows, dateOf, opts);
+  return {
+    w,
+    paged: w.visible,
+    page: 1,
+    totalPages: w.hasMore ? 2 : 1,
+    start: 0,
+    end: w.visible.length,
+    setPage: (_page: number) => {},
+  };
+}

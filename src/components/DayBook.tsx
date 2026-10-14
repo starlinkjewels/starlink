@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate, type LockerTransaction } from "@/lib/db";
 import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
@@ -73,7 +74,8 @@ export function DayBook() {
 
   const filtered = !!(ql || from || to || dir);
   const reset = () => { setQ(""); setFrom(""); setTo(""); setDir(""); setPage(1); };
-  const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE, "db");
+  // The last 15 days first, older entries as you scroll; downloads keep every entry.
+  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.t.createdAt, { filtered, resetKey: [lockerId, ql, from, to, dir] });
 
   const totalIn = rows.filter(r => isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
   const totalOut = rows.filter(r => !isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
@@ -199,8 +201,7 @@ export function DayBook() {
           </tbody>
         </table>
       </div>
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
-        label={rows.length ? `Showing ${start + 1}–${end} of ${rows.length}` : undefined} />
+      <LoadOlder w={w} />
     </div>
   );
 }

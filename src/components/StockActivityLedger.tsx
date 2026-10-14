@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { Fragment, useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -256,7 +257,7 @@ export function StockActivityLedger() {
 
   const filtered = !!(ql || from || to || kind || material || billFilter);
   const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setPage(1); };
-  const { paged, page, setPage, totalPages, start, end } = usePagination(rows, PAGE, "act");
+  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.date, { filtered, resetKey: [ql, from, to, kind, material, billFilter] });
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
@@ -469,8 +470,7 @@ export function StockActivityLedger() {
           </tbody>
         </table>
       </div>
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
-        label={rows.length ? `Showing ${start + 1}–${end} of ${rows.length}` : undefined} />
+      <LoadOlder w={w} />
 
       <EditPurchaseDialog
         purchase={editing}

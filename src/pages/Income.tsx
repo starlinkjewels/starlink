@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useAuth } from "@/lib/auth";
 import { updateDb, fmtMoney, fmtDate, orderTotal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -200,7 +201,8 @@ export function IncomePage() {
 
   /* Pagination */
   const PAGE_SIZE = 15;
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, PAGE_SIZE);
+  // The last 15 days first, older transactions as you scroll; totals count them all.
+  const { w, paged, setPage, start, end } = useScrollPages(filtered, r => r.date, { filtered: !!(dateFrom || dateTo || clientFilter !== "all"), resetKey: [curTab, dateFrom, dateTo, clientFilter] });
 
   const exportCsv = () => {
     downloadCsv(
@@ -499,16 +501,7 @@ export function IncomePage() {
           </div>
         )}
 
-        {totalPages > 1 && (
-          <div className="px-5 border-t border-border/60">
-            <PaginationBar
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-              label={`${start + 1}–${end} of ${filtered.length} transactions`}
-            />
-          </div>
-        )}
+        <LoadOlder w={w} noun="transactions" />
       </div>
 
       {/* ── Edit / delete transaction dialog ── */}
