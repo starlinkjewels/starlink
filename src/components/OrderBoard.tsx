@@ -15,6 +15,7 @@ import {
   type MovePlan,
 } from "@/lib/stages";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
+import { confirmBox } from "@/lib/confirm";
 
 const PRIORITY_RANK: Record<string, number> = { Urgent: 0, "High Priority": 1, Normal: 2 };
 const DONE_SHOWN = 20;
@@ -110,7 +111,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
       action: { label: "Open order", onClick: () => nav(`/orders/${o.id}`) },
     });
 
-  const move = (orderId: string, target: string) => {
+  const move = async (orderId: string, target: string) => {
     const o = loadDb().orders.find(x => x.id === orderId);
     if (!o) return;
     const denied = blockedFor(o);
@@ -120,7 +121,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
     if (plan.blocked) { toast.error(plan.blocked); return; }
 
     if (plan.revertFrom != null) {
-      if (!confirm(`Move ${o.orderNumber} back to ${target}?\n\nThese stages will be marked not done again: ${plan.names.join(", ")}.`)) return;
+      if (!(await confirmBox(`Move ${o.orderNumber} back to ${target}?\n\nThese stages will be marked not done again: ${plan.names.join(", ")}.`))) return;
       updateDbAs({ summary: `Moved ${o.orderNumber} back to ${target} on the board` }, d => applyRevert(d, o.id, plan.revertFrom!));
       toast.success(`${o.orderNumber} moved back to ${target}`);
       return;
@@ -132,7 +133,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
       if (plan.then === "dispatch") setDispatchFor(o);
       else if (plan.then === "deliver") setDeliverFor(o);
       else if (plan.then) {
-        if (confirm(`${thenStep} for ${o.orderNumber} is recorded on the order itself.\n\nOpen the order now?`)) nav(`/orders/${o.id}`);
+        if ((await confirmBox(`${thenStep} for ${o.orderNumber} is recorded on the order itself.\n\nOpen the order now?`))) nav(`/orders/${o.id}`);
       }
       return;
     }
@@ -142,7 +143,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
       plan.complete.length ? `• Mark done: ${plan.complete.map(i => o.timeline[i].step).join(", ")}` : "",
       plan.then ? `• Then ${thenStep} — ${plan.then === "dispatch" || plan.then === "deliver" ? "its form opens next" : "finished on the order"}` : "",
     ].filter(Boolean);
-    if (!confirm(`Move ${o.orderNumber}${plan.then ? ` towards ${target}` : ` to ${target}`}?\n\n${lines.join("\n")}`)) return;
+    if (!(await confirmBox(`Move ${o.orderNumber}${plan.then ? ` towards ${target}` : ` to ${target}`}?\n\n${lines.join("\n")}`))) return;
 
     const at = new Date().toISOString();
     updateDbAs({ summary: `Moved ${o.orderNumber} on the board: ${lines.map(l => l.replace(/^• /, "")).join("; ")}` }, d => {

@@ -32,6 +32,7 @@ import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 // The same rule the Orders page bills by, so the two lists can never disagree
 // about what is ready to invoice.
 import { invoiceBlocker } from "@/lib/invoiceBatch";
+import { confirmBox } from "@/lib/confirm";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -262,7 +263,7 @@ export function InvoicesPage() {
   const applyCreditHere = async (invoiceId: string, number: string, clientId: string) => {
     const credit = db.clients.find(c => c.id === clientId)?.creditBalance || 0;
     if (credit <= 0) { toast.error("This client has no credit to apply"); return; }
-    if (!confirm(`Put ${fmtMoney(credit)} of credit against invoice ${number}?\n\nOnly their unapplied credit moves. Money already on another invoice stays where it is.`)) return;
+    if (!(await confirmBox(`Put ${fmtMoney(credit)} of credit against invoice ${number}?\n\nOnly their unapplied credit moves. Money already on another invoice stays where it is.`))) return;
     let applied = 0;
     updateDb(d => { applied = applyCreditToBills(d, clientId, user!.id, new Date().toISOString(), "Credit applied", invoiceId); });
     if (applied > 0) toast.success(`${fmtMoney(applied)} applied to invoice ${number}`);

@@ -1,4 +1,5 @@
 import { useEffect, lazy, Suspense } from "react";
+import { ConfirmHost } from "@/components/ConfirmHost";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "./lib/auth";
@@ -186,6 +187,7 @@ export function App() {
       </Routes>
       <InstallPrompt />
       {user && <NotificationPermissionModal />}
+      <ConfirmHost />
     </>
   );
 }

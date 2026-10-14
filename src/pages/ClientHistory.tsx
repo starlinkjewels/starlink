@@ -28,6 +28,7 @@ import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti } from "@/lib/le
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
+import { confirmBox } from "@/lib/confirm";
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -240,7 +241,7 @@ function ClientHistoryPageBody() {
   // the client isn't carrying credit — so we never have to guess how much of an
   // opaque credit balance came from this particular payment. If credit is being
   // held, we refuse and point the admin at Apply Credit / manual adjustment.
-  const reversePayment = (paymentCreatedAt: string) => {
+  const reversePayment = async (paymentCreatedAt: string) => {
     if (user?.role !== "admin") { toast.error("Only an admin can reverse a payment."); return; }
     if ((client?.creditBalance || 0) > 0) {
       toast.error("This client is carrying credit on account, so a payment can't be cleanly reversed here. Clear the credit first, or adjust manually.");
@@ -249,7 +250,7 @@ function ClientHistoryPageBody() {
     const affected = billableOrders.flatMap(o => (o.advances || []).filter(a => a.createdAt === paymentCreatedAt));
     const total = affected.reduce((s, a) => s + a.amount, 0);
     if (affected.length === 0) { toast.error("Couldn't find this payment's allocations."); return; }
-    if (!confirm(`Reverse this payment of ${fmtMoney(total)}? It will be removed from the ${affected.length} bill(s) it was applied to and from the locker. This can't be undone.`)) return;
+    if (!(await confirmBox(`Reverse this payment of ${fmtMoney(total)}? It will be removed from the ${affected.length} bill(s) it was applied to and from the locker. This can't be undone.`))) return;
     updateDb(d => {
       for (const o of d.orders.filter(o => o.clientId === id)) {
         if (o.advances) o.advances = o.advances.filter(a => a.createdAt !== paymentCreatedAt);

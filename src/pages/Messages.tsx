@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Send, ArrowLeft, Trash2 } from "lucide-react";
+import { confirmBox } from "@/lib/confirm";
 
 export function MessagesPage() {
   const { user } = useAuth();
@@ -50,9 +51,9 @@ export function MessagesPage() {
     setMenuMsg(null);
   };
 
-  const clearChat = () => {
+  const clearChat = async () => {
     if (!selected) return;
-    if (!confirm("Delete this conversation? This cannot be undone.")) return;
+    if (!(await confirmBox("Delete this conversation? This cannot be undone."))) return;
     updateDb(d => {
       d.messages = d.messages.filter(m => {
         const inThread = (m.fromUserId === user!.id && m.toUserId === selected) || (m.fromUserId === selected && m.toUserId === user!.id);

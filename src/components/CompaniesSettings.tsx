@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { confirmBox } from "@/lib/confirm";
 
 type ImgKey = "logoUrl" | "stamp" | "qr1" | "qr2" | "bankImage1" | "bankImage2";
 const IMAGES: { key: ImgKey; label: string }[] = [
@@ -58,16 +59,16 @@ export function CompaniesSettings() {
   const clientsOf = (id: string) => db.clients.filter(c => companyIdOfClient(c) === id).length;
   const invoicesOf = (id: string) => (db.invoices ?? []).filter(i => companyIdOfInvoice(i) === id).length;
 
-  const toggle = (c: Company) => {
+  const toggle = async (c: Company) => {
     if (c.id === MAIN_COMPANY_ID) return;
     const on = c.active === false;
-    if (!on && !confirm(`Stop using ${c.name}?\n\nIts clients and invoices stay as they are; it just won't be offered for new clients.`)) return;
+    if (!on && !(await confirmBox(`Stop using ${c.name}?\n\nIts clients and invoices stay as they are; it just won't be offered for new clients.`))) return;
     updateDb(d => { const x = d.settings.companies?.find(y => y.id === c.id); if (x) x.active = on; });
     toast.success(on ? `${c.name} is in use again` : `${c.name} is no longer offered for new clients`);
   };
-  const remove = (c: Company) => {
+  const remove = async (c: Company) => {
     if (clientsOf(c.id) || invoicesOf(c.id)) { toast.error("It has clients or invoices — stop using it instead."); return; }
-    if (!confirm(`Delete ${c.name}? It has no clients or invoices.`)) return;
+    if (!(await confirmBox(`Delete ${c.name}? It has no clients or invoices.`))) return;
     updateDb(d => { d.settings.companies = (d.settings.companies ?? []).filter(y => y.id !== c.id); });
     toast.success(`${c.name} deleted`);
   };

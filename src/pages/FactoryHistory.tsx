@@ -28,6 +28,7 @@ import { FactoryOrderLedger, buildFactoryOrderRows } from "@/components/FactoryO
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { confirmBox } from "@/lib/confirm";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -295,13 +296,13 @@ function FactoryHistoryPageBody() {
     setActiveIssuance({ id: "", action: null });
   };
 
-  const payCharge = (issuance: MaterialIssuance) => {
+  const payCharge = async (issuance: MaterialIssuance) => {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
-        !window.confirm(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`)) return;
+        !(await confirmBox(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`))) return;
     const now = new Date().toISOString();
     updateDb(d => {
       const mi = d.materialIssuances.find(x => x.id === issuance.id);

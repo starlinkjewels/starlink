@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -17,6 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 15;
 
@@ -585,12 +587,12 @@ function CertifiedSection() {
     setEditPacket(null);
   };
 
-  const deletePacket = (p: DiamondPacket) => {
+  const deletePacket = async (p: DiamondPacket) => {
     if (p.status !== "in_stock") {
       toast.error("This packet is already issued or used — cancel it from the order instead.");
       return;
     }
-    if (!confirm(`Delete this ${p.shape} ${p.carat}ct packet (Report ${p.certificateNumber})? This can't be undone.`)) return;
+    if (!(await confirmBox(`Delete this ${p.shape} ${p.carat}ct packet (Report ${p.certificateNumber})? This can't be undone.`))) return;
     updateDb(d => {
       d.diamondPackets = (d.diamondPackets ?? []).filter(x => x.id !== p.id);
     });
@@ -757,10 +759,12 @@ function CertifiedSection() {
 
       {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}
       {editPacket && (
-        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => setEditPacket(null)}>
-          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
-            <h3 className="font-display text-lg text-brand-dark mb-1">Edit Certified Diamond</h3>
-            <p className="text-xs text-muted-foreground mb-4">Correct the certificate, grading details or cost for this packet.</p>
+        <Dialog open onOpenChange={v => { if (!v) setEditPacket(null); }}>
+          <DialogContent className="max-w-lg rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="font-display text-xl text-brand-dark">Edit Certified Diamond</DialogTitle>
+              <DialogDescription className="text-xs">Correct the certificate, grading details or cost for this packet.</DialogDescription>
+            </DialogHeader>
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Shape</Label>
@@ -818,12 +822,12 @@ function CertifiedSection() {
                 <Input value={editPacket.certificateLab ?? ""} onChange={e => setEditPacket({ ...editPacket, certificateLab: e.target.value })} className="rounded-xl mt-1" placeholder="GIA / IGI" />
               </div>
             </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setEditPacket(null)} className="flex-1 rounded-xl border border-border py-2 text-sm">Cancel</button>
-              <AsyncButton onClick={savePacketEdit} disabled={savingPacket} className="btn-hero flex-1 rounded-xl py-2 text-sm h-auto">{savingPacket ? "Saving…" : "Save Changes"}</AsyncButton>
-            </div>
-          </div>
-        </div>
+            <DialogFooter>
+              <button onClick={() => setEditPacket(null)} className="h-10 px-4 rounded-xl border border-border bg-card text-sm font-medium hover:bg-secondary">Cancel</button>
+              <AsyncButton onClick={savePacketEdit} disabled={savingPacket} className="btn-hero rounded-xl px-5">{savingPacket ? "Saving…" : "Save Changes"}</AsyncButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );

@@ -11,7 +11,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogTrigger } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -20,6 +20,7 @@ import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
 const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
@@ -262,8 +263,8 @@ export function ReadyStockPage() {
     });
   };
 
-  const del = (item: ReadyStockItem) => {
-    if (!confirm(`Delete "${item.name}" from ready stock? This cannot be undone.`)) return;
+  const del = async (item: ReadyStockItem) => {
+    if (!(await confirmBox(`Delete "${item.name}" from ready stock? This cannot be undone.`))) return;
     updateDb(d => { d.readyStock = d.readyStock.filter(x => x.id !== item.id); });
     toast.success("Deleted");
   };
@@ -427,9 +428,10 @@ export function ReadyStockPage() {
                 <Label className="text-xs">Notes (optional)</Label>
                 <Textarea value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} className="rounded-xl mt-1" rows={2} />
               </div>
-
-              <AsyncButton onClick={save} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Saving…" : editingId ? "Save Changes" : "Add to Ready Stock"}</AsyncButton>
             </div>
+            <DialogFooter>
+              <AsyncButton onClick={save} disabled={saving} className="btn-hero rounded-xl px-6">{saving ? "Saving…" : editingId ? "Save Changes" : "Add to Ready Stock"}</AsyncButton>
+            </DialogFooter>
           </DialogContent>
         </Dialog>
         )}

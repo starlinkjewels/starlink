@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE = 12;
 
@@ -161,10 +162,10 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   });
 
 
-  const remove = (e: MoneyEntry) => {
+  const remove = async (e: MoneyEntry) => {
     if (e.locked) { toast.error(e.locked); return; }
     const lockerName = db.lockers.find(l => l.id === e.lockerId)?.name;
-    if (!confirm(`Cancel this entry?\n\n${entryImpact(e, lockerName).join("\n")}\n\nThis cannot be undone.`)) return;
+    if (!(await confirmBox(`Cancel this entry?\n\n${entryImpact(e, lockerName).join("\n")}\n\nThis cannot be undone.`))) return;
     deleteEntry(e);
     toast.success("Entry cancelled");
     setEditing(null);

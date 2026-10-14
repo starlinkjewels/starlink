@@ -19,6 +19,7 @@ import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 9;
 
@@ -54,8 +55,8 @@ export function EmployeesPage() {
     catch (e) { toast.error(authErrorMessage(e)); }
   };
 
-  const del = (id: string) => {
-    if (!confirm("Remove this employee's access? Their login will stop working.")) return;
+  const del = async (id: string) => {
+    if (!(await confirmBox("Remove this employee's access? Their login will stop working."))) return;
     updateDb(d => { d.users = d.users.filter(u => u.id !== id); });
     toast.success("Access removed");
   };

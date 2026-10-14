@@ -24,7 +24,7 @@ import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email"
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -52,6 +52,7 @@ import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isSt
 import { receiptForAdvance } from "@/lib/receipts";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
+import { confirmBox } from "@/lib/confirm";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -342,12 +343,12 @@ function OrderDetailPageBody() {
   const removeLinkedPurchase = async (p: Purchase) => {
     const check = canVoidPurchase(db, p);
     if (!check.ok) { toast.error(check.reason!); return; }
-    if (!confirm(
+    if (!(await confirmBox(
       `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)}) from this order?
 
 ` +
       "What changes:\n" + voidImpact(db, p).join("\n") + "\n\nThis cannot be undone.",
-    )) return;
+    ))) return;
     setRemovingPurchaseId(p.id);
     try {
       await voidPurchaseCascade(db, p, user!.id);
@@ -415,13 +416,13 @@ function OrderDetailPageBody() {
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
     const unit = mi.material === "gold" ? "g" : "ct";
-    if (!confirm([
+    if (!(await confirmBox([
       `Cancel this issue of ${mi.quantityIssued}${unit} ${mi.purityOrQuality}?`,
       "",
       ...issuanceVoidImpact(db, mi),
       "",
       "This cannot be undone.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     setRemovingIssuanceId(mi.id);
     try {
       await deleteIssuance(db, mi, user!.id);
@@ -509,9 +510,9 @@ function OrderDetailPageBody() {
       seen.add(k);
     }
     const onFile = buyBills.filter(b => (db.purchases ?? []).some(p => billKey(p.supplierId, p.invoiceNumber ?? "") === billKey(b.supplierId, b.billNo)));
-    if (onFile.length && !confirm(
+    if (onFile.length && !(await confirmBox(
       `${onFile.map(b => `Bill ${b.billNo.trim()} from ${supplierName(b.supplierId)}`).join(", ")} is already recorded.\n\n` +
-      "Save these lines against it as well? Cancel if it is the same purchase being entered again.")) return;
+      "Save these lines against it as well? Cancel if it is the same purchase being entered again."))) return;
 
     const now = new Date().toISOString();
     // Every line of every bill becomes its own Purchase; each carries its bill's
@@ -1134,7 +1135,7 @@ function OrderDetailPageBody() {
   const faStepIdx = order.timeline.findIndex(t => t.step === "Final Approval");
   const faDone = faStepIdx >= 0 && order.timeline[faStepIdx].status === "done";
 
-  const advanceStep = (idx: number, overrideReadiness = false, atISO?: string): boolean => {
+  const advanceStep = async (idx: number, overrideReadiness = false, atISO?: string): Promise<boolean> => {
     if (order.timeline[idx].step === "Final Approval" && !overrideReadiness && !readiness.ready) {
       toast.error(`Issue ${readiness.missing.join(" and ")} to a factory before Final Approval`);
       return false;
@@ -1142,7 +1143,7 @@ function OrderDetailPageBody() {
     // Never let goods leave without a price, and warn before shipping unpaid.
     if (order.timeline[idx].step === "Dispatch") {
       if (orderTotal(order) <= 0) { toast.error("Set the order price before dispatching."); return false; }
-      if (balanceDue(order) > 0 && !confirm(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`)) return false;
+      if (balanceDue(order) > 0 && !(await confirmBox(`Balance of ${fmtMoney(balanceDue(order))} is still unpaid on this order. Dispatch anyway?`))) return false;
     }
     // The caller may know the stage happened on an earlier day than the one it
     // is being entered on; everything else is stamped as it is recorded.
@@ -1183,9 +1184,9 @@ function OrderDetailPageBody() {
     return true;
   };
 
-  const forceAdvanceStep = (idx: number) => {
-    if (!confirm(`Mark Final Approval complete without recording ${readiness.missing.join(" and ")} issuance? Only do this if the material was sourced outside this system.`)) return;
-    advanceStep(idx, true);
+  const forceAdvanceStep = async (idx: number) => {
+    if (!(await confirmBox(`Mark Final Approval complete without recording ${readiness.missing.join(" and ")} issuance? Only do this if the material was sourced outside this system.`))) return;
+    await advanceStep(idx, true);
   };
 
   // The single "finishing" record for an order (gold net weight + labour). Used
@@ -1392,7 +1393,7 @@ function OrderDetailPageBody() {
       });
       // A stock build raised before Final Approval existed has no such step, so
       // the actuals are recorded without one being marked complete.
-      if (!alreadyDone && faIdx >= 0) advanceStep(faIdx, true);
+      if (!alreadyDone && faIdx >= 0) await advanceStep(faIdx, true);
       toast.success(alreadyDone ? "Final details updated" : "Final approval saved");
       setFaIdx(null);
     } catch (e) {
@@ -1403,8 +1404,8 @@ function OrderDetailPageBody() {
   // Undo a stage marked complete by mistake — this stage becomes the current
   // (in-progress) one and every later stage is reset to not-done; the order
   // status is recomputed from what's left done.
-  const revertStep = (idx: number) => {
-    if (!confirm("Undo this stage? This stage and any later ones will be marked not done, and the order status will update.")) return;
+  const revertStep = async (idx: number) => {
+    if (!(await confirmBox("Undo this stage? This stage and any later ones will be marked not done, and the order status will update."))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       for (let i = idx; i < o.timeline.length; i++) {
@@ -1480,7 +1481,7 @@ function OrderDetailPageBody() {
   };
 
   const approve = async (yes: boolean) => {
-    if (!yes && !confirm("Reject this order? Any issued gold/diamond returns to stock and any advance paid moves to the client's credit. You can re-open it later if this was a mistake.")) return;
+    if (!yes && !(await confirmBox("Reject this order? Any issued gold/diamond returns to stock and any advance paid moves to the client's credit. You can re-open it later if this was a mistake."))) return;
     const now = new Date().toISOString();
     // On reject, first return any material that was already issued for the order.
     if (!yes) {
@@ -1512,8 +1513,8 @@ function OrderDetailPageBody() {
   };
 
   // Undo an accidental reject — put the order back to Waiting for a fresh decision.
-  const reopenOrder = () => {
-    if (!confirm("Re-open this rejected order back to Waiting?")) return;
+  const reopenOrder = async () => {
+    if (!(await confirmBox("Re-open this rejected order back to Waiting?"))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       o.status = "Waiting";
@@ -1533,7 +1534,7 @@ function OrderDetailPageBody() {
   // packets to stock, closes its issuances, and stops billing it (Rejected is
   // excluded from client totals). Re-openable afterwards.
   const cancelOrder = async () => {
-    if (!confirm("Cancel this order? Any issued material/diamonds return to stock, any advance paid moves to the client's credit, and it will no longer be billed. You can re-open it later.")) return;
+    if (!(await confirmBox("Cancel this order? Any issued material/diamonds return to stock, any advance paid moves to the client's credit, and it will no longer be billed. You can re-open it later."))) return;
     setCancelling(true);
     try {
       await returnIssuedMaterials(); // return gold/diamond, free packets, close issuances
@@ -1893,7 +1894,7 @@ function OrderDetailPageBody() {
       });
       // …then complete the Dispatch step (runs the price/unpaid guard), dated
       // the day the parcel left rather than the day it was typed up.
-      const advanced = advanceStep(dispatchModalIdx, false, stampFor(dispatchDay));
+      const advanced = await advanceStep(dispatchModalIdx, false, stampFor(dispatchDay));
       if (advanced) {
         // Only once it has really gone — a dispatch the price guard turned back
         // must not leave a freight bill behind it.
@@ -1973,19 +1974,19 @@ function OrderDetailPageBody() {
   // In-house build → create a Ready Stock item pre-filled from this order. Admin
   // sets the selling price & cost in Ready Stock (cost basis mixes INR labour with
   // material, so it's entered there, not guessed here).
-  const addToReadyStock = () => {
+  const addToReadyStock = async () => {
     if (order.readyStockCreatedId) { nav("/ready-stock"); return; }
     // The piece carries whatever weights it has. Without Final Approval those
     // are still the estimates it was ordered on, and a stock item is priced off
     // them — so say so rather than let an estimate pass as the real weight.
-    if (!hasActuals && !confirm([
+    if (!hasActuals && !(await confirmBox([
       "The factory's actual details have not been recorded for this piece.",
       "",
       "It will go into Ready Stock with the ESTIMATED weights, which is what its",
       "cost and price will then be worked out from.",
       "",
       "Record actual details first? Cancel to go back and do that.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     const itemId = uid("rs_");
     const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
     const pw = pieceWeights(order, db.materialIssuances);
@@ -3843,31 +3844,35 @@ function OrderDetailPageBody() {
       )}
 
       {/* ── Delivery date popup (from the timeline "Mark complete") ── */}
-      {deliverModalIdx !== null && (
-        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => setDeliverModalIdx(null)}>
-          <div className="card-luxe w-full max-w-sm p-5 ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
-            <h3 className="font-display text-lg text-brand-dark mb-1">Delivered — {order.orderNumber}</h3>
-            <p className="text-xs text-muted-foreground mb-4">The day it reached the client, which need not be today.</p>
+      <Dialog open={deliverModalIdx !== null} onOpenChange={v => { if (!v) setDeliverModalIdx(null); }}>
+        <DialogContent className="max-w-sm rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-brand-dark">Delivered — {order.orderNumber}</DialogTitle>
+            <DialogDescription className="text-xs">The day it reached the client, which need not be today.</DialogDescription>
+          </DialogHeader>
+          <div>
             <Label className="text-xs">Delivery Date *</Label>
             <Input type="date" value={deliverDay} max={todayLocal()} onChange={e => setDeliverDay(e.target.value)} className="rounded-xl h-10 mt-1" />
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setDeliverModalIdx(null)} className="flex-1 rounded-xl border border-border py-2 text-sm">Cancel</button>
-              <AsyncButton onClick={() => {
-                const idx = deliverModalIdx;
-                updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.deliveredAt = stampFor(deliverDay); });
-                if (advanceStep(idx, false, stampFor(deliverDay))) setDeliverModalIdx(null);
-              }} className="btn-hero flex-1 rounded-xl py-2 text-sm">Mark Delivered</AsyncButton>
-            </div>
           </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeliverModalIdx(null)} className="rounded-xl">Cancel</Button>
+            <AsyncButton onClick={async () => {
+              const idx = deliverModalIdx;
+              if (idx === null) return;
+              updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.deliveredAt = stampFor(deliverDay); });
+              if (await advanceStep(idx, false, stampFor(deliverDay))) setDeliverModalIdx(null);
+            }} className="btn-hero rounded-xl px-5">Mark Delivered</AsyncButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── Dispatch Details popup (from the timeline "Mark complete") ── */}
-      {dispatchModalIdx !== null && (
-        <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => !dispatchSaving && setDispatchModalIdx(null)}>
-          <div className="card-luxe w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
-            <h3 className="font-display text-lg text-brand-dark mb-1">Dispatch Details — {order.orderNumber}</h3>
-            <p className="text-xs text-muted-foreground mb-4">Enter the courier details. On confirm, the order is marked dispatched and the client is emailed automatically.</p>
+      <Dialog open={dispatchModalIdx !== null} onOpenChange={v => { if (!v && !dispatchSaving) setDispatchModalIdx(null); }}>
+        <DialogContent className="max-w-lg rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-brand-dark">Dispatch Details — {order.orderNumber}</DialogTitle>
+            <DialogDescription className="text-xs">Enter the courier details. On confirm, the order is marked dispatched and the client is emailed automatically.</DialogDescription>
+          </DialogHeader>
             <div className="space-y-3">
               <div><Label className="text-xs">Courier Company *</Label><Input value={courierName} onChange={e => setCourierName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. FedEx, DHL" /></div>
               <div><Label className="text-xs">Tracking Number *</Label><Input value={trackingNumber} onChange={e => setTrackingNumber(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 1234567890" /></div>
@@ -3875,13 +3880,12 @@ function OrderDetailPageBody() {
               <div><Label className="text-xs">Tracking Link (optional)</Label><Input value={trackingLink} onChange={e => setTrackingLink(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="https://..." /></div>
               <ShippingCostFields value={dispShipCost} onChange={setDispShipCost} pieces={1} />
             </div>
-            <div className="flex gap-2 mt-5">
-              <button onClick={() => setDispatchModalIdx(null)} disabled={dispatchSaving} className="flex-1 rounded-xl border border-border py-2 text-sm disabled:opacity-50">Cancel</button>
-              <AsyncButton onClick={confirmDispatch} disabled={dispatchSaving} className="btn-hero flex-1 rounded-xl py-2 text-sm">{dispatchSaving ? "Sending…" : "Confirm Dispatch & Notify"}</AsyncButton>
-            </div>
-          </div>
-        </div>
-      )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDispatchModalIdx(null)} disabled={dispatchSaving} className="rounded-xl">Cancel</Button>
+            <AsyncButton onClick={confirmDispatch} disabled={dispatchSaving} className="btn-hero rounded-xl px-5">{dispatchSaving ? "Sending…" : "Confirm Dispatch & Notify"}</AsyncButton>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── 360° 3D model viewer (Starlink360 embed) — responsive, full-screen ── */}
       {show360 && viewer360Url && (
@@ -3932,10 +3936,13 @@ function OrderDetailPageBody() {
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
         return (
-          <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={() => !faSaving && setFaIdx(null)}>
-            <div className="card-luxe w-full max-w-lg p-5 max-h-[92vh] overflow-y-auto ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
-              <h3 className="font-display text-lg text-brand-dark mb-1">Final Approval — {order.orderNumber}</h3>
-              <p className="text-xs text-muted-foreground mb-4">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</p>
+          <Dialog open onOpenChange={v => { if (!v && !faSaving) setFaIdx(null); }}>
+            <DialogContent className="max-w-xl rounded-2xl">
+              <DialogHeader>
+                <DialogTitle className="font-display text-xl text-brand-dark">Final Approval — {order.orderNumber}</DialogTitle>
+                <DialogDescription className="text-xs">Enter the real details now: gold used, each diamond used or returned, the labour, and the final order value.</DialogDescription>
+              </DialogHeader>
+              <div>
 
               {/* The factory's own bill number. One of their bills covers several
                   pieces while each comes back on its own, so this is what ties
@@ -4156,12 +4163,13 @@ function OrderDetailPageBody() {
                 <p className="text-sm mt-2">Total to client: <span className="font-semibold text-brand-dark">{fmtMoney((Number(faOrderValue) || 0) + (Number(faShipping) || 0))}</span></p>
               </div>
 
-              <div className="flex gap-2">
-                <button onClick={() => setFaIdx(null)} disabled={faSaving} className="flex-1 rounded-xl border border-border py-2 text-sm disabled:opacity-50">Cancel</button>
-                <AsyncButton onClick={saveFinalApproval} disabled={faSaving} className="btn-hero flex-1 rounded-xl py-2 text-sm">{faSaving ? "Saving…" : "Save & Approve"}</AsyncButton>
               </div>
-            </div>
-          </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setFaIdx(null)} disabled={faSaving} className="rounded-xl">Cancel</Button>
+                <AsyncButton onClick={saveFinalApproval} disabled={faSaving} className="btn-hero rounded-xl px-5">{faSaving ? "Saving…" : "Save & Approve"}</AsyncButton>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         );
       })()}
     </AnimatePresence>

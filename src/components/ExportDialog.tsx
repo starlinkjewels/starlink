@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Download, FileText, FileSpreadsheet } from "lucide-react";
+import { Download, FileText, FileSpreadsheet } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 export interface ExportOption {
   label: string;
@@ -47,15 +48,15 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
   const invalid = !!(fromDate && toDate && +fromDate > +toDate);
 
   return (
-    <div className="ui-scrim fixed inset-0 z-50 grid place-items-center bg-black/40 p-4 max-sm:place-items-end max-sm:p-0" onClick={onClose}>
-      {/* Capped and scrollable: a factory offers eight download options and the
-          last of them were off the bottom of the screen with no way to reach them. */}
-      <div className="card-luxe w-full max-w-md p-5 max-h-[85vh] overflow-y-auto overscroll-contain ui-dialog max-sm:max-w-none max-sm:rounded-b-none max-sm:rounded-t-[1.75rem] max-sm:max-h-[92dvh] max-sm:overflow-y-auto max-sm:overscroll-contain max-sm:pb-[calc(1.25rem+env(safe-area-inset-bottom))]" onClick={e => e.stopPropagation()}>
-        <div className="flex items-center justify-between mb-1">
-          <h3 className="font-display text-lg text-brand-dark">Export{title ? ` — ${title}` : ""}</h3>
-          <button onClick={onClose} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-secondary" aria-label="Close"><X className="h-4 w-4" /></button>
-        </div>
-        <p className="text-xs text-muted-foreground mb-4">Choose a date range (optional), then what to download.</p>
+    // Capped and scrollable: a factory offers eight download options and the
+    // last of them were off the bottom of the screen with no way to reach them.
+    <Dialog open onOpenChange={v => { if (!v) onClose(); }}>
+      <DialogContent className="max-w-md rounded-2xl">
+        <DialogHeader>
+          <DialogTitle className="font-display text-xl text-brand-dark">Export{title ? ` — ${title}` : ""}</DialogTitle>
+          <DialogDescription className="text-xs">Choose a date range (optional), then what to download.</DialogDescription>
+        </DialogHeader>
+        <div>
 
         <div className="flex flex-wrap gap-1.5 mb-3">
           {([["month", "This month"], ["lastMonth", "Last month"], ["year", "This year"], ["all", "All time"]] as const).map(([k, l]) => (
@@ -87,8 +88,9 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
             </button>
           ))}
         </div>
-      </div>
-    </div>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 

@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE = 12;
 const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
@@ -153,12 +154,12 @@ export function ReceiptLedger() {
   });
 
 
-  const remove = (id: string) => {
+  const remove = async (id: string) => {
     const rec = db.clientReceipts?.find(x => x.id === id);
     if (!rec) return;
-    if (!confirm(
+    if (!(await confirmBox(
       `Cancel receipt ${rec.receiptNo}?\n\n${deleteImpact(db, id).join("\n")}\n\nThis cannot be undone.`
-    )) return;
+    ))) return;
     deleteReceipt(id, user!.id);
     toast.success(`Receipt ${rec.receiptNo} cancelled`);
     setEditId(null);

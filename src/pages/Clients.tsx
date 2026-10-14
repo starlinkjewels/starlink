@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 9;
 
@@ -259,8 +260,8 @@ export function ClientsPage() {
     toast.success(c.productPhotoAccess ? "Photo access revoked" : "Photo access granted");
   };
 
-  const del = (id: string) => {
-    if (!confirm("Delete client?")) return;
+  const del = async (id: string) => {
+    if (!(await confirmBox("Delete client?"))) return;
     updateDb(d => {
       d.clients = d.clients.filter(c => c.id !== id);
       d.users = d.users.filter(u => u.clientId !== id);

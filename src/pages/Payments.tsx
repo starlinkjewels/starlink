@@ -25,6 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
@@ -40,14 +41,14 @@ const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Commun
 
 /** Warn before a payment takes a locker's balance negative (money it doesn't hold).
  *  Returns true to proceed, false to cancel. `amt` is in the locker's own currency. */
-function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], lockerId: string, amt: number): boolean {
+async function confirmOverdraw(lockers: Locker[], transactions: LockerTransaction[], lockerId: string, amt: number): Promise<boolean> {
   const locker = lockers.find(l => l.id === lockerId);
   if (!locker) return true;
   const bal = lockerBalance(locker, transactions);
   if (amt > bal) {
-    return window.confirm(
+    return (await confirmBox(
       `This payment of ${fmtLockerAmount(amt, locker.currency)} is more than ${locker.name}'s balance of ${fmtLockerAmount(bal, locker.currency)}.\n\nThe locker will go negative — continue only if you're sure a deposit is still missing.`,
-    );
+    ));
   }
   return true;
 }
@@ -350,7 +351,7 @@ function PaySupplier() {
   );
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 
-  const submit = () => {
+  const submit = async () => {
     const s = db.suppliers.find(x => x.id === supplierId);
     if (!s) { toast.error("Choose a supplier"); return; }
     const amt = Number(amount);
@@ -379,7 +380,7 @@ function PaySupplier() {
     // ── Pay: money out TO the supplier. ──
     // Overpayment is allowed — the excess beyond what's owed is recorded as an
     // overpay on the newest purchase, never silently lost.
-    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
+    if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
@@ -514,7 +515,7 @@ function PayFactory() {
   );
   const pendingIssuances = issuances.filter(i => issuancePending(i) > 0);
 
-  const submit = () => {
+  const submit = async () => {
     const f = db.factories.find(x => x.id === factoryId);
     if (!f) { toast.error("Choose a factory"); return; }
     const amt = Number(amount);
@@ -522,7 +523,7 @@ function PayFactory() {
     if (!lockerId) { toast.error("Choose which locker this was paid from"); return; }
     // Overpayment is allowed (you can pay more than currently owed) — the extra
     // is recorded as an advance/overpay, never silently lost.
-    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
+    if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
@@ -638,14 +639,14 @@ function PayExpense() {
   const curr: "INR" | "USD" = (locker?.currency || "INR") === "USD" ? "USD" : "INR";
   const sym = curr === "USD" ? "$" : "₹";
 
-  const submit = () => {
+  const submit = async () => {
     // Account FIRST — it decides the amount's currency.
     if (!lockerId) { toast.error("Choose the account this is paid from"); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!title.trim()) { toast.error("Enter a title"); return; }
     if (category === "Salary" && !paidToEmployeeId) { toast.error("Choose which team member this salary is for"); return; }
-    if (!confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt)) return;
+    if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
@@ -775,9 +776,9 @@ function LockerActions() {
     if (action === "expense" || action === "transfer_out") {
       const bal = lockerBalance(selected, db.lockerTransactions);
       if (amt > bal) {
-        const ok = window.confirm(
+        const ok = (await confirmBox(
           `This ${action === "expense" ? "withdrawal" : "transfer"} of ${fmtLockerAmount(amt, selected.currency)} is more than ${selected.name}'s balance of ${fmtLockerAmount(bal, selected.currency)} ${cur}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
-        );
+        ));
         if (!ok) return;
       }
     }

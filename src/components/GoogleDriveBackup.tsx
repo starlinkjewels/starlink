@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { HardDrive, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 const LABELS: Record<Frequency, string> = {
   off: "Off", daily: "Every day", weekly: "Every week", monthly: "Every month", yearly: "Every year",
@@ -135,8 +136,8 @@ export function GoogleDriveBackup() {
     } finally { setBusy(false); }
   };
 
-  const disconnect = () => {
-    if (!confirm("Disconnect Google Drive?\n\nBackups already in Drive stay where they are — only the connection is removed.")) return;
+  const disconnect = async () => {
+    if (!(await confirmBox("Disconnect Google Drive?\n\nBackups already in Drive stay where they are — only the connection is removed."))) return;
     disconnectDrive();
     setStatus(driveStatus());
     setFiles(null);

@@ -10,7 +10,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
+import { confirmBox } from "@/lib/confirm";
 
 const DEPTS = ["Sales","CAD","Design","Production","Diamond Setting","Polishing","QC","Packing","Dispatch","Accounts"];
 
@@ -77,7 +78,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
       const asAdmin = needsLogin && rolesLive && access === "admin";
       const roleId = needsLogin && rolesLive && access !== "admin" && access !== STANDARD_STAFF.id
         && (loadDb().roles ?? []).some(r => r.id === access) ? access : undefined;
-      if (asAdmin && !confirm(`Create ${f.name.trim()} as an admin?\n\nThey will be able to do everything — money, settings, employees, roles and other admins. Owners stay owners.`)) return;
+      if (asAdmin && !(await confirmBox(`Create ${f.name.trim()} as an admin?\n\nThey will be able to do everything — money, settings, employees, roles and other admins. Owners stay owners.`))) return;
       const authUid = needsLogin ? await createAuthUser(email, f.password) : undefined;
       const opAmt = Number(openingPaid);
       updateDb(d => d.users.push({
@@ -198,9 +199,11 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
               </div>
               <p className="text-[11px] text-muted-foreground">Salary/wages already paid to this person before you started using this app. Added to their total paid to date.</p>
             </div>
-
-            <Button onClick={create} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create"}</Button>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Cancel</Button>
+            <Button onClick={create} disabled={saving} className="btn-hero rounded-xl px-6">{saving ? "Creating…" : "Create employee"}</Button>
+          </DialogFooter>
         </DialogContent>
     </Dialog>
   );

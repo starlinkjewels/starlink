@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
@@ -6,13 +7,14 @@ import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFA
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
   TrendingUp, TrendingDown, Minus, CalendarDays,
 } from "lucide-react";
+import { confirmBox } from "@/lib/confirm";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 const FALLBACK_CATEGORY_BG = "bg-gray-500/10 text-gray-600";
@@ -197,8 +199,8 @@ export function ExpensesPage() {
     setSaving(false);
   }
 
-  function handleDelete(id: string) {
-    if (!confirm("Delete this expense? Its linked locker entry is also removed. This cannot be undone.")) return;
+  async function handleDelete(id: string) {
+    if (!(await confirmBox("Delete this expense? Its linked locker entry is also removed. This cannot be undone."))) return;
     // In-place on the live cache — only this expense + its locker line go.
     updateDb(d => {
       d.expenses = d.expenses.filter(e => e.id !== id);
@@ -468,47 +470,14 @@ export function ExpensesPage() {
         </div>
       )}
 
-      {/* ── Add Expense Sheet ── */}
-      <AnimatePresence>
-        {showAdd && (
-          <>
-            <motion.div
-              key="exp-backdrop"
-              initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-              transition={{ duration: 0.2 }}
-              className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
-              onClick={() => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); }}
-            />
-            <motion.div
-              key="exp-sheet"
-              initial={{ opacity: 0, y: 48, scale: 0.97 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 48, scale: 0.97 }}
-              transition={{ type: "spring", damping: 28, stiffness: 300 }}
-              className="fixed bottom-0 inset-x-0 md:inset-auto md:top-1/2 md:left-1/2 md:-translate-x-1/2 md:-translate-y-1/2 z-50 md:w-[460px] max-h-[92vh] md:max-h-[88vh] flex flex-col bg-white rounded-t-3xl md:rounded-2xl shadow-2xl overflow-hidden"
-              style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
-            >
-              {/* Sheet handle (mobile) */}
-              <div className="flex justify-center pt-3 pb-0 md:hidden shrink-0">
-                <div className="h-1 w-10 rounded-full bg-border" />
-              </div>
-
-              {/* Header */}
-              <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between shrink-0">
-                <div>
-                  <h2 className="font-display text-lg text-brand-dark">Add Expense</h2>
-                  <p className="text-xs text-muted-foreground mt-0.5">Recording as {user?.name}</p>
-                </div>
-                <button
-                  onClick={() => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); }}
-                  className="h-8 w-8 rounded-xl bg-secondary grid place-items-center text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Form — scrolls if taller than the sheet */}
-              <div className="p-5 space-y-4 overflow-y-auto flex-1 min-h-0">
+      {/* ── Add Expense ── */}
+      <Dialog open={showAdd} onOpenChange={v => { if (!v) { setShowAdd(false); setError(""); setForm(EMPTY_FORM); } }}>
+        <DialogContent className="max-w-md rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="font-display text-xl text-brand-dark">Add Expense</DialogTitle>
+            <DialogDescription className="text-xs">Recording as {user?.name}</DialogDescription>
+          </DialogHeader>
+              <div className="space-y-4">
                 {error && (
                   <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-xl px-3 py-2.5">
                     <X className="h-4 w-4 shrink-0" />
@@ -627,18 +596,20 @@ export function ExpensesPage() {
                   <span className="text-xs text-muted-foreground">will be tagged as this category</span>
                 </div>
 
-                <button
-                  onClick={handleAdd}
-                  disabled={saving}
-                  className="w-full btn-hero h-11 rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
-                >
-                  {saving ? "Saving…" : "Record Expense"}
-                </button>
               </div>
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+          <DialogFooter>
+            <button onClick={() => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); }}
+              className="h-10 px-4 rounded-xl border border-border bg-card text-sm font-medium hover:bg-secondary">Cancel</button>
+            <button
+              onClick={handleAdd}
+              disabled={saving}
+              className="btn-hero h-10 px-5 rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            >
+              {saving ? "Saving…" : "Record Expense"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

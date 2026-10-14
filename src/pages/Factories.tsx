@@ -16,6 +16,7 @@ import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, Hist
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 9;
 
@@ -61,8 +62,8 @@ export function FactoriesPage() {
     toast.success("Status updated");
   };
 
-  const del = (id: string) => {
-    if (!confirm("Delete factory? This does not delete its gold issuance history.")) return;
+  const del = async (id: string) => {
+    if (!(await confirmBox("Delete factory? This does not delete its gold issuance history."))) return;
     updateDb(d => { d.factories = d.factories.filter(f => f.id !== id); });
     toast.success("Deleted");
   };

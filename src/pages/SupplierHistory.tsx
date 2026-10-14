@@ -31,6 +31,7 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { confirmBox } from "@/lib/confirm";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -324,7 +325,7 @@ function SupplierHistoryPageBody() {
   const [payTargetPurchase, setPayTargetPurchase] = useState<string>("__fifo");
   const [payNote, setPayNote] = useState("");
 
-  const recordPayment = () => {
+  const recordPayment = async () => {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
@@ -332,7 +333,7 @@ function SupplierHistoryPageBody() {
     // purchase (shows as Overpaid), never silently lost.
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
-        !window.confirm(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`)) return;
+        !(await confirmBox(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`))) return;
     const now = new Date().toISOString();
 
     updateDb(d => {
@@ -437,12 +438,12 @@ function SupplierHistoryPageBody() {
     // this ledger can never disagree about what "removing a purchase" means.
     const check = canVoidPurchase(db, p);
     if (!check.ok) { toast.error(check.reason!); return; }
-    if (!confirm(
+    if (!(await confirmBox(
       `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)})?
 
 ` +
       "What changes:\n" + voidImpact(db, p).join("\n") + "\n\nThis cannot be undone.",
-    )) return;
+    ))) return;
     setVoidingId(p.id);
     try {
       await voidPurchaseCascade(db, p, user!.id);

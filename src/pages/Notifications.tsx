@@ -6,6 +6,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 15;
 
@@ -43,8 +44,8 @@ export function NotificationsPage() {
   const deleteOne = (id: string) =>
     updateDb(d => { d.notifications = d.notifications.filter(n => n.id !== id); });
 
-  const clearAll = () => {
-    if (!confirm("Delete all your notifications? This cannot be undone.")) return;
+  const clearAll = async () => {
+    if (!(await confirmBox("Delete all your notifications? This cannot be undone."))) return;
     updateDb(d => { d.notifications = d.notifications.filter(n => n.userId !== user!.id); });
   };
 

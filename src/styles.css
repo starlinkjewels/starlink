@@ -596,32 +596,33 @@
 .app-page > :is(.max-w-6xl, .max-w-7xl) { max-width: none; }
 .app-page > .max-w-3xl { max-width: clamp(48rem, 52vw, 64rem); }
 
-/* ── Dialogs: the title stays at the top and the actions at the bottom while
-   the middle scrolls. Only dialogs with the standard padding (p-6) — a
-   dialog laid out its own way is left alone. ── */
-.ui-dialog { --dlg-bg: var(--color-background); --dlg-pb: 1.5rem; --dlg-line: color-mix(in oklab, var(--color-border) 70%, transparent); }
-@media (max-width: 639.98px) { .ui-dialog { --dlg-pb: calc(1.5rem + env(safe-area-inset-bottom)); } }
+/* ── Dialogs (components/ui/dialog.tsx): a title bar and a row of actions that
+   stay put, and a middle that scrolls on its own — so the scrollbar runs
+   inside the body, not up the dialog's rounded edge, and nothing scrolls
+   underneath a see-through bar. ── */
+.ui-dialog { --dlg-bg: var(--color-background); --dlg-line: color-mix(in oklab, var(--color-border) 80%, transparent); }
 :root[data-ui="glass"] .ui-dialog { --dlg-bg: color-mix(in oklab, white 94%, transparent); }
 :root[data-ui="ivory"] .ui-dialog { --dlg-bg: oklch(0.992 0.006 85); }
-
-.ui-dialog.p-6 > .ui-dialog-header {
-  /* Sticky offsets count from inside the dialog's padding, hence the -1.5rem. */
-  position: sticky; top: -1.5rem; z-index: 10;
-  margin: -1.5rem -1.5rem 0;
-  padding: 1.5rem 3.5rem 1rem 1.5rem; /* room on the right for the close button */
-  background: var(--dlg-bg);
-  border-bottom: 1px solid var(--dlg-line);
+.ui-dialog-framed { background: var(--dlg-bg); }
+.ui-dialog-head .ui-dialog-header :is(h2, [role="heading"]) { line-height: 1.15; }
+.ui-dialog-head .ui-dialog-header p { font-size: 0.8125rem; }
+.ui-dialog-body {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--color-foreground) 20%, transparent) transparent;
 }
-/* The last row of buttons — the dialog's actions — or a DialogFooter. A block
-   that also holds fields is the dialog's body, not its footer. */
-.ui-dialog.p-6 > :is(div:has(+ .ui-dialog-close-wrap):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) {
-  position: sticky; bottom: calc(-1 * var(--dlg-pb)); z-index: 10;
-  margin: 0 -1.5rem calc(-1 * var(--dlg-pb));
-  padding: 1rem 1.5rem var(--dlg-pb);
-  background: var(--dlg-bg);
+.ui-dialog-foot {
   border-top: 1px solid var(--dlg-line);
+  background: color-mix(in oklab, var(--color-secondary) 50%, var(--dlg-bg));
 }
-:root[data-ui="glass"] .ui-dialog.p-6 > :is(.ui-dialog-header, div:has(+ .ui-dialog-close-wrap):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) { backdrop-filter: blur(20px) saturate(160%); }
+/* The row of actions sits on the bar, right-aligned, whatever spacing it was written with. */
+.ui-dialog-foot > * { margin: 0 !important; padding-top: 0 !important; }
+.ui-dialog-foot > div:not([class*="justify-"]) { justify-content: flex-end; }
+@media (max-width: 639.98px) {
+  /* On a phone the actions fill the bar: easy to reach with a thumb. */
+  .ui-dialog-foot > div { flex-wrap: nowrap; }
+  .ui-dialog-foot > div > :is(button, a) { flex: 1 1 0; min-width: 0; }
+}
+:root.dark .ui-dialog-foot { background: color-mix(in oklab, var(--color-secondary) 45%, var(--dlg-bg)); }
 
 /* ══════════════════════════════════════════════════════════════════════
    Dark theme — Settings → Appearance → Theme. The "dark" class on <html>
