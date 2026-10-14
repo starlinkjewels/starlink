@@ -2911,6 +2911,7 @@ function subscribeAll(scope: Scope): Promise<void> {
       if (!sp || lazyAttached.has(col) || gen !== subGeneration) return;
       lazyAttached.add(col);
       lazyWanted.delete(col);
+      console.info(`[db] loading ${col} — a page needs it`);
       attach(sp);
     };
     for (const c of [...lazyWanted]) lazyAttach(c);
