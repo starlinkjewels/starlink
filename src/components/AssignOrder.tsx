@@ -33,7 +33,7 @@ function PersonLine({ u, size = "md" }: { u?: User; size?: "sm" | "md" }) {
   if (!u) {
     return (
       <span className="flex items-center gap-2.5 min-w-0">
-        <span className={`${box} shrink-0 rounded-full border border-dashed border-muted-foreground/40 grid place-items-center text-muted-foreground`}><UserRound className="h-3.5 w-3.5" /></span>
+        <span aria-hidden="true" className={`${box} shrink-0 rounded-full border border-dashed border-muted-foreground/40 grid place-items-center text-muted-foreground`}><UserRound className="h-3.5 w-3.5" /></span>
         <span className="min-w-0 flex flex-col text-left leading-tight">
           <span className="text-sm font-medium text-muted-foreground group-data-[highlighted]:text-inherit">Nobody</span>
           <span className="text-[11px] text-muted-foreground/80 group-data-[highlighted]:text-inherit group-data-[highlighted]:opacity-85">Not assigned</span>
@@ -45,7 +45,7 @@ function PersonLine({ u, size = "md" }: { u?: User; size?: "sm" | "md" }) {
   const sub = u.role === "admin" ? "Admin" : [u.department, !u.authUid ? "no login" : ""].filter(Boolean).join(" · ") || "Employee";
   return (
     <span className="flex items-center gap-2.5 min-w-0">
-      <span className={`${box} shrink-0 rounded-full font-semibold grid place-items-center ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{initials || "?"}</span>
+      <span aria-hidden="true" className={`${box} shrink-0 rounded-full font-semibold grid place-items-center ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{initials || "?"}</span>
       <span className="min-w-0 flex flex-col text-left leading-tight">
         <span className="text-sm font-semibold text-brand-dark truncate group-data-[highlighted]:text-inherit">{u.name}</span>
         <span className="text-[11px] text-muted-foreground truncate group-data-[highlighted]:text-inherit group-data-[highlighted]:opacity-85">{sub}</span>
