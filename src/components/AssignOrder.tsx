@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { UserCog, Users } from "lucide-react";
+import { Users, UserRound, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { updateDbAs, assignOrders, type DB, type Order, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -27,16 +27,53 @@ export function assignableStaff(db: DB): User[] {
   ];
 }
 
+/** A person as the pickers show them: initials, name, and what they do. */
+function PersonLine({ u, size = "md" }: { u?: User; size?: "sm" | "md" }) {
+  const box = size === "md" ? "h-8 w-8 text-[11px]" : "h-7 w-7 text-[10px]";
+  if (!u) {
+    return (
+      <span className="flex items-center gap-2.5 min-w-0">
+        <span className={`${box} shrink-0 rounded-full border border-dashed border-muted-foreground/40 grid place-items-center text-muted-foreground`}><UserRound className="h-3.5 w-3.5" /></span>
+        <span className="min-w-0 flex flex-col text-left leading-tight">
+          <span className="text-sm font-medium text-muted-foreground">Nobody</span>
+          <span className="text-[11px] text-muted-foreground/80">Not assigned</span>
+        </span>
+      </span>
+    );
+  }
+  const initials = u.name.split(/\s+/).filter(Boolean).map(w => w[0]).join("").slice(0, 2).toUpperCase();
+  const sub = u.role === "admin" ? "Admin" : [u.department, !u.authUid ? "no login" : ""].filter(Boolean).join(" · ") || "Employee";
+  return (
+    <span className="flex items-center gap-2.5 min-w-0">
+      <span className={`${box} shrink-0 rounded-full font-semibold grid place-items-center ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{initials || "?"}</span>
+      <span className="min-w-0 flex flex-col text-left leading-tight">
+        <span className="text-sm font-semibold text-brand-dark truncate">{u.name}</span>
+        <span className="text-[11px] text-muted-foreground truncate">{sub}</span>
+      </span>
+    </span>
+  );
+}
+
 function StaffOptions({ db }: { db: DB }) {
   return (
     <>
-      <SelectItem value={NOBODY}>Nobody</SelectItem>
+      <SelectItem value={NOBODY} className="py-1.5"><PersonLine size="sm" /></SelectItem>
       {assignableStaff(db).map(u => (
-        <SelectItem key={u.id} value={u.id}>
-          {u.name}{u.role === "admin" ? " (admin)" : u.department ? ` · ${u.department}` : ""}{u.role === "employee" && !u.authUid ? " — no login" : ""}
-        </SelectItem>
+        <SelectItem key={u.id} value={u.id} className="py-1.5"><PersonLine u={u} size="sm" /></SelectItem>
       ))}
     </>
+  );
+}
+
+/** The picker's closed face: the chosen person in full. A div, not a span, so
+ *  the trigger's one-line clamp (which stacked the icon over the name) leaves it alone. */
+function PersonTrigger({ label, u, placeholder }: { label: string; u?: User | null; placeholder?: string }) {
+  return (
+    <SelectTrigger className="h-auto min-h-12 py-2 rounded-xl w-full max-w-sm bg-card shadow-sm hover:border-primary/40 transition-colors" aria-label={label}>
+      <div className="flex-1 min-w-0">
+        <SelectValue placeholder={placeholder}>{u === null && placeholder ? undefined : <PersonLine u={u ?? undefined} />}</SelectValue>
+      </div>
+    </SelectTrigger>
   );
 }
 
@@ -48,7 +85,7 @@ function alsoSees(db: DB, o: Order): string | null {
   const wide = db.users.filter(u => u.role === "employee" && u.status !== "inactive" && u.id !== o.assignedEmployeeId && u.id !== manager?.id
     && reachOf(u, db.roles ?? []) === "all");
   if (wide.length) parts.push(`${wide.length} employee${wide.length !== 1 ? "s" : ""} whose role sees every order`);
-  return parts.length ? `Also sees it: ${parts.join(" · ")}` : null;
+  return parts.length ? parts.join(" · ") : null;
 }
 
 /** The order screen's "Assigned to": a choice for the admin, a name for anyone else. */
@@ -57,7 +94,7 @@ export function AssignOrderField({ order }: { order: Order }) {
   const { user } = useAuth();
   const current = db.users.find(u => u.id === order.assignedEmployeeId);
   if (user?.role !== "admin") {
-    return <div><p className="text-xs text-muted-foreground">Assigned to</p><p className="font-medium mt-0.5">{current?.name || "—"}</p></div>;
+    return <div className="min-w-0"><p className="text-xs text-muted-foreground mb-1.5">Assigned to</p><PersonLine u={current} /></div>;
   }
   const change = (v: string) => {
     const to = v === NOBODY ? null : v;
@@ -71,14 +108,16 @@ export function AssignOrderField({ order }: { order: Order }) {
   const also = alsoSees(db, order);
   return (
     <div className="min-w-0 col-span-2">
-      <p className="text-xs text-muted-foreground">Assigned to</p>
+      <p className="text-xs text-muted-foreground mb-1.5">Assigned to</p>
       <Select value={order.assignedEmployeeId && current ? order.assignedEmployeeId : NOBODY} onValueChange={change}>
-        <SelectTrigger className="mt-1 h-9 rounded-lg text-sm w-full max-w-xs" aria-label="Assigned to">
-          <span className="flex items-center gap-1.5 min-w-0 truncate"><UserCog className="h-3.5 w-3.5 text-primary shrink-0" /><SelectValue /></span>
-        </SelectTrigger>
-        <SelectContent><StaffOptions db={db} /></SelectContent>
+        <PersonTrigger label="Assigned to" u={current} />
+        <SelectContent className="max-h-80"><StaffOptions db={db} /></SelectContent>
       </Select>
-      {also && <p className="text-[11px] text-muted-foreground mt-1">{also}</p>}
+      {also && (
+        <p className="text-[11px] text-muted-foreground mt-1.5 flex items-start gap-1.5 max-w-sm">
+          <Eye className="h-3.5 w-3.5 shrink-0 mt-px" /><span>Also visible to {also}</span>
+        </p>
+      )}
     </div>
   );
 }
@@ -122,8 +161,8 @@ export function AssignOrdersDialog({ orders, onClose }: { orders: Order[]; onClo
           <div>
             <p className="text-xs text-muted-foreground mb-1">Give them to</p>
             <Select value={to} onValueChange={setTo}>
-              <SelectTrigger className="h-10 rounded-xl" aria-label="Give them to"><SelectValue placeholder="Choose a person" /></SelectTrigger>
-              <SelectContent><StaffOptions db={db} /></SelectContent>
+              <PersonTrigger label="Give them to" u={to ? (target ? db.users.find(u => u.id === target) : undefined) : null} placeholder="Choose a person" />
+              <SelectContent className="max-h-80"><StaffOptions db={db} /></SelectContent>
             </Select>
           </div>
           {to && (
