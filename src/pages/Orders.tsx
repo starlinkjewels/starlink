@@ -20,6 +20,8 @@ import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
+import { AssignOrdersDialog } from "@/components/AssignOrder";
+import { reachOf } from "@/lib/permissions";
 import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
@@ -63,9 +65,9 @@ function InvoiceBadge({ invoice, dispatched, onOpen, className = "" }: {
       type="button"
       title={`On invoice ${invoice.number}`}
       onClick={e => { e.preventDefault(); e.stopPropagation(); onOpen(invoice.number); }}
-      className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-success/15 border border-success/40 text-[10px] font-bold text-success hover:bg-success/25 ${className}`}
+      className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-destructive border border-destructive text-[10px] font-bold text-white hover:bg-destructive/85 shadow-sm ${className}`}
     >
-      <FileText className="h-3 w-3" /> {invoice.number}
+      <FileText className="h-3 w-3 shrink-0" /> <span className="truncate">{invoice.number}</span>
     </button>
   );
 }
@@ -180,6 +182,7 @@ export function OrdersPage() {
   const [bulkDispatch, setBulkDispatch] = useState(false);
   const [bulkDeliver, setBulkDeliver] = useState(false);
   const [bulkInvoice, setBulkInvoice] = useState(false);
+  const [bulkAssign, setBulkAssign] = useState(false);
   // The badge is a way in as well as a marker — the invoice it names opens on
   // the Invoices page, already searched for.
   const nav = useNavigate();
@@ -362,6 +365,12 @@ export function OrdersPage() {
                   <PackageCheck className="h-3.5 w-3.5" /> Delivered
                 </button>
                 </>)}
+                {user!.role === "admin" && (
+                  <button onClick={() => setBulkAssign(true)}
+                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-500/10 border border-violet-500/30 text-xs font-semibold text-violet-700 hover:bg-violet-500/20">
+                    <UserCog className="h-3.5 w-3.5" /> Assign
+                  </button>
+                )}
                 {/* An invoice covers one client, so this stays out of reach until
                     the selection is down to one — with the reason said, not just
                     a dead button. */}
@@ -390,7 +399,14 @@ export function OrdersPage() {
       {total === 0 && (
         <div className="card-luxe p-12 text-center text-muted-foreground">
           <Package className="h-10 w-10 mx-auto mb-3 opacity-20" />
-          <p>No orders match your filters.</p>
+          {user!.role === "employee" && currentUserOrders(db, user!).length === 0 ? (
+            <>
+              <p className="font-medium text-brand-dark">No orders are yours yet.</p>
+              <p className="text-xs mt-1 max-w-md mx-auto">
+                {reachOf(user, db.roles ?? []) === "all" ? "There are no orders yet." : "You see the orders assigned to you and the orders of clients you manage. Ask the admin to assign orders to you, make you a client's account manager, or give you a role that sees every order."}
+              </p>
+            </>
+          ) : <p>No orders match your filters.</p>}
         </div>
       )}
 
@@ -421,7 +437,6 @@ export function OrdersPage() {
                   )}
                   <div className="absolute top-2 left-2 z-20 flex flex-col items-start gap-1">
                     <StatusBadge status={o.status} />
-                    {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
                   </div>
                   {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} className="absolute top-2 right-2" />}
                 </div>
@@ -444,9 +459,12 @@ export function OrdersPage() {
                   <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
                     <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
                   </div>
-                  <div className="flex items-center justify-between mt-1.5">
-                    <span className="text-[11px] text-muted-foreground">{progress}%</span>
-                    <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
+                  <div className="flex items-center justify-between gap-2 mt-1.5">
+                    <span className="text-[11px] text-muted-foreground shrink-0">{progress}%</span>
+                    <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 min-w-0">
+                      {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} className="max-w-full" />}
+                      <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
+                    </span>
                   </div>
                 </div>
               </Link>
@@ -509,7 +527,6 @@ export function OrdersPage() {
                   </div>
                   <div className="flex flex-col items-end gap-1 shrink-0">
                     <StatusBadge status={o.status} />
-                    {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
                   </div>
                 </div>
 
@@ -564,7 +581,10 @@ export function OrdersPage() {
                         </p>
                       )}
                     </div>
-                    <span className="font-semibold text-sm shrink-0">{fmtMoney(o.amount)}</span>
+                    <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 shrink-0">
+                      {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
+                      <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
+                    </span>
                   </div>
                 </div>
 
@@ -624,6 +644,10 @@ export function OrdersPage() {
           onClose={() => setBulkDeliver(false)}
           onDone={() => { setBulkDeliver(false); setSel(new Set()); }}
         />
+      )}
+
+      {bulkAssign && chosen.length > 0 && (
+        <AssignOrdersDialog orders={chosen} onClose={() => { setBulkAssign(false); setSel(new Set()); }} />
       )}
 
       {bulkInvoice && chosen.length > 0 && (

@@ -5,7 +5,7 @@ import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { receiptForAdvance } from "@/lib/receipts";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
@@ -73,7 +73,7 @@ export function NewOrderPage() {
   const allClients      = isAdmin
     ? initDb.clients.filter(c => c.status === "active")
     : isEmployee
-    ? initDb.clients.filter(c => c.status === "active" && c.accountManagerId === user!.id)
+    ? currentUserClients(initDb, user!).filter(c => c.status === "active")
     : [];
   const diamondRate     = initDb.settings.diamondRate             ?? 3500;
   const metalRate       = initDb.settings.metalRate               ?? 65;

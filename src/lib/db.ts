@@ -31,7 +31,7 @@ import { LAZY_COLS } from "./pageData";
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
-import type { StaffRole } from "./permissions";
+import { reachOf, type StaffRole } from "./permissions";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -3146,14 +3146,71 @@ async function uploadInlineMedia(db: DB): Promise<DB> {
 }
 
 // helpers
+/* ── Whose work a person reaches (lib/permissions.ts, RoleReach) ──────────
+ * An admin, or an employee whose role reaches every order: everything. Any
+ * other employee: the orders assigned to them, and every order of a client
+ * they are the account manager of. A client: their own. One rule, asked the
+ * same way by every list, search and button — so a role that may update
+ * "every order" really does see every order. */
+
+/** Who is asking — the parts of a person these rules read. */
+export type Worker = { id: string; role: Role; roleId?: string; clientId?: string };
+
+/** Whether this order is within this person's work. */
+export function worksOnOrder(db: DB, user: Worker, o: Pick<Order, "clientId" | "assignedEmployeeId">): boolean {
+  if (user.role === "client") return o.clientId === user.clientId;
+  if (reachOf(user, db.roles ?? []) === "all") return true;
+  if (o.assignedEmployeeId === user.id) return true;
+  return db.clients.find((c) => c.id === o.clientId)?.accountManagerId === user.id;
+}
+
+/** Whether this client is within this person's work. */
+export function worksOnClient(db: DB, user: Worker, c: Pick<Client, "id" | "accountManagerId">): boolean {
+  if (user.role === "client") return c.id === user.clientId;
+  return reachOf(user, db.roles ?? []) === "all" || c.accountManagerId === user.id;
+}
+
+/** The clients within this person's work. */
+export function currentUserClients(db: DB, user: Worker): Client[] {
+  if (user.role !== "client" && reachOf(user, db.roles ?? []) === "all") return db.clients;
+  return db.clients.filter((c) => worksOnClient(db, user, c));
+}
+
 export function currentUserOrders(db: DB, user: User): Order[] {
-  if (user.role === "admin") return db.orders;
   if (user.role === "client") return db.orders.filter((o) => o.clientId === user.clientId);
+  if (reachOf(user, db.roles ?? []) === "all") return db.orders;
   // Employee: orders assigned to them OR belonging to a client they manage.
   const myClientIds = new Set(
     db.clients.filter((c) => c.accountManagerId === user.id).map((c) => c.id),
   );
   return db.orders.filter((o) => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
+}
+
+/**
+ * Hand orders to someone else — or to nobody. Admin only (the screens offer it
+ * to nobody else). The new holder is told; whoever manages the client keeps
+ * seeing the order either way. Call inside updateDb(). Returns how many moved.
+ */
+export function assignOrders(d: DB, orderIds: string[], employeeId: string | null, by: { id: string; name: string }, at: string): number {
+  const to = employeeId ? d.users.find((u) => u.id === employeeId) : undefined;
+  if (employeeId && !to) return 0;
+  const moved: Order[] = [];
+  for (const id of orderIds) {
+    const o = d.orders.find((x) => x.id === id);
+    if (!o || (o.assignedEmployeeId ?? null) === employeeId) continue;
+    if (employeeId) o.assignedEmployeeId = employeeId;
+    else delete o.assignedEmployeeId;
+    moved.push(o);
+  }
+  if (to && to.id !== by.id && moved.length) {
+    d.notifications.unshift({
+      id: uid("n_"), userId: to.id,
+      title: moved.length === 1 ? "Order assigned to you" : `${moved.length} orders assigned to you`,
+      body: `${moved.slice(0, 5).map((o) => o.orderNumber).join(", ")}${moved.length > 5 ? ` and ${moved.length - 5} more` : ""} · by ${by.name}`,
+      type: "info", read: false, createdAt: at,
+    });
+  }
+  return moved.length;
 }
 
 export function fmtMoney(n: number) {

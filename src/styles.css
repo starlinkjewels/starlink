@@ -789,3 +789,10 @@
 :root.dark .recharts-cartesian-axis-tick-value, :root.dark .recharts-text { fill: var(--color-muted-foreground); }
 :root.dark .recharts-cartesian-grid line { stroke: oklch(1 0 0 / 10%); }
 :root.dark .recharts-tooltip-wrapper .recharts-default-tooltip { background: var(--color-popover) !important; border-color: var(--color-border) !important; color: var(--color-foreground); }
+
+/* ══ Fonts — Settings → Appearance. lib/appearance.ts puts the chosen
+   families in --ui-font-text / --ui-font-head on <html> and loads them;
+   nothing here applies while the fonts are the ones the app was built in. ══ */
+:root[data-font] body, :root[data-font] .font-sans { font-family: var(--ui-font-text); }
+:root[data-font][data-headings="sans"]:not([data-head-font]) :is(h1, h2, h3, .font-display) { font-family: var(--ui-font-text); }
+:root[data-head-font] :is(h1, h2, h3, .font-display) { font-family: var(--ui-font-head); }

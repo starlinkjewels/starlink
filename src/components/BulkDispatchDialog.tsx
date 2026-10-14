@@ -56,7 +56,7 @@ export function BulkDispatchDialog({ orders, onClose, onDone }: {
     setSaving(true);
     try {
       const det = { courierName, trackingNumber, trackingLink, day };
-      const me = { id: user!.id, role: user!.role, department: user!.department };
+      const me = { id: user!.id, role: user!.role, roleId: user!.roleId, department: user!.department };
       // One save for the whole parcel, not one per piece.
       const sent: Order[] = [];
       updateDb(d => {
@@ -243,7 +243,7 @@ export function BulkDeliverDialog({ orders, onClose, onDone }: {
     if (!willWrite) { toast.error("None of the selected orders can be marked delivered"); return; }
     setSaving(true);
     try {
-      const me = { id: user!.id, role: user!.role, department: user!.department };
+      const me = { id: user!.id, role: user!.role, roleId: user!.roleId, department: user!.department };
       let done = 0;
       updateDb(d => {
         for (const o of [...plan.go, ...plan.update]) {

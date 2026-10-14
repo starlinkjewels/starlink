@@ -14,8 +14,9 @@ import { collectionLoaded,
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
-  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent,
+  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder,
 } from "@/lib/db";
+import { AssignOrderField } from "@/components/AssignOrder";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
 import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email";
@@ -1097,12 +1098,11 @@ function OrderDetailPageBody() {
     } finally { setIssuing(false); }
   };
 
-  // Admin, or the employee who owns this order (assigned to them OR the account
-  // manager of the order's client) — full control of their own clients' orders,
-  // as long as their role lets them change orders at all.
+  // Admin, or an employee whose work this order is (assigned to them, a client
+  // they manage, or every order when their role reaches all) — as long as their
+  // role lets them change orders at all.
   const canEditStage = () => user!.role === "admin"
-    || (user!.role === "employee" && can("orders", "edit")
-      && (order.assignedEmployeeId === user!.id || client?.accountManagerId === user!.id));
+    || (user!.role === "employee" && can("orders", "edit") && worksOnOrder(db, user!, order));
 
   // "Final Approval" can't be marked complete until the gold/diamond this
   // order actually needs has been issued to a factory — admins can still
@@ -2109,7 +2109,7 @@ function OrderDetailPageBody() {
             ...(order.deliveryTime  ? [["Delivery Time",  order.deliveryTime]]  : []),
             ...(order.rhodium       ? [["Rhodium",        order.rhodium]]       : []),
             ...(order.stamping      ? [["Stamping",       order.stamping]]      : []),
-          ] as [string, string][]).map(([k, v]) => (
+          ] as [string, string][]).map(([k, v]) => k === "Assigned to" ? <AssignOrderField key={k} order={order} /> : (
             <div key={k}><p className="text-xs text-muted-foreground">{k}</p><p className="font-medium mt-0.5">{v}</p></div>
           ))}
         </div>

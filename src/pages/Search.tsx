@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { loadDb } from "@/lib/db";
+import { loadDb, currentUserClients } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -16,9 +16,9 @@ export function SearchPage() {
     o.jewelleryType.toLowerCase().includes(ql) ||
     (o.designNumber || "").toLowerCase().includes(ql)
   ).slice(0, 8) : [];
-  // Employees only search their own assigned clients; clients don't search the client list at all.
+  // Employees search the clients within their work; clients don't search the client list at all.
   const scopedClients = user!.role === "employee"
-    ? db.clients.filter(c => c.accountManagerId === user!.id)
+    ? currentUserClients(db, user!)
     : user!.role === "admin"
     ? db.clients
     : [];

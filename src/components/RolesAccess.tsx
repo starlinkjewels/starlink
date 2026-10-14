@@ -1,16 +1,16 @@
 import { useState } from "react";
-import { updateDb, uid, rolesStoreReady, type User } from "@/lib/db";
+import { updateDb, uid, rolesStoreReady, currentUserOrders, currentUserClients, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { isAdminEmail } from "@/lib/firebase";
 import {
-  ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, ROLE_TEMPLATES, STANDARD_STAFF,
-  normalisePerms, roleOf, type PermAction, type PermMatrix, type StaffRole,
+  ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, ROLE_TEMPLATES, STANDARD_STAFF, REACH_LABEL,
+  normalisePerms, roleOf, type PermAction, type PermMatrix, type StaffRole, type RoleReach,
 } from "@/lib/permissions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ShieldCheck, Plus, Pencil, Trash2, Lock, Crown } from "lucide-react";
+import { ShieldCheck, Plus, Pencil, Trash2, Lock, Crown, Globe2, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 /**
@@ -82,6 +82,7 @@ export function RolesPanel() {
                     {r.name} {r.builtIn && <Lock className="h-3 w-3 text-muted-foreground" />}
                   </p>
                   <p className="text-[11px] text-muted-foreground">{sections} section{sections !== 1 ? "s" : ""} · {n} employee{n !== 1 ? "s" : ""}</p>
+                  <ReachChip reach={r.reach ?? "own"} />
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => setEditing(r)} className="h-7 w-7 grid place-items-center rounded-lg hover:bg-secondary" title={r.builtIn ? "View" : "Edit"}>
@@ -104,11 +105,18 @@ export function RolesPanel() {
   );
 }
 
+function ReachChip({ reach }: { reach: RoleReach }) {
+  return reach === "all"
+    ? <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-primary/10 text-primary"><Globe2 className="h-3 w-3" /> {REACH_LABEL.all}</span>
+    : <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-md bg-secondary text-muted-foreground"><UserRound className="h-3 w-3" /> {REACH_LABEL.own}</span>;
+}
+
 function RoleEditor({ role, readOnly, onClose }: { role: StaffRole; readOnly: boolean; onClose: () => void }) {
   const isNew = !role.id;
   const [name, setName] = useState(role.name);
   const [description, setDescription] = useState(role.description ?? "");
   const [perms, setPerms] = useState<PermMatrix>(role.perms);
+  const [reach, setReach] = useState<RoleReach>(role.reach ?? "own");
 
   const has = (m: string, a: PermAction) => !!perms[m as keyof PermMatrix]?.[a];
   const toggle = (m: string, a: PermAction) => {
@@ -131,6 +139,7 @@ function RoleEditor({ role, readOnly, onClose }: { role: StaffRole; readOnly: bo
   const useTemplate = (i: number) => {
     const t = ROLE_TEMPLATES[i];
     setPerms(t.perms);
+    setReach(t.reach);
     if (!name.trim()) setName(t.name);
     if (!description.trim()) setDescription(t.description);
   };
@@ -141,10 +150,10 @@ function RoleEditor({ role, readOnly, onClose }: { role: StaffRole; readOnly: bo
     const now = new Date().toISOString();
     updateDb(d => {
       if (!d.roles) d.roles = [];
-      if (isNew) d.roles.push({ id: uid("role_"), name: name.trim(), description: description.trim() || undefined, perms: clean, createdAt: now });
+      if (isNew) d.roles.push({ id: uid("role_"), name: name.trim(), description: description.trim() || undefined, perms: clean, reach, createdAt: now });
       else {
         const r = d.roles.find(x => x.id === role.id);
-        if (r) { r.name = name.trim(); r.description = description.trim() || undefined; r.perms = clean; r.updatedAt = now; }
+        if (r) { r.name = name.trim(); r.description = description.trim() || undefined; r.perms = clean; r.reach = reach; r.updatedAt = now; }
       }
     });
     toast.success(isNew ? `Role "${name.trim()}" created` : "Role saved — it applies straight away");
@@ -176,6 +185,25 @@ function RoleEditor({ role, readOnly, onClose }: { role: StaffRole; readOnly: bo
             ))}
           </div>
         )}
+        <div className="rounded-xl border border-border/60 p-3 space-y-2">
+          <p className="text-sm font-semibold text-brand-dark">Whose orders and clients</p>
+          <div className="grid sm:grid-cols-2 gap-2" role="radiogroup" aria-label="Whose orders and clients">
+            {(["own", "all"] as RoleReach[]).map(k => (
+              <button key={k} type="button" role="radio" aria-checked={reach === k} disabled={readOnly} onClick={() => setReach(k)}
+                className={`text-left rounded-xl border p-3 transition-all disabled:cursor-default ${reach === k ? "border-primary ring-2 ring-primary/25 bg-primary/5" : "border-border/70 hover:border-primary/40"}`}>
+                <span className="flex items-center gap-1.5 text-sm font-semibold text-brand-dark">
+                  {k === "all" ? <Globe2 className="h-4 w-4 text-primary" /> : <UserRound className="h-4 w-4 text-primary" />} {REACH_LABEL[k]}
+                </span>
+                <span className="block text-[11px] text-muted-foreground mt-1 leading-snug">
+                  {k === "own"
+                    ? "Orders assigned to them, and every order of a client they are the account manager of. For sales."
+                    : "Every order and every client, whoever they belong to. For production, quality, accounts or a manager."}
+                </span>
+              </button>
+            ))}
+          </div>
+          <p className="text-[11px] text-muted-foreground">The ticks below decide what they may do with them — for example, see every order and only Edit (move stages, record details), without adding new ones.</p>
+        </div>
         <div className="overflow-x-auto rounded-xl border border-border/60">
           <table className="w-full text-sm">
             <thead className="bg-secondary/50">
@@ -275,8 +303,12 @@ export function EmployeeAccessControls({ u }: { u: User }) {
   // An employee without a login cannot sign in, so a role would do nothing.
   if (!u.authUid) return null;
   const current = roleOf({ role: "employee", roleId: u.roleId }, db.roles ?? []);
+  const sees = (current.reach ?? "own") === "all"
+    ? null
+    : { orders: currentUserOrders(db, u).length, clients: currentUserClients(db, u).length };
   return (
-    <div className="flex items-center gap-2 mt-3">
+    <div className="mt-3 space-y-1">
+    <div className="flex items-center gap-2">
       <select
         value={current.id}
         disabled={!live}
@@ -287,6 +319,12 @@ export function EmployeeAccessControls({ u }: { u: User }) {
         {[STANDARD_STAFF, ...(db.roles ?? [])].map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
       </select>
       {live && <button onClick={() => setAdmin(true)} className="text-[11px] text-primary hover:underline whitespace-nowrap">Make admin</button>}
+    </div>
+    {sees === null
+      ? <p className="text-[11px] text-muted-foreground">Sees every order and client</p>
+      : sees.orders === 0 && sees.clients === 0
+      ? <p className="text-[11px] text-amber-700">Sees no orders yet — assign orders or clients to them, or give a role that sees every order</p>
+      : <p className="text-[11px] text-muted-foreground">Sees their own: {sees.orders} order{sees.orders !== 1 ? "s" : ""} · {sees.clients} client{sees.clients !== 1 ? "s" : ""}</p>}
     </div>
   );
 }
