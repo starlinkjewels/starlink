@@ -47,9 +47,11 @@ export interface MeltPlan {
   otherMetal?: string;       // a second metal (platinum…) this does not handle
 }
 
-/** The record of the job: the gold "finishing" issue Final Approval writes. */
+/** The record of the job: the gold "finishing" issue Final Approval writes — or,
+ *  on older orders, the gold issue the finished piece was received against. */
 function finishRecord(db: DB, o: Order): MaterialIssuance | undefined {
-  return (db.materialIssuances ?? []).find(i => i.orderId === o.id && i.material === "gold" && i.source === "factoryPool" && i.finishedNetWeight != null);
+  const gold = (db.materialIssuances ?? []).filter(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
+  return gold.find(i => i.source === "factoryPool") ?? gold[0];
 }
 
 /** What melting this order's piece would give back — and whether it may be melted. */
