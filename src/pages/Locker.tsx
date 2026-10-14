@@ -1,4 +1,5 @@
 import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
+import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
@@ -281,7 +282,9 @@ export function LockerPage() {
   // from the full, unfiltered history, so a filtered view still shows each
   // entry's true balance-at-the-time, like a bank statement search does.
   const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (filterType === "all" || t.type === filterType));
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filteredTxns, PAGE_SIZE);
+  // The last 15 days first, older entries as you scroll; the opening balance
+  // shows at the foot once the oldest entry is in view.
+  const { w, paged, page, totalPages } = useScrollPages(filteredTxns, t => t.createdAt, { filtered: filtersActive, resetKey: [selected?.id, filterFrom, filterTo, filterType] });
 
   const totalIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").reduce((s, t) => s + t.amountInr, 0);
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
@@ -651,9 +654,7 @@ export function LockerPage() {
             )}
           </div>
 
-          {totalPages > 1 && (
-            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${filteredTxns.length}`} />
-          )}
+          <LoadOlder w={w} />
         </motion.div>
       )}
 
