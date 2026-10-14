@@ -11,7 +11,7 @@ import { totalsCovered } from "@/lib/partyTotals";
 import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
-import { can } from "@/lib/permissions";
+import { can, nextAccessChange } from "@/lib/permissions";
 import { pageRequirement } from "@/lib/modules";
 import { GiftCardPopup } from "@/components/GiftCardPopup";
 import { ScanModal } from "@/components/ScanModal";
@@ -269,6 +269,15 @@ export function AppLayout() {
   const canSeeGiftCard = user!.role === "client" && !!db.clients.find(c => c.id === user!.clientId)?.giftCardEnabled;
   // An employee's sidebar is drawn from their role: a section they may not see
   // is not offered. Admins see everything; a client's portal is unaffected.
+  // Temporary access starts and ends on the clock, not on a save: redraw at
+  // that moment, so a grant that has ended is gone from the screen at once.
+  const [, setAccessTick] = useState(0);
+  const nextChange = nextAccessChange(user, db.roles ?? []);
+  useEffect(() => {
+    if (nextChange == null) return;
+    const t = window.setTimeout(() => setAccessTick(x => x + 1), Math.min(Math.max(nextChange - Date.now() + 500, 1000), 2 ** 31 - 1));
+    return () => clearTimeout(t);
+  }, [nextChange]);
   const roleAllows = (path: string) => {
     if (user!.role !== "employee") return true;
     const need = pageRequirement(path);

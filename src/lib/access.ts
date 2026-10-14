@@ -15,7 +15,7 @@ export function currentPermUser(): PermUser | null {
   if (!fb) return null;
   if (isAdminEmail(fb.email)) return { role: "admin" };
   const u = loadDb().users.find(x => x.authUid === fb.uid);
-  return u ? { role: u.role, roleId: u.roleId } : null;
+  return u ? { id: u.id, role: u.role, roleId: u.roleId } : null;
 }
 
 /** Whether the signed-in person may do this in this section. */

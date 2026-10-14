@@ -161,41 +161,159 @@ export const ROLE_TEMPLATES: { name: string; description: string; perms: PermMat
 ];
 
 export interface PermUser {
+  /** The person's app id (User.id) — their own access record is keyed by it. */
+  id?: string;
   role: "admin" | "employee" | "client";
   roleId?: string;
 }
 
+/* ── Each person's own access, on top of their role ──────────────────────
+ * The usual way (role-based access with exceptions): a role is the template
+ * for a job and stays linked, so changing a role changes everyone who holds
+ * it; a person's own record says only what differs for them —
+ *   • add     — given on top of the role, for good;
+ *   • remove  — taken away from what the role gives;
+ *   • temp    — given for a while, with a reason: it starts now or on a date
+ *               and ends by itself at `until`. Kept afterwards as history,
+ *               never deleted — so who had what, and when, can be looked up.
+ * The record lives in the roles store, which only an admin may write: nobody
+ * can give themselves more. */
+export interface TempAccess {
+  id: string;
+  perms: PermMatrix;
+  /** Also every order and client, for the time. */
+  reach?: "all";
+  from?: string;
+  until: string;
+  reason?: string;
+  by: string;
+  byName: string;
+  at: string;
+  /** Ended early, by hand. */
+  endedAt?: string;
+  endedByName?: string;
+}
+export interface UserAccess {
+  id: string;
+  kind: "userAccess";
+  userId: string;
+  /** "Access — Ravi": how the record reads in the activity log. */
+  name: string;
+  reach?: RoleReach;
+  add?: PermMatrix;
+  remove?: PermMatrix;
+  temp?: TempAccess[];
+  createdAt: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+/** What the roles store holds: the roles, and each person's own access. */
+export type AccessDoc = StaffRole | UserAccess;
+export const isUserAccess = (d: AccessDoc): d is UserAccess => (d as UserAccess).kind === "userAccess";
+export const rolesOnly = (docs: AccessDoc[]): StaffRole[] => docs.filter((d): d is StaffRole => !isUserAccess(d));
+export const userAccessId = (userId: string) => `ua_${userId}`;
+export function accessOf(docs: AccessDoc[], userId?: string): UserAccess | undefined {
+  if (!userId) return undefined;
+  return docs.find((d): d is UserAccess => isUserAccess(d) && d.userId === userId);
+}
+
+export type TempState = "upcoming" | "active" | "ended";
+export function tempState(t: TempAccess, now = Date.now()): TempState {
+  if (t.endedAt || now >= +new Date(t.until)) return "ended";
+  if (t.from && now < +new Date(t.from)) return "upcoming";
+  return "active";
+}
+export function activeTemp(ua: UserAccess | undefined, now = Date.now()): TempAccess[] {
+  return (ua?.temp ?? []).filter(t => tempState(t, now) === "active");
+}
+
+const on = (m: PermMatrix | undefined, mod: ModuleKey, a: PermAction) => !!m?.[mod]?.[a];
+
 /** The role an employee holds — Standard staff when none is set, or when the
  *  one they held has since been deleted. */
-export function roleOf(user: PermUser, roles: StaffRole[]): StaffRole {
-  return (user.roleId && roles.find(r => r.id === user.roleId)) || STANDARD_STAFF;
+export function roleOf(user: PermUser, docs: AccessDoc[]): StaffRole {
+  return (user.roleId && rolesOnly(docs).find(r => r.id === user.roleId)) || STANDARD_STAFF;
+}
+
+/** The role with a person's own changes applied: (role − removed) + added. */
+export function applyOwn(role: PermMatrix, add?: PermMatrix, remove?: PermMatrix, extra: PermMatrix[] = []): PermMatrix {
+  const out: PermMatrix = {};
+  for (const m of ROLE_MODULES) {
+    const set: PermSet = {};
+    for (const a of MODULE_ACTIONS[m.key]) {
+      // Taking View away takes the role's whole section, whatever else it gave.
+      let yes = on(role, m.key, a) && on(role, m.key, "view") && !on(remove, m.key, "view");
+      if (on(remove, m.key, a)) yes = false;
+      if (on(add, m.key, a)) yes = true;
+      if (extra.some(x => on(x, m.key, a))) yes = true;
+      if (yes) set[a] = true;
+    }
+    // Anything in a section means they may see it.
+    if (Object.keys(set).length) out[m.key] = { ...set, view: true };
+  }
+  return out;
+}
+
+/**
+ * What this person may do right now: (their role − what was taken away) +
+ * what was added + any temporary access running now. A temporary grant is a
+ * later, deliberate decision, so it applies even to something taken away.
+ */
+export function effectivePerms(user: PermUser, docs: AccessDoc[], now = Date.now()): PermMatrix {
+  const ua = accessOf(docs, user.id);
+  return applyOwn(roleOf(user, docs).perms, ua?.add, ua?.remove, activeTemp(ua, now).map(t => t.perms));
 }
 
 /** Whose work this person reaches — an admin everything; an employee as their
- *  role says ("own" when it says nothing); a client only their own. */
-export function reachOf(user: PermUser | null | undefined, roles: StaffRole[]): RoleReach {
+ *  own access, then their role, says ("own" when nothing does), widened while
+ *  a temporary grant of every order runs; a client only their own. */
+export function reachOf(user: PermUser | null | undefined, docs: AccessDoc[], now = Date.now()): RoleReach {
   if (!user) return "own";
   if (user.role === "admin") return "all";
   if (user.role !== "employee") return "own";
-  return roleOf(user, roles).reach ?? "own";
+  const ua = accessOf(docs, user.id);
+  if (activeTemp(ua, now).some(t => t.reach === "all")) return "all";
+  return ua?.reach ?? roleOf(user, docs).reach ?? "own";
 }
 
 /**
  * The one question every screen asks. An admin may always; a client never
- * through this (their portal decides); an employee as their role says — and
- * nothing in a section they may not see.
+ * through this (their portal decides); an employee as their access says —
+ * and nothing in a section they may not see.
  */
-export function can(user: PermUser | null | undefined, roles: StaffRole[], module: ModuleKey, action: PermAction): boolean {
+export function can(user: PermUser | null | undefined, docs: AccessDoc[], module: ModuleKey, action: PermAction, now = Date.now()): boolean {
   if (!user) return false;
   if (user.role === "admin") return true;
   if (user.role !== "employee") return false;
   if (ADMIN_ONLY_MODULES.includes(module)) return false;
   if (ALWAYS_OPEN_MODULES.includes(module)) return action === "view";
   if (!MODULE_ACTIONS[module].includes(action)) return false;
-  const set = roleOf(user, roles).perms[module];
+  const set = effectivePerms(user, docs, now)[module];
   if (!set?.view) return false; // nothing in a section you cannot see
   return !!set[action];
 }
+
+/** When this person's access next changes by itself — a temporary grant
+ *  starting or ending — so the screen can be redrawn at that moment. */
+export function nextAccessChange(user: PermUser | null | undefined, docs: AccessDoc[], now = Date.now()): number | null {
+  if (!user || user.role !== "employee") return null;
+  const times = (accessOf(docs, user.id)?.temp ?? []).filter(t => !t.endedAt)
+    .flatMap(t => [t.from ? +new Date(t.from) : NaN, +new Date(t.until)]).filter(x => x > now);
+  return times.length ? Math.min(...times) : null;
+}
+
+/** What chosen permissions differ by from the role, cell by cell — the
+ *  record to keep. The same as the role → nothing is kept. */
+export function diffFromRole(role: PermMatrix, chosen: PermMatrix): { add: PermMatrix; remove: PermMatrix } {
+  const add: PermMatrix = {}, remove: PermMatrix = {};
+  for (const m of ROLE_MODULES) for (const a of MODULE_ACTIONS[m.key]) {
+    const had = on(role, m.key, a) && on(role, m.key, "view"), has = on(chosen, m.key, a);
+    if (has && !had) add[m.key] = { ...(add[m.key] ?? {}), [a]: true };
+    if (had && !has) remove[m.key] = { ...(remove[m.key] ?? {}), [a]: true };
+  }
+  return { add, remove };
+}
+export const countCells = (p: PermMatrix | undefined) => Object.values(p ?? {}).reduce((s, set) => s + Object.values(set ?? {}).filter(Boolean).length, 0);
 
 /** Tidy a matrix: drop actions a section does not have, and anything granted
  *  without View (which could never be used). */

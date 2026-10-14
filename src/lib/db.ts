@@ -31,7 +31,7 @@ import { LAZY_COLS } from "./pageData";
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
-import { reachOf, type StaffRole } from "./permissions";
+import { reachOf, type AccessDoc } from "./permissions";
 
 export type Role = "admin" | "employee" | "client";
 
@@ -1342,7 +1342,7 @@ export interface DB {
    *  the security rules. See AdminRecord. */
   adminRecords: AdminRecord[];
   /** Staff roles — named sets of what a holder may see and do. */
-  roles: StaffRole[];
+  roles: AccessDoc[];
   session: { userId: string | null };
 }
 
