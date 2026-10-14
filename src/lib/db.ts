@@ -2392,6 +2392,10 @@ export function collectionsLoaded(cols: readonly string[]): boolean {
 /* ── Totals kept by the server (functions/src/summaries.ts), read-only ── */
 let summaryMap = new Map<string, Record<string, unknown>>();
 let summariesOn = false;
+/** The totals listener has answered at all — with data, or with a refusal. */
+let summariesDone = false;
+/** Whether it is known yet if the server's totals are there (see PageData in AppLayout). */
+export function summariesSettled(): boolean { return summariesDone; }
 /** One party's stored totals: "factory_<id>", "supplier_<id>", "locker_<id>". */
 export function summaryOf(id: string): Record<string, unknown> | undefined { return summaryMap.get(id); }
 /** True once the server's totals have answered this session. */
@@ -2637,6 +2641,7 @@ export function stopDb() {
   loadWaiters.clear();
   summaryMap = new Map();
   summariesOn = false;
+  summariesDone = false;
   Object.assign(cache, emptyDb());
   remote = emptyDb();
   for (const k of Object.keys(remoteIdx)) delete remoteIdx[k];
@@ -2740,6 +2745,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   lazyWarned.clear();
   summaryMap = new Map();
   summariesOn = false;
+  summariesDone = false;
   for (const col of ARRAY_COLS) {
     // Requested by the admin and nobody else. The rules would refuse it to
     // anyone else anyway; not asking at all means there is nothing to refuse.
@@ -2922,10 +2928,13 @@ function subscribeAll(scope: Scope): Promise<void> {
       unsubscribers.push(onSnapshot(collection(fsdb, "summaries"), LISTEN, serverFirst("summaries", (snap) => {
         summaryMap = new Map(snap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
         summariesOn = true;
+        summariesDone = true;
         if (seeded) emit();
       }), (err) => {
         console.warn("[db] server totals not available:", err?.message ?? err);
         summariesOn = false;
+        summariesDone = true;
+        emit();
       }));
     };
 

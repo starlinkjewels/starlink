@@ -36,6 +36,11 @@ const LIGHT: Record<string, TotalsKind[]> = {
   "/suppliers": ["supplier"],               // the supplier list's cards
 };
 
+/** A page that can draw from the server's totals alone (when they cover it). */
+export function isLightPage(pathname: string): boolean {
+  return (pathname.replace(/\/+$/, "") || "/") in LIGHT;
+}
+
 /**
  * The heavy records a page must have before it draws. A light page needs none
  * while the server's totals cover it; when they do not (a party added seconds

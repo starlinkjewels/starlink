@@ -5,8 +5,8 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
-import { loadDb, collectionsLoaded, ensureCollections } from "@/lib/db";
-import { pageNeeds } from "@/lib/pageData";
+import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
+import { pageNeeds, isLightPage } from "@/lib/pageData";
 import { totalsCovered } from "@/lib/partyTotals";
 import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
@@ -190,11 +190,22 @@ const ICON_COLORS: Record<string, string> = {
 function PageData({ children, isClient }: { children: React.ReactNode; isClient: boolean }) {
   const db = useDb();
   const loc = useLocation();
-  const needs = isClient ? [] : pageNeeds(loc.pathname, k => totalsCovered(db, k, k === "factory" && loc.pathname.replace(/\/+$/, "") === "/factories"));
+  const light = !isClient && isLightPage(loc.pathname);
+  // A light page decides once the server's totals have answered — drawing
+  // first would find them "missing" and load the records it meant to avoid.
+  // Four seconds without an answer: load the records, as every page did.
+  const [gaveUp, setGaveUp] = useState(false);
+  const deciding = light && !summariesSettled() && !gaveUp;
+  useEffect(() => {
+    if (!deciding) return;
+    const t = setTimeout(() => setGaveUp(true), 4000);
+    return () => clearTimeout(t);
+  }, [deciding]);
+  const needs = isClient || deciding ? [] : pageNeeds(loc.pathname, k => totalsCovered(db, k, k === "factory" && loc.pathname.replace(/\/+$/, "") === "/factories"));
   const ready = collectionsLoaded(needs);
   const key = needs.join(",");
   useEffect(() => { if (!ready) void ensureCollections(needs); }, [key, ready]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!ready) {
+  if (deciding || !ready) {
     return <div className="grid place-items-center py-24 text-muted-foreground gap-2"><Loader2 className="h-6 w-6 animate-spin" /><span className="text-xs">Loading…</span></div>;
   }
   return <>{children}</>;
