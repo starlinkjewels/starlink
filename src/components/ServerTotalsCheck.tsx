@@ -5,7 +5,7 @@ import { CheckCircle2, AlertTriangle, RefreshCw, Server, Loader2 } from "lucide-
 import { toast } from "sonner";
 import { db as fsdb, functions, DATABASE_ID } from "@/lib/firebase";
 import { loadDb } from "@/lib/db";
-import { factoryAccount, factoryFineGoldBalance, supplierAccount, lockerBalance } from "@/lib/manufacturing";
+import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAccount, lockerBalance } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 
 /** Databases whose server totals are running (functions/src/summaries.ts). */
@@ -21,7 +21,11 @@ function appFigures() {
   for (const f of d.factories) {
     const iss = d.materialIssuances.filter(i => i.factoryId === f.id);
     const a = factoryAccount(iss, f, (d.factoryPayments ?? []).filter(x => x.factoryId === f.id));
-    out.push({ id: `factory_${f.id}`, name: `Factory · ${f.name}`, fig: { ...a, fineGold: factoryFineGoldBalance(d.materialIssuances, f.id, f.openingFineGold) } });
+    out.push({ id: `factory_${f.id}`, name: `Factory · ${f.name}`, fig: {
+      ...a, fineGold: factoryFineGoldBalance(d.materialIssuances, f.id, f.openingFineGold),
+      goldPool: factoryPoolBuckets(iss, f.id, "gold").reduce((t, x) => t + x.balance, 0),
+      diaPool: factoryPoolBuckets(iss, f.id, "diamond").reduce((t, x) => t + x.balance, 0),
+    } });
   }
   for (const s of d.suppliers) {
     const a = supplierAccount(

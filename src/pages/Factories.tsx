@@ -1,3 +1,4 @@
+import { factoryFigures } from "@/lib/partyTotals";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -29,15 +30,10 @@ export function FactoriesPage() {
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
 
-  // Every factory's account, worked out once — rows, sort and totals share it.
-  const accounts = new Map(db.factories.map(fac => [
-    fac.id,
-    factoryAccount(
-      db.materialIssuances.filter(i => i.factoryId === fac.id),
-      fac,
-      (db.factoryPayments ?? []).filter(x => x.factoryId === fac.id),
-    ),
-  ]));
+  // Every factory's figures, worked out once — rows, sort and totals share it.
+  // From the records when they are loaded, else the server's totals (this list
+  // is light in pageData.ts and does not download the factory books for them).
+  const accounts = new Map(db.factories.map(fac => [fac.id, factoryFigures(db, fac)]));
   // The largest labour bill outstanding comes first, whichever way it runs.
   const weight = (fac: Factory) => {
     const a = accounts.get(fac.id);
@@ -116,7 +112,7 @@ export function FactoriesPage() {
         <div className="card-luxe divide-y divide-border/50 overflow-hidden">
           {paged.map(fac => {
             const account = accounts.get(fac.id)!;
-            const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id, fac.openingFineGold);
+            const fineGold = account.fineGold;
             return (
               <Link key={fac.id} to={`/factories/${fac.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
                 <div className="h-10 w-10 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4.5 w-4.5" /></div>
@@ -165,14 +161,11 @@ export function FactoriesPage() {
       {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(fac => {
-          const issuances = db.materialIssuances.filter(i => i.factoryId === fac.id);
           const account = accounts.get(fac.id)!;
-          const goldPool = factoryPoolBuckets(issuances, fac.id, "gold").reduce((s, b) => s + b.balance, 0);
           // Fine (24KT) gold with the opening balance — the figure the factory's
           // own page shows. Raw grams in minus grams out mixed karats and left
           // the opening gold out, so the card could read −144 g for 18 g held.
-          const fineGold = factoryFineGoldBalance(db.materialIssuances, fac.id, fac.openingFineGold);
-          const diaPool = factoryPoolBuckets(issuances, fac.id, "diamond").reduce((s, b) => s + b.balance, 0);
+          const { fineGold, goldPool, diaPool } = account;
           return (
             <div key={fac.id} className="card-luxe card-hover p-5 flex flex-col">
               <div className="flex items-start gap-3">

@@ -1,3 +1,4 @@
+import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats } from "@/lib/db";
@@ -10,7 +11,7 @@ import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import type { Order } from "@/lib/db";
-import { factoryAccount, supplierAccount, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
+import { fmtMoneyInr } from "@/lib/manufacturing";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
@@ -35,22 +36,13 @@ export function Dashboard() {
   const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);
   // Summed per-entity so each one's migration opening balance is included.
-  const makingChargesPending = db.factories.reduce(
-    (s, f) => s + factoryAccount(
-      db.materialIssuances.filter(i => i.factoryId === f.id),
-      f,
-      (db.factoryPayments ?? []).filter(x => x.factoryId === f.id),
-    ).chargesPending, 0);
-  const supplierPaymentsPending = db.suppliers.reduce(
-    (s, sup) => s + Math.max(0, supplierAccount(
-      db.purchases.filter(p => p.supplierId === sup.id),
-      (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id),
-      sup,
-      (db.supplierPayments ?? []).filter(x => x.supplierId === sup.id),
-      // The NET, floored at zero, which is what the Suppliers page totals. Using
-      // balanceOwed counted every unpaid bill in full and ignored advances,
-      // overpayments and refunds, so the two pages disagreed on the same figure.
-    ).net), 0);
+  // From the records when they are loaded, else the server's totals — the
+  // Dashboard is light (pageData.ts) and does not download the books for these.
+  const makingChargesPending = db.factories.reduce((s, f) => s + factoryFigures(db, f).chargesPending, 0);
+  // The NET, floored at zero, which is what the Suppliers page totals. Using
+  // balanceOwed counted every unpaid bill in full and ignored advances,
+  // overpayments and refunds, so the two pages disagreed on the same figure.
+  const supplierPaymentsPending = db.suppliers.reduce((s, sup) => s + Math.max(0, supplierFigures(db, sup).net), 0);
 
   // Cash Position & Profit — every payment in/out (client payments, supplier/
   // factory payments, expenses) that was tagged to a Locker rolls up here.
@@ -61,8 +53,8 @@ export function Dashboard() {
   const activeLockers = db.lockers.filter(l => l.active !== false);
   const usdLockers = activeLockers.filter(l => (l.currency || "INR") === "USD");
   const inrLockers = activeLockers.filter(l => (l.currency || "INR") === "INR");
-  const usdProfit = usdLockers.reduce((s, l) => s + (lockerBalance(l, db.lockerTransactions) - (l.openingBalance || 0)), 0);
-  const inrProfit = inrLockers.reduce((s, l) => s + (lockerBalance(l, db.lockerTransactions) - (l.openingBalance || 0)), 0);
+  const usdProfit = usdLockers.reduce((s, l) => s + (lockerFigure(db, l) - (l.openingBalance || 0)), 0);
+  const inrProfit = inrLockers.reduce((s, l) => s + (lockerFigure(db, l) - (l.openingBalance || 0)), 0);
   const rate = Number(inrPerUsd) || 0;
   const combinedUsd = rate > 0 ? usdProfit + inrProfit / rate : null;
   const combinedInr = rate > 0 ? usdProfit * rate + inrProfit : null;

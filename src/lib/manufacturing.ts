@@ -12,10 +12,12 @@
 import {
   purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
   factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+  factoryPoolBalance, factoryPoolBuckets,
 } from "./pure/accounts";
 export {
   purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
   factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+  factoryPoolBalance, factoryPoolBuckets,
 };
 const r0 = (n: number) => Math.round(n);
 import {
@@ -200,39 +202,6 @@ export function issuanceWastage(i: MaterialIssuance): number {
   return i.quantityIssued - issuanceUsed(i);
 }
 
-/**
- * How much of `material`+`purityOrQuality` is currently sitting at `factoryId`,
- * bulk-delivered but not yet drawn down for a specific order — the factory's
- * own accumulated pool. Both terms are derived, never stored:
- *   delivered = Σ quantityIssued of bulk deliveries (orderId unset) for this
- *               factory/material/purity
- *   drawn     = Σ quantityIssued of pool draws (orderId set, source
- *               "factoryPool") for this factory/material/purity
- * Floors at 0 defensively. This is a plain derived read over the app's normal
- * diffed in-memory sync — same trust level as clientAccount()/Order.advances,
- * NOT a Firestore transaction like src/lib/stock.ts's decreaseStock. Two staff
- * drawing from the same factory's pool at the exact same instant could both
- * pass this check (a deliberate, reviewed tradeoff — see manufacturingReadiness
- * comment style — rather than adding a second transactional subsystem for a
- * much lower-volume, single-factory-scoped number).
- */
-export function factoryPoolBalance(
-  issuances: MaterialIssuance[],
-  factoryId: string,
-  material: "gold" | "diamond",
-  purityOrQuality: string,
-): number {
-  let delivered = 0, drawn = 0;
-  for (const i of issuances) {
-    if (i.factoryId !== factoryId || i.material !== material || i.purityOrQuality !== purityOrQuality) continue;
-    if (!i.orderId) delivered += i.quantityIssued;
-    // A draw marked "returned" at Final Approval didn't end up consuming pool
-    // material after all — exclude it so the pool balance goes back up,
-    // without needing to rewrite quantityIssued itself (re-edit safe).
-    else if (i.source === "factoryPool" && i.finishDisposition !== "returned") drawn += i.quantityIssued;
-  }
-  return Math.max(0, Math.round((delivered - drawn) * 100) / 100);
-}
 
 
 /**
@@ -274,20 +243,6 @@ export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labou
   return labour.minimumLabour > (labour.perGramRate || 0) * (netWeight || 0);
 }
 
-/** Every purity/quality this factory currently holds a positive pool balance
- *  in, for `material` — drives the "draw from pool" picker. */
-export function factoryPoolBuckets(
-  issuances: MaterialIssuance[],
-  factoryId: string,
-  material: "gold" | "diamond",
-): { purityOrQuality: string; balance: number }[] {
-  const purities = new Set(
-    issuances.filter(i => i.factoryId === factoryId && i.material === material && !i.orderId).map(i => i.purityOrQuality),
-  );
-  return [...purities]
-    .map(purityOrQuality => ({ purityOrQuality, balance: factoryPoolBalance(issuances, factoryId, material, purityOrQuality) }))
-    .filter(b => b.balance > 0);
-}
 
 /** Karat string ("9K".."24K") -> fraction of pure (24K) gold, e.g. "18K" -> 0.75.
  *  Jewelers' standard back-of-envelope ratio — an ESTIMATE for low-stock

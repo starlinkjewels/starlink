@@ -21,6 +21,7 @@ export interface FactoryPayment extends Paid {}
 
 export interface MaterialIssuance {
   factoryId: string;
+  orderId?: string;
   material: "gold" | "diamond" | string;
   purityOrQuality: string;
   quantityIssued: number;
