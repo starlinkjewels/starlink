@@ -8,7 +8,7 @@ import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, orderIsDispatched } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,54 +23,11 @@ import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
 import { AssignOrdersDialog } from "@/components/AssignOrder";
 import { reachOf } from "@/lib/permissions";
 import { OrderProfitBadge } from "@/components/OrderProfitCard";
+import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
 
 const PAGE_SIZE = 12;
-
-/** A piece that ought to be on an invoice by now: it has shipped, it belongs to
- *  a client, and it was not rejected. Anything else has nothing to bill yet. */
-function needsInvoice(o: Order): boolean {
-  return orderIsDispatched(o) && !o.forReadyStock && o.status !== "Rejected";
-}
-
-/**
- * Whether this piece has been billed, said on the card itself.
- *
- * Billing is done a parcel at a time, and an order left out of one simply
- * stopped being mentioned — it looked exactly like an order that had been
- * invoiced, and the only way to find it was to open the Invoices page and work
- * out what was missing. A dispatched piece now either carries its invoice
- * number or says plainly that it has none.
- *
- * Only dispatched work is marked: a piece still in production has nothing to be
- * billed for yet, and flagging it would be noise on every card in the list.
- */
-function InvoiceBadge({ invoice, dispatched, onOpen, className = "" }: {
-  invoice?: { number: string };
-  dispatched: boolean;
-  onOpen: (number: string) => void;
-  className?: string;
-}) {
-  if (!invoice && !dispatched) return null;
-  if (!invoice) {
-    return (
-      <span className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-amber-500/15 border border-amber-500/40 text-[10px] font-bold text-amber-700 ${className}`}>
-        <FileText className="h-3 w-3" /> NO INVOICE
-      </span>
-    );
-  }
-  return (
-    <button
-      type="button"
-      title={`On invoice ${invoice.number}`}
-      onClick={e => { e.preventDefault(); e.stopPropagation(); onOpen(invoice.number); }}
-      className={`inline-flex items-center gap-1 h-5 px-1.5 rounded-md bg-destructive border border-destructive text-[10px] font-bold text-white hover:bg-destructive/85 shadow-sm ${className}`}
-    >
-      <FileText className="h-3 w-3 shrink-0" /> <span className="truncate">{invoice.number}</span>
-    </button>
-  );
-}
 
 /** A tick-box riding on top of a card, which must not follow the card's link. */
 function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; onToggle: () => void; className?: string }) {
@@ -80,9 +37,9 @@ function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; on
       aria-pressed={checked}
       aria-label={checked ? "Deselect this piece" : "Select this piece"}
       onClick={e => { e.preventDefault(); e.stopPropagation(); onToggle(); }}
-      className={`z-30 h-6 w-6 grid place-items-center rounded-md border shadow-soft transition-colors ${checked ? "bg-primary border-primary text-white" : "bg-white/90 border-border text-transparent hover:border-primary"} ${className}`}
+      className={`z-30 h-[22px] w-[22px] grid place-items-center rounded-md border-[1.5px] transition-all ${checked ? "bg-primary border-primary text-white shadow-sm" : "bg-card border-border text-transparent hover:border-primary hover:text-primary/40"} ${className}`}
     >
-      <Check className="h-4 w-4" />
+      <Check className="h-3.5 w-3.5" strokeWidth={3} />
     </button>
   );
 }
@@ -420,55 +377,60 @@ export function OrdersPage() {
             const img = o.cadImage || o.images?.[0];
             return (
               <Link key={o.id} to={`/orders/${o.id}`}
-                className={`card-luxe card-hover overflow-hidden block min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
+                className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
                 {/* Status and the tick box sit above the photo, never on it —
                     a CAD sheet's measurements run right to its corners. */}
-                <div className="flex items-center justify-between gap-2 px-2.5 py-2">
+                <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
                   <StatusBadge status={o.status} />
                   {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
                 </div>
-                <div className={`relative aspect-square overflow-hidden ${img ? "bg-secondary animate-pulse" : "bg-secondary/50"}`}>
+                {/* The whole sheet, on white: shown in full, never cropped. */}
+                <div className={`relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 ${img ? "bg-secondary/60 animate-pulse" : "bg-secondary/50"}`}>
                   {img ? (
                     <img
                       src={img}
                       alt={o.orderNumber}
                       loading="lazy"
                       decoding="async"
-                      onLoad={e => e.currentTarget.parentElement?.classList.remove("animate-pulse")}
+                      onLoad={e => { const box = e.currentTarget.parentElement; box?.classList.remove("animate-pulse", "bg-secondary/60"); box?.classList.add("bg-white"); }}
                       onError={e => { e.currentTarget.parentElement?.classList.remove("animate-pulse"); e.currentTarget.style.display = "none"; }}
-                      className="relative z-10 w-full h-full object-cover"
+                      className="relative z-10 w-full h-full object-contain p-1 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                     />
                   ) : (
                     <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
                   )}
                 </div>
-                <div className="p-3">
-                  <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
-                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">
+                <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-w-0">
+                  <p className="font-semibold text-[15px] leading-tight tracking-tight truncate">{o.orderNumber}</p>
+                  <p className="text-xs text-muted-foreground truncate mt-1">
                     {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
-                  {o.melted ? (
-                    <p className="text-[11px] font-bold text-destructive truncate">MELTED</p>
-                  ) : jobFinished(o) && (
-                    <p className="text-[11px] font-bold text-destructive truncate">JOB FINISH</p>
-                  )}
                   {user!.role !== "client" && (o.forReadyStock
-                    ? <p className="text-[11px] font-medium text-primary truncate">🏭 Ready Stock</p>
-                    : client && <p className="text-[11px] font-medium text-muted-foreground truncate">{client.companyName}</p>)}
-                  {user!.role === "admin" && <OrderProfitBadge db={db} order={o} />}
+                    ? <p className="text-xs font-medium text-primary truncate mt-1">🏭 Ready Stock</p>
+                    : client && <p className="text-xs font-semibold text-foreground/70 truncate mt-1">{client.companyName}</p>)}
+                  {(o.melted || jobFinished(o)) && (
+                    <span className="self-start mt-1.5 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-md bg-destructive/10 text-destructive">
+                      {o.melted ? "MELTED" : "JOB FINISH"}
+                    </span>
+                  )}
+                  {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-1.5 text-xs" />}
                   {isStaff && (() => {
                     const wp = pieceWeights(o, db.materialIssuances).problem;
-                    return wp ? <p title={wp} className="text-[10px] font-semibold text-destructive truncate">⚠ Check weights</p> : null;
+                    return wp ? <p title={wp} className="text-[10px] font-semibold text-destructive truncate mt-1">⚠ Check weights</p> : null;
                   })()}
-                  <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
-                  </div>
-                  <div className="flex items-center justify-between gap-2 mt-1.5">
-                    <span className="text-[11px] text-muted-foreground shrink-0">{progress}%</span>
-                    <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 min-w-0">
+                  <div className="mt-auto pt-3">
+                    <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground mb-1.5">
+                      <span className="truncate">{o.status === "Rejected" ? (o.melted ? "Melted" : "Rejected") : lastTrackingStep(o)}</span>
+                      <span className="tabular-nums font-medium shrink-0">{progress}%</span>
+                    </div>
+                    <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                      <div className="h-full rounded-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
+                    </div>
+                    {/* The price, with its invoice number in red right before it. */}
+                    <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 mt-3 pt-2.5 border-t border-border/60">
                       {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} className="max-w-full" />}
-                      <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
-                    </span>
+                      <span className="font-bold text-base tabular-nums text-brand-dark">{fmtMoney(o.amount)}</span>
+                    </div>
                   </div>
                 </div>
               </Link>

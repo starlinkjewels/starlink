@@ -17,6 +17,7 @@ import { collectionLoaded,
   isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder,
 } from "@/lib/db";
 import { AssignOrderField } from "@/components/AssignOrder";
+import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile, deleteByUrl } from "@/lib/storage";
 import { sendMail, orderApprovedEmail, orderDispatchedEmail } from "@/lib/email";
@@ -2142,9 +2143,17 @@ function OrderDetailPageBody() {
               <div className="flex gap-6">
                 <div>
                   <p className="text-xs text-muted-foreground">Order Value</p>
-                  <p className={`font-medium mt-0.5 ${order.amount ? "" : "text-muted-foreground italic"}`}>
-                    {order.amount ? fmtMoney(order.amount) : "Pricing pending"}
-                  </p>
+                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                    <p className={`font-semibold text-lg tabular-nums ${order.amount ? "text-brand-dark" : "text-muted-foreground italic font-medium text-base"}`}>
+                      {order.amount ? fmtMoney(order.amount) : "Pricing pending"}
+                    </p>
+                    {/* Its invoice, in red, right beside the price — or plainly none. */}
+                    {(() => {
+                      const inv = findInvoiceForOrder(db.invoices, order.id);
+                      if (inv || needsInvoice(order)) return <InvoiceBadge invoice={inv} dispatched={needsInvoice(order)} size="md" onOpen={n => nav(`/invoices?q=${encodeURIComponent(n)}`)} />;
+                      return order.forReadyStock ? null : <span className="text-[11px] font-medium px-2 py-1 rounded-lg bg-secondary text-muted-foreground">Not invoiced yet</span>;
+                    })()}
+                  </div>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground">Shipping</p>
