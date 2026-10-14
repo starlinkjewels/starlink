@@ -85,8 +85,11 @@ export async function increaseStock(args: {
   const field = args.material === "gold" ? "gold" : "diamond";
   // setDoc+merge (not updateDoc) so the very first stock purchase on a fresh
   // tenant creates stockLevels/current instead of throwing "No document to update".
+  // A nested map, not a "gold.14K" key: setDoc takes a dotted key literally, so
+  // that wrote a separate field and the real figure never went up (the Stock
+  // page's repair from history was what put it right).
   await setDoc(stockRef(), {
-    [`${field}.${args.purityOrQuality}`]: increment(args.quantity),
+    [field]: { [args.purityOrQuality]: increment(args.quantity) },
     updatedAt: new Date().toISOString(),
     version: increment(1),
   }, { merge: true });
