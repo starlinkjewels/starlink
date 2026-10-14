@@ -155,7 +155,9 @@ export function OrdersPage() {
       o.jewelleryType.toLowerCase().includes(t) ||
       (o.designNumber ?? "").toLowerCase().includes(t)
     ));
-    return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+    // A copy: for the admin with no filter, `list` is the store's own array,
+    // and sorting it in place reordered every other page's lists too.
+    return [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter]);
 
