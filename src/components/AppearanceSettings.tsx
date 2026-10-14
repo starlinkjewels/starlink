@@ -102,6 +102,8 @@ export function AppearanceSettings() {
       </div>
 
       <div>
+        {row("Theme", "Light, dark, or whatever each phone and computer is set to",
+          <Segmented value={ui.theme} onChange={v => set("theme", v)} options={[["light", "Light"], ["dark", "Dark"], ["system", "Match device"]]} />)}
         {row("Accent colour", "Buttons, links, the selected menu item and highlights",
           <div className="flex flex-wrap gap-2">
             {UI_ACCENTS.map(a => (

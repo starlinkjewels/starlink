@@ -622,3 +622,162 @@
   border-top: 1px solid var(--dlg-line);
 }
 :root[data-ui="glass"] .ui-dialog.p-6 > :is(.ui-dialog-header, div:has(+ .ui-dialog-close-wrap):has(> button):not(:has(input, textarea, select, [role="combobox"], table)), .ui-dialog-footer) { backdrop-filter: blur(20px) saturate(160%); }
+
+/* ══════════════════════════════════════════════════════════════════════
+   Dark theme — Settings → Appearance → Theme. The "dark" class on <html>
+   (lib/appearance.ts). Comes after the looks, so its colours win over theirs;
+   the looks keep their shapes.
+
+   The app was built light, with white boxes, pastel notes and navy headings
+   written straight into the pages. Rather than touch every page, those are
+   re-coloured here: white becomes the card colour, a pastel becomes a soft
+   tint of its hue, and dark text becomes a light shade of the same hue — so
+   a warning still reads amber and a payment still reads green.
+   ══════════════════════════════════════════════════════════════════════ */
+:root.dark {
+  color-scheme: dark;
+  --background: oklch(0.17 0.03 262);
+  --foreground: oklch(0.95 0.012 255);
+  --card: oklch(0.215 0.034 262);
+  --card-foreground: oklch(0.95 0.012 255);
+  --popover: oklch(0.235 0.036 262);
+  --popover-foreground: oklch(0.95 0.012 255);
+  --primary: oklch(0.6 0.15 262);
+  --primary-foreground: oklch(0.99 0 0);
+  --secondary: oklch(0.27 0.035 262);
+  --secondary-foreground: oklch(0.92 0.02 255);
+  --muted: oklch(0.27 0.03 262);
+  --muted-foreground: oklch(0.72 0.03 258);
+  --accent: oklch(0.31 0.05 262);
+  --accent-foreground: oklch(0.96 0.01 255);
+  --destructive: oklch(0.68 0.19 22);
+  --destructive-foreground: oklch(0.99 0 0);
+  --success: oklch(0.74 0.16 148);
+  --warning: oklch(0.8 0.15 75);
+  --brand: oklch(0.6 0.15 262);
+  --brand-dark: oklch(0.44 0.14 265);
+  --brand-light: oklch(0.76 0.11 262);
+  --border: oklch(1 0 0 / 11%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(0.64 0.12 262);
+  --sidebar: oklch(0.19 0.032 262);
+  --sidebar-foreground: oklch(0.95 0.012 255);
+  --sidebar-primary: oklch(0.6 0.15 262);
+  --sidebar-primary-foreground: oklch(0.99 0 0);
+  --sidebar-accent: oklch(0.27 0.035 262);
+  --sidebar-accent-foreground: oklch(0.95 0.012 255);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --card-bg: var(--color-card);
+  --card-line: oklch(1 0 0 / 9%);
+  --card-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 10px 30px -18px rgb(0 0 0 / 0.6);
+  --card-hover-shadow: 0 14px 36px -16px rgb(0 0 0 / 0.7);
+  --glass-bg: color-mix(in oklab, var(--color-card) 86%, transparent);
+  --glass-line: oklch(1 0 0 / 10%);
+  --dlg-bg: var(--color-background);
+}
+/* Headings and figures written in the brand navy. */
+:root.dark .text-brand-dark { color: oklch(0.93 0.025 262); }
+:root.dark .text-foreground { color: var(--color-foreground); }
+/* White boxes, inputs and buttons. Translucent white on dark photos (10–30%) is left alone. */
+:root.dark :is(.bg-white, .bg-white\/60, .bg-white\/70, .bg-white\/80, .bg-white\/90, .bg-white\/92, .bg-white\/95) { background-color: var(--color-card); }
+:root.dark .hover\:bg-white:hover { background-color: var(--color-secondary); }
+:root.dark .bg-\[\#F7F9FC\] { background-color: var(--color-background); }
+:root.dark .bg-background { background-color: var(--color-background); }
+/* The logo is navy on white; lift it so it reads on dark. */
+:root.dark img[src*="starlink-logo"], :root.dark img[src*="/logo.png"] { filter: brightness(1.6) saturate(0.9); }
+
+:root.dark :is(.bg-amber-50, .bg-amber-100, [class*="bg-amber-50/"], [class*="bg-amber-100/"]) { background-color: oklch(0.7 0.188 70.08 / 0.14); }
+:root.dark :is(.border-amber-100, .border-amber-200, .border-amber-300) { border-color: oklch(0.7 0.188 70.08 / 0.32); }
+:root.dark .text-amber-600 { color: oklch(0.78 0.188 70.08); }
+:root.dark :is(.text-amber-700, .text-amber-800, .text-amber-900) { color: oklch(0.84 0.170 70.08); }
+:root.dark :is(.bg-orange-50, .bg-orange-100, [class*="bg-orange-50/"], [class*="bg-orange-100/"]) { background-color: oklch(0.7 0.213 47.6 / 0.14); }
+:root.dark :is(.border-orange-100, .border-orange-200, .border-orange-300) { border-color: oklch(0.7 0.213 47.6 / 0.32); }
+:root.dark .text-orange-600 { color: oklch(0.78 0.190 47.6); }
+:root.dark :is(.text-orange-700, .text-orange-800, .text-orange-900) { color: oklch(0.84 0.170 47.6); }
+:root.dark :is(.bg-yellow-50, .bg-yellow-100, [class*="bg-yellow-50/"], [class*="bg-yellow-100/"]) { background-color: oklch(0.7 0.184 86.05 / 0.14); }
+:root.dark :is(.border-yellow-100, .border-yellow-200, .border-yellow-300) { border-color: oklch(0.7 0.184 86.05 / 0.32); }
+:root.dark .text-yellow-600 { color: oklch(0.78 0.184 86.05); }
+:root.dark :is(.text-yellow-700, .text-yellow-800, .text-yellow-900) { color: oklch(0.84 0.170 86.05); }
+:root.dark :is(.bg-lime-50, .bg-lime-100, [class*="bg-lime-50/"], [class*="bg-lime-100/"]) { background-color: oklch(0.7 0.233 130.85 / 0.14); }
+:root.dark :is(.border-lime-100, .border-lime-200, .border-lime-300) { border-color: oklch(0.7 0.233 130.85 / 0.32); }
+:root.dark .text-lime-600 { color: oklch(0.78 0.190 130.85); }
+:root.dark :is(.text-lime-700, .text-lime-800, .text-lime-900) { color: oklch(0.84 0.170 130.85); }
+:root.dark :is(.bg-green-50, .bg-green-100, [class*="bg-green-50/"], [class*="bg-green-100/"]) { background-color: oklch(0.7 0.219 149.58 / 0.14); }
+:root.dark :is(.border-green-100, .border-green-200, .border-green-300) { border-color: oklch(0.7 0.219 149.58 / 0.32); }
+:root.dark .text-green-600 { color: oklch(0.78 0.190 149.58); }
+:root.dark :is(.text-green-700, .text-green-800, .text-green-900) { color: oklch(0.84 0.170 149.58); }
+:root.dark :is(.bg-emerald-50, .bg-emerald-100, [class*="bg-emerald-50/"], [class*="bg-emerald-100/"]) { background-color: oklch(0.7 0.170 162.48 / 0.14); }
+:root.dark :is(.border-emerald-100, .border-emerald-200, .border-emerald-300) { border-color: oklch(0.7 0.170 162.48 / 0.32); }
+:root.dark .text-emerald-600 { color: oklch(0.78 0.170 162.48); }
+:root.dark :is(.text-emerald-700, .text-emerald-800, .text-emerald-900) { color: oklch(0.84 0.170 162.48); }
+:root.dark :is(.bg-teal-50, .bg-teal-100, [class*="bg-teal-50/"], [class*="bg-teal-100/"]) { background-color: oklch(0.7 0.140 182.5 / 0.14); }
+:root.dark :is(.border-teal-100, .border-teal-200, .border-teal-300) { border-color: oklch(0.7 0.140 182.5 / 0.32); }
+:root.dark .text-teal-600 { color: oklch(0.78 0.140 182.5); }
+:root.dark :is(.text-teal-700, .text-teal-800, .text-teal-900) { color: oklch(0.84 0.140 182.5); }
+:root.dark :is(.bg-cyan-50, .bg-cyan-100, [class*="bg-cyan-50/"], [class*="bg-cyan-100/"]) { background-color: oklch(0.7 0.143 215.22 / 0.14); }
+:root.dark :is(.border-cyan-100, .border-cyan-200, .border-cyan-300) { border-color: oklch(0.7 0.143 215.22 / 0.32); }
+:root.dark .text-cyan-600 { color: oklch(0.78 0.143 215.22); }
+:root.dark :is(.text-cyan-700, .text-cyan-800, .text-cyan-900) { color: oklch(0.84 0.143 215.22); }
+:root.dark :is(.bg-sky-50, .bg-sky-100, [class*="bg-sky-50/"], [class*="bg-sky-100/"]) { background-color: oklch(0.7 0.169 237.32 / 0.14); }
+:root.dark :is(.border-sky-100, .border-sky-200, .border-sky-300) { border-color: oklch(0.7 0.169 237.32 / 0.32); }
+:root.dark .text-sky-600 { color: oklch(0.78 0.169 237.32); }
+:root.dark :is(.text-sky-700, .text-sky-800, .text-sky-900) { color: oklch(0.84 0.169 237.32); }
+:root.dark :is(.bg-blue-50, .bg-blue-100, [class*="bg-blue-50/"], [class*="bg-blue-100/"]) { background-color: oklch(0.7 0.214 259.82 / 0.14); }
+:root.dark :is(.border-blue-100, .border-blue-200, .border-blue-300) { border-color: oklch(0.7 0.214 259.82 / 0.32); }
+:root.dark .text-blue-600 { color: oklch(0.78 0.190 259.82); }
+:root.dark :is(.text-blue-700, .text-blue-800, .text-blue-900) { color: oklch(0.84 0.170 259.82); }
+:root.dark :is(.bg-indigo-50, .bg-indigo-100, [class*="bg-indigo-50/"], [class*="bg-indigo-100/"]) { background-color: oklch(0.7 0.233 277.12 / 0.14); }
+:root.dark :is(.border-indigo-100, .border-indigo-200, .border-indigo-300) { border-color: oklch(0.7 0.233 277.12 / 0.32); }
+:root.dark .text-indigo-600 { color: oklch(0.78 0.190 277.12); }
+:root.dark :is(.text-indigo-700, .text-indigo-800, .text-indigo-900) { color: oklch(0.84 0.170 277.12); }
+:root.dark :is(.bg-violet-50, .bg-violet-100, [class*="bg-violet-50/"], [class*="bg-violet-100/"]) { background-color: oklch(0.7 0.250 292.72 / 0.14); }
+:root.dark :is(.border-violet-100, .border-violet-200, .border-violet-300) { border-color: oklch(0.7 0.250 292.72 / 0.32); }
+:root.dark .text-violet-600 { color: oklch(0.78 0.190 292.72); }
+:root.dark :is(.text-violet-700, .text-violet-800, .text-violet-900) { color: oklch(0.84 0.170 292.72); }
+:root.dark :is(.bg-purple-50, .bg-purple-100, [class*="bg-purple-50/"], [class*="bg-purple-100/"]) { background-color: oklch(0.7 0.265 303.9 / 0.14); }
+:root.dark :is(.border-purple-100, .border-purple-200, .border-purple-300) { border-color: oklch(0.7 0.265 303.9 / 0.32); }
+:root.dark .text-purple-600 { color: oklch(0.78 0.190 303.9); }
+:root.dark :is(.text-purple-700, .text-purple-800, .text-purple-900) { color: oklch(0.84 0.170 303.9); }
+:root.dark :is(.bg-pink-50, .bg-pink-100, [class*="bg-pink-50/"], [class*="bg-pink-100/"]) { background-color: oklch(0.7 0.241 354.31 / 0.14); }
+:root.dark :is(.border-pink-100, .border-pink-200, .border-pink-300) { border-color: oklch(0.7 0.241 354.31 / 0.32); }
+:root.dark .text-pink-600 { color: oklch(0.78 0.190 354.31); }
+:root.dark :is(.text-pink-700, .text-pink-800, .text-pink-900) { color: oklch(0.84 0.170 354.31); }
+:root.dark :is(.bg-rose-50, .bg-rose-100, [class*="bg-rose-50/"], [class*="bg-rose-100/"]) { background-color: oklch(0.7 0.246 16.44 / 0.14); }
+:root.dark :is(.border-rose-100, .border-rose-200, .border-rose-300) { border-color: oklch(0.7 0.246 16.44 / 0.32); }
+:root.dark .text-rose-600 { color: oklch(0.78 0.190 16.44); }
+:root.dark :is(.text-rose-700, .text-rose-800, .text-rose-900) { color: oklch(0.84 0.170 16.44); }
+:root.dark :is(.bg-red-50, .bg-red-100, [class*="bg-red-50/"], [class*="bg-red-100/"]) { background-color: oklch(0.7 0.237 25.33 / 0.14); }
+:root.dark :is(.border-red-100, .border-red-200, .border-red-300) { border-color: oklch(0.7 0.237 25.33 / 0.32); }
+:root.dark .text-red-600 { color: oklch(0.78 0.190 25.33); }
+:root.dark :is(.text-red-700, .text-red-800, .text-red-900) { color: oklch(0.84 0.170 25.33); }
+:root.dark :is(.bg-slate-50, .bg-slate-100, [class*="bg-slate-50/"], [class*="bg-slate-100/"]) { background-color: oklch(0.7 0.046 257.42 / 0.14); }
+:root.dark :is(.border-slate-100, .border-slate-200, .border-slate-300) { border-color: oklch(0.7 0.046 257.42 / 0.32); }
+:root.dark .text-slate-600 { color: oklch(0.78 0.046 257.42); }
+:root.dark :is(.text-slate-700, .text-slate-800, .text-slate-900) { color: oklch(0.84 0.046 257.42); }
+:root.dark :is(.bg-gray-50, .bg-gray-100, [class*="bg-gray-50/"], [class*="bg-gray-100/"]) { background-color: oklch(0.7 0.027 264.36 / 0.14); }
+:root.dark :is(.border-gray-100, .border-gray-200, .border-gray-300) { border-color: oklch(0.7 0.027 264.36 / 0.32); }
+:root.dark .text-gray-600 { color: oklch(0.78 0.027 264.36); }
+:root.dark :is(.text-gray-700, .text-gray-800, .text-gray-900) { color: oklch(0.84 0.027 264.36); }
+
+/* The looks' own surfaces, in the dark. */
+:root.dark[data-ui] .ui-dialog, :root.dark .ui-dialog { background: var(--color-background); border-color: var(--color-border); }
+:root.dark[data-ui="glass"] .ui-dialog { background: color-mix(in oklab, var(--color-background) 88%, transparent); }
+:root.dark[data-ui] [data-radix-popper-content-wrapper] > .bg-popover { background: var(--color-popover); border-color: var(--color-border); }
+:root.dark[data-ui="glass"] [data-radix-popper-content-wrapper] > .bg-popover { background: color-mix(in oklab, var(--color-popover) 90%, transparent); }
+:root.dark[data-ui="flat"] .app-sidebar, :root.dark[data-ui="ivory"] .app-sidebar { background: var(--color-sidebar); }
+:root.dark[data-ui="glass"] .app-shell {
+  background:
+    radial-gradient(60rem 40rem at 0% 0%, color-mix(in oklab, var(--color-primary) 18%, transparent), transparent 70%),
+    radial-gradient(50rem 36rem at 100% 100%, color-mix(in oklab, var(--color-brand-light) 12%, transparent), transparent 70%),
+    var(--color-background);
+}
+:root.dark[data-ui="glass"] { --glass-rim: inset 0 1px 0 rgb(255 255 255 / 0.08), inset 0 0 0 1px rgb(255 255 255 / 0.05); }
+/* Table styles that paint rows or headers white. */
+:root.dark[data-tbl] { --tbl-head-bg: color-mix(in oklab, var(--color-secondary) 70%, transparent); --tbl-head-fg: var(--color-muted-foreground); --tbl-zebra: oklch(1 0 0 / 3%); --tbl-hover: oklch(1 0 0 / 5%); }
+:root.dark[data-tbl="clean"] { --tbl-head-bg: var(--color-card); }
+:root.dark[data-tbl="striped"] { --tbl-head-bg: color-mix(in oklab, var(--color-primary) 18%, transparent); --tbl-head-fg: oklch(0.93 0.025 262); }
+:root.dark[data-tbl="cards"] table:not(.tbl-plain) > tbody > tr > td { background-color: var(--color-card); border-color: var(--color-border); }
+:root.dark[data-tbl="cards"] table:not(.tbl-plain) > tbody > tr:hover > td { background-color: var(--color-secondary); }
+:root.dark[data-tbl="minimal"][data-tbl-sticky="on"] table:not(.tbl-plain) > thead > tr > th,
+:root.dark[data-tbl="cards"][data-tbl-sticky="on"] table:not(.tbl-plain) > thead > tr > th { background-color: var(--color-card); }
+
