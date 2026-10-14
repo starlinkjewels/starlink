@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { loadDb, currentUserClients } from "@/lib/db";
+import { loadDb, currentUserClients, currentUserOrders } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -11,7 +11,8 @@ export function SearchPage() {
   const [q, setQ] = useState("");
   const db = useDb();
   const ql = q.toLowerCase();
-  const orders = q ? db.orders.filter(o =>
+  // Only orders within this person's work — the same ones their Orders page lists.
+  const orders = q ? currentUserOrders(db, user!).filter(o =>
     o.orderNumber.toLowerCase().includes(ql) ||
     o.jewelleryType.toLowerCase().includes(ql) ||
     (o.designNumber || "").toLowerCase().includes(ql)

@@ -30,8 +30,9 @@ import {
   ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
   DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag,
+  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame,
 } from "lucide-react";
+import { MeltDialog } from "@/components/MeltDialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
@@ -171,7 +172,19 @@ async function compressImage(file: File): Promise<string> {
 export function OrderDetailPage() {
   const { id } = useParams();
   const db = useDb();
-  if (!(db.orders.some(o => o.id === id))) {
+  const { user } = useAuth();
+  const found = db.orders.find(o => o.id === id);
+  if (found && user?.role === "employee" && !worksOnOrder(db, user, found)) {
+    const holder = db.users.find(u => u.id === found.assignedEmployeeId)?.name;
+    return (
+      <div className="text-center py-20 text-muted-foreground max-w-md mx-auto space-y-2">
+        <p className="font-medium text-brand-dark">{found.orderNumber} is not one of your orders.</p>
+        <p className="text-sm">{holder ? `It is assigned to ${holder}. ` : ""}Ask the admin to assign it to you, or to give you a role that sees every order.</p>
+        <Link to="/orders" className="text-primary underline text-sm">Back to your orders</Link>
+      </div>
+    );
+  }
+  if (!found) {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {collectionLoaded("orders") ? "Order not found." : "Loading…"}{" "}
@@ -293,6 +306,7 @@ function OrderDetailPageBody() {
   const [issueCertSearch, setIssueCertSearch] = useState("");
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [meltOpen, setMeltOpen] = useState(false);
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
@@ -1178,6 +1192,7 @@ function OrderDetailPageBody() {
   const finishRecord = () => db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
 
   const openFinalApproval = (idx: number) => {
+    if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
     const needsGold = orderMaterialRequirements(order).needsGold;
     const finish = finishRecord();
     setFaGoldNet(finish?.finishedNetWeight != null ? String(finish.finishedNetWeight) : (needsGold ? (order.estimatedNetWeight?.toString() ?? order.estimatedGrossWeight?.toString() ?? order.metalWeight?.toString() ?? "") : ""));
@@ -1226,6 +1241,7 @@ function OrderDetailPageBody() {
 
   const saveFinalApproval = async () => {
     if (faIdx === null) return;
+    if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
     const needsGold = orderMaterialRequirements(order).needsGold;
     const netW = parseFloat(faGoldNet);
     // A weight typed here is gold that went into the piece, whatever metal the
@@ -2054,6 +2070,11 @@ function OrderDetailPageBody() {
                 <Tag className="h-4 w-4 mr-2" />Band
               </Button>
             )}
+            {user!.role === "admin" && !order.melted && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
+              <Button variant="outline" onClick={() => setMeltOpen(true)} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" title="Melt this piece — gold back to a factory or stock, stones back to stock">
+                <Flame className="h-4 w-4 mr-2" />Melt
+              </Button>
+            )}
             {user!.role === "admin" && order.status !== "Rejected" && (
               <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
                 Cancel Order
@@ -2216,7 +2237,25 @@ function OrderDetailPageBody() {
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
           </div>
         )}
-        {canEditStage() && order.status === "Rejected" && (
+        {order.melted && user!.role !== "client" && (() => {
+          const m = order.melted;
+          const fac = db.factories.find(f => f.id === m.gold?.factoryId)?.name;
+          const ct = Math.round(m.diamonds.reduce((s, x) => s + x.ct, 0) * 1000) / 1000;
+          return (
+            <div className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm space-y-1">
+              <p className="font-semibold text-destructive flex items-center gap-1.5"><Flame className="h-4 w-4" /> Melted {fmtDate(m.at)} by {m.byName}{m.reason ? ` — ${m.reason}` : ""}</p>
+              <p className="text-xs text-muted-foreground">
+                {m.gold ? `${m.gold.grams} g ${m.gold.purity} gold ${m.gold.to === "factory" ? `to ${fac ?? "the factory"} (its pool)` : "into our stock"}` : "No gold kept"}
+                {ct > 0 ? ` · ${ct} ct loose diamonds back in stock` : ""}
+                {m.packetIds.length ? ` · ${m.packetIds.length} certified packet${m.packetIds.length !== 1 ? "s" : ""} back in stock` : ""}
+                {` · labour ₹${m.labourInr.toLocaleString("en-IN")} stays owed to the factory`}
+                {m.advanceToCredit ? ` · ${fmtMoney(m.advanceToCredit)} advance moved to the client's credit` : ""}
+              </p>
+              <p className="text-[11px] text-muted-foreground">The piece no longer exists, so this order can't be re-opened. Place a new order to make it again.</p>
+            </div>
+          );
+        })()}
+        {canEditStage() && order.status === "Rejected" && !order.melted && (
           <div className="mt-5 flex items-center gap-3 flex-wrap">
             <span className="text-sm text-destructive font-medium">This order was rejected.</span>
             <AsyncButton variant="outline" onClick={reopenOrder} className="rounded-xl gap-2">
@@ -4117,6 +4156,8 @@ function OrderDetailPageBody() {
         );
       })()}
     </AnimatePresence>
+
+    {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
 
     {/* ── Barcode band print/download modal ── */}
     <BandDialog

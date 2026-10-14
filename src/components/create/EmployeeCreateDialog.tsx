@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { loadDb, updateDb, flush, uid, rolesStoreReady, type User } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, rolesStoreReady, type User, type DB } from "@/lib/db";
 import { STANDARD_STAFF } from "@/lib/permissions";
 import { useDb } from "@/hooks/useDb";
 import { createAuthUser, isAdminEmail } from "@/lib/firebase";
@@ -18,6 +18,20 @@ const DEPTS = ["Sales","CAD","Design","Production","Diamond Setting","Polishing"
  * The one Create Employee form — the Employees page's, also opened from
  * "+ Add new employee" wherever an employee is picked. Admin only.
  */
+/** Who already holds this email, said so that the next step is plain. */
+export function emailTakenMessage(db: DB, email: string, exceptId?: string): string | null {
+  const u = db.users.find(x => x.id !== exceptId && (x.email || "").toLowerCase() === email);
+  if (!u) return null;
+  if (u.role === "client") {
+    const c = db.clients.find(x => x.id === u.clientId);
+    return `That email is the login of a client${c ? ` (${c.companyName})` : ""}. Use a different email for the employee.`;
+  }
+  const who = `${u.name}${u.role === "admin" ? " (admin)" : ""}`;
+  if (!u.authUid) return `That email is already on ${who}, who has no login yet. Open the Employees page and press "Give login" on their card instead of adding them again.`;
+  if (u.status === "inactive") return `That email belongs to ${who}, who is deactivated. Press "Activate" on their card instead of adding them again.`;
+  return `That email already belongs to ${who} on the Employees page.`;
+}
+
 export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   open: boolean; onOpenChange: (v: boolean) => void; onCreated?: (id: string) => void;
 }) {
@@ -43,15 +57,16 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   const create = async () => {
     const newId = uid("u_");
     if (!f.name.trim()) { toast.error("Enter a name"); return; }
-    const email = f.email.trim().toLowerCase();
+    // Without a login there is no email at all — whatever was typed before the
+    // login was switched off is hidden, and must not be checked or kept.
+    const email = needsLogin ? f.email.trim().toLowerCase() : "";
     if (needsLogin) {
       if (!email || !f.password) { toast.error("Enter an email and password, or turn off the login"); return; }
       // An owner's login is a permanent admin already — it exists, and adding it
       // again would only make a second record for the same person.
       if (isAdminEmail(email)) { toast.error("That is an owner's login — it is already a permanent admin and needs no record here. Use the partner's own email."); return; }
-      if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
-    } else if (email && loadDb().users.some(u => u.email.toLowerCase() === email)) {
-      toast.error("That email is already in use"); return;
+      const taken = emailTakenMessage(loadDb(), email);
+      if (taken) { toast.error(taken, { duration: 9000 }); return; }
     }
 
     setSaving(true);

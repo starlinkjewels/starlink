@@ -10,7 +10,7 @@ import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid,
   invoiceOrderIds, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, applyCreditToBills,
-  findInvoiceForOrder,
+  findInvoiceForOrder, worksOnClient, worksOnOrder, currentUserClients,
 } from "@/lib/db";
 import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
@@ -69,6 +69,13 @@ export function InvoicesPage() {
   // ── Invoice list (filtered) ──
   let list = db.invoices;
   if (user!.role === "client") list = list.filter(i => i.clientId === user!.clientId);
+  // An employee who reaches only their own work: their clients' bills, and any
+  // bill carrying an order of theirs.
+  const ownReach = user!.role === "employee" && reachOf(user, db.roles ?? []) !== "all";
+  if (ownReach) list = list.filter(i => {
+    const c = db.clients.find(x => x.id === i.clientId);
+    return (!!c && worksOnClient(db, user!, c)) || invoiceOrderIds(i).some(oid => { const o = db.orders.find(x => x.id === oid); return !!o && worksOnOrder(db, user!, o); });
+  });
   if (isStaff && clientFilter !== "all") list = list.filter(i => i.clientId === clientFilter);
   if (isStaff && companyFilter !== "all") list = list.filter(i => companyIdOfInvoice(i) === companyFilter);
 
@@ -91,7 +98,7 @@ export function InvoicesPage() {
 
   const clientOptions = user!.role === "client"
     ? []
-    : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
+    : (ownReach ? currentUserClients(db, user!) : db.clients).slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
 
   // Live figures for an invoice, summed across ALL its orders (never the stale snapshot).
   const invLive = (inv: Invoice) => {
@@ -220,7 +227,7 @@ export function InvoicesPage() {
   // Orders with advances — the Advance Payment Ledger below.
   let ordersWithAdvanceBase = db.orders.filter(o => (o.advances || []).length > 0);
   if (user!.role === "client") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.clientId === user!.clientId);
-  if (user!.role === "employee" && reachOf(user, db.roles ?? []) !== "all") ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => o.assignedEmployeeId === user!.id);
+  if (ownReach) ordersWithAdvanceBase = ordersWithAdvanceBase.filter(o => worksOnOrder(db, user!, o));
   let ordersWithAdvance = ordersWithAdvanceBase;
   if (isStaff && ledgerClientFilter !== "all") ordersWithAdvance = ordersWithAdvance.filter(o => o.clientId === ledgerClientFilter);
   const lq = ledgerQ.trim().toLowerCase();

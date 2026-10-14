@@ -137,7 +137,9 @@ export function buildFactoryOrderRows(
       if (mi.source !== "factoryPool") {
         row.entries.push({
           id: mi.id + "-gin", date: mi.issuedAt, kind: "out",
-          text: `Gold given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
+          text: mi.source === "melt"
+            ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}`
+            : `Gold given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
           qty: `${toPureGold(mi.quantityIssued, mi.purityOrQuality).toFixed(3)} g fine`,
         });
       }

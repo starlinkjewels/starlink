@@ -2,7 +2,7 @@
 export function authErrorMessage(err: unknown): string {
   const code = (err as { code?: string })?.code ?? "";
   switch (code) {
-    case "auth/email-already-in-use": return "That email already has an account.";
+    case "auth/email-already-in-use": return "That email already has a sign-in account — usually someone removed from the app earlier, whose login stays behind. Use a different email for this person.";
     case "auth/invalid-email":        return "That email address is not valid.";
     case "auth/weak-password":        return "Password is too weak (use at least 6 characters).";
     case "auth/requires-recent-login":return "Please sign out and back in, then try again.";

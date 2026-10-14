@@ -1,11 +1,11 @@
-import { EmployeeCreateDialog } from "@/components/create/EmployeeCreateDialog";
+import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/EmployeeCreateDialog";
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { updateDb, type User } from "@/lib/db";
+import { updateDb, flush, loadDb, type User } from "@/lib/db";
 import { RolesPanel, EmployeeAccessControls } from "@/components/RolesAccess";
 import { useDb } from "@/hooks/useDb";
-import { auth, isAdminEmail } from "@/lib/firebase";
+import { auth, isAdminEmail, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TasksPanel } from "@/components/TasksPanel";
-import { Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound } from "lucide-react";
+import { Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn } from "lucide-react";
+import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -28,6 +29,7 @@ export function EmployeesPage() {
 
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
+  const [loginFor, setLoginFor] = useState<User | null>(null);
 
   // Include the admin/owner too — salary can be paid to them, so their ledger
   // needs to be reachable from here. Admins are listed first.
@@ -104,7 +106,7 @@ export function EmployeesPage() {
                     <StatusBadge status={u.status} />
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-0.5">
-                    {u.email || <span className="italic">Salary only — no login</span>}
+                    {u.authUid || u.role === "admin" ? u.email : <span className="italic">Salary only — no login</span>}
                   </p>
                   <div className="flex items-center gap-2 mt-2.5">
                     <span className={`text-[11px] font-medium inline-flex items-center px-2 py-0.5 rounded-full ${u.role === "admin" ? "bg-amber-500/15 text-amber-700" : "bg-primary/10 text-primary"}`}>{u.role === "admin" ? (isAdminEmail(u.email) ? "Owner" : "Admin · Partner") : (u.department || "—")}</span>
@@ -149,8 +151,13 @@ export function EmployeesPage() {
                   <AsyncButton size="sm" variant="outline" onClick={() => toggle(u)} className="rounded-lg flex-1">
                     {u.status === "active" ? "Deactivate" : "Activate"}
                   </AsyncButton>
-                  {/* No login, nothing to reset. */}
-                  {!!u.email && (
+                  {/* No login, nothing to reset — but one can be given. */}
+                  {!u.authUid && (
+                    <Button size="sm" variant="outline" onClick={() => setLoginFor(u)} className="rounded-lg gap-1.5 text-primary" title="Give them an email and password to sign in">
+                      <LogIn className="h-3.5 w-3.5" /> Give login
+                    </Button>
+                  )}
+                  {!!u.authUid && !!u.email && (
                     <AsyncButton size="sm" variant="outline" onClick={() => resetPw(u)} className="rounded-lg w-9 px-0" title="Send password reset email">
                       <KeyRound className="h-3.5 w-3.5" />
                     </AsyncButton>
@@ -175,6 +182,8 @@ export function EmployeesPage() {
         label={total > 0 ? `Showing ${start + 1}–${end} of ${total} employees` : undefined}
       />
 
+      {loginFor && <GiveLoginDialog u={loginFor} onClose={() => setLoginFor(null)} />}
+
       {/* Tasks panel (admin assigning tasks to an employee) */}
       <TasksPanel
         userId={tasksPanelUser ?? ""}
@@ -183,5 +192,53 @@ export function EmployeesPage() {
         asAdmin
       />
     </div>
+  );
+}
+
+/**
+ * A login for someone first added for salary only. Their record stays as it
+ * is — history, salary ledger, everything — and gains an email and password.
+ */
+function GiveLoginDialog({ u, onClose }: { u: User; onClose: () => void }) {
+  const [email, setEmail] = useState(u.email || "");
+  const [password, setPassword] = useState("");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    const e = email.trim().toLowerCase();
+    if (!e || !password) { toast.error("Enter an email and a password"); return; }
+    if (isAdminEmail(e)) { toast.error("That is an owner's login — use this person's own email."); return; }
+    const taken = emailTakenMessage(loadDb(), e, u.id);
+    if (taken) { toast.error(taken, { duration: 9000 }); return; }
+    setSaving(true);
+    try {
+      const authUid = await createAuthUser(e, password);
+      updateDb(d => {
+        const x = d.users.find(y => y.id === u.id);
+        if (!x) return;
+        x.authUid = authUid; x.email = e; x.username = e;
+      });
+      // The sign-in's permission record goes up with this save; wait for it.
+      await flush();
+      toast.success(`${u.name} can now sign in with ${e}`);
+      onClose();
+    } catch (err) {
+      toast.error(authErrorMessage(err), { duration: 9000 });
+    } finally { setSaving(false); }
+  };
+  return (
+    <Dialog open onOpenChange={v => !v && onClose()}>
+      <DialogContent className="max-w-sm rounded-2xl">
+        <DialogHeader><DialogTitle className="font-display text-xl">Give {u.name} a login</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <div><Label className="text-xs">Email (login ID)</Label><Input type="email" value={email} onChange={x => setEmail(x.target.value)} className="rounded-xl mt-1" autoComplete="off" /></div>
+          <div><Label className="text-xs">Password</Label><Input type="password" value={password} onChange={x => setPassword(x.target.value)} className="rounded-xl mt-1" autoComplete="new-password" /></div>
+          <p className="text-[11px] text-muted-foreground">They keep everything already on their record. They sign in with Standard staff access until you choose a role on their card.</p>
+        </div>
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <Button onClick={save} disabled={saving} className="btn-hero rounded-xl">{saving ? "Creating…" : "Create login"}</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }

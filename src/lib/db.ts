@@ -329,6 +329,27 @@ export interface AdvancePayment {
 export type ManufacturingLogEntryType =
   "material_purchased" | "factory_assigned" | "material_issued" | "material_returned" | "piece_finished" | "making_charge_added";
 
+/**
+ * A melted piece — what came out of it and where it went. Written once, by
+ * lib/melt.ts; the order is closed (Rejected) at the same moment.
+ */
+export interface OrderMelt {
+  at: string;
+  by: string;
+  byName: string;
+  reason?: string;
+  /** The metal: back to a factory (into its pool) or into our own stock. */
+  gold?: { to: "factory" | "stock"; factoryId?: string; grams: number; purity: string; issuanceId?: string };
+  /** Loose stones put back in stock. */
+  diamonds: { quality: string; ct: number }[];
+  /** Certified packets put back in stock. */
+  packetIds: string[];
+  /** The job's labour — still owed to the factory, left in its ledger. */
+  labourInr: number;
+  /** Advance the client had paid, moved to their credit. */
+  advanceToCredit?: number;
+}
+
 export interface ManufacturingLogEntry {
   id: string;
   type: ManufacturingLogEntryType;
@@ -355,6 +376,8 @@ export interface Order {
   clientId: string; // empty string when forReadyStock (in-house build, no client)
   forReadyStock?: boolean; // in-house order that becomes a Ready Stock item when finished
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
+  /** The finished piece was melted (lib/melt.ts) — it no longer exists. */
+  melted?: OrderMelt;
   // Gift card redeemed onto this order (a discount — reduces orderTotal). The card's
   // remaining balance is DERIVED from all orders that reference it (never trusted from the card doc).
   giftCardId?: string;
@@ -1220,7 +1243,11 @@ export interface MaterialIssuance {
   material: "gold" | "diamond";
   purityOrQuality: string;
   quantityIssued: number; // grams (gold) or carats (diamond)
-  source: "stock" | "purchase" | "factoryPool";
+  /** "melt": gold from a melted piece handed back to the factory (lib/melt.ts) —
+   *  a delivery into its pool like any other, but not out of our stock. */
+  source: "stock" | "purchase" | "factoryPool" | "melt";
+  /** source "melt": the order whose piece was melted. */
+  meltOf?: string;
   sourcePurchaseId?: string; // set iff source === "purchase"
   diamondKind?: "loose" | "certified"; // for diamond issuances
   diamondPacketIds?: string[]; // set iff diamondKind === "certified" — the specific packets issued
