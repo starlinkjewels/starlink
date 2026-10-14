@@ -781,3 +781,11 @@
 :root.dark[data-tbl="minimal"][data-tbl-sticky="on"] table:not(.tbl-plain) > thead > tr > th,
 :root.dark[data-tbl="cards"][data-tbl-sticky="on"] table:not(.tbl-plain) > thead > tr > th { background-color: var(--color-card); }
 
+
+/* A soft warning tint (a "Waiting" badge) with the dark text meant for solid amber. */
+:root.dark [class*="bg-warning/"]:is(.text-warning-foreground), :root.dark [class*="bg-warning/"] .text-warning-foreground { color: oklch(0.86 0.13 80); }
+/* Chart legends write each label in its series colour — navy on navy in the dark. */
+:root.dark .recharts-legend-item-text { color: var(--color-muted-foreground) !important; }
+:root.dark .recharts-cartesian-axis-tick-value, :root.dark .recharts-text { fill: var(--color-muted-foreground); }
+:root.dark .recharts-cartesian-grid line { stroke: oklch(1 0 0 / 10%); }
+:root.dark .recharts-tooltip-wrapper .recharts-default-tooltip { background: var(--color-popover) !important; border-color: var(--color-border) !important; color: var(--color-foreground); }
