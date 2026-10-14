@@ -2,6 +2,8 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { loadDb, updateDb, flush, uid, rolesStoreReady, type User, type DB } from "@/lib/db";
 import { STANDARD_STAFF } from "@/lib/permissions";
+import { AccessFields, draftFor, writeAccess, type AccessDraft } from "@/components/AccessManager";
+import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { createAuthUser, isAdminEmail } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -46,7 +48,11 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   // What they may do once signed in: Standard staff, one of the custom roles,
   // or a full admin — a partner in the business. Only offered once roles are
   // live on the server, since until then the server would not honour an admin.
-  const [access, setAccess] = useState<string>(STANDARD_STAFF.id);
+  // An employee, with access set right here — their role, anything changed for
+  // them, temporary access — or a full admin (a partner in the business).
+  const [access, setAccess] = useState<"employee" | "admin">("employee");
+  const [draft, setDraft] = useState<AccessDraft>(() => draftFor(db.roles ?? [], null));
+  const { user: me } = useAuth();
   // The companies a new employee sells for — none ticked = every company.
   const [coIds, setCoIds] = useState<string[]>([]);
   const rolesLive = rolesStoreReady();
@@ -76,14 +82,13 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
       // salary-only record has no Auth user, no email and no password — it exists
       // to be paid and to appear in the salary ledger, nothing more.
       const asAdmin = needsLogin && rolesLive && access === "admin";
-      const roleId = needsLogin && rolesLive && access !== "admin" && access !== STANDARD_STAFF.id
-        && (loadDb().roles ?? []).some(r => r.id === access) ? access : undefined;
       if (asAdmin && !(await confirmBox(`Create ${f.name.trim()} as an admin?\n\nThey will be able to do everything — money, settings, employees, roles and other admins. Owners stay owners.`))) return;
       const authUid = needsLogin ? await createAuthUser(email, f.password) : undefined;
       const opAmt = Number(openingPaid);
-      updateDb(d => d.users.push({
-        id: newId, role: asAdmin ? "admin" : "employee", status: "active", createdAt: new Date().toISOString(),
-        ...(roleId ? { roleId } : {}),
+      const at = new Date().toISOString();
+      updateDb(d => {
+        d.users.push({
+        id: newId, role: asAdmin ? "admin" : "employee", status: "active", createdAt: at,
         ...(!asAdmin && coIds.length ? { companyIds: coIds } : {}),
         authUid, username: email, email, password: "",
         // A department says where on the floor someone works; an admin partner
@@ -92,7 +97,11 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
         openingPaid: opAmt > 0 ? opAmt : undefined,
         openingPaidCurrency: opAmt > 0 ? openingCurrency : undefined,
         openingPaidDate: opAmt > 0 ? (openingDate || undefined) : undefined,
-      } as User));
+        } as User);
+        // Their access: the role on their profile, anything changed for them
+        // and any temporary access in their own record.
+        if (needsLogin && rolesLive && !asAdmin) writeAccess(d, newId, draft, { name: me?.name ?? "Admin" }, at);
+      });
       // Wait for the login's permission record to reach the server before
       // saying it is done. It goes up just after the profile; close the tab in
       // between and the account can sign in to nothing.
@@ -104,7 +113,8 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
       onCreated?.(newId);
       setF({ name: "", email: "", password: "", phone: "", department: "Sales" });
       setNeedsLogin(true);
-      setAccess(STANDARD_STAFF.id);
+      setAccess("employee");
+      setDraft(draftFor(loadDb().roles ?? [], null));
       setCoIds([]);
       setOpeningPaid(""); setOpeningCurrency("INR"); setOpeningDate("");
     } catch (e) {
@@ -114,7 +124,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className={`${needsLogin && rolesLive && access === "employee" ? "max-w-3xl" : "max-w-md"} rounded-2xl`}>
           <DialogHeader><DialogTitle className="font-display text-2xl">Create Employee</DialogTitle></DialogHeader>
           <div className="space-y-3">
             {(["name", "phone"] as const).map(key => (
@@ -149,21 +159,22 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
               </div>
             ))}
             {needsLogin && (
-              <div>
-                <Label className="text-xs">Access</Label>
-                <Select value={access} onValueChange={setAccess} disabled={!rolesLive}>
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={STANDARD_STAFF.id}>{STANDARD_STAFF.name}</SelectItem>
-                    {(db.roles ?? []).map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
-                    <SelectItem value="admin">Admin — partner, can do everything</SelectItem>
-                  </SelectContent>
-                </Select>
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  {!rolesLive ? "Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff."
-                    : access === "admin" ? "Full control, the same as you: money, settings, employees and roles. You can take it back later from their card."
-                    : "What they may see and do. You can change it any time from their card."}
-                </p>
+              <div className="rounded-xl border border-border/70 p-3 space-y-3">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-brand-dark">Access</p>
+                  <div role="radiogroup" aria-label="Kind of account" className="inline-flex gap-0.5 p-1 rounded-xl bg-secondary">
+                    {([["employee", "Employee"], ["admin", "Admin — partner"]] as const).map(([k, l]) => (
+                      <button key={k} type="button" role="radio" aria-checked={access === k} disabled={!rolesLive} onClick={() => setAccess(k)}
+                        className={`h-8 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${access === k ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
+                    ))}
+                  </div>
+                </div>
+                {!rolesLive ? <p className="text-[11px] text-muted-foreground">Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff.</p>
+                  : access === "admin" ? <p className="text-[11px] text-muted-foreground">Full control, the same as you: money, settings, employees and roles. You can take it back later from their card.</p>
+                  : <>
+                      <p className="text-[11px] text-muted-foreground -mt-1">Pick the role closest to their job, then tick or clear anything for this person alone. Temporary access ends by itself. All of it can be changed later from their card.</p>
+                      <AccessFields draft={draft} onChange={setDraft} docs={db.roles ?? []} by={{ id: me?.id ?? "", name: me?.name ?? "Admin" }} />
+                    </>}
               </div>
             )}
             {!(needsLogin && rolesLive && access === "admin") && <CompanyTicks value={coIds} onChange={setCoIds} />}

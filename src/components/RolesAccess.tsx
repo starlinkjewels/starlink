@@ -4,8 +4,9 @@ import { useDb } from "@/hooks/useDb";
 import { isAdminEmail } from "@/lib/firebase";
 import {
   ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, ROLE_TEMPLATES, STANDARD_STAFF, REACH_LABEL,
-  normalisePerms, roleOf, type PermAction, type PermMatrix, type StaffRole, type RoleReach,
+  normalisePerms, rolesOnly, accessOf, tempState, countCells, type PermAction, type PermMatrix, type StaffRole, type RoleReach,
 } from "@/lib/permissions";
+import { AccessSummary, ManageAccessDialog, permWords } from "@/components/AccessManager";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -38,8 +39,9 @@ function NotLiveNote() {
 export function RolesPanel() {
   const db = useDb();
   const live = rolesStoreReady();
-  const roles = db.roles ?? [];
+  const roles = rolesOnly(db.roles ?? []);
   const [editing, setEditing] = useState<StaffRole | null>(null);
+  const [managing, setManaging] = useState<User | null>(null);
   const holders = (id: string) => db.users.filter(u => u.role === "employee" && (u.roleId ?? STANDARD_STAFF.id) === id);
 
   const remove = async (r: StaffRole) => {
@@ -102,6 +104,40 @@ export function RolesPanel() {
         })}
       </div>
       {editing && <RoleEditor role={editing} readOnly={!!editing.builtIn || !live} onClose={() => setEditing(null)} />}
+
+      {/* Review: everyone whose access differs from their role, and what is
+          temporary — exceptions are meant to be seen, not forgotten. */}
+      {(() => {
+        const now = Date.now();
+        const people = db.users.filter(u => u.role === "employee" && u.authUid).map(u => {
+          const ua = accessOf(db.roles ?? [], u.id);
+          const changes = countCells(ua?.add) + countCells(ua?.remove) + (ua?.reach ? 1 : 0);
+          const live2 = (ua?.temp ?? []).filter(t => tempState(t, now) !== "ended");
+          return { u, changes, live: live2 };
+        }).filter(x => x.changes > 0 || x.live.length > 0);
+        if (!people.length) return null;
+        return (
+          <div className="pt-2 space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">People with their own access</p>
+            <div className="divide-y divide-border/50 rounded-xl border border-border/60">
+              {people.map(({ u, changes, live: lv }) => (
+                <div key={u.id} className="flex items-center justify-between gap-3 px-3 py-2">
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-brand-dark truncate">{u.name}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {changes > 0 ? `${changes} change${changes !== 1 ? "s" : ""} from the role` : ""}
+                      {changes > 0 && lv.length ? " · " : ""}
+                      {lv.map(t => `${permWords(t.perms, t.reach)} until ${new Date(t.until).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`).join(" · ")}
+                    </p>
+                  </div>
+                  <Button size="sm" variant="outline" onClick={() => setManaging(u)} className="rounded-lg h-8 shrink-0">Manage</Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })()}
+      {managing && <ManageAccessDialog u={managing} onClose={() => setManaging(null)} />}
     </div>
   );
 }
@@ -153,7 +189,7 @@ function RoleEditor({ role, readOnly, onClose }: { role: StaffRole; readOnly: bo
       if (!d.roles) d.roles = [];
       if (isNew) d.roles.push({ id: uid("role_"), name: name.trim(), description: description.trim() || undefined, perms: clean, reach, createdAt: now });
       else {
-        const r = d.roles.find(x => x.id === role.id);
+        const r = rolesOnly(d.roles).find(x => x.id === role.id);
         if (r) { r.name = name.trim(); r.description = description.trim() || undefined; r.perms = clean; r.reach = reach; r.updatedAt = now; }
       }
     });
@@ -263,6 +299,7 @@ export function EmployeeAccessControls({ u }: { u: User }) {
   const db = useDb();
   const live = rolesStoreReady();
   const owner = isAdminEmail(u.email);
+  const [managing, setManaging] = useState(false);
 
   if (owner) {
     return (
@@ -272,14 +309,6 @@ export function EmployeeAccessControls({ u }: { u: User }) {
     );
   }
 
-  const setRole = (roleId: string) => {
-    updateDb(d => {
-      const x = d.users.find(y => y.id === u.id);
-      if (!x) return;
-      if (roleId === STANDARD_STAFF.id) delete x.roleId; else x.roleId = roleId;
-    });
-    toast.success(`${u.name} now has ${roleId === STANDARD_STAFF.id ? STANDARD_STAFF.name : (db.roles ?? []).find(r => r.id === roleId)?.name ?? "that role"}`);
-  };
   const setAdmin = async (on: boolean) => {
     if (!(await confirmBox(on
       ? `Make ${u.name} an admin?\n\nThey will be able to do everything — including managing employees, roles, settings and other admins. Owners stay owners.`
@@ -301,31 +330,18 @@ export function EmployeeAccessControls({ u }: { u: User }) {
       </div>
     );
   }
-  // An employee without a login cannot sign in, so a role would do nothing.
+  // An employee without a login cannot sign in, so access would do nothing.
   if (!u.authUid) return null;
-  const current = roleOf({ role: "employee", roleId: u.roleId }, db.roles ?? []);
-  const sees = (current.reach ?? "own") === "all"
-    ? null
-    : { orders: currentUserOrders(db, u).length, clients: currentUserClients(db, u).length };
   return (
-    <div className="mt-3 space-y-1">
-    <div className="flex items-center gap-2">
-      <select
-        value={current.id}
-        disabled={!live}
-        onChange={e => setRole(e.target.value)}
-        className="flex-1 h-8 rounded-lg border border-input bg-background px-2 text-xs disabled:opacity-60"
-        aria-label={`Role for ${u.name}`}
-      >
-        {[STANDARD_STAFF, ...(db.roles ?? [])].map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
-      </select>
-      {live && <button onClick={() => setAdmin(true)} className="text-[11px] text-primary hover:underline whitespace-nowrap">Make admin</button>}
-    </div>
-    {sees === null
-      ? <p className="text-[11px] text-muted-foreground">Sees every order and client</p>
-      : sees.orders === 0 && sees.clients === 0
-      ? <p className="text-[11px] text-amber-700">Sees no orders yet — assign orders or clients to them, or give a role that sees every order</p>
-      : <p className="text-[11px] text-muted-foreground">Sees their own: {sees.orders} order{sees.orders !== 1 ? "s" : ""} · {sees.clients} client{sees.clients !== 1 ? "s" : ""}</p>}
+    <div className="mt-3 space-y-2">
+      <AccessSummary u={u} db={db} />
+      <div className="flex items-center gap-2">
+        <Button size="sm" variant="outline" disabled={!live} onClick={() => setManaging(true)} className="rounded-lg h-8 flex-1 gap-1.5">
+          <ShieldCheck className="h-3.5 w-3.5 text-primary" /> Manage access
+        </Button>
+        {live && <button onClick={() => setAdmin(true)} className="text-[11px] text-primary hover:underline whitespace-nowrap">Make admin</button>}
+      </div>
+      {managing && <ManageAccessDialog u={u} onClose={() => setManaging(false)} />}
     </div>
   );
 }
