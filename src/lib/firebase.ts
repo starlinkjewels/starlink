@@ -53,18 +53,30 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  * so a copied config can't be used from a script/Postman/other site. This is the
  * real protection for a public client config (the config itself is not secret).
  *
- * SETUP (then it activates automatically):
- *  1. Firebase Console → App Check → Apps → register this web app with
- *     reCAPTCHA v3, and copy the reCAPTCHA v3 **site key**.
- *  2. Paste it below (or set VITE_RECAPTCHA_SITE_KEY in the build env).
- *  3. App Check → APIs → set Firestore & Storage to "Enforced".
- * Left empty, App Check stays OFF and nothing changes.
+ * It is OFF, deliberately. With the key below Google's reCAPTCHA refused to
+ * issue a token on these sites ("AppCheck: ReCAPTCHA error" on every start,
+ * production included), so no request ever carried an App Check token: it
+ * protected nothing, filled the console with errors, and made sign-in wait on
+ * failed attempts — opening offline most of all.
+ *
+ * TO TURN IT ON PROPERLY
+ *  1. Google reCAPTCHA admin console → this site key → Domains: add every
+ *     address the app is served from (the production domain(s) and
+ *     ssdiamdemo.web.app). Or create a new reCAPTCHA v3 key with them.
+ *  2. Firebase Console → App Check → Apps → this web app → reCAPTCHA v3 with
+ *     that key (and its secret).
+ *  3. Build with VITE_APP_CHECK=on (and VITE_RECAPTCHA_SITE_KEY if the key is
+ *     new), deploy, and confirm App Check → Metrics shows verified requests.
+ *  4. Only then: App Check → APIs → set Firestore, Storage and Functions to
+ *     "Enforced". Enforcing before step 3 shows verified traffic would lock
+ *     every user out.
  */
 // reCAPTCHA v3 SITE key (public — safe to commit). Overridable via env var.
 const RECAPTCHA_SITE_KEY =
   (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined)
   || "6Le2pFwtAAAAALa3qinV6qPapcFGgYiSgp1VeP1Z";
-if (RECAPTCHA_SITE_KEY) {
+const APP_CHECK_ON = (import.meta.env?.VITE_APP_CHECK as string | undefined) === "on";
+if (APP_CHECK_ON && RECAPTCHA_SITE_KEY) {
   try {
     initializeAppCheck(app, {
       provider: new ReCaptchaV3Provider(RECAPTCHA_SITE_KEY),
