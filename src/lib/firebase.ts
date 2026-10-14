@@ -155,6 +155,8 @@ export const db: Firestore = makeFirestore();
  * this, so the caller reloads the page.
  */
 export async function clearDeviceCache(): Promise<boolean> {
+  // The role remembered for opening offline goes with it.
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("sl-scope:")) localStorage.removeItem(k); } catch { /* no storage */ }
   if (!deviceCacheOn) return false;
   try { await Promise.race([waitForPendingWrites(db), new Promise(r => setTimeout(r, 4000))]); } catch { /* offline — nothing to wait for */ }
   try {

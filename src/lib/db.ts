@@ -19,6 +19,7 @@ import {
   query,
   where,
   getDoc,
+  getDocFromCache,
   getDocs,
   getCountFromServer,
   documentId,
@@ -2554,16 +2555,39 @@ export function watchAccess(authUid: string, onRevoked: () => void): () => void 
 }
 
 /** Read the caller's role index to decide their data scope (before loading). */
+const SCOPE_KEY = (uid: string) => `sl-scope:${uid}`;
+/** The scope this account had last time, for opening offline. */
+function rememberedScope(authUid: string): Scope | null {
+  try { const r = localStorage.getItem(SCOPE_KEY(authUid)); return r ? (JSON.parse(r) as Scope) : null; } catch { return null; }
+}
 export async function resolveScope(authUid: string): Promise<Scope> {
+  // Offline, asking the server would wait out its timeout before giving up —
+  // read the saved copy of the index, or the scope remembered last time.
+  if (typeof navigator !== "undefined" && navigator.onLine === false) {
+    try {
+      const c = await getDocFromCache(doc(fsdb, INDEX_COL, authUid));
+      if (c.exists()) return scopeOfIndex(c.data() as IndexDoc);
+    } catch { /* not in the saved copy */ }
+    const r = rememberedScope(authUid);
+    if (r) return r;
+  }
+  return resolveScopeOnline(authUid);
+}
+function scopeOfIndex(d: IndexDoc): Scope {
+  if (d.role === "client" && d.clientId) return { kind: "client", appId: d.appId, clientId: d.clientId };
+  if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true, appId: d.appId || undefined };
+  return { kind: "full", appId: d.appId || undefined };
+}
+async function resolveScopeOnline(authUid: string): Promise<Scope> {
   try {
     const s = await getDoc(doc(fsdb, INDEX_COL, authUid));
     if (s.exists()) {
-      const d = s.data() as IndexDoc;
-      if (d.role === "client" && d.clientId)
-        return { kind: "client", appId: d.appId, clientId: d.clientId };
-      // An admin made in the app rather than by the owners' email list.
-      if (d.role === "admin" && d.status === "active") return { kind: "full", admin: true, appId: d.appId || undefined };
-      return { kind: "full", appId: d.appId || undefined };
+      // Read from the account's own index — remembered for an offline start.
+      // A fallback below is never remembered: a client must never be taken
+      // for staff because one read failed.
+      const scope = scopeOfIndex(s.data() as IndexDoc);
+      try { localStorage.setItem(SCOPE_KEY(authUid), JSON.stringify(scope)); } catch { /* private mode */ }
+      return scope;
     }
   } catch (e) {
     console.error("[db] resolveScope failed:", e);
@@ -2713,6 +2737,16 @@ function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: stri
       return;
     }
     cached = snap;
+    // The device says it is offline: no server can answer, so waiting only
+    // keeps the app on its splash screen. Use the saved copy now; the server's
+    // answer replaces it the moment the connection is back.
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      console.warn(`[db] ${label}: offline — opening this device's saved copy until the server answers`);
+      live = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      onData(snap);
+      return;
+    }
     if (!timer) arm();
   };
 }
