@@ -20,11 +20,13 @@ import {
   where,
   getDoc,
   getDocs,
+  getCountFromServer,
   documentId,
   type Query,
   type DocumentData,
   type DocumentSnapshot,
 } from "firebase/firestore";
+import { LAZY_COLS } from "./pageData";
 import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
@@ -1414,7 +1416,8 @@ function normalizeOrder(o: Order): Order {
  * re-render, while in-place mutations via updateDb() stay visible.
  */
 export function loadDb(): DB {
-  return { ...cache };
+  const view = { ...cache };
+  return lazyMode ? guarded(view) : view;
 }
 
 export function totalAdvance(order: Order): number {
@@ -2330,6 +2333,81 @@ export function logEvent(kind: Exclude<ActivityKind, "change" | "undo">, summary
  *  rejected collection cannot make every save slow and failing. Cleared by a
  *  reload, which is when a rules deploy takes effect anyway. */
 const deniedCols = new Set<string>();
+
+/* ── Heavy records loaded on demand (staff) — see lib/pageData.ts ──────────
+ * Purchases, factory issues, account entries, stock movements and the like are
+ * not downloaded at sign-in for staff: the page that needs them asks
+ * (ensureCollections), and waits for them before it draws. Once loaded, a
+ * collection stays live for the session like any other. Clients never load
+ * these at all. */
+const LAZY_SET = new Set<string>(LAZY_COLS);
+let lazyMode = false;
+const lazySpecs = new Map<string, { col: ArrayCol; q: Query<DocumentData> }>();
+const lazyAttached = new Set<string>();
+/** Asked for before the listeners could start; attached as soon as they can. */
+const lazyWanted = new Set<string>();
+let lazyAttach: ((col: string) => void) | null = null;
+const loadWaiters = new Set<() => void>();
+const lazyWarned = new Set<string>();
+
+/** A heavy collection read before it was loaded: load it, and say so once. */
+function lazyRead(col: string, duringSave: boolean) {
+  if (!lazyWarned.has(col)) {
+    lazyWarned.add(col);
+    console.warn(`[db] "${col}" was read before it loaded${duringSave ? " (inside a save)" : ""} — loading it now. Add it to the page's needs in src/lib/pageData.ts.`);
+  }
+  void ensureCollections([col]);
+}
+function guarded<T extends object>(target: T, duringSave = false): T {
+  return new Proxy(target, {
+    get(t, p, r) {
+      if (typeof p === "string" && lazyMode && LAZY_SET.has(p) && !loadedCols.has(p)) lazyRead(p, duringSave);
+      return Reflect.get(t, p, r);
+    },
+  });
+}
+
+/**
+ * Make sure these collections are loaded; resolves once each has given its
+ * first answer. Anything not held back on demand is already on its way and is
+ * simply waited for.
+ */
+export function ensureCollections(cols: readonly string[]): Promise<void> {
+  for (const c of cols) if (!loadedCols.has(c) && LAZY_SET.has(c)) { if (lazyAttach) lazyAttach(c); else lazyWanted.add(c); }
+  if (cols.every(c => loadedCols.has(c))) return Promise.resolve();
+  return new Promise(res => {
+    const check = () => { if (cols.every(c => loadedCols.has(c))) { loadWaiters.delete(check); res(); } };
+    loadWaiters.add(check);
+  });
+}
+/** Everything — before anything that must hold the whole database, a backup most of all. */
+export function ensureAllCollections(): Promise<void> {
+  return ensureCollections(lazyMode ? [...LAZY_COLS] : []);
+}
+/** Whether every one of these has loaded (synchronous; nothing is requested). */
+export function collectionsLoaded(cols: readonly string[]): boolean {
+  return cols.every(c => loadedCols.has(c));
+}
+
+/* ── Totals kept by the server (functions/src/summaries.ts), read-only ── */
+let summaryMap = new Map<string, Record<string, unknown>>();
+let summariesOn = false;
+/** One party's stored totals: "factory_<id>", "supplier_<id>", "locker_<id>". */
+export function summaryOf(id: string): Record<string, unknown> | undefined { return summaryMap.get(id); }
+/** True once the server's totals have answered this session. */
+export function summariesLive(): boolean { return summariesOn; }
+
+/* ── Start-up figures, for Settings → Data size & speed ── */
+const startup = { openedMs: 0, loadedMs: 0, startedAt: 0 };
+export function startupStats() { return { ...startup, lazy: lazyMode, loaded: [...loadedCols] }; }
+/** How many records each collection holds on the server — counted there, nothing downloaded. */
+export async function countRecords(): Promise<Record<string, number>> {
+  const out: Record<string, number> = {};
+  await Promise.all(ARRAY_COLS.map(async c => {
+    try { out[c] = (await getCountFromServer(collection(fsdb, c))).data().count; } catch { /* not readable here */ }
+  }));
+  return out;
+}
 /** Collections already reported as rejected — one message each, not one per save. */
 const deniedReported = new Set<string>();
 
@@ -2394,7 +2472,7 @@ export async function touchPresence(userId: string): Promise<void> {
 
 export function updateDb(fn: (db: DB) => void) {
   const before = idsByCol();
-  fn(cache);
+  fn(lazyMode ? guarded(cache, true) : cache);
   markIntentionalRemovals(before); // whatever the mutator removed is a real delete
   saveDb(cache);
   return cache;
@@ -2533,7 +2611,7 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
     // Legacy localStorage migration only runs for staff (admin) sessions.
     if (scope.kind === "full") {
       const legacy = readLegacy();
-      if (legacy && legacy.users.length > 0) await migrateLegacy(legacy);
+      if (legacy && legacy.users.length > 0) { await ensureAllCollections(); await migrateLegacy(legacy); }
     }
     seeded = true;
     emit();
@@ -2552,6 +2630,13 @@ export function stopDb() {
     }
   });
   unsubscribers = [];
+  lazyAttach = null;
+  lazySpecs.clear();
+  lazyAttached.clear();
+  lazyWanted.clear();
+  loadWaiters.clear();
+  summaryMap = new Map();
+  summariesOn = false;
   Object.assign(cache, emptyDb());
   remote = emptyDb();
   for (const k of Object.keys(remoteIdx)) delete remoteIdx[k];
@@ -2648,6 +2733,13 @@ function subscribeAll(scope: Scope): Promise<void> {
   rolesStoreLive = false;
   adminScope = amAdminScope;
   loadedCols.clear();
+  lazyMode = !client;
+  lazySpecs.clear();
+  lazyAttached.clear();
+  lazyAttach = null;
+  lazyWarned.clear();
+  summaryMap = new Map();
+  summariesOn = false;
   for (const col of ARRAY_COLS) {
     // Requested by the admin and nobody else. The rules would refuse it to
     // anyone else anyway; not asking at all means there is nothing to refuse.
@@ -2691,6 +2783,9 @@ function subscribeAll(scope: Scope): Promise<void> {
       // now. Alerts for others are still created as before (new documents);
       // nothing is ever inferred deleted (deletes are intent-only).
       specs.push({ col, q: query(collection(fsdb, col), where("userId", "==", scope.appId)) });
+    } else if (lazyMode && LAZY_SET.has(col)) {
+      // Loaded when a page asks for it — see ensureCollections().
+      lazySpecs.set(col, { col, q: collection(fsdb, col) });
     } else {
       specs.push({ col, q: collection(fsdb, col) });
     }
@@ -2725,6 +2820,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   // How long the whole load actually takes, logged once everything is in.
   // Read it in the browser console as "[db] startup".
   const t0 = typeof performance !== "undefined" ? performance.now() : Date.now();
+  startup.openedMs = 0; startup.loadedMs = 0; startup.startedAt = Date.now();
   const timing: { col: string; ms: number; docs: number }[] = [];
   const mark = (col: string, docs: number) => {
     const now = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -2740,13 +2836,15 @@ function subscribeAll(scope: Scope): Promise<void> {
       pending.delete(name);
       corePending.delete(name);
       loadedCols.add(name);
+      loadWaiters.forEach(w => w());
       // Open as soon as there is something to show. Everything else arrives
       // behind it and refreshes the screen as it does.
       if (!opened && corePending.size === 0) {
         opened = true;
         seeded = true;
         const ms = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
-        console.info(`[db] opened in ${ms}ms — ${pending.size} collection(s) now loading in the background`);
+        startup.openedMs = ms;
+        console.info(`[db] opened in ${ms}ms — ${pending.size} collection(s) now loading in the background${lazySpecs.size ? `, ${lazySpecs.size} when a page needs them` : ""}`);
         resolve();
         // Everything else starts only now, so it never competes with the three
         // streams the splash screen was waiting on.
@@ -2757,6 +2855,7 @@ function subscribeAll(scope: Scope): Promise<void> {
       if (pending.size === 0) {
         const total = timing.length ? Math.max(...timing.map((t) => t.ms)) : 0;
         const docs = timing.reduce((s, t) => s + t.docs, 0);
+        if (!startup.loadedMs) startup.loadedMs = total;
         const slowest = [...timing].sort((a, b) => b.ms - a.ms).slice(0, 6);
         const biggest = [...timing].sort((a, b) => b.docs - a.docs).slice(0, 6);
         console.info(
@@ -2807,10 +2906,32 @@ function subscribeAll(scope: Scope): Promise<void> {
     // behind twenty-six nobody needs yet — on a phone that is most of the wait.
     // The core goes on first and has the connection to itself; the rest follow
     // once it has landed, and refresh the screen as they arrive.
+    lazyAttach = (col: string) => {
+      const sp = lazySpecs.get(col);
+      if (!sp || lazyAttached.has(col) || gen !== subGeneration) return;
+      lazyAttached.add(col);
+      lazyWanted.delete(col);
+      attach(sp);
+    };
+    for (const c of [...lazyWanted]) lazyAttach(c);
+
+    // The server's totals, read-only, for staff — never written from here.
+    const attachSummaries = () => {
+      if (client) return;
+      unsubscribers.push(onSnapshot(collection(fsdb, "summaries"), LISTEN, serverFirst("summaries", (snap) => {
+        summaryMap = new Map(snap.docs.map(d => [d.id, d.data() as Record<string, unknown>]));
+        summariesOn = true;
+        if (seeded) emit();
+      }), (err) => {
+        console.warn("[db] server totals not available:", err?.message ?? err);
+        summariesOn = false;
+      }));
+    };
+
     const core = specs.filter((s) => corePending.has(s.col));
     const rest = specs.filter((s) => !corePending.has(s.col));
     core.forEach(attach);
-    const attachRest = () => rest.forEach(attach);
+    const attachRest = () => { rest.forEach(attach); attachSummaries(); };
     if (core.length === 0) attachRest();
     else restAttach = attachRest;
 

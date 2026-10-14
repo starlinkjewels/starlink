@@ -5,7 +5,9 @@ import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
-import { loadDb } from "@/lib/db";
+import { loadDb, collectionsLoaded, ensureCollections } from "@/lib/db";
+import { pageNeeds } from "@/lib/pageData";
+import { totalsCovered } from "@/lib/partyTotals";
 import { useDb } from "@/hooks/useDb";
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Loader2, Lock } from "lucide-react";
@@ -178,6 +180,25 @@ const ICON_COLORS: Record<string, string> = {
   "/gift-cards": "bg-primary/15 text-primary",
   "/payments": "bg-indigo-500/15 text-indigo-600",
 };
+
+/**
+ * A page draws once the records it needs are here (pageData.ts). Light pages
+ * — the Dashboard and the factory and supplier lists — need none while the
+ * server's totals cover them; every other page waits for the heavy records
+ * the first time, then they stay loaded. Clients never load these at all.
+ */
+function PageData({ children, isClient }: { children: React.ReactNode; isClient: boolean }) {
+  const db = useDb();
+  const loc = useLocation();
+  const needs = isClient ? [] : pageNeeds(loc.pathname, k => totalsCovered(db, k, k === "factory" && loc.pathname.replace(/\/+$/, "") === "/factories"));
+  const ready = collectionsLoaded(needs);
+  const key = needs.join(",");
+  useEffect(() => { if (!ready) void ensureCollections(needs); }, [key, ready]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!ready) {
+    return <div className="grid place-items-center py-24 text-muted-foreground gap-2"><Loader2 className="h-6 w-6 animate-spin" /><span className="text-xs">Loading…</span></div>;
+  }
+  return <>{children}</>;
+}
 
 export function AppLayout() {
   const { user, logout } = useAuth();
@@ -506,7 +527,7 @@ export function AppLayout() {
             {/* One frame for every page: as wide as the screen allows (Settings →
                 Appearance → Page width), the same on every page. */}
             <div className="app-page">
-            {roleAllows(loc.pathname) ? <Outlet /> : (
+            {roleAllows(loc.pathname) ? <PageData isClient={user?.role === "client"}><Outlet /></PageData> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
                 <h2 className="font-display text-xl text-brand-dark">Not part of your role</h2>

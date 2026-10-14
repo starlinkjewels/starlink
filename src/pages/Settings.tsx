@@ -1,6 +1,7 @@
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
+import { DataSizePanel } from "@/components/DataSizePanel";
 import { Table2, Palette } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
@@ -1427,6 +1428,7 @@ export function SettingsPage() {
 
       {/* Data */}
       {activeId === "data" && isAdmin && <ServerTotalsCheck />}
+      {activeId === "data" && isAdmin && <DataSizePanel />}
       {activeId === "data" && (
       <div className="card-luxe p-6 space-y-3">
         <h3 className="font-semibold">Data</h3>

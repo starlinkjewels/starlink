@@ -1,3 +1,4 @@
+import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
@@ -31,15 +32,9 @@ export function SuppliersPage() {
 
   // Every supplier's account, worked out once: the rows, the sort and the grand
   // totals all read the same figures instead of each recomputing their own.
-  const accounts = new Map(db.suppliers.map(s => [
-    s.id,
-    supplierAccount(
-      db.purchases.filter(p => p.supplierId === s.id),
-      (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id),
-      s,
-      (db.supplierPayments ?? []).filter(x => x.supplierId === s.id),
-    ),
-  ]));
+  // From the records when they are loaded, else the server's totals (this list
+  // is light in pageData.ts and does not download the supplier books for them).
+  const accounts = new Map(db.suppliers.map(s => [s.id, supplierFigures(db, s)]));
   const netOf = (s: Supplier) => accounts.get(s.id)?.net ?? 0;
 
   // Whoever there is most money to settle with comes first — either way round,

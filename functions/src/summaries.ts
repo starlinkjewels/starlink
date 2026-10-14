@@ -16,14 +16,15 @@
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
 import { getFirestore, AggregateField, FieldValue, type Firestore, type DocumentData } from "firebase-admin/firestore";
-import { factoryAccount, factoryFineGoldBalance, supplierAccount } from "./shared/accounts";
+import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAccount } from "./shared/accounts";
 import type { MaterialIssuance, FactoryPayment, Purchase, SupplierReceipt, SupplierPayment, OpeningBalanceInfo } from "./shared/types";
 import { app } from "./lib/firestoreAdmin";
 
 type DbName = "ssdiamdemo" | "diamondflow";
 const SUM = "summaries";
-/** Bumped when what a summary holds changes, so old ones can be told apart. */
-const VERSION = 1;
+/** Bumped when what a summary holds changes, so old ones can be told apart.
+ *  2: a factory's summary also carries its pool stock (goldPool, diaPool). */
+const VERSION = 2;
 const REGION = "us-central1";
 
 /** Owners recognised by email, as each database's rules recognise them. */
@@ -52,6 +53,9 @@ export async function rebuildFactory(fs: Firestore, factoryId: string): Promise<
       kind: "factory", partyId: factoryId, v: VERSION,
       ...acct,
       fineGold: factoryFineGoldBalance(list, factoryId, f.openingFineGold || 0),
+      // Bulk-delivered material not yet drawn for an order — the list's "Pool stock".
+      goldPool: factoryPoolBuckets(list, factoryId, "gold").reduce((t, b) => t + b.balance, 0),
+      diaPool: factoryPoolBuckets(list, factoryId, "diamond").reduce((t, b) => t + b.balance, 0),
       records: list.length,
       computedAt: FieldValue.serverTimestamp(),
     });
