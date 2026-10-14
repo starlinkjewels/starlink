@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -25,6 +25,7 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 10;
 
@@ -155,9 +156,9 @@ export function LockerPage() {
       const bal = lockerBalance(selected, db.lockerTransactions);
       if (amt > bal) {
         const cur = selected.currency || "INR";
-        const ok = window.confirm(
+        const ok = (await confirmBox(
           `This ${txnType === "expense" ? "expense" : "transfer"} of ${fmtLockerAmount(amt, selected.currency)} is more than ${selected.name}'s balance of ${fmtLockerAmount(bal, selected.currency)} ${cur}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
-        );
+        ));
         if (!ok) return;
       }
     }
@@ -698,11 +699,11 @@ export function LockerPage() {
               <Label className="text-xs">Opening Balance ({ef.currency === "USD" ? "$" : "₹"})</Label>
               <Input type="number" min={0} value={ef.openingBalance} onChange={e => setEf({ ...ef, openingBalance: e.target.value })} className="rounded-xl mt-1" />
             </div>
-            <div className="flex gap-2">
-              <AsyncButton onClick={saveEditLocker} disabled={editSaving} className="btn-hero rounded-xl flex-1">{editSaving ? "Saving…" : "Save Changes"}</AsyncButton>
-              <Button variant="outline" onClick={() => setEditId(null)} className="rounded-xl">Cancel</Button>
-            </div>
           </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditId(null)} className="rounded-xl">Cancel</Button>
+            <AsyncButton onClick={saveEditLocker} disabled={editSaving} className="btn-hero rounded-xl px-6">{editSaving ? "Saving…" : "Save Changes"}</AsyncButton>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

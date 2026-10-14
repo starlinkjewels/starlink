@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Button } from "@/components/ui/button";
 import { Share2, Copy, Check, RefreshCw, Link2, Loader2, Trash2, ExternalLink, Clock } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /** Shares an entire folder (all its images + videos, incl. sub-folders) as a
  *  public, no-login link. Drops into the Catalog and Product Photos folder views. */
@@ -43,9 +44,9 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
     try { await navigator.clipboard.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000); toast.success("Link copied"); }
     catch { toast.error("Couldn't copy — long-press the link to copy it."); }
   };
-  const stop = () => {
+  const stop = async () => {
     if (!existing) return;
-    if (!confirm("Stop sharing this folder? The public link will stop working.")) return;
+    if (!(await confirmBox("Stop sharing this folder? The public link will stop working."))) return;
     void deleteShare(existing.id, existing.pageCount);
     setOpen(false);
     toast.success("Sharing stopped");

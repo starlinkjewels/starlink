@@ -11,6 +11,7 @@ import {
   History, RefreshCw, Search, Undo2, ChevronDown, Download, Printer, LogIn, Pencil, Plus, Trash2, Lock, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /**
  * Everything anybody did, newest first. ADMIN ONLY (the route gates it).
@@ -132,7 +133,7 @@ export function ActivityPage() {
       setOpen(e.id);
       return;
     }
-    if (!confirm(`Undo this?\n\n${e.summary}\n\nEvery record it changed goes back exactly as it was before. The undo is recorded too.`)) return;
+    if (!(await confirmBox(`Undo this?\n\n${e.summary}\n\nEvery record it changed goes back exactly as it was before. The undo is recorded too.`))) return;
     try {
       await undoEntry(e);
       toast.success("Undone");

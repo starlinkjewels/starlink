@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Gift, Ban, Check } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /** Admin-only panel on a client's page: enable gift cards/cashback for this
  *  client, issue a welcome gift card, set a cashback %, and see their cards. */
@@ -61,8 +62,8 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
     setAmount(""); setNote("");
   };
 
-  const revoke = (id: string) => {
-    if (!confirm("Cancel this gift card? The client will no longer be able to use it.")) return;
+  const revoke = async (id: string) => {
+    if (!(await confirmBox("Cancel this gift card? The client will no longer be able to use it."))) return;
     updateDb(d => { const c = (d.giftCards ?? []).find(x => x.id === id); if (c) c.revoked = true; });
     toast.success("Gift card cancelled");
   };

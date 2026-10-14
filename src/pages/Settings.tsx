@@ -62,6 +62,7 @@ import {
   ReceiptText,
   Trash2,
 } from "lucide-react";
+import { confirmBox } from "@/lib/confirm";
 
 async function toBase64(file: File): Promise<string> {
   return new Promise((res, rej) => {
@@ -212,14 +213,14 @@ export function SettingsPage() {
     const f = e.target.files?.[0];
     if (!f) return;
     const r = new FileReader();
-    r.onload = () => {
+    r.onload = async () => {
       try {
         const d = JSON.parse(r.result as string) as DB;
         if (!d || !Array.isArray(d.orders) || !Array.isArray(d.clients)) { toast.error("This doesn't look like a valid backup file."); e.target.value = ""; return; }
-        const ok = confirm(
+        const ok = (await confirmBox(
           `Restore from this backup? It REPLACES all current data with the file's contents ` +
           `(${d.clients.length} clients, ${d.orders.length} orders). This cannot be undone.`,
-        );
+        ));
         if (!ok) { e.target.value = ""; return; }
         // Push the restored data into Firestore (keep the current session).
         const fresh = loadDb();
@@ -271,10 +272,10 @@ export function SettingsPage() {
     try {
       const d = (await fetchBackup(b.path)) as unknown as DB;
       if (!d || !Array.isArray(d.orders) || !Array.isArray(d.clients)) { toast.error("That backup looks invalid."); return; }
-      if (!confirm(
+      if (!(await confirmBox(
         `Restore the backup from ${b.date}?\n\nThis REPLACES all current data with that snapshot ` +
         `(${d.clients.length} clients, ${d.orders.length} orders). Anything created since then will be lost. This cannot be undone.`,
-      )) return;
+      ))) return;
       const fresh = loadDb();
       Object.assign(fresh, d, { session: fresh.session });
       saveDb(fresh);
@@ -289,14 +290,14 @@ export function SettingsPage() {
   const [dupScan, setDupScan] = useState(0); // bump to re-scan after a fix
   const [fixingOrderId, setFixingOrderId] = useState<string | null>(null);
   const [mergingEmail, setMergingEmail] = useState<string | null>(null);
-  const mergeAccounts = (email: string, keepId: string, dropIds: string[]) => {
+  const mergeAccounts = async (email: string, keepId: string, dropIds: string[]) => {
     const refs = countReferences(loadDb(), dropIds);
-    if (!confirm(
+    if (!(await confirmBox(
       `Merge ${dropIds.length + 1} accounts for ${email} into one?
 
 ` +
       `${refs} record${refs === 1 ? "" : "s"} attributed to the extra account${dropIds.length === 1 ? "" : "s"} will be moved onto the one you keep, then the extras are removed. Nothing is lost.`
-    )) return;
+    ))) return;
     setMergingEmail(email);
     try {
       mergeUsers(keepId, dropIds);
@@ -348,7 +349,7 @@ export function SettingsPage() {
   );
 
   async function deleteInvoice(id: string, number: string) {
-    if (!confirm(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`)) return;
+    if (!(await confirmBox(`Delete invoice ${number}? Only the bill is removed — the order, its payments, the client ledger and every report stay exactly as they are. The order can be invoiced again once it is dispatched.`))) return;
     const companyId = companyIdOfInvoice((liveDb.invoices ?? []).find(i => i.id === id));
     updateDb(d => { d.invoices = (d.invoices || []).filter(i => i.id !== id); });
     // If this was the newest number, hand it back so the next invoice takes it
@@ -376,7 +377,7 @@ export function SettingsPage() {
     return gaps;
   }, [liveDb.invoices]);
 
-  function renumberInvoices() {
+  async function renumberInvoices() {
     const list = [...mainInvoices].sort(
       (a, b) => +new Date(a.createdAt) - +new Date(b.createdAt) || a.number.localeCompare(b.number));
     if (!list.length) return;
@@ -391,13 +392,13 @@ export function SettingsPage() {
     }
     const preview = moves.slice(0, 12).map(m => `  ${m.from}  →  ${m.to}`).join("\n")
       + (moves.length > 12 ? `\n  …and ${moves.length - 12} more` : "");
-    if (!confirm(
+    if (!(await confirmBox(
       `Renumber ${list.length} invoice${list.length !== 1 ? "s" : ""} in date order, starting at 0001?\n\n`
       + `${moves.length} will change:\n${preview}\n\n`
       + "Every amount, order link and payment stays exactly as it is — only the numbers move. "
       + "Each invoice keeps its old number on record, so a client holding the old copy can still be found by "
       + "searching for it."
-    )) return;
+    ))) return;
     updateDb(d => {
       const byId = new Map(list.map((inv, i) => [inv.id, String(i + 1).padStart(4, "0")]));
       for (const inv of d.invoices ?? []) {
@@ -461,14 +462,14 @@ export function SettingsPage() {
   async function numberPastPayments() {
     const n = unnumberedPayments.length;
     if (!n) return;
-    if (!confirm(
+    if (!(await confirmBox(
       `Give receipt numbers to ${n} past payment${n !== 1 ? "s" : ""}, oldest first?
 
 `
       + "This only labels them. Not one amount, date or balance changes — each payment keeps exactly the money "
       + "it already put on the orders, and an existing deposit is linked rather than recorded again. "
       + "Afterwards they can be corrected or cancelled like any new receipt."
-    )) return;
+    ))) return;
     setNumbering(true);
     try {
       const done = await backfillReceipts(user!.id);
@@ -487,14 +488,14 @@ export function SettingsPage() {
   async function restoreSupplierPayments() {
     const n = lostSupplierPayments.length;
     if (!n) return;
-    if (!confirm(
+    if (!(await confirmBox(
       `Put ${n} payment${n !== 1 ? "s" : ""} back on the supplier books?
 
 `
       + "These left an account but were never recorded against the supplier, so the supplier reads ₹0 and "
       + "\"Settled\". Each one is added back as an advance on its original date, from the same account, for the "
       + "same amount. No money moves — it already left; this only records where it went."
-    )) return;
+    ))) return;
     setFixingSupplier(true);
     try {
       const done = repairSupplierPayments(user!.id);
@@ -509,10 +510,10 @@ export function SettingsPage() {
   const widowedUses = useMemo(() => orphanDirectUses(liveDb), [liveDb]);
   const widowedImpact = useMemo(() => orphanImpact(widowedUses), [widowedUses]);
 
-  function repairStock() {
+  async function repairStock() {
     const n = widowedUses.length;
     if (!n) return;
-    if (!confirm([
+    if (!(await confirmBox([
       `Clear ${n} stock movement${n !== 1 ? "s" : ""} with nothing behind them?`,
       "",
       "These record material leaving a pool it was never added to, because the purchase",
@@ -520,7 +521,7 @@ export function SettingsPage() {
       "puts the balance back.",
       "",
       "Nothing else changes — no purchase, issue, order or payment is touched.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     setFixingStock(true);
     try {
       const done = repairOrphanDirectUses();
@@ -532,12 +533,12 @@ export function SettingsPage() {
 
   const duplicateAccounts = useMemo(() => duplicateUsers(liveDb.users), [liveDb.users, dupScan]);
   const fixOrderNumber = async (orderId: string, oldNumber: string, invoiced: boolean) => {
-    if (invoiced && !confirm(
+    if (invoiced && !(await confirmBox(
       `This order already has an invoice under ${oldNumber}.
 
 ` +
       "Giving it a new number means the invoice you already sent shows the old one — you will need to re-send the corrected invoice. Continue?"
-    )) return;
+    ))) return;
     setFixingOrderId(orderId);
     try {
       const fresh = await renumberOrder(loadDb(), orderId);
@@ -1004,8 +1005,8 @@ export function SettingsPage() {
                               <span className="flex items-center gap-3">
                                 <span className="font-semibold tabular-nums">₹{r.rate}</span>
                                 <button
-                                  onClick={() => {
-                                    if (!confirm(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`)) return;
+                                  onClick={async () => {
+                                    if (!(await confirmBox(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`))) return;
                                     commit(table.rates.filter(x => x.from !== r.from));
                                     toast.success("Rate removed");
                                   }}
@@ -1057,11 +1058,11 @@ export function SettingsPage() {
               const exposed = exposedAdminFigures(liveDb);
               const owed = exposed.stockCosts > 0 || exposed.rates;
               const move = async () => {
-                if (!confirm(
+                if (!(await confirmBox(
                   "Move every ready-stock cost and the exchange rates into the admin-only store?\n\n"
                   + "They are copied first and only removed from their old places once the copy has reached the server, "
                   + "so nothing can be lost on the way. Afterwards no employee or client can read them, even from the raw data.",
-                )) return;
+                ))) return;
                 updateDb(d => { copyAdminFiguresToPrivate(d); });
                 await flush();
                 if (collectionRefused("adminRecords")) {

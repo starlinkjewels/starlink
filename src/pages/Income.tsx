@@ -20,6 +20,7 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { confirmBox } from "@/lib/confirm";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 type PassbookRowType =
@@ -96,9 +97,9 @@ export function IncomePage() {
     setEditing(null);
   };
 
-  const deleteEdit = () => {
+  const deleteEdit = async () => {
     if (!editing?.editable) return;
-    if (!confirm("Delete this transaction? This cannot be undone.")) return;
+    if (!(await confirmBox("Delete this transaction? This cannot be undone."))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === editing.editable!.orderId);
       if (o) o.advances = o.advances.filter(a => a.id !== editing.id);

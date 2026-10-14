@@ -9,7 +9,7 @@ import { meltPlan, meltGoldLine, meltStones, applyMelt, type MeltGoldTo } from "
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 const REASONS = ["Came out wrong", "Customer rejected", "Design changed"];
@@ -86,17 +86,12 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
       <DialogContent className="max-w-lg rounded-2xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><Flame className="h-5 w-5 text-destructive" /> Melt {order.orderNumber}</DialogTitle>
+          {!plan.blocked && <DialogDescription className="text-xs">The piece will no longer exist and the order closes. The metal and stones come back; the factory's labour stays owed.</DialogDescription>}
         </DialogHeader>
         {plan.blocked ? (
-          <div className="space-y-3">
-            <p className="text-sm rounded-xl bg-secondary/70 p-3">{plan.blocked}</p>
-            <div className="flex justify-end"><Button variant="outline" onClick={onClose} className="rounded-xl">Close</Button></div>
-          </div>
+          <p className="text-sm rounded-xl bg-secondary/70 p-3">{plan.blocked}</p>
         ) : (
           <div className="space-y-4 text-sm">
-            <p className="text-xs text-muted-foreground -mt-1">
-              The piece will no longer exist and the order closes. The metal and stones come back; the factory's labour stays owed.
-            </p>
             {plan.warning && <p className="text-xs rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-800 p-2.5 flex gap-2"><AlertTriangle className="h-4 w-4 shrink-0" />{plan.warning}</p>}
 
             <div>
@@ -156,13 +151,16 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
               {paid > 0 && <p className="flex items-center gap-1.5"><Wallet className="h-3.5 w-3.5 text-primary" /> The {fmtMoney(paid)} advance moves to {client?.companyName ?? "the client"}'s credit.</p>}
               <p>The order closes as Rejected and can't be re-opened. To make it again, place a new order.</p>
             </div>
-
-            <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
-              <AsyncButton onClick={melt} className="rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-1.5"><Flame className="h-4 w-4" /> Melt piece</AsyncButton>
-            </div>
           </div>
         )}
+        <DialogFooter>
+          {plan.blocked
+            ? <Button variant="outline" onClick={onClose} className="rounded-xl">Close</Button>
+            : <>
+                <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+                <AsyncButton onClick={melt} className="rounded-xl bg-destructive text-white hover:bg-destructive/90 gap-1.5"><Flame className="h-4 w-4" /> Melt piece</AsyncButton>
+              </>}
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

@@ -16,6 +16,7 @@ import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3,
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 9;
 
@@ -61,8 +62,8 @@ export function SuppliersPage() {
     toast.success("Status updated");
   };
 
-  const del = (id: string) => {
-    if (!confirm("Delete supplier? This does not delete their purchase history.")) return;
+  const del = async (id: string) => {
+    if (!(await confirmBox("Delete supplier? This does not delete their purchase history."))) return;
     updateDb(d => { d.suppliers = d.suppliers.filter(s => s.id !== id); });
     toast.success("Deleted");
   };

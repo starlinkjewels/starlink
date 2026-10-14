@@ -19,6 +19,7 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { ChevronRight } from "lucide-react";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { confirmBox } from "@/lib/confirm";
 
 const PAGE = 12;
 
@@ -97,13 +98,13 @@ export function StockActivityLedger() {
     if (!mi) return;
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
-    if (!confirm([
+    if (!(await confirmBox([
       `Cancel this assignment of ${mi.quantityIssued}${mi.material === "gold" ? "g" : "ct"} ${mi.purityOrQuality}?`,
       "",
       ...issuanceVoidImpact(db, mi),
       "",
       "This cannot be undone.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     setRemovingId(id);
     try {
       await deleteIssuance(db, mi, user!.id);
@@ -120,13 +121,13 @@ export function StockActivityLedger() {
     if (!sale) return;
     const check = canVoidSale(db, sale);
     if (!check.ok) { toast.error(check.reason!); return; }
-    if (!confirm([
+    if (!(await confirmBox([
       `Cancel this sale of ${sale.carat}ct ${sale.shape}?`,
       "",
       ...saleVoidImpact(db, sale),
       "",
       "This cannot be undone.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     setRemovingId(id);
     try {
       await voidDiamondSale(db, sale, user!.id);
@@ -141,14 +142,14 @@ export function StockActivityLedger() {
     if (!p) return;
     const check = canVoidPurchase(db, p);
     if (!check.ok) { toast.error(check.reason!); return; }
-    if (!confirm([
+    if (!(await confirmBox([
       `Remove this purchase of ${purchaseLabel(p)} (${fmtMoneyInr(p.totalInr)})?`,
       "",
       "What changes:",
       ...voidImpact(db, p),
       "",
       "This cannot be undone.",
-    ].join("\n"))) return;
+    ].join("\n")))) return;
     setRemovingId(id);
     try {
       await voidPurchaseCascade(db, p, user!.id);

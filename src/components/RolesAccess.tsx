@@ -12,6 +12,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ShieldCheck, Plus, Pencil, Trash2, Lock, Crown, Globe2, UserRound } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /**
  * Roles and admins — who may see and do what. ADMIN ONLY: rendered on the
@@ -41,12 +42,12 @@ export function RolesPanel() {
   const [editing, setEditing] = useState<StaffRole | null>(null);
   const holders = (id: string) => db.users.filter(u => u.role === "employee" && (u.roleId ?? STANDARD_STAFF.id) === id);
 
-  const remove = (r: StaffRole) => {
+  const remove = async (r: StaffRole) => {
     const who = holders(r.id);
-    if (!confirm(
+    if (!(await confirmBox(
       `Delete the role "${r.name}"?\n\n`
       + (who.length ? `${who.length} employee${who.length !== 1 ? "s" : ""} hold it (${who.map(u => u.name).join(", ")}). They go back to Standard staff.` : "Nobody holds it."),
-    )) return;
+    ))) return;
     updateDb(d => {
       d.roles = (d.roles ?? []).filter(x => x.id !== r.id);
       for (const u of d.users) if (u.roleId === r.id) delete u.roleId;
@@ -279,10 +280,10 @@ export function EmployeeAccessControls({ u }: { u: User }) {
     });
     toast.success(`${u.name} now has ${roleId === STANDARD_STAFF.id ? STANDARD_STAFF.name : (db.roles ?? []).find(r => r.id === roleId)?.name ?? "that role"}`);
   };
-  const setAdmin = (on: boolean) => {
-    if (!confirm(on
+  const setAdmin = async (on: boolean) => {
+    if (!(await confirmBox(on
       ? `Make ${u.name} an admin?\n\nThey will be able to do everything — including managing employees, roles, settings and other admins. Owners stay owners.`
-      : `Remove ${u.name} as an admin?\n\nThey become an employee with Standard staff access, which you can then narrow with a role.`)) return;
+      : `Remove ${u.name} as an admin?\n\nThey become an employee with Standard staff access, which you can then narrow with a role.`))) return;
     updateDb(d => {
       const x = d.users.find(y => y.id === u.id);
       if (!x) return;

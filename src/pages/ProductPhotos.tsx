@@ -11,6 +11,7 @@ import { downloadAsZip } from "@/lib/zipDownload";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
 import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package } from "lucide-react";
+import { confirmBox } from "@/lib/confirm";
 
 const MAX_VIDEO_MB = 60;
 
@@ -262,7 +263,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   const descendantIds = (rootId: string): string[] => { const out = [rootId]; const stack = [rootId]; while (stack.length) { const cur = stack.pop()!; for (const f of folders) if ((f.parentId ?? null) === cur) { out.push(f.id); stack.push(f.id); } } return out; };
   const deleteFolder = async (id: string) => {
     const f = folders.find(x => x.id === id);
-    if (!confirm(`Delete folder "${f?.name}" and everything inside it?`)) return;
+    if (!(await confirmBox(`Delete folder "${f?.name}" and everything inside it?`))) return;
     const ids = descendantIds(id);
     const removed = allItems.filter(i => ids.includes(i.folderId));
     updateDb(d => { d.productPhotoFolders = d.productPhotoFolders.filter(x => !ids.includes(x.id)); d.productPhotoItems = d.productPhotoItems.filter(i => !ids.includes(i.folderId)); });

@@ -4,7 +4,7 @@ import { updateDb, uid, type LockerType } from "@/lib/db";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 type Form = { name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string };
@@ -79,8 +79,11 @@ export function LockerCreateDialog({ open, onOpenChange, onCreated }: {
             <Label className="text-xs">Opening Balance ({f.currency === "USD" ? "$" : "₹"})</Label>
             <Input type="number" min={0} value={f.openingBalance} onChange={e => setF({ ...f, openingBalance: e.target.value })} className="rounded-xl mt-1" />
           </div>
-          <Button onClick={createLocker} disabled={saving} className="btn-hero rounded-xl w-full">{saving ? "Creating…" : "Create Locker"}</Button>
         </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Cancel</Button>
+          <Button onClick={createLocker} disabled={saving} className="btn-hero rounded-xl px-6">{saving ? "Creating…" : "Create Locker"}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

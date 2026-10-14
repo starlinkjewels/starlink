@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Truck, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 /**
  * Shipments that went out before freight was recorded at dispatch — or after,
@@ -76,14 +77,14 @@ export function FreightBacklog() {
     toast.success("Marked as costing nothing to send");
   };
 
-  const applyEstimate = () => {
+  const applyEstimate = async () => {
     const each = Number(estimate);
     if (!(each > 0)) { toast.error("Enter the estimate per parcel"); return; }
-    if (!confirm(
+    if (!(await confirmBox(
       `Record ${sym}${each} of estimated freight against each of the ${parcels.length} shipments listed?\n\n`
       + "Each is written as an ESTIMATE in Expenses, dated the day it shipped, and not taken from any account. "
       + "Replace any of them with the real bill whenever you have it.",
-    )) return;
+    ))) return;
     updateDb(d => {
       for (const p of parcels) {
         recordShippingCost(d, p.orders.map(o => o.id), { freight: each, insurance: 0, currency },
