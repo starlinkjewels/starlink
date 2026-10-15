@@ -184,7 +184,7 @@ export function planMove(o: Order, target: string): MovePlan {
 export function stagePermission(db: DB, user: Worker, o: Order, mayEditOrders: boolean): string | null {
   if (user.role === "admin") return null;
   if (user.role !== "employee") return "Only staff move orders.";
-  if (!mayEditOrders) return "Your role does not let you change orders.";
+  if (!mayEditOrders) return "Your access does not let you change orders.";
   if (worksOnOrder(db, user, o)) return null;
   return "Not assigned to you — ask the admin or the account manager.";
 }

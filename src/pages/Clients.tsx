@@ -24,6 +24,7 @@ import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 9;
 
@@ -534,6 +535,7 @@ export function ClientsPage() {
                 </Button>
 
                 {/* Print shipping label */}
+                <IfExport>
                 <Button
                   variant="outline"
                   size="sm"
@@ -543,6 +545,7 @@ export function ClientsPage() {
                   <Printer className="h-4 w-4" />
                   Print Shipping Label
                 </Button>
+                </IfExport>
               </div>
 
               {user!.role !== "client" && (

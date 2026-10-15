@@ -22,6 +22,7 @@ import {
 import jsPDF from "jspdf";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { IfExport } from "@/components/IfExport";
 
 /* Local YYYY-MM-DD key (matches how the rest of the app displays dates) so a
    purchase near midnight IST lands on the calendar day staff expect. */
@@ -908,6 +909,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               : `${total} order${total !== 1 ? "s" : ""}${hasFilters ? " (filtered)" : " · all time"}`}
           </p>
         </div>
+        <IfExport>
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={exportExcel}
             className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs sm:text-sm font-medium text-brand-dark">
@@ -922,6 +924,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             <span className="sm:hidden">PDF</span>
           </button>
         </div>
+        </IfExport>
       </div>
       )}
 
@@ -1025,6 +1028,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 <p className="text-[11px] text-muted-foreground mt-0.5">Gold · diamond · certified — stock + order buys · {matPeriodLabel}</p>
               </div>
             </div>
+            <IfExport>
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={exportMaterialExcel}
                 className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark">
@@ -1035,6 +1039,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 <Download className="h-3.5 w-3.5" /> PDF
               </button>
             </div>
+            </IfExport>
           </div>
 
           <PeriodBar from={matFrom} to={matTo} setFrom={setMatFrom} setTo={setMatTo} />
@@ -1063,6 +1068,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                     </div>
                   </div>
                   {/* Separate full-ledger download for THIS material only */}
+                  <IfExport>
                   <div className="flex items-center gap-2 mt-3">
                     <button onClick={() => exportCategoryExcel(c.cat)} disabled={c.b.count === 0}
                       className="flex-1 flex items-center justify-center gap-1.5 h-8 rounded-lg border border-border bg-white hover:bg-secondary text-[11px] font-medium text-brand-dark disabled:opacity-40">
@@ -1073,6 +1079,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                       <Download className="h-3 w-3" /> PDF
                     </button>
                   </div>
+                  </IfExport>
                 </div>
               );
             })}
@@ -1187,10 +1194,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 <p className="text-[11px] text-muted-foreground mt-0.5">Paid to suppliers &amp; factories · {payPeriodLabel}</p>
               </div>
             </div>
+            <IfExport>
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={exportPaymentsExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
               <button onClick={exportPaymentsPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
             </div>
+            </IfExport>
           </div>
 
           <PeriodBar from={payFrom} to={payTo} setFrom={setPayFrom} setTo={setPayTo} />
@@ -1249,10 +1258,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 <p className="text-[11px] text-muted-foreground mt-0.5">Orders placed in period · {salesPeriodLabel}</p>
               </div>
             </div>
+            <IfExport>
             <div className="flex items-center gap-2 shrink-0">
               <button onClick={exportSalesExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
               <button onClick={exportSalesPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
             </div>
+            </IfExport>
           </div>
 
           <PeriodBar from={salesFrom} to={salesTo} setFrom={setSalesFrom} setTo={setSalesTo} />
@@ -1328,12 +1339,14 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 <p className="text-[11px] text-muted-foreground mt-0.5">Orders dispatched in period · {profitPeriodLabel}</p>
               </div>
             </div>
+            <IfExport>
             <button
               onClick={() => exportProfitCsv(db, profit.rows.map(r => r.order), `Starlink-Profit-${profitFrom || "all"}`)}
               disabled={!profit.rows.length}
               className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark disabled:opacity-40">
               <Download className="h-3.5 w-3.5" /> Excel
             </button>
+            </IfExport>
           </div>
 
           <PeriodBar from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo} />
@@ -1655,10 +1668,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Detail</p>
               <h3 className="font-semibold text-brand-dark text-sm sm:text-base">All Orders ({filtered.length})</h3>
             </div>
+            <IfExport>
             <button onClick={exportExcel}
               className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark shrink-0">
               <Download className="h-3.5 w-3.5" /> Excel
             </button>
+            </IfExport>
           </div>
 
           {/* Desktop: sortable, searchable, columns to choose */}

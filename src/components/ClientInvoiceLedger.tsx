@@ -6,6 +6,7 @@ import {
 } from "@/lib/db";
 import { Input } from "@/components/ui/input";
 import { Search, Download, ChevronRight, FileText, Package } from "lucide-react";
+import { IfExport } from "@/components/IfExport";
 
 export interface InvoiceBlock {
   id: string;
@@ -170,10 +171,12 @@ export function ClientInvoiceLedger({
           </p>
         </div>
         {onExport && (
+          <IfExport>
           <button onClick={onExport}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
             <Download className="h-4 w-4" /> Export
           </button>
+          </IfExport>
         )}
       </div>
 

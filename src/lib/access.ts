@@ -36,6 +36,6 @@ export function exportAllowed(): boolean {
   if (!u || u.role !== "employee") return true;
   const module = moduleForPath(typeof window !== "undefined" ? window.location.pathname : "/");
   if (can(u, loadDb().roles ?? [], module, "export")) return true;
-  toast.error("Your role does not allow downloading from this section.");
+  toast.error("Your access does not include downloads from this section.");
   return false;
 }

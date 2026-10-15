@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 15;
 
@@ -260,7 +261,9 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
             <h2 className="font-display text-xl text-brand-dark">Movement History{selectedBucket ? ` — ${selectedBucket}` : ""}</h2>
             <p className="text-xs text-muted-foreground mt-0.5">{filteredRows.length} movement{filteredRows.length !== 1 ? "s" : ""}</p>
           </div>
+          <IfExport>
           <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+          </IfExport>
           <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${materialLabel}${selectedBucket ? ` — ${selectedBucket}` : ""}`} options={[
             { label: "Movement History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportPdf },
             { label: "Movement History — Excel", sublabel: "Filterable by date range", kind: "excel", run: exportCsv },
@@ -686,7 +689,9 @@ function CertifiedSection() {
             <h2 className="font-display text-xl text-brand-dark">Purchase &amp; Movement History</h2>
             <p className="text-xs text-muted-foreground mt-0.5">{histRows.length} packet{histRows.length !== 1 ? "s" : ""} · bought from which supplier &amp; where each went</p>
           </div>
+          <IfExport>
           <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+          </IfExport>
           <ExportDialog open={showExport} onClose={() => setShowExport(false)} title="Certified Diamonds — History" options={[
             { label: "Full History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportCertPdf },
             { label: "Full History — Excel", sublabel: "Shape, size, colour, clarity, report no., $ + rate, INR, supplier, status", kind: "excel", run: exportCertCsv },

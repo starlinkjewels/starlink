@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Download, FileText, FileSpreadsheet } from "lucide-react";
+import { useMayExport } from "@/hooks/useCan";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 export interface ExportOption {
@@ -32,7 +33,8 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [extra, setExtra] = useState("");
-  if (!open) return null;
+  const mayExport = useMayExport();
+  if (!open || !mayExport) return null;
 
   const iso = (d: Date) => d.toISOString().slice(0, 10);
   const setPreset = (kind: "month" | "lastMonth" | "year" | "all") => {

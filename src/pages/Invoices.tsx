@@ -33,6 +33,7 @@ import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 // about what is ready to invoice.
 import { invoiceBlocker } from "@/lib/invoiceBatch";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -577,7 +578,9 @@ export function InvoicesPage() {
                       <p className="font-medium">{client?.companyName || "—"}</p>
                       <p className="text-xs text-muted-foreground">{fmtDate(detailInv.createdAt)} · {orders.length} order{orders.length !== 1 ? "s" : ""}</p>
                     </div>
+                    <IfExport>
                     <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
+                    </IfExport>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">

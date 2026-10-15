@@ -26,6 +26,7 @@ import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order } from "@/lib/db";
+import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 12;
 
@@ -249,6 +250,7 @@ export function OrdersPage() {
         )}
 
         {isStaff && orders.length > 0 && (
+          <IfExport>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button type="button" aria-label="Export"
@@ -282,6 +284,7 @@ export function OrdersPage() {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
+          </IfExport>
         )}
 
         <Select value={view} onValueChange={v => saveView(v as "list" | "grid" | "board")}>

@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, FileSpreadsheet, Search } from "lucide-react";
+import { IfExport } from "@/components/IfExport";
 
 /** One dropdown in the bar — "Supplier", "Account", "Mode". "" means All. */
 export interface LedgerSelect {
@@ -82,6 +83,7 @@ export function LedgerFilters({
         <button onClick={onReset} className="text-xs text-primary hover:underline shrink-0">Reset</button>
       )}
 
+      <IfExport>
       <div className="flex items-center gap-2 shrink-0 ml-auto">
         <button onClick={onPdf}
           className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
@@ -92,6 +94,7 @@ export function LedgerFilters({
           <FileSpreadsheet className="h-4 w-4" /> Excel
         </button>
       </div>
+      </IfExport>
     </div>
   );
 }

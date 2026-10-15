@@ -10,6 +10,7 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
 import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download } from "lucide-react";
+import { IfExport } from "@/components/IfExport";
 
 const STATUS_STYLE: Record<GiftCardStatus, string> = {
   active: "bg-success/10 text-success",
@@ -113,7 +114,9 @@ export function GiftCardsAdminPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark flex items-center gap-2"><Gift className="h-6 w-6 text-primary" /> Gift Cards</h1>
           <p className="text-sm text-muted-foreground">Every card issued, redeemed, pending and expired — {stats.count} card{stats.count !== 1 ? "s" : ""}</p>
         </div>
+        <IfExport>
         <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+        </IfExport>
       </div>
 
       {/* Summary — Issued = Redeemed + Pending + Expired */}

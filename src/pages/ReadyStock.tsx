@@ -21,6 +21,7 @@ import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
 const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
@@ -451,6 +452,7 @@ export function ReadyStockPage() {
           </SelectContent>
         </Select>
         {canManage && items.length > 0 && (
+          <IfExport>
           <div className="flex items-center gap-2 shrink-0">
             <button onClick={() => exportReadyStockPdf(exportItems, exportName(), exportSubject())}
               className="flex items-center gap-1.5 h-11 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark">
@@ -461,6 +463,7 @@ export function ReadyStockPage() {
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </button>
           </div>
+          </IfExport>
         )}
 
         <div className="shrink-0 ml-auto inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
@@ -575,9 +578,11 @@ export function ReadyStockPage() {
               {canManage && (
                 <div className="mt-3 pt-3 border-t border-border/50 flex gap-2">
                   {db.settings.barcodeBandEnabled !== false && (
+                    <IfExport>
                     <AsyncButton size="sm" variant="outline" onClick={() => setBandItem(item)} className="rounded-lg flex-1 gap-1.5">
                       <Tag className="h-3.5 w-3.5" /> Band
                     </AsyncButton>
+                    </IfExport>
                   )}
                   {can("readyStock", "delete") && (
                     <AsyncButton size="sm" variant="outline" onClick={() => del(item)} className="rounded-lg flex-1 text-destructive hover:bg-destructive/10 hover:text-destructive gap-1.5">

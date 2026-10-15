@@ -32,6 +32,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -666,7 +667,9 @@ function SupplierHistoryPageBody() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <IfExport>
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            </IfExport>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
               { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
               { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },

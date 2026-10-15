@@ -550,9 +550,9 @@ export function AppLayout() {
             {roleAllows(loc.pathname) ? <PageData isClient={user?.role === "client"}><Outlet /></PageData> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
-                <h2 className="font-display text-xl text-brand-dark">Not part of your role</h2>
+                <h2 className="font-display text-xl text-brand-dark">Not part of your access</h2>
                 <p className="text-sm text-muted-foreground mt-1">
-                  This section is not included in the access your admin has given you. If you need it, ask an admin.
+                  This is not included in the access your admin has given you. If you need it, ask an admin — they can also give it to you for a while.
                 </p>
               </div>
             )}

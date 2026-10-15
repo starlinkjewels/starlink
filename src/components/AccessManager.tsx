@@ -2,10 +2,11 @@ import { useMemo, useState } from "react";
 import { Clock, Globe2, UserRound, Plus, RotateCcw, ShieldCheck, Minus, History, Save } from "lucide-react";
 import { toast } from "sonner";
 import { updateDbAs, uid, currentUserOrders, currentUserClients, type DB, type User } from "@/lib/db";
+import { confirmBox } from "@/lib/confirm";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import {
-  ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, STANDARD_STAFF, REACH_LABEL,
+  ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, STANDARD_STAFF, REACH_LABEL, ROLE_TEMPLATES,
   roleOf, rolesOnly, accessOf, userAccessId, applyOwn, diffFromRole, countCells, tempState, normalisePerms,
   effectivePerms, reachOf,
   type PermAction, type PermMatrix, type RoleReach, type TempAccess, type UserAccess, type AccessDoc, type StaffRole,
@@ -44,15 +45,16 @@ export function draftFor(docs: AccessDoc[], u: Pick<User, "id" | "roleId"> | nul
   return { roleId: role.id, reach: ua?.reach ?? role.reach ?? "own", perms: applyOwn(role.perms, ua?.add, ua?.remove), temp: ua?.temp ?? [] };
 }
 
-/** Save a person's access: the role on their profile, the rest in their own record. Call inside updateDb(). */
+/** Save a person's access in their own record. Call inside updateDb(). */
 export function writeAccess(d: DB, userId: string, draft: AccessDraft, by: { name: string }, at: string): void {
   const u = d.users.find(x => x.id === userId);
   if (!u) return;
-  if (draft.roleId === STANDARD_STAFF.id) delete u.roleId; else u.roleId = draft.roleId;
+  // Access is the person's own: kept as how it differs from "everything"
+  // (Standard staff), with no live link to a template.
+  delete u.roleId;
   if (!d.roles) d.roles = [];
-  const role = roleOf({ role: "employee", roleId: draft.roleId }, d.roles);
-  const { add, remove } = diffFromRole(role.perms, draft.perms);
-  const reach = draft.reach === (role.reach ?? "own") ? undefined : draft.reach;
+  const { add, remove } = diffFromRole(STANDARD_STAFF.perms, draft.perms);
+  const reach = draft.reach === "own" ? undefined : draft.reach;
   const ua = accessOf(d.roles, userId);
   const keep = countCells(add) > 0 || countCells(remove) > 0 || !!reach || draft.temp.length > 0;
   if (!keep) { if (ua) d.roles = d.roles.filter(x => x !== ua); return; }
@@ -272,61 +274,78 @@ function AddTemp({ onAdd, by }: { onAdd: (t: TempAccess) => void; by: { id: stri
 
 /* ── The whole editor: role, whose work, the grid, temporary access ──────── */
 
+/** One-click starting points. A template only fills the boxes — nothing stays
+ *  linked, so changing one person never changes another. */
+export interface AccessTemplate { id: string; name: string; hint?: string; perms: PermMatrix; reach: RoleReach; custom?: boolean }
+export function accessTemplates(docs: AccessDoc[]): AccessTemplate[] {
+  return [
+    { id: "t_all", name: "Everything", hint: "Every section except Employees, Settings and Activity", perms: STANDARD_STAFF.perms, reach: "own" },
+    ...ROLE_TEMPLATES.map(t => ({ id: `t_${t.name}`, name: t.name, hint: t.description, perms: normalisePerms(t.perms), reach: t.reach })),
+    ...rolesOnly(docs).map(r => ({ id: r.id, name: r.name, hint: r.description, perms: r.perms, reach: r.reach ?? "own", custom: true })),
+  ];
+}
+
 export function AccessFields({ draft, onChange, docs, by }: {
   draft: AccessDraft; onChange: (d: AccessDraft) => void; docs: AccessDoc[]; by: { id: string; name: string };
 }) {
-  const roles = [STANDARD_STAFF, ...rolesOnly(docs)];
-  const role = roles.find(r => r.id === draft.roleId) ?? STANDARD_STAFF;
-  const own = diffFromRole(role.perms, draft.perms);
-  const changed = countCells(own.add) + countCells(own.remove);
+  const templates = accessTemplates(docs);
   const timed = useMemo(() => {
     const now = Date.now();
     return applyOwn({}, undefined, undefined, draft.temp.filter(t => tempState(t, now) === "active").map(t => t.perms));
   }, [draft.temp]);
-  const pickRole = (id: string) => {
-    const next = roles.find(r => r.id === id) ?? STANDARD_STAFF;
-    // This person's own changes stay, on top of the new role.
-    onChange({ ...draft, roleId: next.id, perms: applyOwn(next.perms, own.add, own.remove), reach: draft.reach === (role.reach ?? "own") ? next.reach ?? "own" : draft.reach });
+  const same = (a: PermMatrix, b: PermMatrix) => countCells(diffFromRole(a, b).add) + countCells(diffFromRole(a, b).remove) === 0;
+  const current = templates.find(t => same(t.perms, draft.perms) && t.reach === draft.reach);
+  const removeTemplate = async (t: AccessTemplate) => {
+    if (!(await confirmBox(`Delete the template "${t.name}"?\n\nNobody loses anything: people who were given it keep exactly the access they have now.`))) return;
+    const at = new Date().toISOString();
+    updateDbAs({ summary: `Deleted access template "${t.name}"` }, d => {
+      // Anyone still linked to it (from before access was per person) keeps
+      // what it gives them, as their own.
+      for (const u of d.users.filter(x => x.roleId === t.id)) writeAccess(d, u.id, draftFor(d.roles ?? [], u), by, at);
+      d.roles = (d.roles ?? []).filter(x => x.id !== t.id);
+    });
+    toast.success(`Template "${t.name}" deleted`);
   };
   return (
     <div className="space-y-4">
-      <div className="grid sm:grid-cols-2 gap-3 items-start">
-        <div>
-          <Label className="text-xs">Start from role</Label>
-          <Select value={draft.roleId} onValueChange={pickRole}>
-            <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Role"><SelectValue /></SelectTrigger>
-            <SelectContent>{roles.map(r => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}</SelectContent>
-          </Select>
-          {role.description && <p className="text-[11px] text-muted-foreground mt-1">{role.description}</p>}
-        </div>
-        <div>
-          <Label className="text-xs">Whose orders and clients</Label>
-          <div className="grid grid-cols-2 gap-1.5 mt-1" role="radiogroup" aria-label="Whose orders and clients">
-            {(["own", "all"] as RoleReach[]).map(k => (
-              <button key={k} type="button" role="radio" aria-checked={draft.reach === k} onClick={() => onChange({ ...draft, reach: k })}
-                className={`text-left rounded-xl border px-2.5 py-2 text-xs transition-all ${draft.reach === k ? "border-primary ring-2 ring-primary/25 bg-primary/5 font-semibold text-brand-dark" : "border-border/70 hover:border-primary/40"}`}>
-                <span className="flex items-center gap-1.5">{k === "all" ? <Globe2 className="h-3.5 w-3.5 text-primary" /> : <UserRound className="h-3.5 w-3.5 text-primary" />}{k === "all" ? "Every order" : "Their own"}</span>
+      <div className="space-y-1.5">
+        <Label className="text-xs">Fill in from a template</Label>
+        <div className="flex flex-wrap gap-1.5">
+          {templates.map(t => (
+            <span key={t.id} className="inline-flex">
+              <button type="button" title={t.hint} onClick={() => onChange({ ...draft, perms: applyOwn(t.perms), reach: t.reach })}
+                className={`h-8 px-3 border text-xs font-medium transition-colors ${t.custom ? "rounded-l-lg" : "rounded-lg"} ${current?.id === t.id ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border hover:bg-secondary"}`}>
+                {t.name}
               </button>
-            ))}
-          </div>
-          <p className="text-[11px] text-muted-foreground mt-1">
-            {draft.reach === (role.reach ?? "own") ? `As the role (${REACH_LABEL[role.reach ?? "own"]})` : `Changed for this person — the role says ${REACH_LABEL[role.reach ?? "own"].toLowerCase()}`}
-          </p>
+              {t.custom && (
+                <button type="button" onClick={() => removeTemplate(t)} title={`Delete the template "${t.name}"`} aria-label={`Delete template ${t.name}`}
+                  className="h-8 px-1.5 rounded-r-lg border border-l-0 border-border text-muted-foreground hover:text-destructive hover:bg-destructive/10">×</button>
+              )}
+            </span>
+          ))}
+          <button type="button" onClick={() => onChange({ ...draft, perms: {} })} className="h-8 px-3 rounded-lg border border-dashed border-border text-xs text-muted-foreground hover:bg-secondary">Clear all</button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">A template only fills the boxes below — then change anything for this person. Nobody else is affected.</p>
+      </div>
+
+      <div>
+        <Label className="text-xs">Whose orders and clients</Label>
+        <div className="grid sm:grid-cols-2 gap-1.5 mt-1" role="radiogroup" aria-label="Whose orders and clients">
+          {(["own", "all"] as RoleReach[]).map(k => (
+            <button key={k} type="button" role="radio" aria-checked={draft.reach === k} onClick={() => onChange({ ...draft, reach: k })}
+              className={`text-left rounded-xl border px-3 py-2 transition-all ${draft.reach === k ? "border-primary ring-2 ring-primary/25 bg-primary/5" : "border-border/70 hover:border-primary/40"}`}>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-brand-dark">{k === "all" ? <Globe2 className="h-3.5 w-3.5 text-primary" /> : <UserRound className="h-3.5 w-3.5 text-primary" />}{REACH_LABEL[k]}</span>
+              <span className="block text-[11px] text-muted-foreground mt-0.5">{k === "all" ? "Sees every order and client — but may only do what is ticked below." : "Orders assigned to them, and orders of clients they manage."}</span>
+            </button>
+          ))}
         </div>
       </div>
 
       <div className="space-y-2">
-        <div className="flex items-center justify-between gap-2 flex-wrap">
-          <p className="text-sm font-semibold text-brand-dark">What they may do</p>
-          {changed > 0 && (
-            <button type="button" onClick={() => onChange({ ...draft, perms: applyOwn(role.perms) })} className="text-xs text-primary hover:underline inline-flex items-center gap-1">
-              <RotateCcw className="h-3 w-3" /> Back to the role ({changed} change{changed !== 1 ? "s" : ""})
-            </button>
-          )}
-        </div>
-        {LEGEND}
-        <PermGrid value={draft.perms} onChange={p => onChange({ ...draft, perms: p })} role={role.perms} timed={timed} />
-        <p className="text-[11px] text-muted-foreground">Employees, Settings and Activity belong to admins only. The dashboard is open to everyone. A dash means the section has no such action.</p>
+        <p className="text-sm font-semibold text-brand-dark">What they may do</p>
+        <p className="text-[11px] text-muted-foreground -mt-1">View lets them open a section and look. Add, Edit and Delete are the changes they may make there; Export, the downloads and prints. Nothing else is offered to them.</p>
+        <PermGrid value={draft.perms} onChange={p => onChange({ ...draft, perms: p })} timed={timed} />
+        <p className="text-[11px] text-muted-foreground">Employees, Settings and Activity belong to admins only. The dashboard is open to everyone. A dash means the section has no such action. <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded bg-amber-500/20 ring-1 ring-amber-500/40" /> temporary access running now</span></p>
       </div>
 
       <div className="space-y-2">
@@ -354,38 +373,37 @@ export function ManageAccessDialog({ u, onClose }: { u: User; onClose: () => voi
   };
   const saveAsRole = () => {
     const name = roleName ?? "";
-    if (!name.trim()) { toast.error("Name the new role"); return; }
+    if (!name.trim()) { toast.error("Name the template"); return; }
     const at = new Date().toISOString();
     const id = uid("role_");
-    updateDbAs({ summary: `Made role "${name.trim()}" from ${u.name}'s access` }, d => {
+    updateDbAs({ summary: `Saved access template "${name.trim()}" from ${u.name}'s access` }, d => {
       if (!d.roles) d.roles = [];
       d.roles.push({ id, name: name.trim(), perms: normalisePerms(draft.perms), reach: draft.reach, createdAt: at } as StaffRole);
-      writeAccess(d, u.id, { ...draft, roleId: id }, by, at);
     });
-    toast.success(`Role "${name.trim()}" created — give it to others with the same job`);
-    onClose();
+    toast.success(`Template "${name.trim()}" saved — it is offered when setting anyone's access`);
+    setRoleName(null);
   };
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Access — {u.name}</DialogTitle>
-          <DialogDescription className="text-xs">Their role is the starting point. Change anything for them alone, or give temporary access that ends by itself. Saved changes apply at once.</DialogDescription>
+          <DialogDescription className="text-xs">Tick exactly what this person may see and do — a template fills it in one click. Give temporary access that ends by itself. Saved changes apply at once.</DialogDescription>
         </DialogHeader>
         <AccessFields draft={draft} onChange={setDraft} docs={docs} by={by} />
         {roleName !== null && (
           <div className="rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2">
-            <p className="text-sm font-semibold text-brand-dark">Save as a new role</p>
-            <p className="text-[11px] text-muted-foreground">The role gets exactly this person's access (not the temporary part), and they are moved onto it — then give it to others with the same job.</p>
+            <p className="text-sm font-semibold text-brand-dark">Save as a template</p>
+            <p className="text-[11px] text-muted-foreground">A one-click starting point with exactly this access (not the temporary part), for the next person in the same job.</p>
             <div className="flex gap-2">
-              <Input autoFocus value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Role name, e.g. Senior sales" className="h-9 rounded-lg" />
-              <Button size="sm" onClick={saveAsRole} className="btn-hero rounded-lg h-9">Create role</Button>
+              <Input autoFocus value={roleName} onChange={e => setRoleName(e.target.value)} placeholder="Template name, e.g. Senior sales" className="h-9 rounded-lg" />
+              <Button size="sm" onClick={saveAsRole} className="btn-hero rounded-lg h-9">Save template</Button>
               <Button size="sm" variant="ghost" onClick={() => setRoleName(null)} className="rounded-lg h-9">Cancel</Button>
             </div>
           </div>
         )}
         <DialogFooter>
-          <Button variant="ghost" onClick={() => setRoleName(roleName === null ? "" : null)} className="rounded-xl mr-auto gap-1.5 text-primary max-sm:hidden" title="Turn this person's access into a role others can be given"><Plus className="h-4 w-4" /> Save as a new role</Button>
+          <Button variant="ghost" onClick={() => setRoleName(roleName === null ? "" : null)} className="rounded-xl mr-auto gap-1.5 text-primary max-sm:hidden" title="Keep this access as a one-click template for others"><Plus className="h-4 w-4" /> Save as a template</Button>
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
           <Button onClick={save} className="btn-hero rounded-xl px-5 gap-1.5"><Save className="h-4 w-4" /> Save access</Button>
         </DialogFooter>
@@ -400,7 +418,9 @@ export function AccessSummary({ u, db }: { u: User; db: DB }) {
   const role = roleOf(u, docs);
   const ua = accessOf(docs, u.id);
   const now = Date.now();
-  const changes = countCells(ua?.add) + countCells(ua?.remove) + (ua?.reach ? 1 : 0);
+  const mine = applyOwn(role.perms, ua?.add, ua?.remove);
+  const tpl = accessTemplates(docs).find(t => countCells(diffFromRole(t.perms, mine).add) + countCells(diffFromRole(t.perms, mine).remove) === 0
+    && t.reach === (ua?.reach ?? role.reach ?? "own"));
   const live = (ua?.temp ?? []).filter(t => tempState(t, now) !== "ended");
   const reach = reachOf(u, docs, now);
   const sections = Object.keys(effectivePerms(u, docs, now)).length;
@@ -408,8 +428,7 @@ export function AccessSummary({ u, db }: { u: User; db: DB }) {
   return (
     <div className="space-y-1">
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-        <span className="font-semibold px-2 py-0.5 rounded-md bg-primary/10 text-primary">{role.name}</span>
-        {changes > 0 && <span className="font-medium px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-700">{changes} change{changes !== 1 ? "s" : ""} for them</span>}
+        <span className="font-semibold px-2 py-0.5 rounded-md bg-primary/10 text-primary">{tpl ? `${tpl.name} access` : "Custom access"}</span>
         {live.map(t => (
           <span key={t.id} title={permWords(t.perms, t.reach)} className="font-medium px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 inline-flex items-center gap-1">
             <Clock className="h-3 w-3" />{tempState(t, now) === "upcoming" ? `from ${new Date(t.from!).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `until ${new Date(t.until).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}

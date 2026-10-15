@@ -29,6 +29,7 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -459,9 +460,11 @@ function ClientHistoryPageBody() {
               <p className="text-muted-foreground mt-1 break-words">{client.ownerName}</p>
             </div>
           </div>
+          <IfExport>
           <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2 w-full sm:w-auto shrink-0">
             <Download className="h-4 w-4" /> Export Report
           </Button>
+          </IfExport>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
@@ -533,7 +536,9 @@ function ClientHistoryPageBody() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <IfExport>
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            </IfExport>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
               { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
               { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
