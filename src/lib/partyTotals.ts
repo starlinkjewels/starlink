@@ -15,6 +15,10 @@ import { TOTALS_COLS, type TotalsKind } from "./pageData";
 
 /** The summary version that also carries a factory's pool stock. */
 const POOL_VERSION = 2;
+/** The first version whose factory figures keep other materials (Settings →
+ *  Materials) out of the diamond carats. A factory total from before it is
+ *  not trusted: the page works the figures out from the records instead. */
+const FACTORY_VERSION = 3;
 
 export type FactoryFigures = ReturnType<typeof factoryAccount> & { fineGold: number; goldPool: number; diaPool: number };
 export type SupplierFigures = ReturnType<typeof supplierAccount>;
@@ -32,12 +36,13 @@ export function totalsCovered(db: DB, kind: TotalsKind, withPool = false): boole
   const parties: { id: string }[] = kind === "factory" ? db.factories : kind === "supplier" ? db.suppliers : db.lockers;
   return parties.every(p => {
     const s = summaryOf(`${kind}_${p.id}`);
-    return !!s && (!withPool || num(s.v) >= POOL_VERSION);
+    return !!s && (!withPool || num(s.v) >= POOL_VERSION) && (kind !== "factory" || num(s.v) >= FACTORY_VERSION);
   });
 }
 
 export function factoryFigures(db: DB, f: Factory): FactoryFigures {
-  const s = collectionsLoaded(TOTALS_COLS.factory) ? undefined : summaryOf(`factory_${f.id}`);
+  const raw = collectionsLoaded(TOTALS_COLS.factory) ? undefined : summaryOf(`factory_${f.id}`);
+  const s = raw && num(raw.v) >= FACTORY_VERSION ? raw : undefined;
   if (s) {
     return {
       goldIssued: num(s.goldIssued), goldUsed: num(s.goldUsed), goldOutstanding: num(s.goldOutstanding),
