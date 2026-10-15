@@ -1040,11 +1040,17 @@ function FactoryHistoryPageBody() {
                     {mi.source === "purchase" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">Direct purchase</span>}
                     {mi.source === "factoryPool" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">From factory pool</span>}
                   </p>
+                  {mi.source === "melt" && mi.quantityIssued === 0 ? (
+                    <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                      <Coins className="h-3 w-3" /> Charge only, {fmtDate(mi.issuedAt)} — the gold did not stay with this factory
+                    </p>
+                  ) : (
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     {mi.material === "gold" ? <Coins className="h-3 w-3" /> : <Gem className="h-3 w-3" />}
                     {mi.quantityIssued}{unit} {mi.purityOrQuality} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
                     {mi.status === "closed" && wastage !== 0 ? (wastage > 0 ? ` · ${wastage}${unit} wastage` : ` · ${Math.abs(wastage)}${unit} over-used`) : ""}
                   </p>
+                  )}
                 </div>
                 <div className="text-right shrink-0">
                   <p className="text-sm font-semibold">{mi.makingCharges.amountInr > 0 ? fmtMoneyInr(mi.makingCharges.amountInr) : "No charge set"}</p>
