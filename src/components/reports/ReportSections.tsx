@@ -1,6 +1,6 @@
 import { DataTable } from "@/components/DataTable";
 import { useState, useMemo, useEffect } from "react";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
@@ -736,7 +736,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const delivered  = filtered.filter(o => o.status === "Delivered");
   const dispatched = filtered.filter(o => ["Dispatched","Delivered"].includes(o.status));
   const inProd     = filtered.filter(o => o.status === "In Production");
-  const revenue    = delivered.reduce((s, o) => s + (o.amount || 0), 0);
+  const revenue    = delivered.reduce((s, o) => s + keptValue(o), 0);
 
   /* ── dispatch speed ── */
   const speedRows = filtered
@@ -784,7 +784,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const prev = map.get(o.clientId) ?? { id: o.clientId, name, total: 0, dispatched: 0, delivered: 0, revenue: 0, avgDays: null };
       prev.total++;
       if (["Dispatched","Delivered"].includes(o.status)) prev.dispatched++;
-      if (o.status === "Delivered") { prev.delivered++; prev.revenue += o.amount || 0; }
+      if (o.status === "Delivered") { prev.delivered++; prev.revenue += keptValue(o); }
       map.set(o.clientId, prev);
     });
     // compute avgDays per client

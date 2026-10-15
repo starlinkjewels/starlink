@@ -1,4 +1,4 @@
-import { orderTotal, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
+import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 
 const fmtRate = (n: number, unit: string) =>
@@ -88,6 +88,8 @@ export interface OrderCost {
   labour: CostLine[];
   other: CostLine[];
   totalInr: number;
+  /** What the pieces themselves cost — the total less freight and other order expenses. */
+  pieceInr: number;
   missing: MissingCost[];
   /** True only when no part of the cost is unknown. */
   complete: boolean;
@@ -201,7 +203,7 @@ function finishedFine(mi: MaterialIssuance): number {
 }
 
 export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
-  const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, missing: [], complete: true };
+  const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, pieceInr: 0, missing: [], complete: true };
   const issuances = (db.materialIssuances ?? []).filter(i => i.orderId === order.id);
   const purchases = db.purchases ?? [];
   // Each bill is counted once, however many routes lead to it — a purchase
@@ -346,7 +348,14 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const build = item && db.orders.find(o => o.readyStockCreatedId === item.id && o.id !== order.id);
     const bc = build ? orderCost(db, build, depth + 1) : null;
     const rate = rateOn(db, saleDate(order))?.rate ?? 0;
-    if (build && bc && bc.totalInr > 0) {
+    // A piece a client sent back: it cost what its first order cost per piece.
+    const back = item?.fromReturn ? db.orders.find(o => o.id === item.fromReturn!.orderId && o.id !== order.id) : undefined;
+    const backCost = back ? orderCost(db, back, depth + 1) : null;
+    if (back && backCost && backCost.pieceInr > 0) {
+      const pieces = back.quantity || 1;
+      out.other.push({ label: `${name} — returned from ${back.orderNumber}${pieces > 1 || sold > 1 ? `, ${sold} piece${sold !== 1 ? "s" : ""} at its cost per piece` : ""}`, amountInr: r2((backCost.pieceInr / pieces) * sold) });
+      for (const m of backCost.missing) out.missing.push({ label: m.label, reason: `on ${back.orderNumber}: ${m.reason}` });
+    } else if (build && bc && bc.totalInr > 0) {
       // A build can make several identical pieces; this order carries its share.
       const pieces = build.quantity || 1;
       out.other.push({
@@ -372,10 +381,13 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   // selling value, the usual basis for freight-out: a $3,000 ring carries more
   // of a parcel's insurance than a $300 band in the same box. An expense paid
   // in dollars is converted at the rate on the day it was paid.
+  let expenseInr = 0;
   for (const e of db.expenses ?? []) {
     if (!e.orderIds?.includes(order.id)) continue;
     const peers = e.orderIds.map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o);
-    const value = (o: Order) => Math.max(0, orderTotal(o));
+    // Split by what each order sold for — before any return, so a piece
+    // sent back later does not push its freight onto the rest of the parcel.
+    const value = (o: Order) => Math.max(0, orderTotal(o) + returnedCredit(o));
     const pool = peers.reduce((s, o) => s + value(o), 0);
     const share = pool > 0 ? value(order) / pool : 1 / Math.max(peers.length, 1);
     let inr: number | null = e.amount;
@@ -391,6 +403,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       label: peers.length > 1 ? `${e.title} — ${Math.round(share * 100)}% of a ${peers.length}-order parcel` : e.title,
       amountInr: r2(inr * share),
     });
+    expenseInr += r2(inr * share);
   }
 
   // A shipped order with nothing on record for its shipping is not free to
@@ -412,7 +425,15 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   }
 
   const all = [...out.gold, ...out.diamond, ...out.labour, ...out.other];
-  out.totalInr = r2(all.reduce((s, l) => s + l.amountInr, 0));
+  // The pieces themselves — everything but the freight and other costs of sending them.
+  out.pieceInr = r2(all.reduce((s, l) => s + l.amountInr, 0) - expenseInr);
+  // Pieces the client sent back carry their cost into Ready Stock; the freight stays spent.
+  const back = returnedQty(order);
+  if (depth === 0 && back > 0 && out.pieceInr > 0) {
+    const of = order.quantity || 1;
+    out.other.push({ label: `Returned by the client — ${back} of ${of} piece${of !== 1 ? "s" : ""}, cost moves to Ready Stock with ${back !== 1 ? "them" : "it"}`, amountInr: -r2(out.pieceInr * Math.min(back, of) / of) });
+  }
+  out.totalInr = r2([...out.gold, ...out.diamond, ...out.labour, ...out.other].reduce((s, l) => s + l.amountInr, 0));
   out.complete = out.missing.length === 0;
   return out;
 }

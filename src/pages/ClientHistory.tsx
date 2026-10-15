@@ -288,16 +288,19 @@ function ClientHistoryPageBody() {
     for (const b of blocks) {
       for (const i of b.items) {
         rows.push([b.number, fmtDate(b.date), i.orderNo, i.description, i.qty,
-          i.gross, i.gift || "", i.received || "", i.balance]);
+          i.gross, i.gift || "", i.returned || "", i.received || "", i.balance]);
+      }
+      for (const c of b.credits) {
+        rows.push([b.number, fmtDate(c.date), "", `Credit note ${c.note}`, "", "", "", c.amount, "", ""]);
       }
       for (const p of b.payments) {
-        rows.push([b.number, fmtDate(p.date), "", p.note, "", "", "", p.amount, ""]);
+        rows.push([b.number, fmtDate(p.date), "", p.note, "", "", "", "", p.amount, ""]);
       }
-      rows.push([b.number, "", "", "Invoice total", "", b.gross, b.gift || "", b.received, b.balance]);
+      rows.push([b.number, "", "", "Invoice total", "", b.gross, b.gift || "", b.returned || "", b.received, b.balance]);
     }
     downloadCsv(
       `Client-Invoice-Statement-${client.companyName.replace(/\s+/g, "_")}`,
-      ["Invoice", "Date", "Order", "Description / Particular", "Qty", "Billed", "Gift card", "Received", "Balance"],
+      ["Invoice", "Date", "Order", "Description / Particular", "Qty", "Billed", "Gift card", "Returned", "Received", "Balance"],
       rows,
     );
   };
@@ -307,9 +310,9 @@ function ClientHistoryPageBody() {
     const blocks = invoiceBlocks.filter(b => inDateRange(b.date, from, to));
     const oD = openingDebitAmt(client), oC = openingCreditAmt(client);
     const T = blocks.reduce((t, b) => ({
-      gross: t.gross + b.gross, gift: t.gift + b.gift,
+      gross: t.gross + b.gross, gift: t.gift + b.gift, returned: t.returned + b.returned,
       received: t.received + b.received, balance: t.balance + b.balance,
-    }), { gross: 0, gift: 0, received: 0, balance: 0 });
+    }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
     const closing = oD - oC + T.balance;
 
     // One table per invoice: its pieces, then the payments received against it.
@@ -318,25 +321,31 @@ function ClientHistoryPageBody() {
       columns: [
         { header: "Order / Date", x: 14 },
         { header: "Description", x: 52 },
-        { header: "Qty", x: 172 },
-        { header: "Billed", x: 192 },
-        { header: "Gift card", x: 218 },
-        { header: "Received", x: 244 },
+        { header: "Qty", x: 160 },
+        { header: "Billed", x: 176 },
+        { header: "Gift card", x: 202 },
+        { header: "Returned", x: 224 },
+        { header: "Received", x: 246 },
         { header: "Balance", x: 266 },
       ],
-      align: ["left", "left", "right", "right", "right", "right", "right"] as ("left" | "right")[],
+      align: ["left", "left", "right", "right", "right", "right", "right", "right"] as ("left" | "right")[],
       rows: [
         ...b.items.map(i => [
-          i.orderNo, fit(i.description || "—", 116), String(i.qty),
+          i.orderNo, fit(i.description || "—", 104), String(i.qty),
           fmtMoney(i.gross), i.gift ? `-${fmtMoney(i.gift)}` : "",
+          i.returned ? `-${fmtMoney(i.returned)}` : "",
           i.received ? fmtMoney(i.received) : "",
           i.balance > 0.009 ? fmtMoney(i.balance) : "Cleared",
         ]),
+        ...b.credits.map(c => [
+          fmtDate(c.date), fit(`Credit note ${c.note}`, 104), "", "", "", `-${fmtMoney(c.amount)}`, "", "",
+        ]),
         ...b.payments.map(p => [
-          fmtDate(p.date), fit(`Payment received — ${p.note}`, 116), "", "", "", fmtMoney(p.amount), "",
+          fmtDate(p.date), fit(`Payment received — ${p.note}`, 104), "", "", "", "", fmtMoney(p.amount), "",
         ]),
       ],
       totalsRow: ["", "Invoice total", "", fmtMoney(b.gross), b.gift ? `-${fmtMoney(b.gift)}` : "",
+        b.returned ? `-${fmtMoney(b.returned)}` : "",
         fmtMoney(b.received), b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"],
     }));
 
@@ -354,6 +363,7 @@ function ClientHistoryPageBody() {
         ...(oD || oC ? [{ label: "Balance brought forward", value: fmtMoney(oD - oC) }] : []),
         { label: "Total billed (gross)", value: fmtMoney(T.gross) },
         ...(T.gift > 0 ? [{ label: "Gift card used", value: fmtMoney(T.gift) }] : []),
+        ...(T.returned > 0 ? [{ label: "Returned (credit notes)", value: fmtMoney(T.returned) }] : []),
         { label: "Received", value: fmtMoney(T.received) },
         { label: "Outstanding", value: fmtMoney(Math.max(0, closing)) },
         { label: "Invoices", value: String(blocks.length) },

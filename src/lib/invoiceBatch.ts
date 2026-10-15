@@ -1,4 +1,4 @@
-import { orderIsDispatched, findInvoiceForOrder, orderTotal, type DB, type Order } from "@/lib/db";
+import { orderIsDispatched, findInvoiceForOrder, orderTotal, keptQty, type DB, type Order } from "@/lib/db";
 
 /**
  * Billing several dispatched orders on one invoice, from wherever they were
@@ -36,6 +36,8 @@ export function invoiceBlocker(db: DB, o: Order): string | null {
   // A bill for goods that have not shipped is the one mistake this guard
   // exists for, so it is named plainly rather than lumped in with the rest.
   if (!orderIsDispatched(o)) return "Not dispatched yet.";
+  // Sent back before it was billed: there is nothing left to bill.
+  if (keptQty(o) === 0) return "Every piece came back — nothing to bill.";
   // Reads both invoice shapes — the single-order ones and the batched ones.
   const existing = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (existing) return `Already on invoice ${existing.number}.`;

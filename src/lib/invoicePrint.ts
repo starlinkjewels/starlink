@@ -1,5 +1,5 @@
-import type { Order, Client, Settings } from "./db";
-import { totalAdvance, orderTotal, balanceDue, logEvent, loadDb } from "./db";
+import type { Order, Client, Settings, DB } from "./db";
+import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb } from "./db";
 import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
 
@@ -59,7 +59,8 @@ function itemRowHtml(sr: number, order: Order, mainShape?: string): string {
   return `<tr class="item-row">
         <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${itemDescription(order, mainShape)}</td>
+        <td class="l">${itemDescription(order, mainShape)}${returnedQty(order) > 0
+          ? `<div style="font-size:9px;color:#b91c1c;margin-top:1px;">${returnedQty(order)} of ${order.quantity} returned — ${[...new Set((order.returns ?? []).map(r => r.creditNoteNo))].join(", ")}</div>` : ""}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>
         <td class="c">${itemPrice}</td>
@@ -92,12 +93,27 @@ function bankImagesHtml(settings: Settings): string {
 /* Deposit/Balance rows only appear when they add information: a $0 balance or a
    deposit that equals the total is redundant with "Total Amount" above, so a
    fully-settled invoice just ends with Total Amount as the final line. */
-function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, gift = 0): string {
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, gift = 0, more: { certificate?: number; returned?: number; notes?: string[] } = {}): string {
   const shippingRow = shipping > 0 ? `
     <tr class="tot-row">
       <td colspan="4" class="blank"></td>
       <td colspan="2" class="tot-lbl">Shipping Charges</td>
       <td class="tot-val">${usd(shipping)}</td>
+    </tr>` : "";
+
+  const certificateRow = (more.certificate ?? 0) > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">Certificate</td>
+      <td class="tot-val">${usd(more.certificate!)}</td>
+    </tr>` : "";
+
+  // Pieces the client sent back — the credit note(s) that took them off.
+  const returnedRow = (more.returned ?? 0) > 0 ? `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">Less: Returned goods${more.notes?.length ? `<br/><span style="font-size:9px;">${more.notes.join(", ")}</span>` : ""}</td>
+      <td class="tot-val">-${usd(more.returned!)}</td>
     </tr>` : "";
 
   const giftRow = gift > 0 ? `
@@ -123,7 +139,9 @@ function totalsRowsHtml(total: number, adv: number, bal: number, shipping: numbe
 
   return `
     ${shippingRow}
+    ${certificateRow}
     ${giftRow}
+    ${returnedRow}
     <tr class="tot-row tot-bold">
       <td colspan="4" class="blank"></td>
       <td colspan="2" class="tot-lbl"><strong>Total Amount</strong></td>
@@ -143,8 +161,10 @@ function buildInvoiceDoc(opts: {
   totalsRows: string;
   /** Preview for an order that isn't billed yet — no invoice number is issued. */
   draft?: boolean;
+  /** A credit note for returned goods, against `againstInvoice`. */
+  credit?: { againstInvoice?: string };
 }): string {
-  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft } = opts;
+  const { client, settings, invoiceNumber, dateLabel, itemRows, totalsRows, draft, credit } = opts;
   // The first company prints as it always has, defaults and all; another
   // company prints only what it has been given.
   const isMain = ((settings as Partial<BrandSettings>).brandCompanyId ?? MAIN_COMPANY_ID) === MAIN_COMPANY_ID;
@@ -352,7 +372,7 @@ function buildInvoiceDoc(opts: {
 
   <hr class="rule"/>
 
-  <div class="title">${draft ? "PROFORMA INVOICE" : "INVOICE"}</div>
+  <div class="title">${credit ? "CREDIT NOTE" : draft ? "PROFORMA INVOICE" : "INVOICE"}</div>
 
   <!-- TO + Invoice meta -->
   <div class="inforow">
@@ -368,9 +388,11 @@ function buildInvoiceDoc(opts: {
     </div>
     <div class="meta">
       <table>
-        <tr><td>${draft ? "Proforma" : "Invoice No:"}</td><td>${draft ? "NOT BILLED" : invoiceNumber}</td></tr>
+        <tr><td>${credit ? "Credit Note No:" : draft ? "Proforma" : "Invoice No:"}</td><td>${draft ? "NOT BILLED" : invoiceNumber}</td></tr>
         <tr><td>Date:</td><td>${dateLabel}</td></tr>
-        <tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>
+        ${credit
+          ? `<tr><td>Against Invoice:</td><td>${credit.againstInvoice ? esc(credit.againstInvoice) : "—"}</td></tr>`
+          : `<tr><td>Terms:</td><td>${settings.invoiceTerms || "COD"}</td></tr>`}
       </table>
     </div>
   </div>
@@ -397,8 +419,8 @@ function buildInvoiceDoc(opts: {
       </tbody>
     </table>
 
-    <!-- Bank / wire details (uploaded images, if set) -->
-    ${bankImagesHtml(settings)}
+    <!-- Bank / wire details (uploaded images, if set) — nothing to pay on a credit note -->
+    ${credit ? "" : bankImagesHtml(settings)}
   </div>
 
   <!-- Footer -->
@@ -411,14 +433,14 @@ function buildInvoiceDoc(opts: {
     </div>
 
     <div class="f-mid">
-      <div class="qr-block">
+      ${credit ? "" : `<div class="qr-block">
         <div class="qr-lbl">SCAN TO PAY</div>
         ${qr(settings.invoiceQr1)}
       </div>
       <div class="qr-block">
         <div class="qr-lbl">SCAN TO PAY</div>
         ${qr(settings.invoiceQr2)}
-      </div>
+      </div>`}
     </div>
 
     <div class="f-right">
@@ -429,10 +451,10 @@ function buildInvoiceDoc(opts: {
   </div>
 
   <!-- Legal -->
-  <div class="legal">
+  ${credit ? `<div class="legal">The goods listed above were returned to us. The credit amount comes off what is due on the invoice named above; anything already paid beyond it is held as your credit for future bills.</div>` : `<div class="legal">
     This Items Here in Invoiced Has Been Purchased from Legal Sources, Not Involved in Funding Conflict and In Compliance with United Nations Resolutions.<br/>
     The Seller Here by Guaranteed This Item Are Conflict Free and Not Involved in Any Money Laundering, Based On Personal Knowledge and Written Guarantied Provided By The Supplier of This Item.
-  </div>
+  </div>`}
 
   <div class="thankyou">THANK YOU FOR YOUR BUSINESS</div>
 
@@ -470,6 +492,7 @@ export function printInvoice(
   const bal = balanceDue(order);
   const shipping = order.shippingCharge || 0;
   const gift = order.giftCardRedeemed || 0;
+  const more = { certificate: order.certificateFee || 0, returned: returnedCredit(order), notes: [...new Set((order.returns ?? []).map(r => r.creditNoteNo))] };
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
   const ITEM_ROWS = 10;
@@ -482,7 +505,7 @@ export function printInvoice(
     client, settings: brand, invoiceNumber, draft,
     dateLabel: localDate(order.createdAt),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift, more),
   });
   openAndPrint(html);
 }
@@ -507,6 +530,11 @@ export function printBatchInvoice(
   const bal = orders.reduce((s, o) => s + balanceDue(o), 0);
   const shipping = orders.reduce((s, o) => s + (o.shippingCharge || 0), 0);
   const gift = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
+  const more = {
+    certificate: orders.reduce((s, o) => s + (o.certificateFee || 0), 0),
+    returned: Math.round(orders.reduce((s, o) => s + returnedCredit(o), 0) * 100) / 100,
+    notes: [...new Set(orders.flatMap(o => (o.returns ?? []).map(r => r.creditNoteNo)))].sort(),
+  };
 
   // Always keep a few blank rows after the real ones — the bank-detail images are
   // absolutely positioned over this space (see bankImagesHtml), so with too many
@@ -521,7 +549,66 @@ export function printBatchInvoice(
     client, settings: brand, invoiceNumber,
     dateLabel: localDateStr(dateStr),
     itemRows,
-    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift),
+    totalsRows: totalsRowsHtml(total, adv, bal, shipping, gift, more),
+  });
+  openAndPrint(html);
+}
+
+/**
+ * The credit note for a sales return — every returned piece on it (one note
+ * can cover several orders of one client), and what it does to the bill.
+ */
+export function printCreditNote(db: DB, noteId: string, mainShapes?: Record<string, string>) {
+  if (!exportAllowed()) return;
+  const lines: { order: Order; ret: NonNullable<Order["returns"]>[number] }[] = [];
+  for (const o of db.orders) for (const r of o.returns ?? []) if (r.noteId === noteId) lines.push({ order: o, ret: r });
+  if (!lines.length) return;
+  const first = lines[0];
+  const client = db.clients.find(c => c.id === first.order.clientId);
+  const inv = first.ret.invoiceId ? db.invoices.find(i => i.id === first.ret.invoiceId) : undefined;
+  const no = first.ret.creditNoteNo;
+  logEvent("print", `Printed credit note ${no} — ${client?.companyName ?? "client"}`, { creditNote: no });
+  const r2 = (n: number) => Math.round(n * 100) / 100;
+  const sum = (f: (r: typeof first.ret) => number) => r2(lines.reduce((s, l) => s + f(l.ret), 0));
+  const rows = lines.map((l, i) => {
+    const o = l.order, r = l.ret;
+    const per = o.quantity || 1;
+    const ct = o.diamondWeight ? Math.round(o.diamondWeight * r.qty / per * 1000) / 1000 : 0;
+    return `<tr class="item-row">
+        <td class="c">${i + 1}</td>
+        <td class="c">${o.designNumber || o.orderNumber}</td>
+        <td class="l">${itemDescription(o, mainShapes?.[o.id])}<div style="font-size:9px;color:#555;margin-top:1px;">Order ${o.orderNumber}${r.reason ? ` — ${esc(r.reason)}` : ""}</div></td>
+        <td class="c">${r.qty}</td>
+        <td class="c">${ct ? `${ct}CT` : "—"}</td>
+        <td class="c">${usd(r2(r.valueUsd / r.qty))}</td>
+        <td class="c">${usd(r.valueUsd)}</td>
+      </tr>`;
+  });
+  const ITEM_ROWS = Math.max(8, lines.length + 3);
+  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => rows[i] ?? BLANK_ROW).join("\n");
+  const row = (label: string, value: string, bold = false) => `
+    <tr class="tot-row${bold ? " tot-bold" : ""}">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">${bold ? `<strong>${label}</strong>` : label}</td>
+      <td class="tot-val">${bold ? `<strong>${value}</strong>` : value}</td>
+    </tr>`;
+  const value = sum(r => r.valueUsd), gift = sum(r => r.giftBackUsd || 0), ship = sum(r => (r.shippingBackUsd || 0) + (r.certificateBackUsd || 0));
+  const fee = sum(r => r.feeUsd || 0), cb = sum(r => r.cashbackChargedUsd || 0), creditTotal = sum(r => r.creditUsd), toCredit = sum(r => r.toCreditUsd || 0);
+  const totalsRows = [
+    row("Goods returned", usd(value)),
+    gift > 0 ? row("Gift card share (back on the card)", `-${usd(gift)}`) : "",
+    ship > 0 ? row("Shipping &amp; certificate refunded", usd(ship)) : "",
+    fee > 0 ? row("Return charge", `-${usd(fee)}`) : "",
+    cb > 0 ? row("Cashback already used", `-${usd(cb)}`) : "",
+    row("Credit Amount", usd(creditTotal), true),
+    toCredit > 0 ? row("Already paid — held as your credit", usd(toCredit)) : "",
+  ].join("");
+  const brand = brandForDocument(db, { clientId: client?.id ?? first.order.clientId, invoiceId: inv?.id });
+  const html = buildInvoiceDoc({
+    client, settings: brand, invoiceNumber: no,
+    dateLabel: localDate(first.ret.at),
+    itemRows, totalsRows,
+    credit: { againstInvoice: inv?.number },
   });
   openAndPrint(html);
 }

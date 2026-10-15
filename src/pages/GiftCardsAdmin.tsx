@@ -1,7 +1,7 @@
 import { DataTable } from "@/components/DataTable";
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
-import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardStatus, type GiftCard, type GiftCardStatus } from "@/lib/db";
+import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, giftCardStatus, type GiftCard, type GiftCardStatus } from "@/lib/db";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -78,7 +78,7 @@ export function GiftCardsAdminPage() {
       rows: rs.map(c => {
         const rem = giftCardRemaining(c, db.orders);
         return [
-          clientName(c.clientId).slice(0, 26), sourceLabel(c.source), "$" + money0(c.amount), "$" + money0(c.amount - rem),
+          clientName(c.clientId).slice(0, 26), sourceLabel(c.source), "$" + money0(giftCardGranted(c)), "$" + money0(giftCardGranted(c) - rem),
           "$" + money0(rem), giftCardStatus(c, db.orders), fmtDate(c.createdAt), fmtDate(c.expiresAt),
           ordersFor(c.id).map(o => o.orderNumber).join(", ").slice(0, 22),
         ];
@@ -93,7 +93,7 @@ export function GiftCardsAdminPage() {
       ["Client", "Source", "Amount (USD)", "Used (USD)", "Remaining (USD)", "Status", "Issued", "Expires", "Orders redeemed", "Note"],
       rs.map(c => {
         const rem = giftCardRemaining(c, db.orders);
-        return [clientName(c.clientId), sourceLabel(c.source), Math.round(c.amount), Math.round(c.amount - rem), Math.round(rem),
+        return [clientName(c.clientId), sourceLabel(c.source), Math.round(giftCardGranted(c)), Math.round(giftCardGranted(c) - rem), Math.round(rem),
           giftCardStatus(c, db.orders), fmtDate(c.createdAt), fmtDate(c.expiresAt),
           ordersFor(c.id).map(o => o.orderNumber).join(" "), c.note ?? ""];
       }),
@@ -158,8 +158,8 @@ export function GiftCardsAdminPage() {
             columns={[
               { key: "client", header: "Client", always: true, sortValue: c => clientName(c.clientId), cell: c => <span className="font-medium max-w-[180px] truncate block">{clientName(c.clientId)}</span> },
               { key: "source", header: "Source", sortValue: c => sourceLabel(c.source), cell: c => <span className="text-xs text-muted-foreground">{sourceLabel(c.source)}</span> },
-              { key: "amount", header: "Amount", align: "right", sortValue: c => c.amount, cell: c => <span className="font-semibold tabular-nums">{fmtMoney(c.amount)}</span> },
-              { key: "used", header: "Used", align: "right", sortValue: c => c.amount - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums text-success">{fmtMoney(c.amount - giftCardRemaining(c, db.orders))}</span> },
+              { key: "amount", header: "Amount", align: "right", sortValue: c => giftCardGranted(c), cell: c => <span className="font-semibold tabular-nums">{fmtMoney(giftCardGranted(c))}</span> },
+              { key: "used", header: "Used", align: "right", sortValue: c => giftCardGranted(c) - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums text-success">{fmtMoney(giftCardGranted(c) - giftCardRemaining(c, db.orders))}</span> },
               { key: "remaining", header: "Remaining", align: "right", sortValue: c => giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums">{fmtMoney(giftCardRemaining(c, db.orders))}</span> },
               { key: "status", header: "Status", align: "center", sortValue: c => giftCardStatus(c, db.orders), cell: c => { const st = giftCardStatus(c, db.orders); return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[st]}`}>{st}</span>; } },
               { key: "issued", header: "Issued", kind: "date", sortValue: c => c.createdAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.createdAt)}</span> },

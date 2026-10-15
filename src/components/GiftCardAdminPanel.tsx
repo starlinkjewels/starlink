@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired, giftCardGranted } from "@/lib/db";
 import { sendMail } from "@/lib/email";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -144,7 +144,7 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
                   <div key={c.id} className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-3 py-2">
                     <div className="min-w-0">
                       <p className="text-sm font-medium">
-                        {fmtMoney(c.amount)} <span className="text-[10px] uppercase tracking-wide text-muted-foreground">· {c.source === "cashback" ? "Cashback" : "Gift"}</span>
+                        {fmtMoney(giftCardGranted(c))} <span className="text-[10px] uppercase tracking-wide text-muted-foreground">· {c.source === "cashback" ? "Cashback" : "Gift"}</span>
                       </p>
                       <p className="text-[11px] text-muted-foreground">
                         {c.revoked ? "Cancelled" : expired ? "Expired" : `${fmtMoney(remaining)} left`} · expires {fmtDate(c.expiresAt)}
