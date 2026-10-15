@@ -53,6 +53,7 @@ import { receiptForAdvance } from "@/lib/receipts";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -2066,11 +2067,13 @@ function OrderDetailPageBody() {
                     ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
                     : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                 ))
-              : <Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button>}
+              : <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
             {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && (
+              <IfExport>
               <Button variant="outline" onClick={() => setBandOpen(true)} className="rounded-xl" title="Print / download the barcode jewellery band">
                 <Tag className="h-4 w-4 mr-2" />Band
               </Button>
+              </IfExport>
             )}
             {user!.role === "admin" && !order.melted && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
               <Button variant="outline" onClick={() => setMeltOpen(true)} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" title="Melt this piece — gold back to a factory or stock, stones back to stock">
@@ -3131,7 +3134,7 @@ function OrderDetailPageBody() {
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div className="flex items-center gap-2">
                 <span className="text-xs font-semibold text-brand-dark shrink-0">{faDone ? "Manufacturing (actual)" : "① Assign & Estimate"}</span>
-                <Select value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
+                <Select disabled={!canEditStage()} value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
                   <SelectTrigger className="h-8 w-52 rounded-lg text-xs"><SelectValue placeholder="Choose factory" /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none">Not assigned</SelectItem>

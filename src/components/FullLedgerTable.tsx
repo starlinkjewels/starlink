@@ -4,6 +4,7 @@ import { Input } from "@/components/ui/input";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Search, Download } from "lucide-react";
+import { IfExport } from "@/components/IfExport";
 
 /** One movement in one material — the shape a ledger line actually has. */
 export interface MovementRow {
@@ -75,10 +76,12 @@ export function FullLedgerTable({
           <p className="text-xs text-muted-foreground mt-0.5">{caption}</p>
         </div>
         {onExport && (
+          <IfExport>
           <button onClick={onExport}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
             <Download className="h-4 w-4" /> Export
           </button>
+          </IfExport>
         )}
       </div>
 

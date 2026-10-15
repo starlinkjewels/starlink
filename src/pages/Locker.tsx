@@ -26,6 +26,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 10;
 
@@ -425,7 +426,9 @@ export function LockerPage() {
               </div>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
+              <IfExport>
               <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+              </IfExport>
               <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={selected ? `${selected.name} ledger` : "locker"} options={[
                 { label: "Ledger — PDF", sublabel: "Transactions with running balance", kind: "pdf", run: exportPdf },
                 { label: "Ledger — Excel", sublabel: "Transactions with running balance", kind: "excel", run: exportCsv },

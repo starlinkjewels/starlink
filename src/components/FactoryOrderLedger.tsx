@@ -5,6 +5,7 @@ import { fmtMoneyInr, diamondFlow } from "@/lib/manufacturing";
 import { Input } from "@/components/ui/input";
 import { Search, Download } from "lucide-react";
 import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
+import { IfExport } from "@/components/IfExport";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -328,10 +329,12 @@ export function FactoryOrderLedger({
           </p>
         </div>
         {onExport && (
+          <IfExport>
           <button onClick={onExport}
             className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
             <Download className="h-4 w-4" /> Export
           </button>
+          </IfExport>
         )}
       </div>
 

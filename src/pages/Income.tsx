@@ -21,6 +21,7 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 type PassbookRowType =
@@ -249,6 +250,7 @@ export function IncomePage() {
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Passbook</h1>
+        <IfExport>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button disabled={filtered.length === 0} className="btn-hero rounded-xl gap-2">
@@ -260,6 +262,7 @@ export function IncomePage() {
             <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+        </IfExport>
       </div>
 
       {/* ── Currency tabs — never blend USD client billing with INR sourcing/cost ── */}

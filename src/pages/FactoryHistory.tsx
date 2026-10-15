@@ -29,6 +29,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { IfExport } from "@/components/IfExport";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -838,7 +839,9 @@ function FactoryHistoryPageBody() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <IfExport>
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
+            </IfExport>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
               extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
               options={[
