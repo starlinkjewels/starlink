@@ -2122,8 +2122,8 @@ function OrderDetailPageBody() {
                         ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
                         : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                     ))
-                  : <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
-                {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && (
+                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
+                {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && !order.melted && (
                   <IfExport>
                   <Button variant="outline" onClick={() => setBandOpen(true)} className="rounded-xl" title="Print / download the barcode jewellery band">
                     <Tag className="h-4 w-4 mr-2" />Band
@@ -2144,11 +2144,17 @@ function OrderDetailPageBody() {
             </div>
             <div className="mt-5">
               <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
-                <span className="text-muted-foreground">Now: <span className="font-semibold text-brand-dark">{order.status === "Rejected" ? (order.melted ? "Melted" : "Rejected") : stage}</span></span>
-                <span className="tabular-nums text-muted-foreground"><span className="font-semibold text-brand-dark">{pct}%</span> · {doneSteps} of {order.timeline.length} stages</span>
+                {order.status === "Rejected"
+                  ? <span className="font-semibold text-destructive">Order closed — {order.melted ? "melted" : "rejected"}</span>
+                  : <span className="text-muted-foreground">Now: <span className="font-semibold text-brand-dark">{stage}</span></span>}
+                <span className="tabular-nums text-muted-foreground">
+                  {order.status === "Rejected"
+                    ? <>stopped at {doneSteps} of {order.timeline.length} stages</>
+                    : <><span className="font-semibold text-brand-dark">{pct}%</span> · {doneSteps} of {order.timeline.length} stages</>}
+                </span>
               </div>
               <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-primary to-brand-light transition-all duration-500" style={{ width: `${pct}%` }} />
+                <div className={`h-full rounded-full transition-all duration-500 ${order.status === "Rejected" ? "bg-destructive/45" : "bg-gradient-to-r from-primary to-brand-light"}`} style={{ width: `${pct}%` }} />
               </div>
             </div>
           </div>
