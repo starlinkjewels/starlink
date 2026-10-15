@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
+import { loadDb } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances } from "@/lib/manufacturing";
@@ -73,14 +74,23 @@ export function StockPage() {
   // below stays as an admin escape hatch. (deriveStockBalances only rounds to
   // 3dp vs recompute's raw sum, well inside the 0.001 drift tolerance, so one
   // pass always clears the drift — no thrash.)
+  //
+  // Only once the two have stopped changing: a counter moves a moment before
+  // its movement reaches this screen, and rebuilding in that moment, from a
+  // history one entry short, would take the very change just made back out.
   const healed = useRef(false);
+  const driftKey = driftingCos.join(",");
   useEffect(() => {
-    if (user?.role !== "admin" || !cacheDrift || healed.current) return;
-    healed.current = true;
-    // A company with no movements of its own yet has nothing to rebuild from — left alone.
-    Promise.all(driftingCos.filter(id => (db.stockMovements ?? []).some(m => companyOf(m) === id))
-      .map(id => recomputeStockFromHistory(db.stockMovements, id))).catch(() => { /* manual button remains */ });
-  }, [cacheDrift, user, db.stockMovements, driftingCos]);
+    if (user?.role !== "admin" || !driftKey || healed.current) return;
+    const t = setTimeout(() => {
+      healed.current = true;
+      // A company with no movements of its own yet has nothing to rebuild from — left alone.
+      const movements = loadDb().stockMovements ?? [];
+      Promise.all(driftKey.split(",").filter(id => movements.some(m => companyOf(m) === id))
+        .map(id => recomputeStockFromHistory(movements, id))).catch(() => { /* manual button remains */ });
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [driftKey, user, db.stockMovements, levelsBy]);
 
   const recompute = async () => {
     setRecomputing(true);
