@@ -61,6 +61,34 @@ export function diamondFlow(i: MaterialIssuance): { out: number; in: number } {
 }
 
 /**
+ * Any OTHER material at a factory (platinum, a gemstone, findings — anything
+ * but gold or diamond), counted the way loose diamonds are: what reached the
+ * factory, and what it has accounted for — used in a piece or sent back.
+ */
+export function otherFlow(i: MaterialIssuance): { out: number; in: number } {
+  const pool = i.source === "factoryPool";
+  const out = pool ? 0 : i.quantityIssued;
+  const used = issuanceUsed(i);
+  const returned = i.finishReturnedQty || 0;
+  const accounted = pool ? used : i.status === "closed" ? i.quantityIssued : Math.min(i.quantityIssued, used + returned);
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  return { out: r3(out), in: r3(Math.max(0, accounted)) };
+}
+
+/** How much of each other material a factory still holds, by material key —
+ *  only those it holds something of. */
+export function factoryOtherBalances(issuances: MaterialIssuance[], factoryId: string): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const i of issuances) {
+    if (i.factoryId !== factoryId || i.material === "gold" || i.material === "diamond") continue;
+    const f = otherFlow(i);
+    out[i.material] = (out[i.material] || 0) + f.out - f.in;
+  }
+  for (const k of Object.keys(out)) { out[k] = Math.round(out[k] * 1000) / 1000; if (Math.abs(out[k]) < 0.0005) delete out[k]; }
+  return out;
+}
+
+/**
  * The factory's gold expressed in PURE / fine (24KT) grams — the client's
  * "factory gold stock". Gold ARRIVES as fine gold (each issuance's grams ×
  * its karat purity, for every gold issuance EXCEPT internal factoryPool draws,
@@ -110,7 +138,9 @@ export function factoryAccount(
   for (const i of issuances) {
     const isPoolDraw = i.source === "factoryPool";
     if (i.material === "gold") { if (!isPoolDraw) goldIssued += i.quantityIssued; goldUsed += issuanceUsed(i); }
-    else { const f = diamondFlow(i); diamondIssued += f.out; diamondUsed += f.in; }
+    // Diamond only: another material is in its own unit and has its own
+    // figures (factoryOtherBalances) — never added to the carats.
+    else if (i.material === "diamond") { const f = diamondFlow(i); diamondIssued += f.out; diamondUsed += f.in; }
     chargesTotal += i.makingCharges.amountInr;
     const paid = issuancePaid(i);
     chargesPaid += paid;
@@ -233,7 +263,7 @@ export function lockerBalance(locker: Locker, transactions: LockerTransaction[])
 export function factoryPoolBalance(
   issuances: MaterialIssuance[],
   factoryId: string,
-  material: "gold" | "diamond",
+  material: string,
   purityOrQuality: string,
 ): number {
   let delivered = 0, drawn = 0;
@@ -253,7 +283,7 @@ export function factoryPoolBalance(
 export function factoryPoolBuckets(
   issuances: MaterialIssuance[],
   factoryId: string,
-  material: "gold" | "diamond",
+  material: string,
 ): { purityOrQuality: string; balance: number }[] {
   const purities = new Set(
     issuances.filter(i => i.factoryId === factoryId && i.material === material && !i.orderId).map(i => i.purityOrQuality),

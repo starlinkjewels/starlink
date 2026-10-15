@@ -36,6 +36,8 @@ import {
   Undo2,
 } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
+import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
+import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, purchaseText, type MaterialKey } from "@/lib/materials";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
@@ -46,6 +48,7 @@ import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
   applyDiscountPct, discountLabel,
+  deriveStockBalances,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
@@ -295,7 +298,11 @@ function OrderDetailPageBody() {
   const [buying, setBuying] = useState(false);
 
   const [showIssueForm, setShowIssueForm] = useState(false);
-  const [issueMaterial, setIssueMaterial] = useState<"gold" | "diamond">("gold");
+  const [issueMaterial, setIssueMaterial] = useState<MaterialKey>("gold");
+  const [issueGrade, setIssueGrade] = useState("");
+  const otherMaterials = useOtherMaterials();
+  /** "gold", "diamond", or the other material's own name — for messages. */
+  const matWord = (k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
   const [issueFactoryId, setIssueFactoryId] = useState("");
   const [issuePurity, setIssuePurity] = useState("22K");
   const [issueQuality, setIssueQuality] = useState("Round");
@@ -433,7 +440,7 @@ function OrderDetailPageBody() {
   const removeIssuance = async (mi: MaterialIssuance) => {
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
-    const unit = mi.material === "gold" ? "g" : "ct";
+    const unit = materialUnit(db.settings, mi.material);
     if (!(await confirmBox([
       `Cancel this issue of ${mi.quantityIssued}${unit} ${mi.purityOrQuality}?`,
       "",
@@ -706,7 +713,7 @@ function OrderDetailPageBody() {
   const resetIssueForm = () => {
     setIssueFactoryId("");
     setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
-    setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch("");
+    setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch(""); setIssueGrade("");
   };
 
   // ── Rework / alteration ──────────────────────────────────────────────────
@@ -848,6 +855,7 @@ function OrderDetailPageBody() {
   const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({}); // certified packets: whole used/returned
   const [faDiaReturnedCt, setFaDiaReturnedCt] = useState<Record<string, string>>({}); // loose diamonds: carats returned (partial allowed)
   const [faDiaReturnedPcs, setFaDiaReturnedPcs] = useState<Record<string, string>>({}); // loose diamonds: how many STONES came back
+  const [faXReturned, setFaXReturned] = useState<Record<string, string>>({}); // other materials: how much came back
   // A factory weighs the stones on its own scale, so its bill can read 6.60ct
   // where we issued 6.58ct. Handling charges are billed on THEIR total, so
   // without a way to match it the two ledgers can never agree. This is that
@@ -979,7 +987,7 @@ function OrderDetailPageBody() {
     // their existing used amount (net weight doesn't apply).
     const usedQty = hasNet ? Math.min(netW, issuance.quantityIssued) : issuanceUsed(issuance);
     const leftover = Math.round((issuance.quantityIssued - usedQty) * 100) / 100;
-    const unit = isGold ? "g" : "ct";
+    const unit = materialUnit(db.settings, issuance.material);
     const factory = db.factories.find(f => f.id === issuance.factoryId);
     const now = new Date().toISOString();
     setClosingId(issuance.id);
@@ -1081,8 +1089,9 @@ function OrderDetailPageBody() {
     }
 
     const qty = Number(issueQuantity);
-    if (!qty || qty <= 0) { toast.error(`Enter the ${issueMaterial} weight/carat used`); return; }
-    const purityOrQuality = issueMaterial === "gold" ? issuePurity : (issueQuality.trim() || "unspecified");
+    if (isOtherMaterial(issueMaterial) && !otherMaterials.some(m => m.id === issueMaterial)) { toast.error("Choose the material"); return; }
+    if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} ${isOtherMaterial(issueMaterial) ? "quantity" : "weight/carat"} used`); return; }
+    const purityOrQuality = issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
 
     // "From Stock" is now an explicit choice, so it MUST draw from company stock
     // (and decrement it) — no silent auto-resolve to a factory pool or a linked
@@ -1120,11 +1129,11 @@ function OrderDetailPageBody() {
           o.manufacturingLog.push({
             id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
             material: issueMaterial, amountMaterial: qty, amountInr: chargeAmount || undefined,
-            remarks: `${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
+            remarks: `${qty}${materialUnit(db.settings, issueMaterial)} ${purityOrQuality} ${matWord(issueMaterial)} used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
           });
         }
       });
-      toast.success(`Recorded ${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
+      toast.success(`Recorded ${qty}${materialUnit(db.settings, issueMaterial)} ${purityOrQuality} ${isOtherMaterial(issueMaterial) ? `${matWord(issueMaterial)} ` : ""}used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
       setShowIssueForm(false); setShowDiamond(false);
       resetIssueForm();
     } catch (e) {
@@ -1211,6 +1220,20 @@ function OrderDetailPageBody() {
   // to prefill the popup on re-edit and to update in place instead of duplicating.
   const finishRecord = () => db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
 
+  /** Other materials issued for this order (Settings → Materials) — Final Approval says what came back. */
+  const faXIssues = () => db.materialIssuances.filter(i => i.orderId === order.id && isOtherMaterial(i.material) && i.source !== "melt");
+  const faXReturnedOf = (i: MaterialIssuance) => Math.min(Math.max(Number(faXReturned[i.id]) || 0, 0), i.quantityIssued);
+  /** Grams the other materials add to the piece: metals as weighed, stones at 0.2 g a carat (pieces are not weighed). */
+  const faXGrams = () => {
+    let metal = 0, stone = 0;
+    for (const i of faXIssues()) {
+      const used = Math.max(0, i.quantityIssued - faXReturnedOf(i));
+      const u = materialUnit(db.settings, i.material);
+      if (u === "g") metal += used; else if (u === "ct") stone += used * CARAT_TO_GRAM;
+    }
+    return { metal: Math.round(metal * 1000) / 1000, stone: Math.round(stone * 1000) / 1000 };
+  };
+
   const openFinalApproval = (idx: number) => {
     if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
     const needsGold = orderMaterialRequirements(order).needsGold;
@@ -1243,6 +1266,7 @@ function OrderDetailPageBody() {
     const retPcs: Record<string, string> = {};
     dias.forEach(i => { retPcs[i.id] = i.finishReturnedPcs != null ? String(i.finishReturnedPcs) : ""; });
     setFaDiaReturnedPcs(retPcs);
+    setFaXReturned(Object.fromEntries(faXIssues().map(i => [i.id, i.finishReturnedQty != null ? String(i.finishReturnedQty) : "0"])));
     setFaDiaAdjust(order.diamondWeightAdjust != null ? String(order.diamondWeightAdjust) : "");
     setFaDiaPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
     setFaBillNo(order.factoryBillNo ?? "");
@@ -1296,7 +1320,10 @@ function OrderDetailPageBody() {
     // platinum or silver piece has no gold net weight, so charging on gold
     // alone silently dropped the per-gram labour from the factory's bill.
     const faOtherW = faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
-    const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW) * 1000) / 1000;
+    // Metal issued from stock as another material (platinum, silver) is in the piece too.
+    const xG = faXGrams();
+    const xIssues = faXIssues();
+    const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal) * 1000) / 1000;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
     const factoryId = order.assignedFactoryId;
     const orderVal = parseFloat(faOrderValue);
@@ -1322,6 +1349,17 @@ function OrderDetailPageBody() {
           await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}` });
         } else if (delta < 0) {
           await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
+        }
+      }
+      // Other materials the same way: only what came out of our stock goes back to it, by the change.
+      for (const i of xIssues) {
+        if (i.source !== "stock") continue;
+        const delta = Math.round((faXReturnedOf(i) - (i.finishReturnedQty || 0)) * 1000) / 1000;
+        const u = materialUnit(db.settings, i.material), name = materialName(db.settings, i.material);
+        if (delta > 0) {
+          await increaseStock({ material: i.material, purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}${u} ${name} returned on final approval for ${order.orderNumber}` });
+        } else if (delta < 0) {
+          await decreaseStockSelfHealing({ material: i.material, purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `${name} re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
         }
       }
       updateDb(d => {
@@ -1375,6 +1413,16 @@ function OrderDetailPageBody() {
             mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: usedCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
           }
         }
+        // Every other material: what came back, and what stayed in the piece.
+        for (const i of xIssues) {
+          const mi = d.materialIssuances.find(x => x.id === i.id);
+          if (!mi) continue;
+          const returned = faXReturnedOf(i);
+          mi.status = "closed";
+          mi.finishReturnedQty = returned;
+          const used = Math.round((i.quantityIssued - returned) * 1000) / 1000;
+          mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: used, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
+        }
         // Two-tone: the second metal used in the finished piece.
         const otherW = parseFloat(faOtherNet);
         const otherP = parseFloat(faOtherPurity);
@@ -1392,8 +1440,8 @@ function OrderDetailPageBody() {
         // order so the card, the band and every export read the same figures
         // instead of the estimate from the day it was ordered.
         if (hasNet) o.actualNetWeight = netW;
-        const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
-        if (hasNet || faOtherW > 0) o.actualGrossWeight = faGross;
+        const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal + xG.stone + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
+        if (hasNet || faOtherW > 0 || xG.metal > 0) o.actualGrossWeight = faGross;
         const diaPcsN = Math.round(Number(faDiaPcs) || 0);
         o.actualDiamondPcs = diaPcsN > 0 ? diaPcsN : undefined;
 
@@ -3408,6 +3456,22 @@ function OrderDetailPageBody() {
                 )}
               </div>
             )}
+            {/* ③ Anything else the piece uses — platinum, a gemstone, a lock (Settings → Materials). */}
+            {canEditStage() && !faDone && otherMaterials.length > 0 && (
+              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
+                <span className="text-xs font-semibold text-brand-dark">③ Other material</span>
+                <span className="text-xs text-muted-foreground">{otherMaterials.map(m => m.name).slice(0, 4).join(", ")}{otherMaterials.length > 4 ? "…" : ""}</span>
+                <button type="button"
+                  onClick={() => {
+                    if (!order.assignedFactoryId) { toast.error("Choose the factory first"); return; }
+                    setShowIssueForm(true); setShowBuyForm(false); setShowDiamond(false);
+                    setIssueMaterial(otherMaterials[0].id); setIssueGrade(""); setIssueFactoryId(order.assignedFactoryId);
+                  }}
+                  className={`h-7 px-3 rounded-md text-xs font-medium bg-secondary hover:bg-secondary/70 ${showIssueForm && isOtherMaterial(issueMaterial) ? "ring-2 ring-primary/30 text-brand-dark" : "text-muted-foreground"}`}>
+                  From Stock
+                </button>
+              </div>
+            )}
           </div>
           )}
 
@@ -3595,7 +3659,16 @@ function OrderDetailPageBody() {
 
           {showIssueForm && (
             <div className="pt-2 border-t border-border/60 space-y-2.5">
-              <p className="text-sm font-medium text-brand-dark">Diamond from stock → {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "factory"}</p>
+              <p className="text-sm font-medium text-brand-dark">{isOtherMaterial(issueMaterial) ? "Other material" : "Diamond"} from stock → {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "factory"}</p>
+              {isOtherMaterial(issueMaterial) ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <OtherMaterialSelect value={issueMaterial} onChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }} />
+                  <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
+                  <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                    In stock: {fmtQty(deriveStockBalances(db.stockMovements, issueMaterial)[issueGrade.trim() || "—"] ?? 0, materialUnit(db.settings, issueMaterial))} of {issueGrade.trim() || "—"}
+                  </p>
+                </div>
+              ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <Select value={issueDiaKind} onValueChange={v => setIssueDiaKind(v as "loose" | "certified")}>
                   <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
@@ -3613,6 +3686,7 @@ function OrderDetailPageBody() {
                   </Select>
                 )}
               </div>
+              )}
 
               {issueMaterial === "gold" && issueFactoryId && orderMaterialRequirements(order).needsGold && (() => {
                 const balance = factoryPoolBalance(db.materialIssuances, issueFactoryId, "gold", issuePurity);
@@ -3666,7 +3740,7 @@ function OrderDetailPageBody() {
               ) : (
                 <Input
                   type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
-                  className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight used (g)" : "Carat used"}
+                  className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? "Weight used (g)" : isOtherMaterial(issueMaterial) ? `Quantity used (${materialUnit(db.settings, issueMaterial)})` : "Carat used"}
                 />
               )}
 
@@ -3698,7 +3772,7 @@ function OrderDetailPageBody() {
                   <Link key={p.id} to={`/suppliers/${p.supplierId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
                     <span className="flex items-center gap-2 min-w-0">
                       {p.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : `${p.diamond?.carat}ct`} from {supplier?.name || "supplier"}{p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}</span>
+                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : p.material === "diamond" ? `${p.diamond?.carat}ct` : purchaseText(db.settings, p)} from {supplier?.name || "supplier"}{p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}</span>
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
@@ -3727,7 +3801,7 @@ function OrderDetailPageBody() {
                 const pending = issuancePending(mi);
                 const factory = db.factories.find(f => f.id === mi.factoryId);
                 const used = issuanceUsed(mi);
-                const unit = mi.material === "gold" ? "g" : "ct";
+                const unit = materialUnit(db.settings, mi.material);
                 const certPackets = mi.diamondKind === "certified"
                   ? (db.diamondPackets ?? []).filter(p => mi.diamondPacketIds?.includes(p.id))
                   : [];
@@ -3736,7 +3810,7 @@ function OrderDetailPageBody() {
                 const srcInfo = srcPurchase ? ` · bought from ${srcSupplier?.name || "supplier"}${srcPurchase.invoiceNumber ? ` (bill ${srcPurchase.invoiceNumber})` : ""}` : mi.source === "stock" ? " · from stock" : "";
                 const label = (mi.diamondKind === "certified"
                   ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
-                  : `${mi.material === "gold" ? "Gold" : "Diamond"} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`) + srcInfo;
+                  : `${materialName(db.settings, mi.material)} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`) + srcInfo;
                 const srcCost = srcPurchase ? purchasePending(srcPurchase) : 0;
                 const isGold = mi.material === "gold";
                 const liveLabour = labourValue({
@@ -3920,7 +3994,7 @@ function OrderDetailPageBody() {
                       <span className="text-xs text-muted-foreground">{new Date(entry.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
-                      {entry.amountMaterial !== undefined && `${entry.amountMaterial}${entry.material === "diamond" ? "ct" : "g"} ${entry.material || ""}`}
+                      {entry.amountMaterial !== undefined && `${entry.amountMaterial}${materialUnit(db.settings, entry.material ?? "gold")} ${entry.material ? (isOtherMaterial(entry.material) ? materialName(db.settings, entry.material) : entry.material) : ""}`}
                       {entry.amountMaterial !== undefined && entry.amountInr !== undefined && " · "}
                       {entry.amountInr !== undefined && fmtMoneyInr(entry.amountInr)}
                       {emp?.name && <> · By {emp.name}</>}
@@ -4050,8 +4124,10 @@ function OrderDetailPageBody() {
           metalByFactoryGrams: faMetalG ? Number(faMetalG) : undefined,
           metalByFactoryRate: faMetalRate ? Number(faMetalRate) : undefined,
         };
+        const faX = faXIssues();
+        const faXG = faXGrams();
         const faNetW = Math.round(((Number(faGoldNet) || 0)
-          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0)) * 1000) / 1000;
+          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0) + faXG.metal) * 1000) / 1000;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
@@ -4222,12 +4298,42 @@ function OrderDetailPageBody() {
                 </div>
               )}
 
+              {/* Other materials issued for this order — used or returned? */}
+              {faX.length > 0 && (
+                <div className="mb-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Other materials — used or returned?</p>
+                  <div className="space-y-1.5">
+                    {faX.map(i => {
+                      const u = materialUnit(db.settings, i.material);
+                      const retStr = faXReturned[i.id] ?? "0";
+                      const ret = faXReturnedOf(i);
+                      const used = Math.round((i.quantityIssued - ret) * 1000) / 1000;
+                      return (
+                        <div key={i.id} className="p-2 rounded-lg bg-secondary text-sm">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate min-w-0">{materialName(db.settings, i.material)} · {i.purityOrQuality} · {i.quantityIssued}{u} issued</span>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="text-[11px] text-muted-foreground">Returned ({u})</span>
+                              <Input type="number" min={0} max={i.quantityIssued} step={u === "pcs" ? "1" : "0.001"} value={retStr}
+                                onChange={e => setFaXReturned(m => ({ ...m, [i.id]: e.target.value }))}
+                                className="h-8 w-24 rounded-lg" aria-label={`${materialName(db.settings, i.material)} returned`} />
+                            </div>
+                          </div>
+                          <p className="text-[11px] text-muted-foreground mt-1">Used <span className="font-medium text-foreground">{used} {u}</span>{ret > 0 ? <> · Returned <span className="font-medium text-amber-600">{ret} {u}</span>{i.source === "stock" ? " → stock" : ""}</> : null}</p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1">What is used counts in the piece&rsquo;s weight below (metal by the gram, stones at 0.2 g a carat); what came back goes back to stock.</p>
+                </div>
+              )}
+
               {/* Auto totals — diamond used (ct → g) and gross = gold net + diamond */}
               {(() => {
                 const diaG = Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000;
                 const netG = Number(faGoldNet) || 0;
                 const otherG = faOtherMetal ? (Number(faOtherNet) || 0) : 0;
-                const gross = Math.round((netG + otherG + diaG) * 1000) / 1000;
+                const gross = Math.round((netG + otherG + faXG.metal + faXG.stone + diaG) * 1000) / 1000;
                 return (
                   <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-muted-foreground">Issued to the factory</span><span className="font-semibold text-foreground">{usedDiaCtRaw} ct</span></div>
@@ -4240,7 +4346,9 @@ function OrderDetailPageBody() {
                     )}
                     {netG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
                     {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{otherG} g</span></div>}
-                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond)</span><span className="font-bold text-brand-dark">{gross} g</span></div>
+                    {faXG.metal > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other metal from stock</span><span className="font-semibold text-foreground">{faXG.metal} g</span></div>}
+                    {faXG.stone > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other stones</span><span className="font-semibold text-foreground">{faXG.stone} g</span></div>}
+                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond{faX.length ? " + other" : ""})</span><span className="font-bold text-brand-dark">{gross} g</span></div>
                   </div>
                 );
               })()}
@@ -4317,15 +4425,18 @@ function OrderDetailPageBody() {
         </p>
         <div className="grid grid-cols-2 gap-3 mt-1">
           <div>
-            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Weight (g)" : "Carat (ct)"}</Label>
+            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Weight (g)" : editingIssuance?.material === "diamond" ? "Carat (ct)" : `Quantity (${materialUnit(db.settings, editingIssuance?.material)})`}</Label>
             <Input type="number" min={0} step="0.001" value={isf.qty}
               disabled={editingIssuance?.diamondKind === "certified"}
               onChange={e => setIsf({ ...isf, qty: e.target.value })}
               className="rounded-xl h-10 mt-1 disabled:opacity-60" />
           </div>
           <div>
-            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Purity" : "Shape"}</Label>
-            {editingIssuance?.material === "gold" ? (
+            <Label className="text-xs">{editingIssuance?.material === "gold" ? "Purity" : editingIssuance?.material === "diamond" ? "Shape" : "Grade"}</Label>
+            {isOtherMaterial(editingIssuance?.material) ? (
+              // Its grade is its stock bucket — fixed, like a diamond's shape once issued from stock.
+              <div className="rounded-xl h-10 px-3 mt-1 flex items-center bg-secondary/60 text-sm text-muted-foreground">{editingIssuance?.purityOrQuality} · {materialName(db.settings, editingIssuance?.material)}</div>
+            ) : editingIssuance?.material === "gold" ? (
               <Select value={isf.bucket} onValueChange={v => setIsf({ ...isf, bucket: v })}>
                 <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>{GOLD_PURITIES.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>

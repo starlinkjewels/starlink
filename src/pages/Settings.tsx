@@ -1,3 +1,4 @@
+import { materialUnit } from "@/lib/materials";
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
@@ -5,6 +6,7 @@ import { DataSizePanel } from "@/components/DataSizePanel";
 import { Table2, Palette } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
+import { MaterialsSettings } from "@/components/MaterialsSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
 import { ListOrdered } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -51,7 +53,7 @@ import {
   Plus,
   Gift,
   DollarSign,
-  Building2,
+  Building2, Layers,
   Database,
   Lock,
   Boxes,
@@ -685,6 +687,7 @@ export function SettingsPage() {
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
+    { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
     { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin },
     { id: "tables", label: "Table Style", icon: Table2, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
@@ -1331,6 +1334,8 @@ export function SettingsPage() {
 
       {/* Companies — admin only */}
       {activeId === "companies" && <CompaniesSettings />}
+      {/* Materials beyond gold and diamonds — admin only */}
+      {activeId === "materials" && <MaterialsSettings />}
 
       {/* Production timeline — admin only */}
       {activeId === "timeline" && <TimelineSettings />}
@@ -1640,7 +1645,7 @@ export function SettingsPage() {
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
               {widowedUses.slice(0, 8).map(r => (
                 <p key={r.id} className="text-[11px] text-muted-foreground">
-                  {new Date(r.createdAt).toLocaleDateString()} · {r.purityOrQuality} · {r.quantity}{r.material === "gold" ? "g" : "ct"} · {r.orderNumber}
+                  {new Date(r.createdAt).toLocaleDateString()} · {r.purityOrQuality} · {r.quantity}{materialUnit(db.settings, r.material)} · {r.orderNumber}
                 </p>
               ))}
               {widowedUses.length > 8 && (

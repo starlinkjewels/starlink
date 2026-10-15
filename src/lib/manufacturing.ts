@@ -10,15 +10,18 @@
 // The account calculations live in src/lib/pure so the server works every total
 // out with exactly this code. Re-exported: nothing that imports them from here changes.
 import {
-  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
-  factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow, otherFlow,
+  factoryFineGoldBalance, factoryAccount, factoryOtherBalances, supplierAccount, lockerBalance,
   factoryPoolBalance, factoryPoolBuckets,
 } from "./pure/accounts";
+import { purchaseQty } from "./materials";
 export {
-  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow,
-  factoryFineGoldBalance, factoryAccount, supplierAccount, lockerBalance,
+  purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow, otherFlow,
+  factoryFineGoldBalance, factoryAccount, factoryOtherBalances, supplierAccount, lockerBalance,
   factoryPoolBalance, factoryPoolBuckets,
 };
+/** Whose stock a movement moved: unset is the first company. */
+const moveCompany = (m: Pick<StockMovement, "companyId">) => m.companyId || "main";
 const r0 = (n: number) => Math.round(n);
 import {
   uid,
@@ -364,10 +367,12 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
  * stockLevels/current doc is only the transactional floor-check helper and can
  * drift; the ledger cannot lie. Same signs as recomputeStockFromHistory.
  */
-export function deriveStockBalances(movements: StockMovement[], material: "gold" | "diamond"): Record<string, number> {
+export function deriveStockBalances(movements: StockMovement[], material: string, companyId?: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const m of movements) {
     if (m.material !== material) continue;
+    // One company's stock, or (no company given) every company's together.
+    if (companyId && companyId !== "all" && moveCompany(m) !== companyId) continue;
     const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity) : -1;
     out[m.purityOrQuality] = Math.round(((out[m.purityOrQuality] || 0) + sign * Math.abs(m.quantity)) * 1000) / 1000;
   }
@@ -379,12 +384,14 @@ export function deriveStockBalances(movements: StockMovement[], material: "gold"
  *  per-bucket drill-down modal. */
 export function stockBucketHistory(
   movements: StockMovement[],
-  material: "gold" | "diamond",
+  material: string,
   purityOrQuality: string | null,
   ctx: StockLinkContext,
+  companyId?: string,
 ): (StockMovement & { link: StockMovementLink })[] {
   return movements
-    .filter(m => m.material === material && (purityOrQuality === null || m.purityOrQuality === purityOrQuality))
+    .filter(m => m.material === material && (purityOrQuality === null || m.purityOrQuality === purityOrQuality)
+      && (!companyId || companyId === "all" || moveCompany(m) === companyId))
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .map(m => ({ ...m, link: resolveStockMovementLink(m, ctx) }));
 }
@@ -410,10 +417,11 @@ export interface MaterialLedgerRow {
  *  ledger shown on the Stock page and downloadable in Reports. */
 export function materialLedger(
   movements: StockMovement[],
-  material: "gold" | "diamond",
+  material: string,
   ctx: StockLinkContext,
+  companyId?: string,
 ): MaterialLedgerRow[] {
-  const hist = stockBucketHistory(movements, material, null, ctx); // links resolved
+  const hist = stockBucketHistory(movements, material, null, ctx, companyId); // links resolved
   // Deterministic chronological order: a direct-order purchase writes an IN + OUT
   // pair with the SAME timestamp (logOrderDirectPurchase), so apply IN before OUT
   // at a tie (then by id) — the running balance is stable and its newest row
@@ -434,7 +442,7 @@ export function materialLedger(
     if (m.type === "purchase_in" && m.refType === "purchase" && m.refId) {
       const p = purchaseById.get(m.refId);
       if (p) {
-        const pQty = material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+        const pQty = purchaseQty(p);
         rateInr = pQty > 0 ? p.totalInr / pQty : 0;
         amountInr = rateInr * m.quantity;
       }

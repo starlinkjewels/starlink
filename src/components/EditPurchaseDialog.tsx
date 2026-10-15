@@ -9,6 +9,7 @@ import { useDb } from "@/hooks/useDb";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Purchase } from "@/lib/db";
 import type { PurchaseEdit } from "@/lib/purchaseVoid";
+import { materialUnit, materialName, purchaseQty, purchaseRate, UNIT_LABEL } from "@/lib/materials";
 
 /**
  * Correct a purchase that was entered wrong (wrong carat, rate, invoice no.).
@@ -27,7 +28,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const db = useDb();
   const isGold = purchase?.material === "gold";
   const isCertified = purchase?.material === "diamond" && purchase?.diamond?.kind === "certified";
-  const unit = isGold ? "g" : "ct";
+  const unit = materialUnit(db.settings, purchase?.material);
 
   const [supplierId, setSupplierId] = useState("");
   const [qty, setQty] = useState("");
@@ -44,8 +45,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   useEffect(() => {
     if (!purchase) return;
     setSupplierId(purchase.supplierId);
-    setQty(String(purchase.material === "gold" ? purchase.gold?.weightGrams ?? 0 : purchase.diamond?.carat ?? 0));
-    setRate(String(purchase.material === "gold" ? purchase.gold?.ratePerGram ?? 0 : purchase.diamond?.ratePerCarat ?? 0));
+    setQty(String(purchaseQty(purchase)));
+    setRate(String(purchaseRate(purchase)));
     setDiscount(purchase.discountPct ? String(purchase.discountPct) : "");
     setInv(purchase.invoiceNumber ?? "");
     setNotes(purchase.notes ?? "");
@@ -102,7 +103,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
 
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
           <div>
-            <Label className="text-xs">{isGold ? "Weight (g)" : "Carat (ct)"}</Label>
+            <Label className="text-xs">{isGold ? "Weight (g)" : purchase.material === "diamond" ? "Carat (ct)" : `${materialName(db.settings, purchase.material)} (${UNIT_LABEL[unit]})`}</Label>
             <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} disabled={lockQuantity} className="rounded-xl h-10 mt-1 disabled:opacity-60" />
           </div>
           <div>

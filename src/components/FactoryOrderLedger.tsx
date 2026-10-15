@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
-import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory } from "@/lib/db";
-import { fmtMoneyInr, diamondFlow } from "@/lib/manufacturing";
+import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
+import { fmtMoneyInr, diamondFlow, otherFlow } from "@/lib/manufacturing";
+import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
 import { Input } from "@/components/ui/input";
 import { Search, Download } from "lucide-react";
 import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
@@ -61,6 +62,8 @@ export interface FactoryOrderRow {
    *  labour payment, so this one table can be opened up rather than sending
    *  anyone to a second ledger to find out when something was paid. */
   entries: { id: string; date: string; text: string; qty?: string; amount?: number; kind: "out" | "in" | "pay" }[];
+  /** Other materials on the job (Settings → Materials), each in its own unit: given and accounted for. */
+  materials?: Record<string, { out: number; in: number }>;
 }
 
 /**
@@ -75,6 +78,8 @@ export interface FactoryOrderRow {
 export function buildFactoryOrderRows(
   issuances: MaterialIssuance[],
   orders: Order[],
+  /** For naming any other material on a job. */
+  settings?: Pick<Settings, "materials">,
 ): FactoryOrderRow[] {
   const byOrder = new Map<string, FactoryOrderRow>();
   /** Rows with a real diamond issue — only the others may show the order's estimate. */
@@ -93,7 +98,7 @@ export function buildFactoryOrderRows(
         orderId: mi.orderId || "",
         orderNo: order?.orderNumber || (mi.orderId ? "—" : "Bulk delivery"),
         date: mi.issuedAt,
-        jewellery: order?.jewelleryType || `${mi.material === "gold" ? "Gold" : "Diamond"} ${mi.purityOrQuality}`,
+        jewellery: order?.jewelleryType || `${materialName(settings, mi.material)} ${mi.purityOrQuality}`,
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
         labour: 0, paid: 0, open: 0, total: 0,
         orderStatus: order?.status || "",
@@ -172,6 +177,18 @@ export function buildFactoryOrderRows(
         if (ret > 0) row.entries.push({ id: mi.id + "-dr", date: mi.issuedAt, kind: "in", text: "Returned to stock", qty: `${ret} ct` });
       }
     }
+    if (isOtherMaterial(mi.material)) {
+      // In its own unit and under its own name — never added to the gold or diamond columns.
+      const f = otherFlow(mi);
+      const name = materialName(settings, mi.material), u = materialUnit(settings, mi.material);
+      const m = (row.materials ??= {})[mi.material] ??= { out: 0, in: 0 };
+      m.out += f.out; m.in += f.in;
+      row.entries.push({ id: mi.id + "-xin", date: mi.issuedAt, kind: "out", text: `${name} given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.purityOrQuality}`, qty: `${mi.quantityIssued} ${u}` });
+      const ret = Math.min(mi.finishReturnedQty || 0, f.in);
+      const used = Math.round((f.in - ret) * 1000) / 1000;
+      if (used > 0) row.entries.push({ id: mi.id + "-xu", date: mi.issuedAt, kind: "in", text: `${name} used in the piece`, qty: `${used} ${u}` });
+      if (ret > 0) row.entries.push({ id: mi.id + "-xr", date: mi.issuedAt, kind: "in", text: `${name} returned to stock`, qty: `${ret} ${u}` });
+    }
     if (mi.makingCharges?.amountInr) {
       row.entries.push({ id: mi.id + "-chg", date: mi.issuedAt, kind: "out", text: "Labour billed", amount: mi.makingCharges.amountInr });
     }
@@ -196,6 +213,9 @@ export function buildFactoryOrderRows(
     if (!order) continue;
     row.quotedUsd = order.estimatedMakingCharges || 0;
     row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
+    // Any other material on the job, named in the item column: "14K Gold + 2.5 g Platinum".
+    const extra = Object.entries(row.materials ?? {}).map(([k, v]) => `${Math.round(v.out * 1000) / 1000} ${materialUnit(settings, k)} ${materialName(settings, k)}`);
+    if (extra.length) row.metalNote = [row.metalNote, ...extra].filter(Boolean).join(" + ");
     row.designNo = order.designNumber?.trim() || undefined;
     // The piece's net weight: the real one once it is recorded — on the order
     // at Final Approval, or (one older path) only on the factory issue — and the

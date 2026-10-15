@@ -1,9 +1,10 @@
-import { loadDb, updateDb, type DB, type StockMovement } from "@/lib/db";
+import { loadDb, updateDb, type DB, type StockMovement, type MaterialKey } from "@/lib/db";
+import { purchaseQty, materialUnit, type MaterialUnit } from "@/lib/materials";
 
 /** A "used directly on order" row whose "bought" row is gone. */
 export interface OrphanDirectUse {
   id: string;
-  material: "gold" | "diamond";
+  material: MaterialKey;
   purityOrQuality: string;
   quantity: number;
   orderNumber: string;
@@ -42,7 +43,7 @@ export function orphanDirectUses(db: DB): OrphanDirectUse[] {
     const partner = purchases.some(p =>
       p.orderId === m.refId
       && p.material === m.material
-      && Math.abs((p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0)) - m.quantity) < 0.0001
+      && Math.abs(purchaseQty(p) - m.quantity) < 0.0001
       && Math.abs(+new Date(p.createdAt) - at) < 2000);
     if (partner) continue;
 
@@ -69,11 +70,12 @@ export function orphanDirectUses(db: DB): OrphanDirectUse[] {
 }
 
 /** What each shape or purity is short by, because of those rows alone. */
-export function orphanImpact(rows: OrphanDirectUse[]): { key: string; qty: number; unit: "g" | "ct" }[] {
-  const by = new Map<string, { key: string; qty: number; unit: "g" | "ct" }>();
+export function orphanImpact(rows: OrphanDirectUse[]): { key: string; qty: number; unit: MaterialUnit }[] {
+  const by = new Map<string, { key: string; qty: number; unit: MaterialUnit }>();
+  const settings = loadDb().settings;
   for (const r of rows) {
     const key = `${r.material}:${r.purityOrQuality}`;
-    const cur = by.get(key) ?? { key: r.purityOrQuality, qty: 0, unit: r.material === "gold" ? "g" : "ct" };
+    const cur = by.get(key) ?? { key: r.purityOrQuality, qty: 0, unit: materialUnit(settings, r.material) };
     cur.qty = Math.round((cur.qty + r.quantity) * 1000) / 1000;
     by.set(key, cur);
   }

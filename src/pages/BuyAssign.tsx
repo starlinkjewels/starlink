@@ -12,8 +12,10 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes } from "lucide-react";
+import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers } from "lucide-react";
 import { toast } from "sonner";
+import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
+import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 type Mode = "buy" | "assign" | "sell" | "opening";
@@ -30,17 +32,17 @@ export function BuyAssignPage() {
   const [mode, setMode] = useState<Mode>("buy");
   const can = useCan();
   return (
-    <div className="max-w-6xl mx-auto space-y-5">
+    <div className="max-w-7xl mx-auto space-y-5">
       <div>
         <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Buy &amp; Assign</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold to a factory, or sell a diamond directly</p>
+        <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold or other metal to a factory, or sell a diamond directly</p>
       </div>
 
       <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
         {([
           { m: "buy", label: "Buy Material", icon: ShoppingCart },
           { m: "opening", label: "Opening Stock", icon: Boxes },
-          { m: "assign", label: "Assign Gold", icon: ArrowRightLeft },
+          { m: "assign", label: "Assign to Factory", icon: ArrowRightLeft },
           { m: "sell", label: "Sell Diamond", icon: Tag },
         ] as const).map(opt => (
           <button key={opt.m} onClick={() => setMode(opt.m)}
@@ -53,11 +55,11 @@ export function BuyAssignPage() {
       </div>
 
       {can("buyAssign", "add") ? (
-        <div className="card-luxe p-6 max-w-3xl">
+        <div className="card-luxe p-5 sm:p-6">
           {mode === "buy" ? <BuyMaterialForm /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
         </div>
       ) : (
-        <div className="card-luxe p-4 max-w-3xl text-sm text-muted-foreground">
+        <div className="card-luxe p-4 text-sm text-muted-foreground">
           Your role lets you look at these entries but not record new ones.
         </div>
       )}
@@ -70,14 +72,17 @@ export function BuyAssignPage() {
 }
 
 /* ── Buy material → Stock + supplier payable ── */
-type BuyKind = "gold" | "loose" | "certified";
+type BuyKind = "gold" | "loose" | "certified" | "other";
 
 /* ── Opening Stock → seed material already owned (migration). No supplier, no
    payable — it just increases Stock and shows an "Opening Stock" line (with its
    ₹ value) in the stock ledger. ── */
 function OpeningStock() {
   const { user } = useAuth();
-  const [kind, setKind] = useState<BuyKind>("gold"); // gold | loose | certified
+  const db = useDb();
+  const [kind, setKind] = useState<BuyKind>("gold"); // gold | loose | certified | other
+  const [materialId, setMaterialId] = useState("");
+  const [grade, setGrade] = useState("");
   const [purity, setPurity] = useState("22K");
   const [shape, setShape] = useState("Round");
   const [qty, setQty] = useState("");     // grams (gold) / carats (diamond)
@@ -96,7 +101,8 @@ function OpeningStock() {
 
   const submit = async () => {
     const q = Number(qty);
-    if (!q || q <= 0) { toast.error(`Enter the opening ${kind === "gold" ? "weight (g)" : "carats"}`); return; }
+    if (kind === "other" && !materialDef(db.settings, materialId)) { toast.error("Choose the material"); return; }
+    if (!q || q <= 0) { toast.error(`Enter the opening ${kind === "gold" ? "weight (g)" : kind === "other" ? "quantity" : "carats"}`); return; }
     if (kind === "certified" && !certNo.trim()) { toast.error("Enter the report / certificate number"); return; }
     const val = Number(value) > 0 ? Math.round(Number(value)) : undefined;
     // Carries the time of day, so several opening entries on one date keep the
@@ -124,10 +130,12 @@ function OpeningStock() {
         setQty(""); setValue(""); setAsOf(""); setNote(""); resetGrading();
         return;
       }
-      // Gold / loose diamond pool into Stock.
+      // Gold, loose diamond or another material pools into Stock.
+      const material: MaterialKey = kind === "gold" ? "gold" : kind === "other" ? (materialId as MaterialKey) : "diamond";
+      const bucket = kind === "gold" ? purity : kind === "other" ? (grade.trim() || "—") : shape;
       await increaseStock({
-        material: kind === "gold" ? "gold" : "diamond",
-        purityOrQuality: kind === "gold" ? purity : shape,
+        material,
+        purityOrQuality: bucket,
         quantity: q,
         refType: "opening",
         valueInr: val,
@@ -135,7 +143,7 @@ function OpeningStock() {
         createdAt: asOf ? createdAt : undefined,
         note: note.trim() || undefined,
       });
-      toast.success(`Opening stock added: ${q} ${kind === "gold" ? "g" : "ct"} ${kind === "gold" ? purity : shape}`);
+      toast.success(`Opening stock added: ${fmtQty(q, materialUnit(db.settings, material))} ${bucket}${kind === "other" ? ` ${materialName(db.settings, material)}` : ""}`);
       setQty(""); setValue(""); setAsOf(""); setNote("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't add opening stock");
@@ -149,8 +157,8 @@ function OpeningStock() {
       </p>
 
       {/* Material kind — gold / loose diamond / certified diamond */}
-      <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl">
-        {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck]] as const).map(([k, lbl, Icon]) => (
+      <div className="grid grid-cols-4 gap-1 p-1 bg-secondary rounded-xl">
+        {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const).map(([k, lbl, Icon]) => (
           <button key={k} type="button" onClick={() => setKind(k)}
             className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
             <Icon className="h-3.5 w-3.5" /> {lbl}
@@ -158,7 +166,17 @@ function OpeningStock() {
         ))}
       </div>
 
-      {/* Purity/Shape + quantity */}
+      {/* Another material: which one, its grade, how much */}
+      {kind === "other" ? (
+      <div className="grid sm:grid-cols-3 gap-3">
+        <div><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></div></div>
+        <div><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={materialId} value={grade} onChange={setGrade} /></div></div>
+        <div>
+          <Label className="text-xs">Opening quantity ({materialUnit(db.settings, materialId)}) <span className="text-destructive">*</span></Label>
+          <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+        </div>
+      </div>
+      ) : (
       <div className="grid grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">{kind === "gold" ? "Purity" : "Shape"}</Label>
@@ -179,6 +197,7 @@ function OpeningStock() {
           <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
         </div>
       </div>
+      )}
 
       {/* Certified grading */}
       {kind === "certified" && (
@@ -217,12 +236,15 @@ function OpeningStock() {
   );
 }
 
-/* ── Assign (transfer) stock gold → a factory's reserve ── */
+/* ── Assign (transfer) stock gold — or another material — → a factory's reserve ── */
 function AssignGold() {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
   const [factoryId, setFactoryId] = useState("");
+  const [what, setWhat] = useState<"gold" | "other">("gold");
+  const [materialId, setMaterialId] = useState("");
+  const [grade, setGrade] = useState("");
   const [purity, setPurity] = useState("22K");
   const [grams, setGrams] = useState("");
   const [date, setDate] = useState(todayLocal());
@@ -230,35 +252,42 @@ function AssignGold() {
   const [saving, setSaving] = useState(false);
 
   const factories = db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name));
-  const inStock = deriveStockBalances(db.stockMovements, "gold")[purity] ?? 0;
+  const material: MaterialKey = what === "gold" ? "gold" : (materialId as MaterialKey);
+  const bucket = what === "gold" ? purity : (grade.trim() || "—");
+  const unit = materialUnit(db.settings, material);
+  const otherStock = what === "other" && materialId ? deriveStockBalances(db.stockMovements, materialId) : {};
+  const inStock = what === "gold" ? (deriveStockBalances(db.stockMovements, "gold")[purity] ?? 0) : (otherStock[bucket] ?? 0);
 
   const submit = async () => {
     if (!factoryId) { toast.error("Choose a factory"); return; }
+    if (what === "other" && !materialDef(db.settings, materialId)) { toast.error("Choose the material"); return; }
     const g = Number(grams);
-    if (!g || g <= 0) { toast.error("Enter the grams"); return; }
-    if (g > inStock) { toast.error(`Only ${inStock}g of ${purity} in stock`); return; }
+    if (!g || g <= 0) { toast.error(`Enter the ${what === "gold" ? "grams" : "quantity"}`); return; }
+    if (g > inStock) { toast.error(`Only ${fmtQty(inStock, unit)} of ${bucket} in stock`); return; }
     const factory = db.factories.find(f => f.id === factoryId);
     const issuanceId = uid("mi_");
     const now = stampFor(date);
     setSaving(true);
     try {
       await decreaseStockSelfHealing({
-        material: "gold", purityOrQuality: purity, quantity: g,
+        material, purityOrQuality: bucket, quantity: g,
         type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
         note: `Assigned to ${factory?.name || "factory"}`,
       }, db.stockMovements);
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
         const mi: MaterialIssuance = {
-          id: issuanceId, factoryId, orderId: undefined, material: "gold",
-          purityOrQuality: purity, quantityIssued: g, source: "stock",
+          id: issuanceId, factoryId, orderId: undefined, material,
+          purityOrQuality: bucket, quantityIssued: g, source: "stock",
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
           notes: notes.trim() || undefined,
         };
         d.materialIssuances.unshift(mi);
       });
-      toast.success(`${g}g ${purity} (${toPureGold(g, purity)}g fine) assigned to ${factory?.name || "factory"}`);
+      toast.success(what === "gold"
+        ? `${g}g ${purity} (${toPureGold(g, purity)}g fine) assigned to ${factory?.name || "factory"}`
+        : `${fmtQty(g, unit)} ${bucket} ${materialName(db.settings, material)} assigned to ${factory?.name || "factory"}`);
       setGrams(""); setNotes("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to assign");
@@ -277,15 +306,30 @@ function AssignGold() {
           <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold)}g fine (24KT)</span></p>
         )}
       </div>
+      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+        {([["gold", "Gold", Coins], ["other", "Other material", Layers]] as const).map(([k, lbl, Icon]) => (
+          <button key={k} type="button" onClick={() => setWhat(k)}
+            className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${what === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+            <Icon className="h-3.5 w-3.5" /> {lbl}
+          </button>
+        ))}
+      </div>
       <div className="grid grid-cols-2 gap-2.5">
-        <div><Label className="text-xs">Purity</Label>
-          <Select value={purity} onValueChange={setPurity}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
-        <div><Label className="text-xs">Grams to assign</Label><Input type="number" min={0} step="0.01" value={grams} onChange={e => setGrams(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
+        {what === "gold" ? (
+          <div><Label className="text-xs">Purity</Label>
+            <Select value={purity} onValueChange={setPurity}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
+        ) : (
+          <div className="grid grid-cols-2 gap-2.5">
+            <div><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></div></div>
+            <div><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={materialId} value={grade} onChange={setGrade} /></div></div>
+          </div>
+        )}
+        <div><Label className="text-xs">{what === "gold" ? "Grams to assign" : `Quantity to assign (${unit})`}</Label><Input type="number" min={0} step="0.01" value={grams} onChange={e => setGrams(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
         <div><Label className="text-xs">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
         <div><Label className="text-xs">Remark</Label><Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" /></div>
       </div>
-      <p className="text-xs text-muted-foreground">In stock: <span className="font-semibold text-foreground">{inStock}g of {purity}</span>{Number(grams) > 0 ? ` · ${toPureGold(Number(grams), purity)}g fine gold` : ""}</p>
+      <p className="text-xs text-muted-foreground">In stock: <span className="font-semibold text-foreground">{fmtQty(inStock, unit)} of {bucket}{what === "other" && materialId ? ` ${materialName(db.settings, material)}` : ""}</span>{what === "gold" && Number(grams) > 0 ? ` · ${toPureGold(Number(grams), purity)}g fine gold` : ""}</p>
       <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Assign to Factory"}</AsyncButton>
     </div>
   );

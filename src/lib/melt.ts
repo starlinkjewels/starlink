@@ -20,6 +20,7 @@
  * MaterialIssuance with no order), so the factory's fine-gold balance, its
  * pool and the totals the server keeps all count it with no new rule.
  */
+import { isOtherMaterial, type MaterialKey } from "./materials";
 import {
   findInvoiceForOrder, toPureGold, pureFromPurity, uid, isDiamondOnlyOrder,
   type DB, type Order, type MaterialIssuance, type OrderMelt,
@@ -34,6 +35,8 @@ export type MeltAs = "karat" | "24k";
 
 /** A loose-diamond line coming back out of the piece. */
 export interface MeltStone { issuanceId: string; quality: string; ct: number; pcs?: number }
+/** Any other material in the piece (Settings → Materials) — back into its own stock, as it was. */
+export interface MeltOther { issuanceId: string; material: MaterialKey; grade: string; qty: number }
 
 export interface MeltPlan {
   /** Why it cannot be melted (shown as is); undefined when it can. */
@@ -49,6 +52,7 @@ export interface MeltPlan {
   stones: MeltStone[];       // loose stones to put back in stock
   packetIds: string[];       // certified packets to put back in stock
   packetCt: number;
+  others: MeltOther[];       // other materials to put back in stock
   otherMetal?: string;       // a second metal (platinum…) this does not handle
 }
 
@@ -76,12 +80,17 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
     const pcs = i.piecesIssued != null ? Math.max(0, i.piecesIssued - (i.finishReturnedPcs ?? 0)) : undefined;
     stones.push({ issuanceId: i.id, quality: i.purityOrQuality, ct, pcs });
   }
+  const others: MeltOther[] = [];
+  for (const i of (db.materialIssuances ?? []).filter(x => x.orderId === o.id && isOtherMaterial(x.material) && x.source !== "melt")) {
+    const qty = r3(issuanceUsed(i));
+    if (qty > 0) others.push({ issuanceId: i.id, material: i.material, grade: i.purityOrQuality, qty });
+  }
   const packets = (db.diamondPackets ?? []).filter(p => p.orderId === o.id && p.status === "used");
   packetIds = packets.map(p => p.id);
   const packetCt = r3(packets.reduce((s, p) => s + (p.carat || 0), 0));
   const plan: MeltPlan = {
     net, karat, purity, fine, factoryId: fin?.factoryId ?? o.assignedFactoryId, labourInr: Math.round(labourInr),
-    stones, packetIds, packetCt, otherMetal: o.otherMetal && (o.otherMetalWeight ?? 0) > 0 ? `${o.otherMetalWeight}g ${o.otherMetal}` : undefined,
+    stones, packetIds, packetCt, others, otherMetal: o.otherMetal && (o.otherMetalWeight ?? 0) > 0 ? `${o.otherMetalWeight}g ${o.otherMetal}` : undefined,
   };
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (o.melted) plan.blocked = "This piece has already been melted.";
@@ -94,7 +103,7 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
   // at the factory — handing the melted gold back would count it twice.
   else if (!fin) plan.blocked = "The factory's books don't show this piece as received back. Open Final Approval, make sure the factory is set, and save it — then melt.";
   else if (inv) plan.blocked = `This order is on invoice ${inv.number}. Take it off the invoice first.`;
-  else if (net <= 0 && !stones.length && !packetIds.length) plan.blocked = "The piece has no gold or diamonds recorded.";
+  else if (net <= 0 && !stones.length && !packetIds.length && !others.length) plan.blocked = "The piece has no gold or diamonds recorded.";
   if (!plan.blocked && ["Dispatched", "Delivered"].includes(o.status)) plan.warning = "This piece was sent out — make sure it has come back before melting it.";
   return plan;
 }
@@ -180,6 +189,7 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
     at, by: by.id, byName: by.name, reason: c.reason?.trim() || undefined,
     gold: goldRec, diamonds: meltStones(plan, c).map(s => ({ quality: s.quality, ct: s.ct })),
     packetIds: plan.packetIds, labourInr: plan.labourInr, advanceToCredit: paid > 0 ? paid : undefined,
+    ...(plan.others.length ? { others: plan.others.map(x => ({ material: x.material, grade: x.grade, qty: x.qty })) } : {}),
     meltedBy: chargeTo || undefined, chargeInr: charge > 0 && chargeTo ? charge : undefined,
   };
   o.melted = rec;

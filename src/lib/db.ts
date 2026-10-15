@@ -122,6 +122,8 @@ export type LedgerDir = "debit" | "credit";
 // Pure helpers, kept with the account calculations so the server can use the
 // very same code (see src/lib/pure). Re-exported so nothing that imports them
 // from here changes.
+import type { MaterialDef, MaterialKey } from "./materials";
+export type { MaterialDef, MaterialKey } from "./materials";
 import { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance } from "./pure/basics";
 export { KARAT_PURITY, toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt, hasOpeningBalance };
 
@@ -344,6 +346,8 @@ export interface OrderMelt {
   diamonds: { quality: string; ct: number }[];
   /** Certified packets put back in stock. */
   packetIds: string[];
+  /** Other materials in the piece (Settings → Materials), back in stock as they were. */
+  others?: { material: MaterialKey; grade: string; qty: number }[];
   /** The job's labour — still owed to the factory, left in its ledger. */
   labourInr: number;
   /** Advance the client had paid, moved to their credit. */
@@ -396,8 +400,8 @@ export interface ManufacturingLogEntry {
   at: string;
   employeeId?: string;
   factoryId?: string;
-  material?: "gold" | "diamond";
-  amountMaterial?: number; // grams (gold) or carats (diamond)
+  material?: MaterialKey;
+  amountMaterial?: number; // in the material's unit
   amountInr?: number;
   remarks?: string;
 }
@@ -867,6 +871,10 @@ export interface Settings {
   googleClientId?: string;
   /** Our other companies — the first company is these settings themselves. */
   companies?: Company[];
+  /** Materials beyond gold and diamonds — platinum, silver, gemstones, findings
+   *  (Settings → Materials; see lib/materials.ts). Names and units only — no
+   *  cost lives here, since clients read these settings too. */
+  materials?: MaterialDef[];
   /** How every table in the app looks — Settings → Table Style. See tableStyle.ts. */
   tableUi?: { style: string; density: string; zebra: boolean; hover: boolean; lines: boolean; sticky: boolean };
   /** Settings → Appearance: the look of the whole app (see lib/appearance.ts). Absent = Classic. */
@@ -1002,7 +1010,8 @@ export interface Supplier {
   openingDate?: string;
 }
 
-export type PurchaseMaterial = "gold" | "diamond";
+/** "gold", "diamond", or an admin-defined material's id (lib/materials.ts). */
+export type PurchaseMaterial = MaterialKey;
 export type PurchasePurpose = "order" | "stock";
 export type PurchaseCurrency = "INR" | "USD";
 
@@ -1029,6 +1038,15 @@ export interface DiamondPurchaseDetail {
   shape?: string; // one of DIAMOND_SHAPES — the loose-stock bucket key
   certificateNumber?: string;
   certificateLab?: string; // GIA / IGI / etc.
+}
+
+/** A material other than gold or diamond (lib/materials.ts): how much, of
+ *  which grade, at what rate per unit of the material's own unit. */
+export interface OtherPurchaseDetail {
+  qty: number;
+  grade?: string;
+  ratePerUnit: number; // in the purchase's billing currency
+  pieces?: number;     // how many, when counted by weight (stones in a parcel)
 }
 
 /**
@@ -1180,6 +1198,7 @@ export interface Purchase {
   material: PurchaseMaterial;
   gold?: GoldPurchaseDetail; // present iff material === "gold"
   diamond?: DiamondPurchaseDetail; // present iff material === "diamond"
+  other?: OtherPurchaseDetail; // present iff material is an admin-defined material
   purpose: PurchasePurpose;
   orderId?: string; // required iff purpose === "order"
 
@@ -1286,9 +1305,9 @@ export interface MaterialIssuance {
   id: string;
   factoryId: string;
   orderId?: string; // unset = bulk delivery to this factory's pool
-  material: "gold" | "diamond";
+  material: MaterialKey;
   purityOrQuality: string;
-  quantityIssued: number; // grams (gold) or carats (diamond)
+  quantityIssued: number; // in the material's unit: grams (gold), carats (diamond), or the material's own
   /** "melt": gold from a melted piece handed back to the factory (lib/melt.ts) —
    *  a delivery into its pool like any other, but not out of our stock. */
   source: "stock" | "purchase" | "factoryPool" | "melt";
@@ -1314,6 +1333,7 @@ export interface MaterialIssuance {
   finishReturnedCt?: number; // loose diamond issuances: carats returned to stock at Final Approval (partial allowed; used = issued − this)
   piecesIssued?: number;     // loose diamond issuances: how many stones went out
   finishReturnedPcs?: number; // loose diamond issuances: how many stones came back at Final Approval
+  finishReturnedQty?: number; // other-material issuances: how much came back at Final Approval (used = issued − this)
   // Structured labour that makes up makingCharges.amountInr (the factory payable):
   //   perGramRate × net weight + cadCharge + diamondCt × diamondHandlingRate
   //   + otherCharges + metalByFactoryGrams × metalByFactoryRate
@@ -1337,8 +1357,10 @@ export type StockMovementType = "purchase_in" | "issuance_out" | "order_direct_u
 
 export interface StockMovement {
   id: string;
-  material: "gold" | "diamond";
+  material: MaterialKey;
   type: StockMovementType;
+  /** The company whose stock moved — unset is the first company. */
+  companyId?: string;
   purityOrQuality: string;
   quantity: number; // always positive; direction implied by `type`
   refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual" | "opening";

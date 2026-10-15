@@ -11,6 +11,7 @@ import { FactoryCreateDialog } from "./FactoryCreateDialog";
 import { LockerCreateDialog } from "./LockerCreateDialog";
 import { EmployeeCreateDialog } from "./EmployeeCreateDialog";
 import { CompanyEditor } from "@/components/CompaniesSettings";
+import { MaterialEditor } from "@/components/MaterialsSettings";
 
 /**
  * "+ Add new …" inside a dropdown — the standard way to add the thing you are
@@ -23,14 +24,14 @@ import { CompanyEditor } from "@/components/CompaniesSettings";
  *
  * Offered only to people who may create one on its own page.
  */
-export type QuickKind = "client" | "supplier" | "factory" | "locker" | "employee" | "company";
+export type QuickKind = "client" | "supplier" | "factory" | "locker" | "employee" | "company" | "material";
 
 /** The value of the "+ Add new" entry — never a real record's id. */
 export const ADD_NEW = "__add_new__";
 
 const LABEL: Record<QuickKind, string> = {
   client: "client", supplier: "supplier", factory: "factory",
-  locker: "bank / cash account", employee: "employee", company: "company",
+  locker: "bank / cash account", employee: "employee", company: "company", material: "material",
 };
 
 type Ctx = { open: (kind: QuickKind, onCreated: (id: string) => void) => void };
@@ -80,6 +81,7 @@ export function QuickCreateProvider({ children }: { children: ReactNode }) {
               onClose={() => drop(key)} onSaved={created(key)}
             />
           );
+          case "material": return <MaterialEditor key={key} onClose={() => drop(key)} onSaved={created(key)} />;
         }
       })}
     </QuickCreateContext.Provider>

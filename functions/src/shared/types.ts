@@ -30,6 +30,7 @@ export interface MaterialIssuance {
   diamondKind?: string;
   finishDisposition?: string;
   finishReturnedCt?: number;
+  finishReturnedQty?: number;
   finishedNetWeight?: number;
   finishedPurity?: number;
   finishedKarat?: string;
