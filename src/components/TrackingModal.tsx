@@ -14,7 +14,7 @@ export function TrackingModal({ order, onClose }: Props) {
 
   return (
     <Dialog open={!!order} onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md rounded-2xl max-h-[85vh] overflow-y-auto">
+      <DialogContent className="max-w-xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2 flex-wrap">
             {order.orderNumber} <StatusBadge status={order.status} />

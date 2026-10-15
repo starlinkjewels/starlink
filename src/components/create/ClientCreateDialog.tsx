@@ -79,9 +79,9 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-lg rounded-2xl">
+        <DialogContent className="max-w-4xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">Create Client</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
             {(["companyName","ownerName","email","phone","country","zip","gstVat","address","password"] as const).map(k => (
               <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
                 <Label className="text-xs capitalize">

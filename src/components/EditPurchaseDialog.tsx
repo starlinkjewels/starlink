@@ -92,7 +92,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
 
   return (
     <Dialog open={!!purchase} onOpenChange={o => { if (!o) onClose(); }}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl">Correct this purchase</DialogTitle>
         </DialogHeader>
@@ -100,7 +100,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
           The change carries through to the supplier&rsquo;s dues, the material issued to the factory and the stock entry.
         </p>
 
-        <div className="grid grid-cols-2 gap-3 mt-1">
+        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-1">
           <div>
             <Label className="text-xs">{isGold ? "Weight (g)" : "Carat (ct)"}</Label>
             <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} disabled={lockQuantity} className="rounded-xl h-10 mt-1 disabled:opacity-60" />

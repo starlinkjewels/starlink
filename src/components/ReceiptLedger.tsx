@@ -252,7 +252,7 @@ export function ReceiptLedger() {
       <LoadOlder w={w} noun="receipts" />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditId(null); }}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-xl">Correct receipt {editing?.receiptNo}</DialogTitle>
           </DialogHeader>

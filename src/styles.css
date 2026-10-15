@@ -797,3 +797,11 @@
 :root[data-font] body, :root[data-font] .font-sans { font-family: var(--ui-font-text); }
 :root[data-font][data-headings="sans"]:not([data-head-font]) :is(h1, h2, h3, .font-display) { font-family: var(--ui-font-text); }
 :root[data-head-font] :is(h1, h2, h3, .font-display) { font-family: var(--ui-font-head); }
+
+/* A long form in a wide dialog: its blocks flow into two columns on a laptop
+   (one on a phone), and no block is split across them. */
+.dlg-cols > * + * { margin-top: 0.875rem; }
+@media (min-width: 1024px) {
+  .dlg-cols { columns: 2; column-gap: 1.75rem; }
+  .dlg-cols > * { break-inside: avoid; margin-top: 0 !important; margin-bottom: 0.875rem !important; }
+}

@@ -124,8 +124,9 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className={`${needsLogin && rolesLive && access === "employee" ? "max-w-3xl" : "max-w-md"} rounded-2xl`}>
+        <DialogContent className={`${needsLogin && rolesLive && access === "employee" ? "max-w-6xl" : "max-w-xl"} rounded-2xl`}>
           <DialogHeader><DialogTitle className="font-display text-2xl">Create Employee</DialogTitle></DialogHeader>
+          <div className={needsLogin && rolesLive && access === "employee" ? "grid lg:grid-cols-[minmax(0,1fr)_minmax(0,1.9fr)] gap-6 items-start" : ""}>
           <div className="space-y-3">
             {(["name", "phone"] as const).map(key => (
               <div key={key}>
@@ -158,25 +159,6 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                   className="rounded-xl mt-1" />
               </div>
             ))}
-            {needsLogin && (
-              <div className="rounded-xl border border-border/70 p-3 space-y-3">
-                <div className="flex items-center justify-between gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-brand-dark">Access</p>
-                  <div role="radiogroup" aria-label="Kind of account" className="inline-flex gap-0.5 p-1 rounded-xl bg-secondary">
-                    {([["employee", "Employee"], ["admin", "Admin — partner"]] as const).map(([k, l]) => (
-                      <button key={k} type="button" role="radio" aria-checked={access === k} disabled={!rolesLive} onClick={() => setAccess(k)}
-                        className={`h-8 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${access === k ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
-                    ))}
-                  </div>
-                </div>
-                {!rolesLive ? <p className="text-[11px] text-muted-foreground">Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff.</p>
-                  : access === "admin" ? <p className="text-[11px] text-muted-foreground">Full control, the same as you: money, settings, employees and roles. You can take it back later from their card.</p>
-                  : <>
-                      <p className="text-[11px] text-muted-foreground -mt-1">Pick the role closest to their job, then tick or clear anything for this person alone. Temporary access ends by itself. All of it can be changed later from their card.</p>
-                      <AccessFields draft={draft} onChange={setDraft} docs={db.roles ?? []} by={{ id: me?.id ?? "", name: me?.name ?? "Admin" }} />
-                    </>}
-              </div>
-            )}
             {!(needsLogin && rolesLive && access === "admin") && <CompanyTicks value={coIds} onChange={setCoIds} />}
             {!(needsLogin && rolesLive && access === "admin") && (
               <div>
@@ -210,6 +192,26 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
               </div>
               <p className="text-[11px] text-muted-foreground">Salary/wages already paid to this person before you started using this app. Added to their total paid to date.</p>
             </div>
+          </div>
+          {needsLogin && (
+            <div className="rounded-xl border border-border/70 p-3 space-y-3">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-sm font-semibold text-brand-dark">Access</p>
+                <div role="radiogroup" aria-label="Kind of account" className="inline-flex gap-0.5 p-1 rounded-xl bg-secondary">
+                  {([["employee", "Employee"], ["admin", "Admin — partner"]] as const).map(([k, l]) => (
+                    <button key={k} type="button" role="radio" aria-checked={access === k} disabled={!rolesLive} onClick={() => setAccess(k)}
+                      className={`h-8 px-3 rounded-lg text-xs font-semibold transition-all disabled:opacity-50 ${access === k ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              {!rolesLive ? <p className="text-[11px] text-muted-foreground">Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff.</p>
+                : access === "admin" ? <p className="text-[11px] text-muted-foreground">Full control, the same as you: money, settings, employees and roles. You can take it back later from their card.</p>
+                : <>
+                    <p className="text-[11px] text-muted-foreground -mt-1">Pick the role closest to their job, then tick or clear anything for this person alone. Temporary access ends by itself. All of it can be changed later from their card.</p>
+                    <AccessFields draft={draft} onChange={setDraft} docs={db.roles ?? []} by={{ id: me?.id ?? "", name: me?.name ?? "Admin" }} />
+                  </>}
+            </div>
+          )}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl">Cancel</Button>

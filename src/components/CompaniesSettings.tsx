@@ -187,7 +187,7 @@ export function CompanyEditor({ company, all, invoices, onClose, onSaved }: { co
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-2xl">{isNew ? "Add company" : `Edit ${company.name}`}</DialogTitle></DialogHeader>
 
         <section className="space-y-3">

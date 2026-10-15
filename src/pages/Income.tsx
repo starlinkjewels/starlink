@@ -510,7 +510,7 @@ export function IncomePage() {
 
       {/* ── Edit / delete transaction dialog ── */}
       <Dialog open={!!editing} onOpenChange={open => !open && setEditing(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-2xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">Edit Transaction</DialogTitle></DialogHeader>
           {editing && (
             <div className="space-y-4">

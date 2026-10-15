@@ -40,9 +40,9 @@ export function LockerCreateDialog({ open, onOpenChange, onCreated }: {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent className="max-w-2xl rounded-2xl">
         <DialogHeader><DialogTitle className="font-display text-2xl">Add Locker</DialogTitle></DialogHeader>
-        <div className="space-y-3 mt-2">
+        <div className="dlg-cols mt-2">
           <div>
             <Label className="text-xs">Account Name</Label>
             <Input value={f.name} onChange={e => setF({ ...f, name: e.target.value })} className="rounded-xl mt-1" placeholder="HDFC Current A/c" />

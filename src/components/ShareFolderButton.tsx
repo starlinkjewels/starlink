@@ -82,7 +82,7 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
       </button>
 
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-xl flex items-center gap-2"><Link2 className="h-5 w-5 text-primary" /> Public link</DialogTitle>
           </DialogHeader>

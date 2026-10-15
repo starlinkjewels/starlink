@@ -71,7 +71,7 @@ export function BulkInvoiceDialog({ orders, onClose, onDone }: {
 
   return (
     <Dialog open onOpenChange={v => { if (!v && !saving) onClose(); }}>
-      <DialogContent className="max-w-lg rounded-2xl max-h-[88vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2">
             <FileText className="h-5 w-5 text-primary" /> Create invoice

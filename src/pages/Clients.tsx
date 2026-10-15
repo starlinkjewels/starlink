@@ -286,12 +286,12 @@ export function ClientsPage() {
       </div>
 
       <Dialog open={!!editingId} onOpenChange={v => !v && setEditingId(null)}>
-        <DialogContent className="max-w-lg rounded-2xl">
+        <DialogContent className="max-w-4xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">Edit Client</DialogTitle></DialogHeader>
           <p className="text-xs text-muted-foreground -mt-2">
             Login email and password aren't editable here — use "Reset Password" for credentials.
           </p>
-          <div className="grid grid-cols-2 gap-3 mt-2">
+          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
             {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address"] as const).map(k => (
               <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
                 <Label className="text-xs capitalize">

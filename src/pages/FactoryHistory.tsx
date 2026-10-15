@@ -514,7 +514,7 @@ function FactoryHistoryPageBody() {
       const melted = mi.source === "melt" ? db.orders.find(o => o.id === mi.meltOf) : undefined;
       const ref = order?.orderNumber || melted?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
       // Gold given to the factory (fine 24KT, matching the "Fine Gold at Factory" card).
-      if (mi.material === "gold" && mi.source !== "factoryPool") {
+      if (mi.material === "gold" && mi.source !== "factoryPool" && !(mi.source === "melt" && mi.quantityIssued === 0)) {
         rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}` : `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
       }
       // Finished piece returned by the factory (converted to fine 24KT).
@@ -550,7 +550,7 @@ function FactoryHistoryPageBody() {
       // Making charges billed (credit) and payments made (debit).
       if (mi.makingCharges.amountInr > 0) {
         const unit = mi.material === "gold" ? "g" : "ct";
-        rows.push({ ...zero(), id: mi.id + "-chg", date: mi.issuedAt, ref, particular: `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`, crAmount: mi.makingCharges.amountInr });
+        rows.push({ ...zero(), id: mi.id + "-chg", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melting / refining charge` : `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`, crAmount: mi.makingCharges.amountInr });
       }
     }
     // Payments are shown as they were made, not as they were split across jobs.
@@ -1032,7 +1032,7 @@ function FactoryHistoryPageBody() {
                 <div>
                   <p className="font-semibold text-sm">
                     {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — back in the factory's pool</span>
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
                     )}

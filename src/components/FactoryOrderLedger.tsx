@@ -135,7 +135,7 @@ export function buildFactoryOrderRows(
     }
     // Keep the entries behind the figures so the row can be opened up.
     if (mi.material === "gold") {
-      if (mi.source !== "factoryPool") {
+      if (mi.source !== "factoryPool" && !(mi.source === "melt" && mi.quantityIssued === 0)) {
         row.entries.push({
           id: mi.id + "-gin", date: mi.issuedAt, kind: "out",
           text: mi.source === "melt"
