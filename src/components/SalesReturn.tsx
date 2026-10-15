@@ -12,6 +12,8 @@ import { useCan } from "@/hooks/useCan";
 import { reserveCreditNoteNumber, releaseCreditNoteNumber } from "@/lib/counters";
 import { planReturn, applyReturn, receiveReturn, cancelReturn, cancelReturnBlocker, returnBlocker, returnsComing, RETURN_REASONS, type ReturnPlan } from "@/lib/salesReturn";
 import { printCreditNote } from "@/lib/invoicePrint";
+import { orderCost, rateOn, saleDate } from "@/lib/orderCost";
+import { COST } from "@/lib/pageData";
 import { confirmBox } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -31,6 +33,24 @@ export function useMayReturn(): boolean {
 const thumb = (o: Order) => o.cadImage || o.productPhotos?.[0] || o.images?.[0];
 const describe = (o: Order) => [o.productKarats, o.metal !== "None (Diamond only)" ? o.metal : "", o.jewelleryType, o.designNumber ? `#${o.designNumber}` : ""].filter(Boolean).join(" · ");
 const shapes = (orderIds: string[]) => Object.fromEntries(orderIds.map(id => [id, mainDiamondShape(loadDb(), id) ?? ""]));
+
+/**
+ * What one returned piece cost, in dollars at the rate of its sale — for the
+ * Ready Stock card. Admin only (cost is private); undefined when not known.
+ */
+async function pieceCostUsd(orderId: string, isAdmin: boolean): Promise<number | undefined> {
+  if (!isAdmin) return undefined;
+  try {
+    await ensureCollections(COST);
+    const db = loadDb();
+    const o = db.orders.find(x => x.id === orderId);
+    if (!o) return undefined;
+    const c = orderCost(db, o);
+    const fx = rateOn(db, saleDate(o));
+    if (!fx || !(c.pieceInr > 0)) return undefined;
+    return Math.round((c.pieceInr / (o.quantity || 1) / fx.rate) * 100) / 100;
+  } catch { return undefined; }
+}
 
 /** Print the credit note a return belongs to. */
 export function printNote(noteId: string) {
@@ -85,9 +105,13 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
     const noteId = uid("cn_");
     let applied: ReturnPlan | undefined;
     try {
-      if (received) await ensureCollections(["materialIssuances"]);
+      const costUsd: Record<string, number> = {};
+      if (received) {
+        await ensureCollections(["materialIssuances"]);
+        for (const l of plan.lines) { const c = await pieceCostUsd(l.order.id, user.role === "admin"); if (c != null) costUsd[l.order.id] = c; }
+      }
       updateDbAs({ summary: `Return ${no} — ${t.qty} pc${t.qty !== 1 ? "s" : ""} from ${client?.companyName ?? "client"}, ${fmtMoney(t.creditUsd)} credit` }, d => {
-        applied = applyReturn(d, input, opts, { noteId, creditNoteNo: no, by: user.id, byName: user.name, at: new Date().toISOString() });
+        applied = applyReturn(d, input, opts, { noteId, creditNoteNo: no, by: user.id, byName: user.name, at: new Date().toISOString(), costUsd });
       });
     } catch (e) {
       await releaseCreditNoteNumber(no).catch(() => {});
@@ -277,8 +301,9 @@ export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret
   const go = async () => {
     if (!user) return;
     await ensureCollections(["materialIssuances"]);
+    const costUsd = await pieceCostUsd(order.id, user.role === "admin");
     updateDbAs({ summary: `Received return ${ret.creditNoteNo} — ${order.orderNumber}, ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} into Ready Stock` }, d => {
-      receiveReturn(d, order.id, ret.id, { by: user.id, at: new Date().toISOString(), location, priceUsd: Number(price) >= 0 ? Number(price) : undefined });
+      receiveReturn(d, order.id, ret.id, { by: user.id, at: new Date().toISOString(), location, priceUsd: Number(price) >= 0 ? Number(price) : undefined, costUsd });
     });
     toast.success(`${order.orderNumber}: ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} in Ready Stock (${location})`);
     onClose();

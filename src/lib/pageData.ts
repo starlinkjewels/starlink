@@ -43,7 +43,8 @@ const LIGHT: Record<string, TotalsKind[]> = {
 };
 
 /** What an order's cost is worked out from (lib/orderCost.ts, costDataReady). */
-const COST: LazyCol[] = ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "clientReceipts"];
+/** What working out an order's cost reads (lib/orderCost.ts). */
+export const COST: LazyCol[] = ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "clientReceipts"];
 const PHOTOS: LazyCol[] = ["catalogFolders", "productPhotoFolders", "productPhotoItems", "shares"];
 
 /**
