@@ -18,26 +18,44 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
-import { uid, type StockMovement } from "./db";
+import { uid, type StockMovement, type MaterialKey } from "./db";
 
 const STOCK_COL = "stockLevels";
-const STOCK_DOC = "current";
+const MAIN_DOC = "current";
 
+/**
+ * The running counter behind the floor check. One map per material — `gold`
+ * (purity → g), `diamond` (shape → ct), and one per admin-defined material
+ * under its own id (`mat_…`, grade → its unit) — so a ruby can never pass a
+ * diamond's floor check, whatever it is called.
+ */
 export interface StockLevels {
   gold: Record<string, number>; // purity -> grams
   diamond: Record<string, number>; // quality bucket -> carats
+  [material: `mat_${string}`]: Record<string, number>;
   updatedAt: string;
   version: number;
 }
 
-function stockRef() {
-  return doc(fsdb as Firestore, STOCK_COL, STOCK_DOC);
+/** Each company holds its own stock: the first company's counter is
+ *  stockLevels/current, as it always was; another's is stockLevels/co_<id>. */
+function stockDocId(companyId?: string): string {
+  return !companyId || companyId === "main" ? MAIN_DOC : `co_${companyId}`;
+}
+
+function stockRef(companyId?: string) {
+  return doc(fsdb as Firestore, STOCK_COL, stockDocId(companyId));
+}
+
+/** A movement belongs to the company whose stock it moved; unset = the first company. */
+function companyOf(m: Pick<StockMovement, "companyId">): string {
+  return m.companyId || "main";
 }
 
 /** Real-time subscription — call the returned unsubscribe on unmount. */
-export function subscribeStockLevels(onChange: (levels: StockLevels) => void): () => void {
+export function subscribeStockLevels(onChange: (levels: StockLevels) => void, companyId?: string): () => void {
   return onSnapshot(
-    stockRef(),
+    stockRef(companyId),
     snap => {
       if (snap.exists()) onChange(snap.data() as StockLevels);
       else onChange({ gold: {}, diamond: {}, updatedAt: new Date().toISOString(), version: 0 });
@@ -48,11 +66,11 @@ export function subscribeStockLevels(onChange: (levels: StockLevels) => void): (
   );
 }
 
-export async function fetchStockLevels(): Promise<StockLevels> {
-  const snap = await getDoc(stockRef());
+export async function fetchStockLevels(companyId?: string): Promise<StockLevels> {
+  const snap = await getDoc(stockRef(companyId));
   if (!snap.exists()) {
     const initial: StockLevels = { gold: {}, diamond: {}, updatedAt: new Date().toISOString(), version: 0 };
-    await setDoc(stockRef(), initial);
+    await setDoc(stockRef(companyId), initial);
     return initial;
   }
   return snap.data() as StockLevels;
@@ -72,7 +90,9 @@ async function addStockMovement(m: Omit<StockMovement, "id">): Promise<void> {
 
 /** Purchase → stock: a plain atomic increment is safe, since additions can never go negative. */
 export async function increaseStock(args: {
-  material: "gold" | "diamond";
+  material: MaterialKey;
+  /** Whose stock — unset is the first company. */
+  companyId?: string;
   purityOrQuality: string;
   quantity: number;
   refType: "purchase" | "manual" | "opening";
@@ -82,19 +102,21 @@ export async function increaseStock(args: {
   note?: string;
   createdAt?: string; // as-of date (opening stock) — defaults to now
 }): Promise<void> {
-  const field = args.material === "gold" ? "gold" : "diamond";
+  // Each material its own map, keyed by the material itself.
+  const field = args.material;
   // setDoc+merge (not updateDoc) so the very first stock purchase on a fresh
   // tenant creates stockLevels/current instead of throwing "No document to update".
   // A nested map, not a "gold.14K" key: setDoc takes a dotted key literally, so
   // that wrote a separate field and the real figure never went up (the Stock
   // page's repair from history was what put it right).
-  await setDoc(stockRef(), {
+  await setDoc(stockRef(args.companyId), {
     [field]: { [args.purityOrQuality]: increment(args.quantity) },
     updatedAt: new Date().toISOString(),
     version: increment(1),
   }, { merge: true });
   await addStockMovement({
     material: args.material,
+    ...(args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {}),
     type: "purchase_in",
     purityOrQuality: args.purityOrQuality,
     quantity: args.quantity,
@@ -114,7 +136,9 @@ export async function increaseStock(args: {
  * surface that error to the user rather than let it fail silently.
  */
 export async function decreaseStock(args: {
-  material: "gold" | "diamond";
+  material: MaterialKey;
+  /** Whose stock — unset is the first company. */
+  companyId?: string;
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
@@ -123,14 +147,14 @@ export async function decreaseStock(args: {
   createdBy: string;
   note?: string;
 }): Promise<void> {
-  const field = args.material === "gold" ? "gold" : "diamond";
+  const field = args.material;
   const movementId = uid("sm_");
 
   await runTransaction(fsdb, async (tx) => {
-    const ref = stockRef();
+    const ref = stockRef(args.companyId);
     const snap = await tx.get(ref);
     const levels = (snap.exists() ? snap.data() : { gold: {}, diamond: {} }) as StockLevels;
-    const have = (levels[field] as Record<string, number>)?.[args.purityOrQuality] || 0;
+    const have = ((levels as unknown as Record<string, Record<string, number> | undefined>)[field])?.[args.purityOrQuality] || 0;
     if (have < args.quantity) {
       throw new Error(
         `Insufficient ${args.purityOrQuality} ${args.material} stock: have ${have}, need ${args.quantity}.`,
@@ -148,6 +172,7 @@ export async function decreaseStock(args: {
     tx.set(doc(collection(fsdb, "stockMovements"), movementId), pruneUndefined({
       id: movementId,
       material: args.material,
+      companyId: args.companyId && args.companyId !== "main" ? args.companyId : undefined,
       type: args.type,
       purityOrQuality: args.purityOrQuality,
       quantity: args.quantity,
@@ -176,7 +201,8 @@ export async function decreaseStock(args: {
  * via DiamondPacket, never pooled, same as a Buy & Assign certified purchase.
  */
 export async function logOrderDirectPurchase(args: {
-  material: "gold" | "diamond";
+  material: MaterialKey;
+  companyId?: string;
   purityOrQuality: string;
   quantity: number;
   purchaseId: string;
@@ -191,13 +217,14 @@ export async function logOrderDirectPurchase(args: {
   createdAt?: string;
 }): Promise<void> {
   const now = args.createdAt ?? new Date().toISOString();
+  const co = args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {};
   await Promise.all([
     addStockMovement({
-      material: args.material, type: "purchase_in", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      material: args.material, ...co, type: "purchase_in", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
       refType: "purchase", refId: args.purchaseId, createdBy: args.createdBy, createdAt: now,
     }),
     addStockMovement({
-      material: args.material, type: "order_direct_use", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      material: args.material, ...co, type: "order_direct_use", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
       refType: "order", refId: args.orderId, createdBy: args.createdBy, createdAt: now,
     }),
   ]);
@@ -221,7 +248,7 @@ export async function decreaseStockSelfHealing(
     await decreaseStock(args);
   } catch (e) {
     if (e instanceof Error && e.message.startsWith("Insufficient")) {
-      await recomputeStockFromHistory(movements);
+      await recomputeStockFromHistory(movements, args.companyId);
       await decreaseStock(args);
     } else {
       throw e;
@@ -234,19 +261,22 @@ export async function decreaseStockSelfHealing(
  * overwrite it — a reconciliation escape hatch (like a bank statement
  * reconciliation) in case of any drift, never called automatically.
  */
-export async function recomputeStockFromHistory(movements: StockMovement[]): Promise<StockLevels> {
+export async function recomputeStockFromHistory(movements: StockMovement[], companyId?: string): Promise<StockLevels> {
   // Safety: this OVERWRITES the whole stockLevels doc. If the caller hands us an
   // empty history (movements not loaded yet / a stale cache), rebuilding from it
   // would zero out real stock. Refuse and return what's stored instead.
-  if (!movements || movements.length === 0) return fetchStockLevels();
-  const gold: Record<string, number> = {};
-  const diamond: Record<string, number> = {};
+  if (!movements || movements.length === 0) return fetchStockLevels(companyId);
+  const co = companyId || "main";
+  // Every material that has ever moved — gold, diamond, and each other one by
+  // its id — so the rebuild never drops a map the history has.
+  const maps: Record<string, Record<string, number>> = { gold: {}, diamond: {} };
   for (const m of movements) {
-    const bucket = m.material === "gold" ? gold : diamond;
+    if (companyOf(m) !== co) continue;
+    const bucket = (maps[m.material] ??= {});
     const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity) : -1;
     bucket[m.purityOrQuality] = (bucket[m.purityOrQuality] || 0) + sign * Math.abs(m.quantity);
   }
-  const levels: StockLevels = { gold, diamond, updatedAt: new Date().toISOString(), version: 0 };
-  await setDoc(stockRef(), levels);
+  const levels = { ...maps, updatedAt: new Date().toISOString(), version: 0 } as unknown as StockLevels;
+  await setDoc(stockRef(companyId), levels);
   return levels;
 }

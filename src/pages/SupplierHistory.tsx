@@ -1,4 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
+import { isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
@@ -61,6 +63,10 @@ interface PurchaseLine {
   diaSym: string;
   diaFluor: string;
   diaMeasure: string;
+  /** A material other than gold or diamond (Settings → Materials). */
+  otherQty: string;
+  otherGrade: string;
+  otherRate: string;
   currency: PurchaseCurrency;
   totalUsd: string;
   exchangeRate: string;
@@ -75,6 +81,7 @@ function emptyPurchaseLine(): PurchaseLine {
     diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
+    otherQty: "", otherGrade: "", otherRate: "",
     currency: "INR", totalUsd: "", exchangeRate: "",
     invoiceNumber: "", notes: "",
   };
@@ -83,6 +90,8 @@ function emptyPurchaseLine(): PurchaseLine {
 function purchaseLineTotalInr(line: PurchaseLine): number {
   const computed = line.material === "gold"
     ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
+    : isOtherMaterial(line.material)
+    ? (Number(line.otherQty) || 0) * (Number(line.otherRate) || 0)
     : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
   return line.currency === "USD"
     ? Math.round((Number(line.totalUsd) || 0) * (Number(line.exchangeRate) || 0))
@@ -116,6 +125,7 @@ function SupplierHistoryPageBody() {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
+  const otherMaterials = useOtherMaterials();
 
   const supplier = db.suppliers.find(s => s.id === id);
   if (!supplier) {
@@ -185,6 +195,8 @@ function SupplierHistoryPageBody() {
       if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error("Enter gold weight for every line"); return; }
       if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error("Enter diamond carat for every line"); return; }
       if (line.material === "diamond" && line.diaKind === "certified" && !line.diaCertNo.trim()) { toast.error("Enter the certificate number for every certified diamond line"); return; }
+      if (isOtherMaterial(line.material) && !materialDef(db.settings, line.material)) { toast.error("Choose the material for every line"); return; }
+      if (isOtherMaterial(line.material) && (!line.otherQty || Number(line.otherQty) <= 0)) { toast.error(`Enter the ${materialName(db.settings, line.material)} quantity for every line`); return; }
       if (line.currency === "USD" && (!line.totalUsd || !line.exchangeRate)) { toast.error("Enter the USD amount and exchange rate for every USD line"); return; }
       if (line.purpose === "order" && !line.orderNumber.trim()) { toast.error("Enter the order number for every 'for a specific order' line"); return; }
       if (purchaseLineTotalInr(line) <= 0) { toast.error("A line's total comes to ₹0 — check its weight/rate fields"); return; }
@@ -220,8 +232,8 @@ function SupplierHistoryPageBody() {
         if (line.material === "diamond" && line.diaKind === "certified") continue;
         await increaseStock({
           material: line.material,
-          purityOrQuality: line.material === "gold" ? line.goldPurity : line.diaShape,
-          quantity: line.material === "gold" ? Number(line.goldWeight) : Number(line.diaCarat),
+          purityOrQuality: line.material === "gold" ? line.goldPurity : isOtherMaterial(line.material) ? (line.otherGrade.trim() || "—") : line.diaShape,
+          quantity: line.material === "gold" ? Number(line.goldWeight) : isOtherMaterial(line.material) ? Number(line.otherQty) : Number(line.diaCarat),
           refType: "purchase",
           refId: entry.id,
           createdBy: user!.id,
@@ -236,6 +248,7 @@ function SupplierHistoryPageBody() {
             supplierId: id!,
             material: line.material,
             gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
+            other: isOtherMaterial(line.material) ? { qty: Number(line.otherQty), grade: line.otherGrade.trim() || "—", ratePerUnit: Number(line.otherRate) || 0 } : undefined,
             diamond: line.material === "diamond" ? {
               carat: Number(line.diaCarat),
               quality: line.diaQuality || undefined,
@@ -298,9 +311,11 @@ function SupplierHistoryPageBody() {
               if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
               o.linkedPurchaseIds.push(purchase.id);
               if (!o.manufacturingLog) o.manufacturingLog = [];
-              const qty = line.material === "gold" ? Number(line.goldWeight) : Number(line.diaCarat);
+              const qty = line.material === "gold" ? Number(line.goldWeight) : isOtherMaterial(line.material) ? Number(line.otherQty) : Number(line.diaCarat);
               const label = line.material === "gold"
                 ? `${qty}g ${line.goldPurity} gold`
+                : isOtherMaterial(line.material)
+                ? `${qty} ${materialUnit(db.settings, line.material)} ${line.otherGrade.trim() ? `${line.otherGrade.trim()} ` : ""}${materialName(db.settings, line.material)}`
                 : `${qty}ct ${line.diaShape} diamond${line.diaKind === "certified" ? ` (Certified ${line.diaCertNo.trim()})` : line.diaQuality ? ` (${line.diaQuality})` : ""}`;
               o.manufacturingLog.push({
                 id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
@@ -474,6 +489,10 @@ function SupplierHistoryPageBody() {
       ].filter(Boolean);
       return bits.join(" · ");
     }
+    if (isOtherMaterial(p.material)) {
+      return [materialName(db.settings, p.material), p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
+        p.other?.pieces ? `${p.other.pieces} pcs` : undefined, p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined].filter(Boolean).join(" · ");
+    }
     const d = p.diamond;
     const bits = [
       d?.shape || "Diamond",
@@ -508,8 +527,8 @@ function SupplierHistoryPageBody() {
       const orderNo = p.orderId ? db.orders.find(o => o.id === p.orderId)?.orderNumber : undefined;
       // Everything the purchase entry captured: the weight, the supplier’s invoice
       // number, the rate behind the amount and the order it was bought for.
-      const qty = p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0);
-      const unit = p.material === "gold" ? "g" : "ct";
+      const qty = purchaseQty(p);
+      const unit = materialUnit(db.settings, p.material);
       rows.push({
         id: p.id, date: p.createdAt,
         particulars: purchaseDesc(p),
@@ -723,7 +742,10 @@ function SupplierHistoryPageBody() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <Select value={line.material} onValueChange={v => updatePurchaseLine(idx, { material: v as PurchaseMaterial })}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+                    <SelectContent>
+                      <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
+                      {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                    </SelectContent>
                   </Select>
                   <Select value={line.purpose} onValueChange={v => updatePurchaseLine(idx, { purpose: v as "order" | "stock" })}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
@@ -735,7 +757,13 @@ function SupplierHistoryPageBody() {
                   <Input value={line.orderNumber} onChange={e => updatePurchaseLine(idx, { orderNumber: e.target.value })} className="rounded-xl h-10" placeholder="Order number, e.g. SLJ-2026-1020" />
                 )}
 
-                {line.material === "gold" ? (
+                {isOtherMaterial(line.material) ? (
+                  <div className="grid grid-cols-3 gap-2.5">
+                    <GradeInput material={line.material} value={line.otherGrade} onChange={v => updatePurchaseLine(idx, { otherGrade: v })} />
+                    <Input type="number" min={0} step="0.001" value={line.otherQty} onChange={e => updatePurchaseLine(idx, { otherQty: e.target.value })} className="rounded-xl h-10" placeholder={`Quantity (${materialUnit(db.settings, line.material)})`} />
+                    <Input type="number" min={0} value={line.otherRate} onChange={e => updatePurchaseLine(idx, { otherRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/${materialUnit(db.settings, line.material)} (${line.currency})`} />
+                  </div>
+                ) : line.material === "gold" ? (
                   <div className="grid grid-cols-3 gap-2.5">
                     <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
                     <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
@@ -963,7 +991,7 @@ function SupplierHistoryPageBody() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <p className="text-sm font-semibold">
-                      {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold` : `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`}
+                      {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold` : p.material === "diamond" ? `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}` : purchaseText(db.settings, p)}
                     </p>
                     <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
                       {p.purpose === "order"

@@ -15,27 +15,26 @@
 // whenever the purchase can't be cleanly reversed — money already paid, making
 // charges already paid, the factory already finished the piece, or a certified
 // stone already used/sold. Those must be undone at the source first.
-import { updateDb, uid, type DB, type Purchase, type StockMovement } from "./db";
+import { updateDb, uid, loadDb, type DB, type Purchase, type StockMovement } from "./db";
+import { purchaseQty, purchaseBucket, purchaseText, materialUnit } from "./materials";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "./stock";
 
 /** Human description of what was bought, for confirmations and the audit line. */
 export function purchaseLabel(p: Purchase): string {
-  return p.material === "gold"
-    ? `${p.gold?.weightGrams ?? 0}g ${p.gold?.purity ?? ""} gold`
-    : `${p.diamond?.carat ?? 0}ct ${p.diamond?.kind === "certified" ? "certified " : ""}diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
+  if (p.material === "gold" || p.material === "diamond") {
+    return p.material === "gold"
+      ? `${p.gold?.weightGrams ?? 0}g ${p.gold?.purity ?? ""} gold`
+      : `${p.diamond?.carat ?? 0}ct ${p.diamond?.kind === "certified" ? "certified " : ""}diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
+  }
+  return purchaseText(loadDb().settings, p);
 }
 
-/** Quantity in the purchase's own unit (grams / carats). */
-function qtyOf(p: Purchase): number {
-  return p.material === "gold" ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0);
-}
+/** Quantity in the purchase's own unit (grams / carats / the material's own). */
+const qtyOf = (p: Purchase): number => purchaseQty(p);
 
 /** The pooled-stock bucket this purchase would have landed in. */
-function bucketOf(p: Purchase): string {
-  if (p.material === "gold") return p.gold?.purity ?? "";
-  return p.diamond?.kind === "certified" ? "Certified" : (p.diamond?.shape ?? "unspecified");
-}
+const bucketOf = (p: Purchase): string => purchaseBucket(p);
 
 /** True when this purchase actually increased the shared pooled stock. */
 function pooledStock(p: Purchase): boolean {
@@ -74,12 +73,12 @@ export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: st
  */
 export function voidImpact(db: DB, p: Purchase): string[] {
   const out: string[] = [];
-  const unit = p.material === "gold" ? "g" : "ct";
+  const unit = materialUnit(db.settings, p.material);
   const sup = db.suppliers.find(s => s.id === p.supplierId);
   out.push(`• ${fmtMoneyInr(p.totalInr)} comes off ${sup?.name || "the supplier"}’s dues`);
   for (const i of (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id)) {
     const fac = db.factories.find(f => f.id === i.factoryId);
-    out.push(`• ${i.quantityIssued}${i.material === "gold" ? "g" : "ct"} taken back off ${fac?.name || "the factory"}’s hands`);
+    out.push(`• ${i.quantityIssued}${materialUnit(db.settings, i.material)} taken back off ${fac?.name || "the factory"}’s hands`);
     if (i.makingCharges.amountInr > 0) {
       out.push(`• the ${fmtMoneyInr(i.makingCharges.amountInr)} making charge on that factory issue is removed too`);
     }
@@ -302,6 +301,11 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     if (pur.material === "gold" && pur.gold) {
       pur.gold.weightGrams = newQty;
       pur.gold.ratePerGram = edit.ratePerUnit;
+    }
+    if (pur.material !== "gold" && pur.material !== "diamond" && pur.other) {
+      pur.other.qty = newQty;
+      pur.other.ratePerUnit = edit.ratePerUnit;
+      // Its grade is its stock bucket, like a diamond's shape — not changed here.
     }
     if (pur.material === "diamond" && pur.diamond) {
       pur.diamond.carat = newQty;

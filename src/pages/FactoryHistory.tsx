@@ -1,4 +1,7 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { useOtherMaterials, GradeInput } from "@/components/MaterialFields";
+import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
+import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
 import { useMemo, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
@@ -112,7 +115,12 @@ function FactoryHistoryPageBody() {
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [issueMode, setIssueMode] = useState<"bulkDelivery" | "orderConsumption">("orderConsumption");
   const [issueOrderNumber, setIssueOrderNumber] = useState("");
-  const [issueMaterial, setIssueMaterial] = useState<"gold" | "diamond">("gold");
+  const [issueMaterial, setIssueMaterial] = useState<MaterialKey>("gold");
+  const [issueGrade, setIssueGrade] = useState("");
+  const otherMaterials = useOtherMaterials();
+  /** "gold", "diamond" — or the other material's own name — for messages. */
+  const matWord = (k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
+  const issueUnit = materialUnit(db.settings, issueMaterial);
   const [issuePurity, setIssuePurity] = useState("22K");
   const [issueQuality, setIssueQuality] = useState("Round");
   const [issueQuantity, setIssueQuantity] = useState("");
@@ -138,13 +146,13 @@ function FactoryHistoryPageBody() {
 
   const resetIssueForm = () => {
     setIssueOrderNumber("");
-    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality("Round"); setIssueGrade(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
     const qty = Number(issueQuantity);
-    if (!qty || qty <= 0) { toast.error(`Enter the ${issueMaterial} quantity to issue`); return; }
-    const purityOrQuality = issueMaterial === "gold" ? issuePurity : (issueQuality.trim() || "unspecified");
+    if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} quantity to issue`); return; }
+    const purityOrQuality = issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
     const issuanceId = uid("mi_");
     const now = new Date().toISOString();
 
@@ -169,7 +177,7 @@ function FactoryHistoryPageBody() {
             notes: issueNotes.trim() || undefined,
           });
         });
-        toast.success(`${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} delivered to ${factory.name}'s pool`);
+        toast.success(`${qty}${issueUnit} ${purityOrQuality} ${matWord(issueMaterial)} delivered to ${factory.name}'s pool`);
         setShowIssueForm(false);
         resetIssueForm();
       } catch (e) {
@@ -221,11 +229,11 @@ function FactoryHistoryPageBody() {
           o.manufacturingLog.push({
             id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: id,
             material: issueMaterial, amountMaterial: qty, amountInr: chargeAmount || undefined,
-            remarks: `${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} ${issueMaterial} used at ${factory.name}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
+            remarks: `${qty}${issueUnit} ${purityOrQuality} ${matWord(issueMaterial)} used at ${factory.name}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
           });
         }
       });
-      toast.success(`Recorded ${qty}${issueMaterial === "gold" ? "g" : "ct"} ${purityOrQuality} used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
+      toast.success(`Recorded ${qty}${issueUnit} ${purityOrQuality} used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
       setShowIssueForm(false);
       resetIssueForm();
     } catch (e) {
@@ -252,8 +260,8 @@ function FactoryHistoryPageBody() {
 
   const recordPiece = (issuance: MaterialIssuance) => {
     const w = Number(pieceQty);
-    if (!w || w <= 0) { toast.error(`Enter the ${issuance.material} quantity used`); return; }
-    const u = issuance.material === "gold" ? "g" : "ct";
+    if (!w || w <= 0) { toast.error(`Enter the ${matWord(issuance.material)} quantity used`); return; }
+    const u = materialUnit(db.settings, issuance.material);
     const alreadyUsed = issuanceUsed(issuance);
     if (alreadyUsed + w > issuance.quantityIssued + 0.001) {
       toast.error(`Can't use more than issued — issued ${issuance.quantityIssued}${u}, already used ${alreadyUsed}${u}.`);
@@ -271,7 +279,7 @@ function FactoryHistoryPageBody() {
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "piece_finished", at: now, employeeId: user!.id, factoryId: id,
           material: issuance.material, amountMaterial: w,
-          remarks: `${w}${issuance.material === "gold" ? "g" : "ct"} used in finished piece(s)`,
+          remarks: `${w}${materialUnit(db.settings, issuance.material)} used in finished piece(s)`,
         });
       }
     });
@@ -355,7 +363,7 @@ function FactoryHistoryPageBody() {
     }
 
     const qty = Number(returnQty);
-    const unit = issuance.material === "gold" ? "g" : "ct";
+    const unit = materialUnit(db.settings, issuance.material);
     // A bulk delivery's own issuanceUsed is always 0 (orders draw against it
     // via separate factoryPool-sourced records, never its own finishedPieces)
     // — cap it at the true remaining pool balance instead, or this would let
@@ -363,7 +371,7 @@ function FactoryHistoryPageBody() {
     const maxReturnable = !issuance.orderId
       ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
       : Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
-    if (!qty || qty <= 0) { toast.error(`Enter the ${issuance.material} quantity to return`); return; }
+    if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issuance.material)} quantity to return`); return; }
     if (qty > maxReturnable) { toast.error(`Can't return more than the unused remainder (${maxReturnable}${unit})`); return; }
     const now = new Date().toISOString();
     setReturning(true);
@@ -387,7 +395,7 @@ function FactoryHistoryPageBody() {
           o.manufacturingLog.push({
             id: uid("mlog_"), type: "material_returned", at: now, employeeId: user!.id, factoryId: id,
             material: issuance.material, amountMaterial: qty,
-            remarks: `${qty}${unit} ${issuance.material} returned from ${factory.name}${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
+            remarks: `${qty}${unit} ${matWord(issuance.material)} returned from ${factory.name}${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
           });
         }
       });
@@ -412,7 +420,7 @@ function FactoryHistoryPageBody() {
     const leftover = !issuance.orderId
       ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
       : Math.round(issuanceWastage(issuance) * 100) / 100;
-    const unit = issuance.material === "gold" ? "g" : "ct";
+    const unit = materialUnit(db.settings, issuance.material);
     const now = new Date().toISOString();
     try {
       // Only stock-sourced, non-certified leftovers return to shared Stock.
@@ -466,7 +474,7 @@ function FactoryHistoryPageBody() {
     }
   };
 
-  const orderRows = buildFactoryOrderRows(issuances, db.orders);
+  const orderRows = buildFactoryOrderRows(issuances, db.orders, db.settings);
 
   /** Trim only when the text genuinely cannot fit (8.5pt Helvetica is about
    *  1.6mm a character), so nothing is cut that would have fitted. */
@@ -498,7 +506,9 @@ function FactoryHistoryPageBody() {
   const rs = (n: number) => Math.round(n).toLocaleString("en-IN"); // plain INR (jsPDF can't render ₹)
   const q3 = (n: number) => Math.round(n * 1000) / 1000;
 
-  type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drSilver: number; drDia: number; drOther: number; drAmount: number; crGold: number; crSilver: number; crDia: number; crOther: number; crAmount: number; otherLabel?: string };
+  type UniRow = { id: string; date: string; ref: string; particular: string; drGold: number; drSilver: number; drDia: number; drOther: number; drAmount: number; crGold: number; crSilver: number; crDia: number; crOther: number; crAmount: number; otherLabel?: string;
+    /** A material other than gold or diamond (Settings → Materials), in its own unit. */
+    mat?: { key: string; label: string; dr: number; cr: number } };
   // Debit  = value we GAVE the factory (gold/diamond issued) + money we PAID them.
   // Credit = value the factory RETURNED (finished gold, diamond used/returned) + charges they BILLED.
   const buildUnifiedLedger = (iss: MaterialIssuance[], includeOpening = false): UniRow[] => {
@@ -547,9 +557,21 @@ function FactoryHistoryPageBody() {
           if (returned > 0) rows.push({ ...zero(), id: mi.id + "-dret", date: mi.issuedAt, ref, particular: `Diamond returned to stock`, crDia: returned });
         }
       }
+      // Any other material — given, then used in the piece or sent back, in its own unit.
+      if (isOtherMaterial(mi.material)) {
+        const flow = otherFlow(mi);
+        const name = materialName(db.settings, mi.material), u = materialUnit(db.settings, mi.material);
+        const label = `${name} (${u})`;
+        if (flow.out > 0) rows.push({ ...zero(), id: mi.id + "-xin", date: mi.issuedAt, ref, particular: `${name} issued — ${mi.quantityIssued}${u} ${mi.purityOrQuality}`, mat: { key: mi.material, label, dr: flow.out, cr: 0 } });
+        // What it has accounted for is what went into the piece plus what came back.
+        const returned = Math.min(mi.finishReturnedQty || 0, flow.in);
+        const used = Math.max(0, Math.round((flow.in - returned) * 1000) / 1000);
+        if (used > 0) rows.push({ ...zero(), id: mi.id + "-xused", date: mi.issuedAt, ref, particular: `${name} used in piece`, mat: { key: mi.material, label, dr: 0, cr: used } });
+        if (returned > 0) rows.push({ ...zero(), id: mi.id + "-xret", date: mi.issuedAt, ref, particular: `${name} returned to stock`, mat: { key: mi.material, label, dr: 0, cr: returned } });
+      }
       // Making charges billed (credit) and payments made (debit).
       if (mi.makingCharges.amountInr > 0) {
-        const unit = mi.material === "gold" ? "g" : "ct";
+        const unit = materialUnit(db.settings, mi.material);
         rows.push({ ...zero(), id: mi.id + "-chg", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melting / refining charge` : `Making charges — ${mi.quantityIssued}${unit} ${mi.purityOrQuality}`, crAmount: mi.makingCharges.amountInr });
       }
     }
@@ -609,6 +631,10 @@ function FactoryHistoryPageBody() {
           money: p.money,
         });
       }
+      if (r.mat && (r.mat.dr || r.mat.cr)) {
+        running[r.mat.key] = Math.round(((running[r.mat.key] || 0) + r.mat.dr - r.mat.cr) * 1000) / 1000;
+        out.push({ id: `${r.id}-${r.mat.key}`, date: r.date, ref: r.ref, particular: r.particular, material: r.mat.label, out: r.mat.dr, in: r.mat.cr, balance: running[r.mat.key] });
+      }
     }
     return out;
   };
@@ -628,7 +654,7 @@ function FactoryHistoryPageBody() {
 
   // ── Order-by-order downloads: the summary people actually read ──────────
   const orderRowsFor = (from: Date | null, to: Date | null, orderNo?: string) =>
-    buildFactoryOrderRows(issuancesForOrder(orderNo), db.orders)
+    buildFactoryOrderRows(issuancesForOrder(orderNo), db.orders, db.settings)
       .filter(r => inDateRange(r.date, from, to));
 
 
@@ -861,6 +887,9 @@ function FactoryHistoryPageBody() {
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold).toLocaleString()} g</p></div>
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond (net ±)</p><p className={`font-semibold text-sm ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding > 0 ? "+" : ""}{account.diamondOutstanding.toLocaleString()} ct</p></div>
+          {Object.entries(factoryOtherBalances(db.materialIssuances, id!)).map(([k, q]) => (
+            <div key={k} className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">{materialName(db.settings, k)} at factory</p><p className={`font-semibold text-sm ${q < 0 ? "text-destructive" : ""}`}>{q.toLocaleString()} {materialUnit(db.settings, k)}</p></div>
+          ))}
           <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
             <p className="text-xs text-muted-foreground mb-1">Charges Pending</p>
             <p className={`font-semibold text-sm ${account.chargesPending > 0 ? "text-destructive" : "text-success"}`}>{account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared"}</p>
@@ -945,13 +974,18 @@ function FactoryHistoryPageBody() {
               {issueMode === "orderConsumption" && (
                 <Input value={issueOrderNumber} onChange={e => setIssueOrderNumber(e.target.value)} className="rounded-xl h-10" placeholder="Order number" />
               )}
-              <Select value={issueMaterial} onValueChange={v => setIssueMaterial(v as "gold" | "diamond")}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem></SelectContent>
+              <Select value={issueMaterial} onValueChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }}>
+                <SelectTrigger className="h-10 rounded-xl" aria-label="Material"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
+                  {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                </SelectContent>
               </Select>
             </div>
 
-            {issueMaterial === "gold" ? (
+            {isOtherMaterial(issueMaterial) ? (
+              <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
+            ) : issueMaterial === "gold" ? (
               <Select value={issuePurity} onValueChange={setIssuePurity}>
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
@@ -965,7 +999,7 @@ function FactoryHistoryPageBody() {
 
             <Input
               type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
-              className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? (issueMode === "bulkDelivery" ? "Weight (g)" : "Weight used (g)") : (issueMode === "bulkDelivery" ? "Carat" : "Carat used")}
+              className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? (issueMode === "bulkDelivery" ? "Weight (g)" : "Weight used (g)") : issueMaterial === "diamond" ? (issueMode === "bulkDelivery" ? "Carat" : "Carat used") : `${issueMode === "bulkDelivery" ? "Quantity" : "Quantity used"} (${issueUnit})`}
             />
 
             {issueMode === "orderConsumption" && (
@@ -1024,7 +1058,7 @@ function FactoryHistoryPageBody() {
           const wastage = issuanceWastage(mi);
           const pending = issuancePending(mi);
           const isActive = activeIssuance.id === mi.id;
-          const unit = mi.material === "gold" ? "g" : "ct";
+          const unit = materialUnit(db.settings, mi.material);
 
           return (
             <div key={mi.id} className="card-luxe p-4">
@@ -1047,7 +1081,7 @@ function FactoryHistoryPageBody() {
                   ) : (
                   <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
                     {mi.material === "gold" ? <Coins className="h-3 w-3" /> : <Gem className="h-3 w-3" />}
-                    {mi.quantityIssued}{unit} {mi.purityOrQuality} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
+                    {mi.quantityIssued}{unit} {mi.purityOrQuality}{isOtherMaterial(mi.material) ? ` ${materialName(db.settings, mi.material)}` : ""} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
                     {mi.status === "closed" && wastage !== 0 ? (wastage > 0 ? ` · ${wastage}${unit} wastage` : ` · ${Math.abs(wastage)}${unit} over-used`) : ""}
                   </p>
                   )}
@@ -1084,7 +1118,7 @@ function FactoryHistoryPageBody() {
 
               {isActive && activeIssuance.action === "piece" && (
                 <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <Input type="number" min={0} value={pieceQty} onChange={e => setPieceQty(e.target.value)} className="rounded-xl h-9" placeholder={`${mi.material === "gold" ? "Gold" : "Diamond"} used (${unit})`} />
+                  <Input type="number" min={0} value={pieceQty} onChange={e => setPieceQty(e.target.value)} className="rounded-xl h-9" placeholder={`${materialName(db.settings, mi.material)} used (${unit})`} />
                   <Input type="number" min={1} value={pieceCount} onChange={e => setPieceCount(e.target.value)} className="rounded-xl h-9" placeholder="Pieces count" />
                   <div className="flex gap-2">
                     <AsyncButton onClick={() => recordPiece(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>

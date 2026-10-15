@@ -20,6 +20,7 @@ import { ChevronRight } from "lucide-react";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
+import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
 
 const PAGE = 12;
 
@@ -30,12 +31,14 @@ interface Row {
   kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold";
   party: string;
   material: string;
+  /** The materials on the row ("gold", "diamond", "mat_…") — what the Materials filter matches. */
+  mats: string[];
   qty: number;
-  unit: "g" | "ct";
+  unit: MaterialUnit;
   amountInr?: number;
   remark?: string;
   /** A bill's own lines, when this row is a whole bill. */
-  items?: { id: string; material: string; qty: number; unit: "g" | "ct"; amountInr: number; discountPct?: number }[];
+  items?: { id: string; material: string; qty: number; unit: MaterialUnit; amountInr: number; discountPct?: number }[];
   billNo?: string;
   /** Set when the purchase was bought for one order rather than into stock. */
   forOrder?: string;
@@ -99,7 +102,7 @@ export function StockActivityLedger() {
     const check = canEditIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
     if (!(await confirmBox([
-      `Cancel this assignment of ${mi.quantityIssued}${mi.material === "gold" ? "g" : "ct"} ${mi.purityOrQuality}?`,
+      `Cancel this assignment of ${mi.quantityIssued}${materialUnit(db.settings, mi.material)} ${mi.purityOrQuality}?`,
       "",
       ...issuanceVoidImpact(db, mi),
       "",
@@ -171,12 +174,13 @@ export function StockActivityLedger() {
   // strangers. They stay separate purchases underneath: stock is per size.
   const bills = new Map<string, Row>();
   for (const p of db.purchases ?? []) {
-    const isGold = p.material === "gold";
-    const label = isGold
+    const label = p.material === "gold"
       ? `Gold ${p.gold?.purity ?? ""}`.trim()
-      : `${p.diamond?.shape ?? "Diamond"}${p.diamond?.kind === "certified" ? " (certified)" : ""}`;
-    const qty = isGold ? (p.gold?.weightGrams ?? 0) : (p.diamond?.carat ?? 0);
-    const unit: "g" | "ct" = isGold ? "g" : "ct";
+      : p.material === "diamond"
+      ? `${p.diamond?.shape ?? "Diamond"}${p.diamond?.kind === "certified" ? " (certified)" : ""}`
+      : `${materialName(db.settings, p.material)} ${p.other?.grade && p.other.grade !== "—" ? p.other.grade : ""}`.trim();
+    const qty = purchaseQty(p);
+    const unit = materialUnit(db.settings, p.material);
     // A bill number groups a bill outright; without one, the lines written in
     // the same save share a supplier and the exact moment they were saved.
     const key = p.invoiceNumber?.trim()
@@ -187,6 +191,7 @@ export function StockActivityLedger() {
       existing.items!.push({ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
       existing.qty = Math.round((existing.qty + qty) * 1000) / 1000;
       existing.amountInr = (existing.amountInr ?? 0) + p.totalInr;
+      if (!existing.mats.includes(p.material)) existing.mats.push(p.material);
       if (existing.unit !== unit) existing.unit = unit; // mixed bill — the count is shown per line
       continue;
     }
@@ -195,7 +200,7 @@ export function StockActivityLedger() {
       id: p.id, date: p.createdAt, kind: "Purchase",
       forOrder,
       party: db.suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier",
-      material: label, qty, unit, amountInr: p.totalInr,
+      material: label, mats: [p.material], qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
       remark: p.notes || undefined,
       items: [{ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
@@ -211,8 +216,8 @@ export function StockActivityLedger() {
     if (m.refType !== "opening") continue;
     all.push({
       id: m.id, date: m.createdAt, kind: "Opening stock", party: "—",
-      material: `${m.material === "gold" ? "Gold" : "Diamond"} ${m.purityOrQuality}`.trim(),
-      qty: m.quantity, unit: m.material === "gold" ? "g" : "ct",
+      material: `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(), mats: [m.material],
+      qty: m.quantity, unit: materialUnit(db.settings, m.material),
       amountInr: m.valueInr, remark: m.note,
     });
   }
@@ -223,8 +228,8 @@ export function StockActivityLedger() {
     all.push({
       id: i.id, date: i.issuedAt, kind: "Assigned to factory",
       party: db.factories.find(f => f.id === i.factoryId)?.name ?? "Factory",
-      material: `${i.material === "gold" ? "Gold" : "Diamond"} ${i.purityOrQuality}`.trim(),
-      qty: i.quantityIssued, unit: i.material === "gold" ? "g" : "ct",
+      material: `${materialName(db.settings, i.material)} ${i.purityOrQuality}`.trim(), mats: [i.material],
+      qty: i.quantityIssued, unit: materialUnit(db.settings, i.material),
       remark: i.notes,
     });
   }
@@ -234,7 +239,7 @@ export function StockActivityLedger() {
     all.push({
       id: s.id, date: s.createdAt, kind: "Diamond sold",
       party: s.clientId ? (db.clients.find(c => c.id === s.clientId)?.companyName ?? "Client") : (s.buyerName ?? "Buyer"),
-      material: `${s.shape}${s.kind === "certified" ? " (certified)" : ""}`,
+      material: `${s.shape}${s.kind === "certified" ? " (certified)" : ""}`, mats: ["diamond"],
       qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,
     });
   }
@@ -244,7 +249,7 @@ export function StockActivityLedger() {
     .filter(r => {
       if (!inDateRange(r.date, from, to)) return false;
       if (kind && r.kind !== kind) return false;
-      if (material && !r.material.toLowerCase().startsWith(material.toLowerCase())) return false;
+      if (material && !r.mats.includes(material)) return false;
       // Purchases entered before the bill number was required — the ones that
       // still need tying back to a chitthi.
       if (billFilter === "none" && r.billNo) return false;
@@ -327,7 +332,8 @@ export function StockActivityLedger() {
           { label: "Entries", value: kind, onChange: v => { setKind(v); setPage(1); },
             options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
           { label: "Materials", value: material, onChange: v => { setMaterial(v); setPage(1); },
-            options: [{ value: "Gold", label: "Gold" }, { value: "Diamond", label: "Diamond" }] },
+            options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
+              ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
           { label: "Bills", value: billFilter, onChange: v => { setBillFilter(v); setPage(1); },
             options: [{ value: "none", label: "No bill number" }] },
         ]}

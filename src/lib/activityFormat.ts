@@ -117,10 +117,15 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "purchases": {
       const g = d.gold as { weightGrams?: number; purity?: string } | undefined;
       const dm = d.diamond as { carat?: number; shape?: string } | undefined;
-      const what = d.material === "gold" ? `${g?.weightGrams ?? ""}g ${g?.purity ?? ""}` : `${dm?.carat ?? ""}ct ${dm?.shape ?? ""}`;
+      const ot = d.other as { qty?: number; grade?: string } | undefined;
+      const what = d.material === "gold" ? `${g?.weightGrams ?? ""}g ${g?.purity ?? ""}`
+        : d.material === "diamond" ? `${dm?.carat ?? ""}ct ${dm?.shape ?? ""}`
+        : `${ot?.qty ?? ""} ${ot?.grade ?? ""}`;
       return `${what.trim()} · ₹${num(d.totalInr)}${d.invoiceNumber ? ` · bill ${s(d.invoiceNumber)}` : ""}`;
     }
-    case "materialIssuances": return `${s(d.material)} ${num(d.quantityIssued)}${d.material === "gold" ? "g" : "ct"} ${s(d.purityOrQuality)}`;
+    case "materialIssuances": return d.material === "gold" || d.material === "diamond"
+      ? `${s(d.material)} ${num(d.quantityIssued)}${d.material === "gold" ? "g" : "ct"} ${s(d.purityOrQuality)}`
+      : `${num(d.quantityIssued)} ${s(d.purityOrQuality)}`;
     case "stockMovements": return `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;

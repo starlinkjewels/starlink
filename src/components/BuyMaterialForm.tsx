@@ -13,11 +13,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, Gem, BadgeCheck, Plus, X } from "lucide-react";
+import { Coins, Gem, BadgeCheck, Plus, X, Layers } from "lucide-react";
 import { toast } from "sonner";
+import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
+import { materialDef, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
-type BuyKind = "gold" | "loose" | "certified";
+/** Gold, loose or certified diamonds, or any other material (Settings → Materials). */
+type BuyKind = "gold" | "loose" | "certified" | "other";
 
 /** One line of a supplier's bill — a size, a rate and its own discount. */
 interface Line {
@@ -31,12 +34,18 @@ interface Line {
   discountPct: string;
   color: string; clarity: string; cut: string; polish: string; sym: string;
   fluor: string; measure: string; lab: string; certNo: string;
+  /** kind "other": which material, and its grade. */
+  materialId: string; grade: string;
 }
 
 const emptyLine = (): Line => ({
   kind: "loose", purity: "22K", shape: "Round", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
   color: "", clarity: "", cut: "", polish: "", sym: "", fluor: "", measure: "", lab: "", certNo: "",
+  materialId: "", grade: "",
 });
+
+/** The stock material a line buys. */
+const lineMaterial = (l: Line): MaterialKey => (l.kind === "gold" ? "gold" : l.kind === "other" ? (l.materialId as MaterialKey) : "diamond");
 
 /** Weight × rate, less this line's own discount. */
 function lineBase(l: Line): number {
@@ -71,7 +80,7 @@ export function BuyMaterialForm() {
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const set = (i: number, patch: Partial<Line>) => setLines(ls => ls.map((l, n) => (n === i ? { ...l, ...patch } : l)));
-  const addLine = () => setLines(ls => [...ls, { ...emptyLine(), kind: ls[ls.length - 1]?.kind ?? "gold" }]);
+  const addLine = () => setLines(ls => [...ls, { ...emptyLine(), kind: ls[ls.length - 1]?.kind ?? "gold", materialId: ls[ls.length - 1]?.materialId ?? "" }]);
   const removeLine = (i: number) => setLines(ls => (ls.length > 1 ? ls.filter((_, n) => n !== i) : ls));
 
   const lineInr = (l: Line) => (currency === "USD"
@@ -94,7 +103,8 @@ export function BuyMaterialForm() {
     if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
     for (const [i, l] of lines.entries()) {
       const q = Number(l.qty);
-      if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : "carat"}`); return; }
+      if (l.kind === "other" && !materialDef(db.settings, l.materialId)) { toast.error(`Item ${i + 1}: choose the material`); return; }
+      if (!q || q <= 0) { toast.error(`Item ${i + 1}: enter the ${l.kind === "gold" ? "weight" : l.kind === "other" ? "quantity" : "carat"}`); return; }
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report number`); return; }
       if (lineInr(l) <= 0) { toast.error(`Item ${i + 1}: comes to ₹0 — check the rate`); return; }
     }
@@ -108,8 +118,8 @@ export function BuyMaterialForm() {
       for (const [i, l] of lines.entries()) {
         if (l.kind === "certified") continue;
         await increaseStock({
-          material: l.kind === "gold" ? "gold" : "diamond",
-          purityOrQuality: l.kind === "gold" ? l.purity : l.shape,
+          material: lineMaterial(l),
+          purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : l.shape,
           quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
         });
       }
@@ -119,11 +129,16 @@ export function BuyMaterialForm() {
           const q = Number(l.qty);
           const disc = Math.min(Math.max(Number(l.discountPct) || 0, -100), 100);
           const isGold = l.kind === "gold";
+          const isOther = l.kind === "other";
           const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
-            id: ids[i], supplierId, material: isGold ? "gold" : "diamond",
+            id: ids[i], supplierId, material: lineMaterial(l),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
-            diamond: !isGold ? {
+            other: isOther ? {
+              qty: q, grade: l.grade.trim() || "—", ratePerUnit: Number(l.rate) || 0,
+              pieces: Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
+            } : undefined,
+            diamond: !isGold && !isOther ? {
               carat: q, quality: l.quality.trim() || undefined, ratePerCarat: Number(l.rate) || 0,
               pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
               kind: l.kind === "certified" ? "certified" : "loose", shape: l.shape,
@@ -205,8 +220,8 @@ export function BuyMaterialForm() {
             </>
           )}
 
-          <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl">
-            {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck]] as const).map(([k, lbl, Icon]) => (
+          <div className="grid grid-cols-4 gap-1 p-1 bg-secondary rounded-xl">
+            {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const).map(([k, lbl, Icon]) => (
               <button key={k} type="button" onClick={() => set(i, { kind: k })}
                 className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${l.kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
                 <Icon className="h-3.5 w-3.5" /> {lbl}
@@ -214,7 +229,24 @@ export function BuyMaterialForm() {
             ))}
           </div>
 
-          {l.kind === "gold" ? (
+          {l.kind === "other" ? (() => {
+            const unit = materialUnit(db.settings, l.materialId);
+            return (
+              <div className="space-y-2.5">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                  <div className="col-span-2"><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={l.materialId} onChange={v => set(i, { materialId: v, grade: "" })} /></div></div>
+                  <div className="col-span-2"><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={l.materialId} value={l.grade} onChange={v => set(i, { grade: v })} /></div></div>
+                </div>
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div><Label className="text-xs">Quantity ({unit})</Label><Input type="number" min={0} step={unit === "pcs" ? "1" : "0.001"} value={l.qty} onChange={e => set(i, { qty: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
+                  <div><Label className="text-xs">Rate / {unit} ({currency})</Label><Input type="number" min={0} value={l.rate} onChange={e => set(i, { rate: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
+                  {unit !== "pcs"
+                    ? <div><Label className="text-xs">Pieces (optional)</Label><Input type="number" min={0} step="1" value={l.pcs} onChange={e => set(i, { pcs: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="How many" /></div>
+                    : <div className="text-[11px] text-muted-foreground self-end pb-2">{l.materialId ? `Counted in pieces — stock of ${materialName(db.settings, l.materialId)} per grade.` : ""}</div>}
+                </div>
+              </div>
+            );
+          })() : l.kind === "gold" ? (
             <div className="grid grid-cols-3 gap-2.5">
               <div><Label className="text-xs">Weight (g)</Label><Input type="number" min={0} step="0.001" value={l.qty} onChange={e => set(i, { qty: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
               <div><Label className="text-xs">Purity</Label>

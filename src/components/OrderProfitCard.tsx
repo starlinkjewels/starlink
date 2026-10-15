@@ -163,6 +163,7 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
             <div className="mt-3 space-y-3 rounded-xl border border-border/60 p-3">
               {section("Gold", cost.gold)}
               {section("Diamonds", cost.diamond)}
+              {section("Other materials", cost.materials)}
               {section("Factory", cost.labour)}
               {section("Shipping & other", cost.other)}
               <div className="flex items-baseline justify-between gap-3 pt-2 border-t border-border/60 text-sm">

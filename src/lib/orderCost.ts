@@ -1,5 +1,6 @@
 import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
+import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/materials";
 
 const fmtRate = (n: number, unit: string) =>
   `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/${unit}`;
@@ -85,6 +86,8 @@ export interface MissingCost {
 export interface OrderCost {
   gold: CostLine[];
   diamond: CostLine[];
+  /** Every other material in the piece — platinum, gemstones, findings (lib/materials.ts). */
+  materials: CostLine[];
   labour: CostLine[];
   other: CostLine[];
   totalInr: number;
@@ -96,7 +99,7 @@ export interface OrderCost {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
-const qtyOf = (p: Purchase) => (p.material === "gold" ? p.gold?.weightGrams ?? 0 : p.diamond?.carat ?? 0);
+const qtyOf = (p: Purchase) => purchaseQty(p);
 
 /**
  * What a gram (or carat) of pooled stock cost, as it stood on a given day.
@@ -118,7 +121,7 @@ const qtyOf = (p: Purchase) => (p.material === "gold" ? p.gold?.weightGrams ?? 0
  *
  * Null when nothing in the pool has ever had a price.
  */
-export function stockAverageRate(db: DB, material: "gold" | "diamond", bucket: string, at: string): number | null {
+export function stockAverageRate(db: DB, material: string, bucket: string, at: string): number | null {
   const purchases = new Map((db.purchases ?? []).map(p => [p.id, p]));
   const cutoff = +new Date(at);
   const moves = (db.stockMovements ?? [])
@@ -203,7 +206,7 @@ function finishedFine(mi: MaterialIssuance): number {
 }
 
 export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
-  const out: OrderCost = { gold: [], diamond: [], labour: [], other: [], totalInr: 0, pieceInr: 0, missing: [], complete: true };
+  const out: OrderCost = { gold: [], diamond: [], materials: [], labour: [], other: [], totalInr: 0, pieceInr: 0, missing: [], complete: true };
   const issuances = (db.materialIssuances ?? []).filter(i => i.orderId === order.id);
   const purchases = db.purchases ?? [];
   // Each bill is counted once, however many routes lead to it — a purchase
@@ -218,8 +221,10 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   const goldFinished = issuances.some(i => i.material === "gold" && i.finishedNetWeight != null);
 
   for (const mi of issuances) {
-    const unit = mi.material === "gold" ? "g" : "ct";
-    const bucket = mi.material === "gold" ? out.gold : out.diamond;
+    const unit = materialUnit(db.settings, mi.material);
+    const bucket = mi.material === "gold" ? out.gold : mi.material === "diamond" ? out.diamond : out.materials;
+    // A material other than gold or diamond is named with its grade: "2g 950 Platinum".
+    const what = isOtherMaterial(mi.material) ? `${mi.purityOrQuality} ${materialName(db.settings, mi.material)}` : mi.purityOrQuality;
 
     if (mi.material === "gold" && mi.finishedNetWeight != null) {
       if (mi.sourcePurchaseId) counted.add(mi.sourcePurchaseId);
@@ -265,9 +270,9 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       continue;
     }
 
-    // What actually went into the piece: loose stones sent back to stock at
-    // Final Approval are not this order's cost.
-    const returned = mi.material === "diamond" ? mi.finishReturnedCt ?? 0 : 0;
+    // What actually went into the piece: loose stones (or any other material)
+    // sent back to stock at Final Approval are not this order's cost.
+    const returned = mi.material === "diamond" ? mi.finishReturnedCt ?? 0 : isOtherMaterial(mi.material) ? mi.finishReturnedQty ?? 0 : 0;
     const used = Math.max(0, r2(mi.quantityIssued - returned));
     if (used <= 0) continue;
 
@@ -276,13 +281,13 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       counted.add(mi.sourcePurchaseId);
       const bought = p ? qtyOf(p) : 0;
       if (!p || bought <= 0) {
-        out.missing.push({ label: `${used}${unit} ${mi.purityOrQuality}`, reason: "the purchase it came from is no longer on file" });
+        out.missing.push({ label: `${used}${unit} ${what}`, reason: "the purchase it came from is no longer on file" });
         continue;
       }
       // The bill's own rate, applied to what was used — a bill for more than
       // the piece took is not all this order's cost.
       bucket.push({
-        label: `${used}${unit} ${mi.purityOrQuality} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
+        label: `${used}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
         amountInr: r2((p.totalInr / bought) * used),
       });
       continue;
@@ -294,7 +299,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     // that purity has never had a price on it, it is reported, not guessed.
     const avg = stockAverageRate(db, mi.material, mi.purityOrQuality, mi.issuedAt)
       ?? stockAverageRate(db, mi.material, mi.purityOrQuality, new Date().toISOString());
-    const where = mi.source === "factoryPool" ? "from gold held at the factory" : "from stock";
+    const where = mi.source === "factoryPool" ? `from ${mi.material === "gold" ? "gold" : "material"} held at the factory` : "from stock";
     if (avg === null && mi.material === "gold") {
       // No purchase of this exact karat — value its fine content instead, at
       // what fine gold has cost. Provisional until the finished piece is in.
@@ -310,15 +315,15 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     }
     if (avg === null) {
       out.missing.push({
-        label: `${used}${unit} ${mi.purityOrQuality}`,
+        label: `${used}${unit} ${what}`,
         reason: mi.material === "gold"
           ? `${where} — no gold purchase with a price is on file to value it by`
-          : `${where} — no ${mi.purityOrQuality} has ever been bought with a price to value it by`,
+          : `${where} — no ${what} has ever been bought with a price to value it by`,
       });
       continue;
     }
     bucket.push({
-      label: `${used}${unit} ${mi.purityOrQuality} · ${where}, at average cost ${fmtRate(avg, unit)}`,
+      label: `${used}${unit} ${what} · ${where}, at average cost ${fmtRate(avg, unit)}`,
       amountInr: r2(avg * used),
     });
   }
@@ -329,9 +334,10 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     if (p.orderId !== order.id || counted.has(p.id)) continue;
     counted.add(p.id);
     const q = qtyOf(p);
-    const unit = p.material === "gold" ? "g" : "ct";
-    const what = p.material === "gold" ? p.gold?.purity ?? "" : p.diamond?.shape ?? "";
-    (p.material === "gold" ? out.gold : out.diamond).push({
+    const unit = materialUnit(db.settings, p.material);
+    const what = p.material === "gold" ? p.gold?.purity ?? "" : p.material === "diamond" ? p.diamond?.shape ?? ""
+      : `${p.other?.grade ? `${p.other.grade} ` : ""}${materialName(db.settings, p.material)}`;
+    (p.material === "gold" ? out.gold : p.material === "diamond" ? out.diamond : out.materials).push({
       label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
       amountInr: r2(p.totalInr),
     });
@@ -424,7 +430,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     out.labour.push({ label: `${f?.name ?? "Factory"} — making & labour`, amountInr: r2(charge) });
   }
 
-  const all = [...out.gold, ...out.diamond, ...out.labour, ...out.other];
+  const all = [...out.gold, ...out.diamond, ...out.materials, ...out.labour, ...out.other];
   // The pieces themselves — everything but the freight and other costs of sending them.
   out.pieceInr = r2(all.reduce((s, l) => s + l.amountInr, 0) - expenseInr);
   // Pieces the client sent back carry their cost into Ready Stock; the freight stays spent.
@@ -433,7 +439,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const of = order.quantity || 1;
     out.other.push({ label: `Returned by the client — ${back} of ${of} piece${of !== 1 ? "s" : ""}, cost moves to Ready Stock with ${back !== 1 ? "them" : "it"}`, amountInr: -r2(out.pieceInr * Math.min(back, of) / of) });
   }
-  out.totalInr = r2([...out.gold, ...out.diamond, ...out.labour, ...out.other].reduce((s, l) => s + l.amountInr, 0));
+  out.totalInr = r2([...out.gold, ...out.diamond, ...out.materials, ...out.labour, ...out.other].reduce((s, l) => s + l.amountInr, 0));
   out.complete = out.missing.length === 0;
   return out;
 }

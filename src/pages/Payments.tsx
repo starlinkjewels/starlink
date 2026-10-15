@@ -1,3 +1,4 @@
+import { materialUnit } from "@/lib/materials";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
@@ -599,7 +600,7 @@ function PayFactory() {
             <SelectContent>
               <SelectItem value="__fifo">Oldest issued first</SelectItem>
               <SelectItem value="__advance">Advance / loan — not against any job</SelectItem>
-              {pendingIssuances.map(mi => <SelectItem key={mi.id} value={mi.id}>{mi.quantityIssued}{mi.material === "gold" ? "g" : "ct"} {mi.purityOrQuality} — pending {fmtMoneyInr(issuancePending(mi))}</SelectItem>)}
+              {pendingIssuances.map(mi => <SelectItem key={mi.id} value={mi.id}>{mi.quantityIssued}{materialUnit(db.settings, mi.material)} {mi.purityOrQuality} — pending {fmtMoneyInr(issuancePending(mi))}</SelectItem>)}
             </SelectContent>
           </Select>
         </div>

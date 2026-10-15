@@ -1,4 +1,5 @@
 import { DataTable } from "@/components/DataTable";
+import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
@@ -33,12 +34,13 @@ function ymd(iso: string): string {
 
 /** Which report bucket a purchase belongs to. Diamonds without an explicit
  *  kind are treated as loose (matches the DiamondPurchaseDetail contract). */
-function purchaseCategory(p: Purchase): "gold" | "diamond" | "cert" {
+function purchaseCategory(p: Purchase): "gold" | "diamond" | "cert" | "other" {
   if (p.material === "gold") return "gold";
+  if (p.material !== "diamond") return "other"; // platinum, gemstones, findings — Settings → Materials
   return p.diamond?.kind === "certified" ? "cert" : "diamond";
 }
 function purchaseQty(p: Purchase): number {
-  return p.material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+  return qtyOfPurchase(p);
 }
 
 /* ── helpers ── */
@@ -199,12 +201,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     // Purchase date = supplier invoice date when recorded, else when it was entered.
     const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt));
     const mk = () => ({ qty: 0, amount: 0, count: 0, stockQty: 0, stockAmt: 0, orderQty: 0, orderAmt: 0 });
-    const g = mk(), dl = mk(), dc = mk();
+    const g = mk(), dl = mk(), dc = mk(), ot = mk();
     const byPurity = new Map<string, { qty: number; amount: number }>();
     const byShape  = new Map<string, { qty: number; amount: number }>();
     for (const p of rows) {
       const c = purchaseCategory(p);
-      const bucket = c === "gold" ? g : c === "cert" ? dc : dl;
+      const bucket = c === "gold" ? g : c === "cert" ? dc : c === "other" ? ot : dl;
       const qty = purchaseQty(p);
       bucket.qty += qty; bucket.amount += p.totalInr; bucket.count++;
       if (p.purpose === "stock") { bucket.stockQty += qty; bucket.stockAmt += p.totalInr; }
@@ -212,15 +214,18 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       if (c === "gold") {
         const key = p.gold?.purity || "—";
         const e = byPurity.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byPurity.set(key, e);
+      } else if (c === "other") {
+        const key = `${materialName(db.settings, p.material)}${p.other?.grade && p.other.grade !== "—" ? ` · ${p.other.grade}` : ""}`;
+        const e = byShape.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byShape.set(key, e);
       } else {
         const key = p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—");
         const e = byShape.get(key) || { qty: 0, amount: 0 }; e.qty += qty; e.amount += p.totalInr; byShape.set(key, e);
       }
     }
-    const grand = g.amount + dl.amount + dc.amount;
+    const grand = g.amount + dl.amount + dc.amount + ot.amount;
     return {
       rows: [...rows].sort((a, b) => +new Date(b.invoiceDate || b.createdAt) - +new Date(a.invoiceDate || a.createdAt)),
-      g, dl, dc, grand,
+      g, dl, dc, ot, grand,
       byPurity: [...byPurity.entries()].sort((a, b) => b[1].amount - a[1].amount),
       byShape:  [...byShape.entries()].sort((a, b) => b[1].amount - a[1].amount),
     };
@@ -276,8 +281,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       let running = 0;
       const ordered = [...r.rows].sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
       for (const p of ordered) {
-        const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = c === "gold" ? "g" : "ct";
-        const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : "Diamond";
+        const c = purchaseCategory(p); const qty = purchaseQty(p); const unit = materialUnit(db.settings, p.material);
+        const label = c === "gold" ? "Gold" : c === "cert" ? "Cert.Dia" : c === "other" ? materialName(db.settings, p.material).slice(0, 10) : "Diamond";
         running += p.totalInr;
         const cells = [fmtDate(p.invoiceDate || p.createdAt), (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 20), label, `${qty}${unit}`, qty > 0 ? plain(p.totalInr / qty) : "-", plain(p.totalInr), plain(running)];
         cells.forEach((cval, i) => doc.text(cval, cols[i][2] ? colR(i) : cols[i][1], y, cols[i][2] ? { align: "right" } : undefined));
@@ -297,15 +302,15 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const suppliers = db.suppliers ?? [];
       const esc = (v: unknown) => { const s = String(v ?? ""); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
       const headers = ["Date","Supplier","Category","Purpose","Purity/Shape","Quantity","Unit","Rate (Rs)","Amount (Rs)","Running Total (Rs)","Invoice #"];
-      const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond" };
+      const catLabel = { gold: "Metal (Gold)", diamond: "Diamond (Loose)", cert: "Certified Diamond", other: "Other material" };
       let running = 0;
       const rows = [...materialReport.rows]
         .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt))
         .map(p => {
           const c = purchaseCategory(p);
           const qty = purchaseQty(p);
-          const unit = c === "gold" ? "g" : "ct";
-          const detail = c === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
+          const unit = materialUnit(db.settings, p.material);
+          const detail = c === "gold" ? (p.gold?.purity || "") : c === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim() : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
           const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
           running += p.totalInr;
           return [
@@ -525,19 +530,23 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
 
   /* ── Per-material ledgers — separate Gold / Loose Diamond / Certified Diamond
      reports, each a full ledger (every purchase + running total) ── */
-  type MatCat = "gold" | "diamond" | "cert";
+  type MatCat = "gold" | "diamond" | "cert" | "other";
   const CAT_META: Record<MatCat, { label: string; unit: string; detail: string }> = {
     gold:    { label: "Gold",             unit: "g",  detail: "Purity" },
     diamond: { label: "Loose Diamond",    unit: "ct", detail: "Shape" },
     cert:    { label: "Certified Diamond", unit: "ct", detail: "Shape/Cert" },
+    // Each in its own unit, so the unit goes on every line instead.
+    other:   { label: "Other Materials",  unit: "",   detail: "Material / Grade" },
   };
   const catDetail = (p: Purchase, cat: MatCat) =>
-    cat === "gold" ? (p.gold?.purity || "") : (p.diamond?.shape || p.diamond?.quality || (cat === "cert" ? "Certified" : ""));
+    cat === "gold" ? (p.gold?.purity || "")
+    : cat === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim()
+    : (p.diamond?.shape || p.diamond?.quality || (cat === "cert" ? "Certified" : ""));
   // Oldest-first for a running-balance ledger.
   const catRows = (cat: MatCat) => (materialReport?.rows ?? [])
     .filter(p => purchaseCategory(p) === cat)
     .sort((a, b) => +new Date(a.invoiceDate || a.createdAt) - +new Date(b.invoiceDate || b.createdAt));
-  const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : materialReport!.dl;
+  const catBucket = (cat: MatCat) => cat === "gold" ? materialReport!.g : cat === "cert" ? materialReport!.dc : cat === "other" ? materialReport!.ot : materialReport!.dl;
 
   // Full stock-movement ledger (purchases IN + factory issues / order use / sales
   // OUT + returns) with running balance, for Gold & Loose Diamond — the "proper
@@ -573,6 +582,23 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             r.inQty || "", r.outQty || "", r.balance,
             r.rateInr ? Math.round(r.rateInr) : "", r.amountInr ? Math.round(r.amountInr) : "",
           ]),
+        );
+        return;
+      }
+      if (cat === "other") {
+        let run = 0;
+        const sup = db.suppliers ?? [];
+        csvDownload(
+          `Starlink-Other-Materials-Ledger-${matFrom || "all"}.csv`,
+          ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Material", "Grade", "Quantity", "Unit", "Rate (Rs)", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"],
+          catRows("other").map(p => {
+            run += p.totalInr;
+            const q = purchaseQty(p);
+            return [fmtDate(p.invoiceDate || p.createdAt), p.invoiceNumber ?? "", sup.find(x => x.id === p.supplierId)?.name ?? "", p.purpose,
+              p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "",
+              materialName(db.settings, p.material), p.other?.grade ?? "", q, materialUnit(db.settings, p.material),
+              q > 0 ? Math.round(p.totalInr / q) : "", Math.round(p.totalInr), Math.round(purchasePaid(p)), Math.round(purchasePending(p)), Math.round(run), p.notes ?? ""];
+          }),
         );
         return;
       }
@@ -671,14 +697,14 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         const ref = p.invoiceNumber
           || (p.orderId ? (db.orders.find(o => o.id === p.orderId)?.orderNumber ?? "") : "")
           || "—";
-        const cert = p.diamond?.certificateNumber || pk?.certificateNumber || "—";
+        const cert = cat === "other" ? (p.other?.grade || "—") : (p.diamond?.certificateNumber || pk?.certificateNumber || "—");
         return [
           fmtDate(p.invoiceDate || p.createdAt),
           (suppliers.find(s => s.id === p.supplierId)?.name ?? "").slice(0, 26),
           String(ref).slice(0, 16),
-          String(p.diamond?.shape || pk?.shape || "—"),
+          cat === "other" ? materialName(db.settings, p.material).slice(0, 18) : String(p.diamond?.shape || pk?.shape || "—"),
           String(cert).slice(0, 24),
-          `${qty}${m.unit}`,
+          `${qty}${cat === "other" ? ` ${materialUnit(db.settings, p.material)}` : m.unit}`,
           qty > 0 ? rs(p.totalInr / qty) : "—",
           rs(p.totalInr),
         ];
@@ -687,8 +713,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         title: `${m.label} — Purchase Ledger`,
         subjectLines: [`Period: ${matPeriodLabel}`, "Rate & Amount in Rs (INR)"],
         summary: [
-          { label: "Total quantity", value: `${b.qty.toLocaleString()} ${m.unit}` },
-          { label: "Average rate", value: `${rupees(avg)} / ${m.unit}` },
+          ...(cat === "other" ? [] : [
+            { label: "Total quantity", value: `${b.qty.toLocaleString()} ${m.unit}` },
+            { label: "Average rate", value: `${rupees(avg)} / ${m.unit}` },
+          ]),
           { label: "Total value", value: rupees(b.amount) },
           { label: "Purchases", value: `${b.count}  (stock ${rupees(b.stockAmt)} · order ${rupees(b.orderAmt)})` },
         ],
@@ -697,8 +725,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           { header: "Date", x: 14 },
           { header: "Supplier", x: 42 },
           { header: "Inv / Order", x: 96 },
-          { header: "Shape", x: 132 },
-          { header: "Certificate", x: 158 },
+          { header: cat === "other" ? "Material" : "Shape", x: 132 },
+          { header: cat === "other" ? "Grade" : "Certificate", x: 158 },
           { header: "Qty", x: 222 },
           { header: "Rate", x: 248 },
           { header: "Amount", x: 268 },
@@ -1045,21 +1073,24 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           <PeriodBar from={matFrom} to={matTo} setFrom={setMatFrom} setTo={setMatTo} />
 
           {/* Category cards */}
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className={`grid gap-3 sm:grid-cols-2 ${materialReport.ot.count ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
             {([
               { label: "Metal (Gold)", cat: "gold" as MatCat, unit: "g", icon: Coins, ring: "bg-amber-500/10 text-amber-600", b: materialReport.g },
               { label: "Diamond (Loose)", cat: "diamond" as MatCat, unit: "ct", icon: Gem, ring: "bg-blue-500/10 text-blue-600", b: materialReport.dl },
               { label: "Certified Diamond", cat: "cert" as MatCat, unit: "ct", icon: Award, ring: "bg-primary/10 text-primary", b: materialReport.dc },
+              ...(materialReport.ot.count ? [{ label: "Other Materials", cat: "other" as MatCat, unit: "", icon: Boxes, ring: "bg-emerald-500/10 text-emerald-600", b: materialReport.ot }] : []),
             ]).map(c => {
-              const avg = c.b.qty > 0 ? c.b.amount / c.b.qty : 0;
+              const avg = c.b.qty > 0 && c.unit ? c.b.amount / c.b.qty : 0;
               return (
                 <div key={c.label} className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
                   <div className="flex items-center gap-2 mb-3">
                     <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${c.ring}`}><c.icon className="h-4 w-4" /></div>
                     <p className="text-xs font-semibold text-brand-dark">{c.label}</p>
                   </div>
-                  <p className="font-display text-2xl text-brand-dark leading-none">{c.b.qty.toLocaleString(undefined, { maximumFractionDigits: 3 })}<span className="text-sm text-muted-foreground font-sans ml-1">{c.unit}</span></p>
-                  <p className="text-xs text-muted-foreground mt-1">{c.b.count} purchase{c.b.count !== 1 ? "s" : ""} · avg {c.b.qty > 0 ? `${fmtMoneyInr(avg)}/${c.unit}` : "—"}</p>
+                  {c.unit
+                    ? <p className="font-display text-2xl text-brand-dark leading-none">{c.b.qty.toLocaleString(undefined, { maximumFractionDigits: 3 })}<span className="text-sm text-muted-foreground font-sans ml-1">{c.unit}</span></p>
+                    : <p className="font-display text-2xl text-brand-dark leading-none">{c.b.count}<span className="text-sm text-muted-foreground font-sans ml-1">bill line{c.b.count !== 1 ? "s" : ""}</span></p>}
+                  <p className="text-xs text-muted-foreground mt-1">{c.b.count} purchase{c.b.count !== 1 ? "s" : ""}{c.unit ? ` · avg ${c.b.qty > 0 ? `${fmtMoneyInr(avg)}/${c.unit}` : "—"}` : " · each in its own unit"}</p>
                   <div className="mt-3 pt-3 border-t border-border/50">
                     <p className="text-lg font-semibold text-brand-dark">{fmtMoneyInr(c.b.amount)}</p>
                     <div className="flex items-center gap-3 mt-1.5 text-[11px]">
@@ -1147,16 +1178,16 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                   {materialReport.rows.map(p => {
                     const c = purchaseCategory(p);
                     const qty = purchaseQty(p);
-                    const unit = c === "gold" ? "g" : "ct";
-                    const detail = c === "gold" ? (p.gold?.purity || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—"));
-                    const label = c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : "Diamond";
+                    const unit = materialUnit(db.settings, p.material);
+                    const detail = c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—"));
+                    const label = c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : "Diamond";
                     const supplier = (db.suppliers ?? []).find(s => s.id === p.supplierId);
                     return (
                       <tr key={p.id} className="hover:bg-secondary/30 transition-colors">
                         <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDate(p.invoiceDate || p.createdAt)}</td>
                         <td className="px-3 py-2 whitespace-nowrap">{supplier?.name ?? "—"}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${c === "gold" ? "bg-amber-500/10 text-amber-700" : c === "cert" ? "bg-primary/10 text-primary" : "bg-blue-500/10 text-blue-700"}`}>{label}</span>
+                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${c === "gold" ? "bg-amber-500/10 text-amber-700" : c === "cert" ? "bg-primary/10 text-primary" : c === "other" ? "bg-emerald-500/10 text-emerald-700" : "bg-blue-500/10 text-blue-700"}`}>{label}</span>
                         </td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <span className={`inline-flex items-center gap-1 text-[11px] ${p.purpose === "stock" ? "text-muted-foreground" : "text-brand-dark"}`}>

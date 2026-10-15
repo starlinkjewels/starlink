@@ -16,7 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download } from "lucide-react";
+import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download, Layers } from "lucide-react";
+import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
@@ -25,8 +26,11 @@ const PAGE_SIZE = 15;
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
+  const db = useDb();
   if (section === "certified") return <CertifiedSection />;
   if (section === "gold" || section === "diamond") return <MaterialSection material={section} />;
+  // Any other material (Settings → Materials), by its id.
+  if (isOtherMaterial(section) && materialDef(db.settings, section)) return <MaterialSection material={section} />;
   return (
     <div className="text-center py-20 text-muted-foreground">
       Unknown stock section. <Link to="/stock" className="text-primary underline">Back to Stock</Link>
@@ -36,7 +40,7 @@ export function StockSectionPage() {
 
 /* ── Gold / Loose Diamonds — bucket tiles + full resolved movement history ── */
 
-function MaterialSection({ material }: { material: "gold" | "diamond" }) {
+function MaterialSection({ material }: { material: MaterialKey }) {
   const navigate = useNavigate();
   const db = useDb();
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
@@ -48,7 +52,8 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
   // reflects the true current total — the date filter below only narrows which
   // history rows are shown, same as Locker's ledger filter.
   const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
-  const unit = material === "gold" ? "g" : "ct";
+  const unit = materialUnit(db.settings, material);
+  const def = materialDef(db.settings, material);
 
   const rawRows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
@@ -81,8 +86,8 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
 
   const { paged, page, setPage, totalPages, start, end } = usePagination(filteredRows, PAGE_SIZE);
 
-  const materialLabel = material === "gold" ? "Gold Reserve" : "Loose Diamonds";
-  const bucketLabel = material === "gold" ? "Purity" : "Shape"; // purityOrQuality = shape for diamonds
+  const materialLabel = material === "gold" ? "Gold Reserve" : material === "diamond" ? "Loose Diamonds" : (def?.name ?? "Material");
+  const bucketLabel = material === "gold" ? "Purity" : material === "diamond" ? "Shape" : "Grade"; // purityOrQuality = shape for diamonds, grade for the rest
 
   // ── One-time cleanup: older order-bought loose diamonds were filed by quality
   // grade ("EF VVS") or "unspecified" instead of shape. Each is part of a
@@ -136,7 +141,7 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
     if (m.type !== "purchase_in" || m.refType !== "purchase" || !m.refId) return null;
     const p = db.purchases.find(x => x.id === m.refId);
     if (!p) return null;
-    const pQty = material === "gold" ? (p.gold?.weightGrams || 0) : (p.diamond?.carat || 0);
+    const pQty = purchaseQty(p);
     const rate = pQty > 0 ? p.totalInr / pQty : 0;
     return { rate, amount: rate * m.quantity };
   };
@@ -211,12 +216,12 @@ function MaterialSection({ material }: { material: "gold" | "diamond" }) {
       </button>
 
       <div className="flex items-center gap-3">
-        <div className={`h-12 w-12 rounded-2xl grid place-items-center shrink-0 ${material === "gold" ? "bg-amber-500/15" : "bg-cyan-500/15"}`}>
-          {material === "gold" ? <Coins className="h-5 w-5 text-amber-600" /> : <Gem className="h-5 w-5 text-cyan-600" />}
+        <div className={`h-12 w-12 rounded-2xl grid place-items-center shrink-0 ${material === "gold" ? "bg-amber-500/15" : material === "diamond" ? "bg-cyan-500/15" : "bg-emerald-500/15"}`}>
+          {material === "gold" ? <Coins className="h-5 w-5 text-amber-600" /> : material === "diamond" ? <Gem className="h-5 w-5 text-cyan-600" /> : <Layers className="h-5 w-5 text-emerald-600" />}
         </div>
         <div>
-          <h1 className="font-display text-2xl text-brand-dark leading-tight">{material === "gold" ? "Gold Reserve" : "Loose Diamonds"}</h1>
-          <p className="text-sm text-muted-foreground">{material === "gold" ? "By purity" : "Pooled by shape"} · full movement history</p>
+          <h1 className="font-display text-2xl text-brand-dark leading-tight">{materialLabel}</h1>
+          <p className="text-sm text-muted-foreground">{material === "gold" ? "By purity" : material === "diamond" ? "Pooled by shape" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`} · full movement history</p>
         </div>
       </div>
 

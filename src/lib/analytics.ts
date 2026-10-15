@@ -423,15 +423,17 @@ export function factoryTable(db: DB, p: Period): FactoryRow[] {
   }).sort((a, b) => b.pieces - a.pieces || b.labourInr - a.labourInr);
 }
 
-/** Material bought, month by month, in rupees — gold and diamonds apart. */
-export function purchasesMonthly(db: DB, p: Period, orders: Order[]): { month: string; label: string; goldInr: number; diamondInr: number }[] {
+/** Material bought, month by month, in rupees — gold, diamonds and everything else apart. */
+export function purchasesMonthly(db: DB, p: Period, orders: Order[]): { month: string; label: string; goldInr: number; diamondInr: number; otherInr: number }[] {
   return monthsOf(p, orders).map(month => {
-    let goldInr = 0, diamondInr = 0;
+    let goldInr = 0, diamondInr = 0, otherInr = 0;
     for (const pu of db.purchases ?? []) {
       const at = pu.invoiceDate || pu.createdAt;
       if (monthKey(at) !== month || !inPeriod(p, at)) continue;
-      if (pu.material === "gold") goldInr += pu.totalInr; else diamondInr += pu.totalInr;
+      if (pu.material === "gold") goldInr += pu.totalInr;
+      else if (pu.material === "diamond") diamondInr += pu.totalInr;
+      else otherInr += pu.totalInr; // platinum, gemstones, findings (Settings → Materials)
     }
-    return { month, label: monthLabel(month), goldInr: r2(goldInr), diamondInr: r2(diamondInr) };
+    return { month, label: monthLabel(month), goldInr: r2(goldInr), diamondInr: r2(diamondInr), otherInr: r2(otherInr) };
   });
 }

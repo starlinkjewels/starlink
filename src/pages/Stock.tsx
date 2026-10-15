@@ -6,14 +6,17 @@ import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } fro
 import { deriveStockBalances } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
-import { Gem, Coins, BadgeCheck, RotateCcw, History } from "lucide-react";
+import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
+import { MaterialEditor } from "@/components/MaterialsSettings";
 
 export function StockPage() {
   const { user } = useAuth();
   const db = useDb();
   const [levels, setLevels] = useState<StockLevels | null>(null);
   const [recomputing, setRecomputing] = useState(false);
+  const [addingMaterial, setAddingMaterial] = useState(false);
 
   useEffect(() => subscribeStockLevels(setLevels), []);
 
@@ -25,6 +28,14 @@ export function StockPage() {
   const goldPurities = Object.entries(goldBal).filter(([, g]) => g !== 0).length;
   const diamondShapes = Object.entries(diamondBal).filter(([, c]) => c !== 0).length;
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  // Every other material (Settings → Materials): offered ones, and any switched
+  // off that still has stock or history.
+  const others = materialDefs(db.settings)
+    .map(m => {
+      const bal = deriveStockBalances(db.stockMovements, m.id);
+      return { m, bal, total: Object.values(bal).reduce((s, q) => s + q, 0), grades: Object.values(bal).filter(q => q !== 0).length, moved: (db.stockMovements ?? []).some(x => x.material === m.id) };
+    })
+    .filter(x => x.m.active !== false || x.moved);
 
   // The cached counter (used by the floor-check when issuing) can drift from the
   // ledger. Displayed balances already come from the ledger; flag drift so an
@@ -34,7 +45,9 @@ export function StockPage() {
       for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (Math.abs((a[k] || 0) - (b[k] || 0)) > 0.001) return true;
       return false;
     };
-    return cmp(goldBal, levels.gold || {}) || cmp(diamondBal, levels.diamond || {});
+    const lv = levels as unknown as Record<string, Record<string, number> | undefined>;
+    return cmp(goldBal, levels.gold || {}) || cmp(diamondBal, levels.diamond || {})
+      || others.some(o => cmp(o.bal, lv[o.m.id] || {}));
   })();
 
   // Auto-heal: when the cached counter drifts from the ledger, silently resync
@@ -67,7 +80,7 @@ export function StockPage() {
       <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Stock</h1>
-          <p className="text-sm text-muted-foreground">Gold &amp; diamond inventory on hand</p>
+          <p className="text-sm text-muted-foreground">Gold, diamonds{others.length ? " and other materials" : ""} on hand</p>
         </div>
         {user?.role === "admin" && (
           <AsyncButton variant="outline" onClick={recompute} disabled={recomputing} className="rounded-xl gap-2">
@@ -128,7 +141,39 @@ export function StockPage() {
             </Button>
           </div>
         </div>
+
+        {others.map(({ m, total, grades }) => {
+          const Icon = m.kind === "stone" ? Gem : m.kind === "finding" ? Link2 : Layers;
+          return (
+            <div key={m.id} className={`card-luxe p-5 flex flex-col ${m.active === false ? "opacity-70" : ""}`}>
+              <div className="flex items-center gap-3">
+                <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 grid place-items-center shrink-0"><Icon className="h-5 w-5 text-emerald-600" /></div>
+                <div className="min-w-0">
+                  <p className="font-display text-lg text-brand-dark leading-tight truncate">{m.name}</p>
+                  <p className="text-xs text-muted-foreground">{KIND_LABEL[m.kind]} · {grades} grade{grades === 1 ? "" : "s"} in stock</p>
+                </div>
+              </div>
+              <p className="text-2xl font-display font-bold text-brand-dark mt-4">{fmtQty(total, m.unit)}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Total across all grades</p>
+              <div className="mt-4 pt-3 border-t border-border/50">
+                <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
+                  <Link to={`/stock/${m.id}`}><History className="h-4 w-4 text-primary" />View History</Link>
+                </Button>
+              </div>
+            </div>
+          );
+        })}
+
+        {user?.role === "admin" && (
+          <button type="button" onClick={() => setAddingMaterial(true)}
+            className="rounded-2xl border-2 border-dashed border-border/80 p-5 flex flex-col items-center justify-center gap-2 text-center text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors min-h-[180px]">
+            <Plus className="h-6 w-6" />
+            <span className="font-semibold text-sm">Add another material</span>
+            <span className="text-xs max-w-[16rem]">Platinum, silver, gemstones, pearls, locks — anything a piece uses besides gold and diamonds</span>
+          </button>
+        )}
       </div>
+      {addingMaterial && <MaterialEditor onClose={() => setAddingMaterial(false)} />}
     </div>
   );
 }

@@ -219,7 +219,7 @@ export function exportReadyStockPdf(items: ReadyStockItem[], name: string, subje
 
 const PROFIT_HEAD = [
   "Order", "Design", "Client", "Item", "Metal", "Status", "Ordered", "Sold (dispatched)",
-  "Selling ($)", "Gold cost (₹)", "Diamond cost (₹)", "Factory (₹)", "Freight & other (₹)", "Total cost (₹)",
+  "Selling ($)", "Gold cost (₹)", "Diamond cost (₹)", "Other materials (₹)", "Factory (₹)", "Freight & other (₹)", "Total cost (₹)",
   "Rate (₹/$)", "Rate basis", "Cost ($)", "Profit ($)", "Margin %", "Cost complete", "Not yet valued",
 ];
 
@@ -244,7 +244,7 @@ export function exportProfitCsv(db: DB, orders: Order[], name: string): void {
       o.orderNumber, o.designNumber ?? "", db.clients.find(x => x.id === o.clientId)?.companyName ?? (o.forReadyStock ? "Ready stock" : ""),
       o.jewelleryType, `${o.metal}${o.productKarats ? ` ${o.productKarats}` : ""}`, o.status, fmtDate(o.createdAt),
       recognisedSale(o) ? fmtDate(saleDate(o)) : "",
-      o.forReadyStock ? "" : p.sellingUsd, sum(c.gold), sum(c.diamond), sum(c.labour), sum(c.other), c.totalInr,
+      o.forReadyStock ? "" : p.sellingUsd, sum(c.gold), sum(c.diamond), sum(c.materials), sum(c.labour), sum(c.other), c.totalInr,
       p.fx?.rate ?? "", p.fx ? BASIS[p.fx.basis] : "no rate",
       p.costUsd ?? "", o.forReadyStock ? "" : p.profitUsd ?? "", o.forReadyStock ? "" : p.marginPct ?? "",
       c.complete ? "yes" : "NO", c.missing.map(m => `${m.label} (${m.reason})`).join("; "),

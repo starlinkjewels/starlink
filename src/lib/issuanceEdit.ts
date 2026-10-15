@@ -6,9 +6,10 @@
 // idea for the other source — with the stock movement, the certified packets
 // and the order log all carried along.
 import {
-  updateDb, uid, type DB, type MaterialIssuance,
+  updateDb, uid, loadDb, type DB, type MaterialIssuance,
 } from "@/lib/db";
 import { issuancePaid } from "@/lib/manufacturing";
+import { materialUnit } from "@/lib/materials";
 import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
@@ -47,7 +48,7 @@ export function canEditIssuance(db: DB, mi: MaterialIssuance): { ok: boolean; re
 
 /** What cancelling this will change, spelled out before it is confirmed. */
 export function issuanceVoidImpact(db: DB, mi: MaterialIssuance): string[] {
-  const unit = mi.material === "gold" ? "g" : "ct";
+  const unit = materialUnit(loadDb().settings, mi.material);
   const out: string[] = [];
   if (mi.diamondKind === "certified") {
     const packets = (db.diamondPackets ?? []).filter(p => mi.diamondPacketIds?.includes(p.id));
@@ -136,7 +137,7 @@ export async function editIssuance(
     const o = d.orders.find(x => x.id === live.orderId);
     if (o) {
       if (!o.manufacturingLog) o.manufacturingLog = [];
-      const unit = live.material === "gold" ? "g" : "ct";
+      const unit = materialUnit(loadDb().settings, live.material);
       o.manufacturingLog.push({
         id: uid("mlog_"), type: "material_issued", at: new Date().toISOString(), employeeId: userId,
         factoryId: live.factoryId, material: live.material, amountMaterial: live.quantityIssued,
@@ -176,7 +177,7 @@ export async function deleteIssuance(db: DB, mi: MaterialIssuance, userId: strin
     if (o) {
       o.materialIssuanceIds = (o.materialIssuanceIds ?? []).filter(x => x !== live.id);
       if (!o.manufacturingLog) o.manufacturingLog = [];
-      const unit = live.material === "gold" ? "g" : "ct";
+      const unit = materialUnit(loadDb().settings, live.material);
       o.manufacturingLog.push({
         id: uid("mlog_"), type: "material_issued", at: new Date().toISOString(), employeeId: userId,
         factoryId: live.factoryId, material: live.material, amountMaterial: live.quantityIssued,

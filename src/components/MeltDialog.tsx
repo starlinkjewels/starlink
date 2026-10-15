@@ -6,6 +6,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { increaseStock } from "@/lib/stock";
 import { meltPlan, meltGoldLine, meltStones, applyMelt, type MeltTo, type MeltAs } from "@/lib/melt";
+import { materialName, materialUnit } from "@/lib/materials";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -70,6 +71,12 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
         const ref = `${meltId}_d_${s.issuanceId}`;
         if (done.has(ref)) continue;
         await increaseStock({ material: "diamond", purityOrQuality: s.quality, quantity: s.ct, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
+      }
+      // Any other material in the piece — back into its own stock, once.
+      for (const x of plan.others) {
+        const ref = `${meltId}_x_${x.issuanceId}`;
+        if (done.has(ref)) continue;
+        await increaseStock({ material: x.material, purityOrQuality: x.grade, quantity: x.qty, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
       }
       if (to === "stock" && line.grams > 0 && !done.has(`${meltId}_g`)) {
         await increaseStock({ material: "gold", purityOrQuality: line.purity, quantity: line.grams, refType: "manual", refId: `${meltId}_g`, createdBy: user.id, note: `Melted ${order.orderNumber}${as === "24k" ? " — refined to 24K" : ""}` });
@@ -181,6 +188,15 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
                   <p className="text-[11px] text-muted-foreground">Lower a figure for any stone that broke or was lost.</p>
                 </div>
               )}
+
+              {plan.others.length > 0 && (
+                <div className="rounded-2xl border border-border/60 p-4 space-y-1.5">
+                  <p className="font-semibold text-brand-dark flex items-center gap-1.5"><Gem className="h-4 w-4 text-emerald-600" /> Other materials — back into stock</p>
+                  {plan.others.map(x => (
+                    <p key={x.issuanceId} className="text-xs">{x.qty} {materialUnit(db.settings, x.material)} {x.grade} {materialName(db.settings, x.material)}</p>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* ── Right: exactly what will happen ── */}
@@ -194,6 +210,12 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
                     <p className="text-muted-foreground flex items-center gap-1 flex-wrap">{plan.karat} piece <ArrowRight className="h-3 w-3" /> {to === "stock" ? "our gold stock" : `${nameOf(factoryId)}'s pool`}{as === "24k" ? " · refined" : ""}</p>
                   </div>
                 </div>
+                {plan.others.length > 0 && (
+                  <div className="rounded-xl bg-card ring-1 ring-border/60 p-3 flex items-center gap-2.5 text-xs">
+                    <Gem className="h-5 w-5 text-emerald-600 shrink-0" />
+                    <p>{plan.others.map(x => `${x.qty} ${materialUnit(db.settings, x.material)} ${materialName(db.settings, x.material)}`).join(", ")} <span className="text-muted-foreground">back into stock</span></p>
+                  </div>
+                )}
                 {(stoneTotal > 0 || plan.packetIds.length > 0) && (
                   <div className="rounded-xl bg-card ring-1 ring-border/60 p-3 flex items-center gap-2.5 text-xs">
                     <Gem className="h-5 w-5 text-sky-600 shrink-0" />
