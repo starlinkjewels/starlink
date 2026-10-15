@@ -23,8 +23,9 @@ import { app } from "./lib/firestoreAdmin";
 type DbName = "ssdiamdemo" | "diamondflow";
 const SUM = "summaries";
 /** Bumped when what a summary holds changes, so old ones can be told apart.
- *  2: a factory's summary also carries its pool stock (goldPool, diaPool). */
-const VERSION = 2;
+ *  2: a factory's summary also carries its pool stock (goldPool, diaPool).
+ *  3: other materials (Settings → Materials) are kept out of the diamond figures. */
+const VERSION = 3;
 const REGION = "us-central1";
 
 /** Owners recognised by email, as each database's rules recognise them. */
