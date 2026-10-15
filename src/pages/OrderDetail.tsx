@@ -2144,7 +2144,7 @@ function OrderDetailPageBody() {
                     <Undo2 className="h-4 w-4 mr-2" />Return
                   </Button>
                 )}
-                {user!.role === "admin" && !order.melted && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
+                {user!.role === "admin" && !order.melted && !order.returns?.length && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
                   <Button variant="outline" onClick={() => setMeltOpen(true)} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" title="Melt this piece — gold back to a factory or stock, stones back to stock">
                     <Flame className="h-4 w-4 mr-2" />Melt
                   </Button>

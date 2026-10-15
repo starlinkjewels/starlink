@@ -22,7 +22,7 @@
 import {
   type DB, type Order, type OrderReturn, type GiftCard, type Invoice, type ReadyStockItem,
   orderGrossTotal, orderTotal, totalAdvance, balanceDue, keptQty, keptValue, capOrderAdvances,
-  giftCardRemaining, findInvoiceForOrder, orderIsDispatched, uid,
+  giftCardRemaining, findInvoiceForOrder, orderIsDispatched, uid, writeStockCost,
 } from "./db";
 import { pieceWeights } from "./weights";
 
@@ -240,6 +240,8 @@ export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by:
   for (const k of Object.keys(item) as (keyof ReadyStockItem)[]) if (item[k] === undefined) delete item[k];
   d.readyStock.push(item);
   r.readyStockId = item.id;
+  // What it cost per piece, so the Ready Stock card shows it (an admin's figure).
+  if (w.costUsd != null && w.costUsd > 0) writeStockCost(d, item.id, w.costUsd);
   return item;
 }
 
