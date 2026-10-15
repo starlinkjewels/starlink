@@ -23,6 +23,8 @@ import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
 import { ReturnsComingPanel } from "@/components/SalesReturn";
+import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
+import { coField, companyOf, companyIdOfClient } from "@/lib/companies";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
 const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
@@ -85,12 +87,14 @@ type ItemForm = {
   sku: string;
   location: string;
   notes: string;
+  /** Whose Ready Stock the piece is in. */
+  companyId: string;
 };
 
 const EMPTY_FORM: ItemForm = {
   name: "", jewelleryType: "Ring", metal: "Gold", productKarats: "22K",
   grossWeight: "", netWeight: "", diamondWeight: "", diamondType: "Natural",
-  price: "", cost: "", quantity: "1", sku: "", location: "US", notes: "",
+  price: "", cost: "", quantity: "1", sku: "", location: "US", notes: "", companyId: "main",
 };
 
 export function ReadyStockPage() {
@@ -101,6 +105,12 @@ export function ReadyStockPage() {
   const db = useDb();
   const [q, setQ] = useState("");
   const [avail, setAvail] = useState<"all" | "available" | "sold">("all"); // stock availability filter
+  // Each company has its own Ready Stock. Staff choose whose; a client sees the
+  // company they buy from.
+  const multiCo = useMultiCo();
+  const defaultCompany = useDefaultCompany();
+  const [coSel, setCoSel] = useState("all");
+  const coView = !multiCo ? "all" : user?.role === "client" ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : coSel;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
   const [view, setView] = useState<"list" | "grid">(() => {
     try { return (localStorage.getItem("readystock-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
@@ -111,6 +121,7 @@ export function ReadyStockPage() {
   // as written and the sheet drawn from exactly those pieces.
   const terms = q.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
   const items = db.readyStock
+    .filter(i => coView === "all" || companyOf(i) === coView)
     .filter(i => !terms.length || terms.some(t =>
       i.name.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)))
     .filter(i => avail === "all" ? true : avail === "available" ? i.quantity > 0 : i.quantity === 0)
@@ -158,7 +169,7 @@ export function ReadyStockPage() {
   const imgRef = useRef<HTMLInputElement>(null);
   const vidRef = useRef<HTMLInputElement>(null);
 
-  const openAdd = () => { setEditingId(null); setF(EMPTY_FORM); setImages([]); setVideo(""); setVideoFile(null); setOpen(true); };
+  const openAdd = () => { setEditingId(null); setF({ ...EMPTY_FORM, companyId: coSel !== "all" ? coSel : defaultCompany }); setImages([]); setVideo(""); setVideoFile(null); setOpen(true); };
   const openEdit = (item: ReadyStockItem) => {
     setEditingId(item.id);
     setF({
@@ -169,7 +180,7 @@ export function ReadyStockPage() {
       diamondWeight: item.diamondWeight ? String(item.diamondWeight) : "",
       diamondType: item.diamondType || "Natural",
       price: String(item.price), cost: stockCostOf(db, item) != null ? String(stockCostOf(db, item)) : "", quantity: String(item.quantity),
-      sku: item.sku || "", location: item.location || "US", notes: item.notes || "",
+      sku: item.sku || "", location: item.location || "US", notes: item.notes || "", companyId: companyOf(item),
     });
     setImages(item.images || []);
     setVideo(item.video || "");
@@ -240,6 +251,9 @@ export function ReadyStockPage() {
           sku: f.sku.trim() || undefined,
           location: f.location || undefined,
           notes: f.notes.trim() || undefined,
+          ...coField(f.companyId),
+          // A piece sent back by a client keeps its link to that order — its cost comes from it.
+          ...(editingId && d.readyStock.find(x => x.id === editingId)?.fromReturn ? { fromReturn: d.readyStock.find(x => x.id === editingId)!.fromReturn } : {}),
           createdBy: editingId ? d.readyStock.find(x => x.id === editingId)!.createdBy : user!.id,
           createdAt: editingId ? d.readyStock.find(x => x.id === editingId)!.createdAt : new Date().toISOString(),
         };
@@ -426,6 +440,7 @@ export function ReadyStockPage() {
                   </Select>
                 </div>
               </div>
+              <CompanyPicker value={f.companyId} onChange={v => setF({ ...f, companyId: v })} label="Company — whose Ready Stock it is" className="rounded-xl" />
               <div>
                 <Label className="text-xs">Notes (optional)</Label>
                 <Textarea value={f.notes} onChange={e => setF({ ...f, notes: e.target.value })} className="rounded-xl mt-1" rows={2} />
@@ -446,6 +461,7 @@ export function ReadyStockPage() {
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search by name or SKU — or SKU-1, SKU-2" className="pl-9 h-11 rounded-xl" />
         </div>
+        {canManage && <CompanyFilter value={coSel} onChange={v => { setCoSel(v); setPage(1); }} className="flex-1 sm:flex-none sm:w-52 h-11 rounded-xl" />}
         <Select value={avail} onValueChange={v => setAvail(v as "all" | "available" | "sold")}>
           <SelectTrigger className="flex-1 sm:flex-none sm:w-44 h-11 rounded-xl"><SelectValue /></SelectTrigger>
           <SelectContent>
@@ -557,6 +573,7 @@ export function ReadyStockPage() {
               {canManage && item.fromReturn && (
                 <span title={item.notes} className="inline-flex items-center gap-1 mt-1 self-start text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>
               )}
+              {canManage && coSel === "all" && <CompanyBadge id={companyOf(item)} className="mt-1 self-start" />}
               <div className="flex items-center justify-between mt-3">
                 <p className="font-display text-xl font-bold text-brand-dark">{fmtMoney(item.price)}</p>
                 {canManage && can("readyStock", "edit") ? (
@@ -642,6 +659,7 @@ export function ReadyStockPage() {
                 {canManage && item.fromReturn && (
                   <span title={item.notes} className="inline-flex items-center gap-1 mt-1 ml-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>
                 )}
+                {canManage && coSel === "all" && <CompanyBadge id={companyOf(item)} className="mt-1 ml-1" />}
               </div>
               <div className="text-right shrink-0">
                 <p className="font-display text-lg font-bold text-brand-dark">{fmtMoney(item.price)}</p>

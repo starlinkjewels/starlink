@@ -1,5 +1,8 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useOtherMaterials, GradeInput } from "@/components/MaterialFields";
+import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
+import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
+import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
 import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
 import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
 import { useMemo, useState } from "react";
@@ -20,7 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
-  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle,
+  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -75,12 +78,21 @@ function FactoryHistoryPageBody() {
     );
   }
 
+  // Each company's material at the factory is kept apart: the page shows one
+  // company's share, or the whole factory.
+  const multiCo = useMultiCo();
+  const [coView, setCoView] = useState("all");
+  const view = multiCo ? coView : "all";
   const issuances = db.materialIssuances
-    .filter(i => i.factoryId === id)
+    .filter(i => i.factoryId === id && (view === "all" || companyOf(i) === view))
     .sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
   // Advances and loans — paid to this factory but settling no particular job.
-  const advances = (db.factoryPayments ?? []).filter(x => x.factoryId === id);
-  const account = factoryAccount(issuances, factory, advances);
+  // They, and the opening balance, date from before there was more than one
+  // company: the first company's.
+  const firstCo = view === "all" || view === "main";
+  const advances = firstCo ? (db.factoryPayments ?? []).filter(x => x.factoryId === id) : [];
+  const account = factoryAccount(issuances, firstCo ? factory : undefined, advances);
+  const [movingPool, setMovingPool] = useState(false);
 
   // ── Opening balance (migration) ──
   const [obOpen, setObOpen] = useState(false);
@@ -117,6 +129,8 @@ function FactoryHistoryPageBody() {
   const [issueOrderNumber, setIssueOrderNumber] = useState("");
   const [issueMaterial, setIssueMaterial] = useState<MaterialKey>("gold");
   const [issueGrade, setIssueGrade] = useState("");
+  // Whose material a bulk delivery is (an order's issue is always its order's company).
+  const [issueCompany, setIssueCompany] = useState(useDefaultCompany());
   const otherMaterials = useOtherMaterials();
   /** "gold", "diamond" — or the other material's own name — for messages. */
   const matWord = (k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
@@ -163,14 +177,14 @@ function FactoryHistoryPageBody() {
       setIssuing(true);
       try {
         await decreaseStockSelfHealing({
-          material: issueMaterial, purityOrQuality, quantity: qty,
+          material: issueMaterial, companyId: issueCompany, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Bulk delivery to ${factory.name}`,
         }, db.stockMovements);
         updateDb(d => {
           if (!d.materialIssuances) d.materialIssuances = [];
           d.materialIssuances.unshift({
-            id: issuanceId, factoryId: id!, orderId: undefined, material: issueMaterial,
+            id: issuanceId, factoryId: id!, orderId: undefined, material: issueMaterial, ...coField(issueCompany),
             purityOrQuality, quantityIssued: qty, source: "stock",
             issuedAt: now, issuedBy: user!.id, status: "open",
             finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
@@ -192,7 +206,9 @@ function FactoryHistoryPageBody() {
     // bought specifically for this order, then shared company stock.
     if (!matchedOrder) { toast.error(`No order found matching "${issueOrderNumber}"`); return; }
     const chargeAmount = Number(issueChargeAmount) || 0;
-    const poolBalance = factoryPoolBalance(db.materialIssuances, id!, issueMaterial, purityOrQuality);
+    // The order's company: its share of the pool, its stock.
+    const orderCo = workCompanyOf(db, matchedOrder);
+    const poolBalance = factoryPoolBalance(db.materialIssuances, id!, issueMaterial, purityOrQuality, orderCo);
     const eligiblePurchase = eligiblePurchases[0];
     const resolvedSource: "factoryPool" | "purchase" | "stock" =
       poolBalance >= qty ? "factoryPool" : eligiblePurchase ? "purchase" : "stock";
@@ -204,7 +220,7 @@ function FactoryHistoryPageBody() {
       // never touches stockLevels (see MaterialIssuance.source in db.ts).
       if (resolvedSource === "stock") {
         await decreaseStockSelfHealing({
-          material: issueMaterial, purityOrQuality, quantity: qty,
+          material: issueMaterial, companyId: orderCo, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Used by ${factory.name} for order ${matchedOrder.orderNumber}`,
         }, db.stockMovements);
@@ -212,7 +228,7 @@ function FactoryHistoryPageBody() {
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
         const issuance: MaterialIssuance = {
-          id: issuanceId, factoryId: id!, orderId: matchedOrder.id, material: issueMaterial,
+          id: issuanceId, factoryId: id!, orderId: matchedOrder.id, material: issueMaterial, ...coField(orderCo),
           purityOrQuality, quantityIssued: qty,
           source: resolvedSource, sourcePurchaseId: resolvedSource === "purchase" ? eligiblePurchase!.id : undefined,
           issuedAt: now, issuedBy: user!.id, status: "open",
@@ -369,7 +385,7 @@ function FactoryHistoryPageBody() {
     // — cap it at the true remaining pool balance instead, or this would let
     // you "return" material a different order already has committed.
     const maxReturnable = !issuance.orderId
-      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
+      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality, companyOf(issuance))
       : Math.round((issuance.quantityIssued - issuanceUsed(issuance)) * 100) / 100;
     if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issuance.material)} quantity to return`); return; }
     if (qty > maxReturnable) { toast.error(`Can't return more than the unused remainder (${maxReturnable}${unit})`); return; }
@@ -380,7 +396,7 @@ function FactoryHistoryPageBody() {
       // for this order never entered stock, so returning it must not inflate the pool.
       if (issuance.source === "stock" || issuance.source === "melt") {
         await increaseStock({
-          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: qty,
+          material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: qty,
           refType: "manual", createdBy: user!.id,
           note: `Returned from ${factory.name} issuance${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
         });
@@ -418,7 +434,7 @@ function FactoryHistoryPageBody() {
     // the whole original amount to stock even after part of it was already
     // legitimately committed to an order, conjuring phantom gold into Stock.
     const leftover = !issuance.orderId
-      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality)
+      ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality, companyOf(issuance))
       : Math.round(issuanceWastage(issuance) * 100) / 100;
     const unit = materialUnit(db.settings, issuance.material);
     const now = new Date().toISOString();
@@ -432,7 +448,7 @@ function FactoryHistoryPageBody() {
       const releasesToPool = leftover > 0 && issuance.source === "factoryPool";
       if (returnsToStock) {
         await increaseStock({
-          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
+          material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: leftover,
           refType: "manual", createdBy: user!.id,
           note: `Unused material returned on closing issuance for ${factory.name}`,
         });
@@ -865,6 +881,10 @@ function FactoryHistoryPageBody() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
+            <CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-48" />
+            {multiCo && user?.role === "admin" && (
+              <Button variant="outline" onClick={() => setMovingPool(true)} className="rounded-xl gap-2"><ArrowRightLeft className="h-4 w-4" /> Move between companies</Button>
+            )}
             <IfExport>
             <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
             </IfExport>
@@ -885,9 +905,9 @@ function FactoryHistoryPageBody() {
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT)</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold).toLocaleString()} g</p></div>
+          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT){view !== "all" ? ` · ${companyById(db.settings, view).name}` : ""}</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g</p></div>
           <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond (net ±)</p><p className={`font-semibold text-sm ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding > 0 ? "+" : ""}{account.diamondOutstanding.toLocaleString()} ct</p></div>
-          {Object.entries(factoryOtherBalances(db.materialIssuances, id!)).map(([k, q]) => (
+          {Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => (
             <div key={k} className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">{materialName(db.settings, k)} at factory</p><p className={`font-semibold text-sm ${q < 0 ? "text-destructive" : ""}`}>{q.toLocaleString()} {materialUnit(db.settings, k)}</p></div>
           ))}
           <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
@@ -1012,11 +1032,17 @@ function FactoryHistoryPageBody() {
               </div>
             )}
             {issueMode === "bulkDelivery" && (
-              <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+              <>
+                <CompanyPicker value={issueCompany} onChange={setIssueCompany} label="Company — whose stock it leaves, whose share of the pool it joins" />
+                <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+              </>
+            )}
+            {issueMode === "orderConsumption" && multiCo && matchedOrder && (
+              <p className="text-[11px] text-muted-foreground">For {companyById(db.settings, workCompanyOf(db, matchedOrder)).name} — {matchedOrder.orderNumber}&rsquo;s company: its share of the pool, then its stock.</p>
             )}
 
             {issueMode === "orderConsumption" && issueMaterial === "gold" && matchedOrder && orderMaterialRequirements(matchedOrder).needsGold && (() => {
-              const balance = factoryPoolBalance(db.materialIssuances, id!, "gold", issuePurity);
+              const balance = factoryPoolBalance(db.materialIssuances, id!, "gold", issuePurity, workCompanyOf(db, matchedOrder));
               const estimate = estimatedPureGoldNeeded(matchedOrder);
               if (estimate <= 0 || balance >= estimate) return null;
               return (
@@ -1036,6 +1062,7 @@ function FactoryHistoryPageBody() {
           </div>
         )}
       </div>
+      {movingPool && <FactoryPoolTransferDialog factoryId={id!} onClose={() => setMovingPool(false)} />}
       {/* ONE ledger for this factory: gold given and used, diamond given and
           used, the other metals, and the labour billed, paid and pending — all
           on the same row as the order they belong to. It replaced a separate
@@ -1073,6 +1100,8 @@ function FactoryHistoryPageBody() {
                     <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{mi.status === "open" ? "In progress" : "Closed"}</span>
                     {mi.source === "purchase" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">Direct purchase</span>}
                     {mi.source === "factoryPool" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">From factory pool</span>}
+                    {mi.source === "transfer" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">Moved from another company</span>}
+                    {view === "all" && <CompanyBadge id={companyOf(mi)} className="ml-1.5" />}
                   </p>
                   {mi.source === "melt" && mi.quantityIssued === 0 ? (
                     <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">

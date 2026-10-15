@@ -12,7 +12,8 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import type { Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
+import { subscribeStockLevelsByCompany, sumStockLevels, type StockLevels } from "@/lib/stock";
+import { companiesOf } from "@/lib/companies";
 
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
 function lastTrackingStep(o: Order): string {
@@ -31,7 +32,9 @@ export function Dashboard() {
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Stock levels are staff-only; a client's dashboard does not ask for them.
   const isStaffUser = user?.role === "admin" || user?.role === "employee";
-  useEffect(() => (isStaffUser ? subscribeStockLevels(setStockLevels) : undefined), [isStaffUser]);
+  // Every company's stock together — each company keeps its own counter.
+  const coIds = companiesOf(db.settings).map(c => c.id).join(",");
+  useEffect(() => (isStaffUser ? subscribeStockLevelsByCompany(coIds.split(","), by => setStockLevels(sumStockLevels(Object.values(by)))) : undefined), [isStaffUser, coIds]);
   const ordersInProduction = db.orders.filter(o => o.status === "In Production").length;
   const goldReserveGrams = Object.values(stockLevels?.gold ?? {}).reduce((s, g) => s + g, 0);
   const diamondReserveCarats = Object.values(stockLevels?.diamond ?? {}).reduce((s, c) => s + c, 0);

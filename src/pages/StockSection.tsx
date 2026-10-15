@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo } from "@/components/CompanyFields";
+import { companyOf, coField } from "@/lib/companies";
 import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -51,14 +53,19 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   // Balance derived from the FULL (unfiltered) movement ledger, so it always
   // reflects the true current total — the date filter below only narrows which
   // history rows are shown, same as Locker's ledger filter.
-  const entries = Object.entries(deriveStockBalances(db.stockMovements, material)).filter(([, q]) => q !== 0);
+  // One company's stock (from the Stock page's choice), or every company's together.
+  const [sp, setSp] = useSearchParams();
+  const multiCo = useMultiCo();
+  const co = multiCo ? (sp.get("co") || "all") : "all";
+  const pickCo = (v: string) => setSp(prev => { const n = new URLSearchParams(prev); if (v === "all") n.delete("co"); else n.set("co", v); return n; });
+  const entries = Object.entries(deriveStockBalances(db.stockMovements, material, co)).filter(([, q]) => q !== 0);
   const unit = materialUnit(db.settings, material);
   const def = materialDef(db.settings, material);
 
   const rawRows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
     diamondSales: db.diamondSales, clients: db.clients,
-  });
+  }, co);
 
   // Deterministic chronological order so the running balance is stable AND its
   // newest row always equals the Balances total. A direct-order purchase writes
@@ -223,6 +230,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
           <h1 className="font-display text-2xl text-brand-dark leading-tight">{materialLabel}</h1>
           <p className="text-sm text-muted-foreground">{material === "gold" ? "By purity" : material === "diamond" ? "Pooled by shape" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`} · full movement history</p>
         </div>
+        <div className="ml-auto"><CompanyFilter value={co} onChange={pickCo} /></div>
       </div>
 
       {user?.role === "admin" && material === "diamond" && badShapeCount > 0 && (
@@ -374,7 +382,12 @@ function CertifiedSection() {
   const [histTo, setHistTo] = useState("");
   const [showExport, setShowExport] = useState(false);
 
-  const allInStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  const [sp, setSp] = useSearchParams();
+  const multiCo = useMultiCo();
+  const co = multiCo ? (sp.get("co") || "all") : "all";
+  const pickCo = (v: string) => setSp(prev => { const n = new URLSearchParams(prev); if (v === "all") n.delete("co"); else n.set("co", v); return n; });
+  const inCo = (p: DiamondPacket) => co === "all" || companyOf(p) === co;
+  const allInStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && inCo(p));
 
   // ── Full certified-diamond history — every packet ever bought: from which
   // supplier, at what rate, and where it went (still in stock / issued / used
@@ -389,7 +402,7 @@ function CertifiedSection() {
     used: "bg-secondary text-muted-foreground", sold: "bg-violet-500/10 text-violet-700",
   };
 
-  const allPackets = [...(db.diamondPackets ?? [])].sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
+  const allPackets = [...(db.diamondPackets ?? [])].filter(inCo).sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
   const histFromDate = histFrom ? new Date(histFrom + "T00:00:00") : null;
   const histToDate = histTo ? new Date(histTo + "T23:59:59.999") : null;
   const histActive = !!histFrom || !!histTo;
@@ -574,6 +587,10 @@ function CertifiedSection() {
       const idx = (d.diamondPackets ?? []).findIndex(x => x.id === p.id);
       if (idx >= 0) {
         const clean = <T,>(v: T) => (typeof v === "string" && v.trim() === "" ? undefined : v);
+        // A stone still in stock may move to another of our companies; one already
+        // issued or used stays with the company whose order took it.
+        const companyMove = d.diamondPackets[idx].status === "in_stock" ? (companyOf(p) !== companyOf(d.diamondPackets[idx]) ? coField(companyOf(p)) : null) : null;
+        if (companyMove) { delete d.diamondPackets[idx].companyId; Object.assign(d.diamondPackets[idx], companyMove); }
         d.diamondPackets[idx] = {
           ...d.diamondPackets[idx],
           shape: p.shape,
@@ -619,6 +636,7 @@ function CertifiedSection() {
           <h1 className="font-display text-2xl text-brand-dark leading-tight">Certified Diamonds</h1>
           <p className="text-sm text-muted-foreground">{allInStockPackets.length} packet{allInStockPackets.length !== 1 ? "s" : ""} in stock · each with its own certificate</p>
         </div>
+        <div className="ml-auto"><CompanyFilter value={co} onChange={pickCo} /></div>
       </div>
 
       {user?.role === "admin" && unnumberedCount > 0 && (
@@ -775,6 +793,10 @@ function CertifiedSection() {
               <DialogTitle className="font-display text-xl text-brand-dark">Edit Certified Diamond</DialogTitle>
               <DialogDescription className="text-xs">Correct the certificate, grading details or cost for this packet.</DialogDescription>
             </DialogHeader>
+            {multiCo && editPacket.status === "in_stock" && (
+              <CompanyPicker value={companyOf(editPacket)} onChange={v => setEditPacket({ ...editPacket, companyId: v === "main" ? undefined : v })}
+                label="Company — whose stock it is" hint="Moving it hands the stone to that company's stock." />
+            )}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Shape</Label>

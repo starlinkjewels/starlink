@@ -17,6 +17,8 @@ import { Coins, Gem, BadgeCheck, Plus, X, Layers } from "lucide-react";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
+import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
+import { coField, companyById } from "@/lib/companies";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 /** Gold, loose or certified diamonds, or any other material (Settings → Materials). */
@@ -69,6 +71,9 @@ export function BuyMaterialForm() {
   const db = useDb();
   const addNew = useAddNew();
   const [supplierId, setSupplierId] = useState("");
+  // Whose stock the bill goes into — each company holds its own.
+  const defaultCompany = useDefaultCompany();
+  const [companyId, setCompanyId] = useState(defaultCompany);
   const [date, setDate] = useState(todayLocal());
   const [billNo, setBillNo] = useState("");
   const [currency, setCurrency] = useState<PurchaseCurrency>("INR");
@@ -118,7 +123,7 @@ export function BuyMaterialForm() {
       for (const [i, l] of lines.entries()) {
         if (l.kind === "certified") continue;
         await increaseStock({
-          material: lineMaterial(l),
+          material: lineMaterial(l), companyId,
           purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : l.shape,
           quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
         });
@@ -132,7 +137,7 @@ export function BuyMaterialForm() {
           const isOther = l.kind === "other";
           const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
-            id: ids[i], supplierId, material: lineMaterial(l),
+            id: ids[i], supplierId, material: lineMaterial(l), ...coField(companyId),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
             other: isOther ? {
               qty: q, grade: l.grade.trim() || "—", ratePerUnit: Number(l.rate) || 0,
@@ -168,13 +173,13 @@ export function BuyMaterialForm() {
               measurement: l.measure.trim() || undefined,
               certificateNumber: l.certNo.trim(), certificateLab: l.lab.trim() || undefined,
               ratePerCaratInr: q > 0 ? Math.round((total / q) * 100) / 100 : undefined,
-              supplierId, purchaseId: ids[i], status: "in_stock",
+              supplierId, purchaseId: ids[i], status: "in_stock", ...coField(companyId),
               createdBy: user!.id, createdAt: now,
             });
           }
         });
       });
-      toast.success(`${lines.length > 1 ? `${lines.length} items` : "Item"} bought → stock · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
+      toast.success(`${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${companyId !== "main" ? `${companyById(db.settings, companyId).name}'s ` : ""}stock · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
       reset();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
@@ -196,6 +201,8 @@ export function BuyMaterialForm() {
           <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
       </div>
+
+      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
         <div>

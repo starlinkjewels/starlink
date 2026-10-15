@@ -19,6 +19,7 @@
  * Everything lives on the order (`returns`), the client, the gift card and the
  * Ready Stock item — no new collection, so no rules change.
  */
+import { coField, companyOfOrder } from "./companies";
 import {
   type DB, type Order, type OrderReturn, type GiftCard, type Invoice, type ReadyStockItem,
   orderGrossTotal, orderTotal, totalAdvance, balanceDue, keptQty, keptValue, capOrderAdvances,
@@ -236,6 +237,8 @@ export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by:
     sku: o.designNumber || undefined, location: r.location || "US",
     notes: `Returned by ${client?.companyName ?? "the client"} — order ${o.orderNumber}, credit note ${r.creditNoteNo}${r.reason ? ` (${r.reason})` : ""}`,
     createdBy: w.by, createdAt: w.at, fromReturn: { orderId: o.id, returnId: r.id },
+    // Back in the Ready Stock of the company that sold it.
+    ...coField(companyOfOrder(d, o)),
   };
   for (const k of Object.keys(item) as (keyof ReadyStockItem)[]) if (item[k] === undefined) delete item[k];
   d.readyStock.push(item);

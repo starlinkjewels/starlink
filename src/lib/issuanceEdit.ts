@@ -5,6 +5,7 @@
 // typed in stayed wrong, and the stones stayed out of stock. This is the same
 // idea for the other source — with the stock movement, the certified packets
 // and the order log all carried along.
+import { companyOf } from "@/lib/companies";
 import {
   updateDb, uid, loadDb, type DB, type MaterialIssuance,
 } from "@/lib/db";
@@ -94,24 +95,24 @@ export async function editIssuance(
   if (mi.diamondKind !== "certified") {
     if (newBucket !== oldBucket) {
       await increaseStock({
-        material: mi.material, purityOrQuality: oldBucket, quantity: oldQty,
+        material: mi.material, companyId: companyOf(mi), purityOrQuality: oldBucket, quantity: oldQty,
         refType: "manual", refId: mi.id, createdBy: userId,
         note: `Correction — ${oldBucket} returned`,
       });
       await decreaseStockSelfHealing({
-        material: mi.material, purityOrQuality: newBucket, quantity: newQty,
+        material: mi.material, companyId: companyOf(mi), purityOrQuality: newBucket, quantity: newQty,
         type: "issuance_out", refType: "materialIssuance", refId: mi.id, createdBy: userId,
         note: `Correction — ${newBucket} taken instead`,
       }, db.stockMovements);
     } else if (newQty > oldQty) {
       await decreaseStockSelfHealing({
-        material: mi.material, purityOrQuality: newBucket, quantity: r3(newQty - oldQty),
+        material: mi.material, companyId: companyOf(mi), purityOrQuality: newBucket, quantity: r3(newQty - oldQty),
         type: "issuance_out", refType: "materialIssuance", refId: mi.id, createdBy: userId,
         note: "Correction — more taken than first recorded",
       }, db.stockMovements);
     } else if (newQty < oldQty) {
       await increaseStock({
-        material: mi.material, purityOrQuality: newBucket, quantity: r3(oldQty - newQty),
+        material: mi.material, companyId: companyOf(mi), purityOrQuality: newBucket, quantity: r3(oldQty - newQty),
         refType: "manual", refId: mi.id, createdBy: userId,
         note: "Correction — less taken than first recorded",
       });
@@ -154,7 +155,7 @@ export async function deleteIssuance(db: DB, mi: MaterialIssuance, userId: strin
 
   if (mi.diamondKind !== "certified") {
     await increaseStock({
-      material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued,
+      material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued,
       refType: "manual", refId: mi.id, createdBy: userId,
       note: "Issue cancelled — returned to stock",
     });

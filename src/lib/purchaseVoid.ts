@@ -15,6 +15,7 @@
 // whenever the purchase can't be cleanly reversed — money already paid, making
 // charges already paid, the factory already finished the piece, or a certified
 // stone already used/sold. Those must be undone at the source first.
+import { companyOf } from "./companies";
 import { updateDb, uid, loadDb, type DB, type Purchase, type StockMovement } from "./db";
 import { purchaseQty, purchaseBucket, purchaseText, materialUnit } from "./materials";
 import { purchasePaid, issuancePaid, fmtMoneyInr } from "./manufacturing";
@@ -103,7 +104,7 @@ export async function voidPurchase(db: DB, p: Purchase, userId: string): Promise
   //    failure leaves the whole record intact rather than half-removed.
   if (pooledStock(p) && qty > 0) {
     await decreaseStockSelfHealing({
-      material: p.material,
+      material: p.material, companyId: companyOf(p),
       purityOrQuality: bucketOf(p),
       quantity: qty,
       type: "issuance_out",
@@ -282,12 +283,12 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     const note = `Correction to purchase ${p.invoiceNumber || p.id.slice(-6)}`;
     if (delta > 0) {
       await increaseStock({
-        material: p.material, purityOrQuality: bucketOf(p), quantity: delta,
+        material: p.material, companyId: companyOf(p), purityOrQuality: bucketOf(p), quantity: delta,
         refType: "purchase", refId: p.id, createdBy: userId, note,
       });
     } else {
       await decreaseStockSelfHealing({
-        material: p.material, purityOrQuality: bucketOf(p), quantity: -delta,
+        material: p.material, companyId: companyOf(p), purityOrQuality: bucketOf(p), quantity: -delta,
         type: "issuance_out", refType: "purchase", refId: p.id, createdBy: userId, note,
       }, db.stockMovements);
     }

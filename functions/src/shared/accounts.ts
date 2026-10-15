@@ -17,6 +17,12 @@ import { toPureGold, pureFromPurity, openingDebitAmt, openingCreditAmt } from ".
 
 const r0 = (n: number) => Math.round(n);
 
+/** One company's share, or (no company, or "all") every company's together.
+ *  A record without a company is the first company's ("main"). */
+function ofCompany(i: { companyId?: string }, companyId?: string): boolean {
+  return !companyId || companyId === "all" || (i.companyId || "main") === companyId;
+}
+
 export function purchasePaid(p: Purchase): number {
   return (p.payments || []).reduce((s, x) => s + x.amountInr, 0);
 }
@@ -77,10 +83,10 @@ export function otherFlow(i: MaterialIssuance): { out: number; in: number } {
 
 /** How much of each other material a factory still holds, by material key —
  *  only those it holds something of. */
-export function factoryOtherBalances(issuances: MaterialIssuance[], factoryId: string): Record<string, number> {
+export function factoryOtherBalances(issuances: MaterialIssuance[], factoryId: string, companyId?: string): Record<string, number> {
   const out: Record<string, number> = {};
   for (const i of issuances) {
-    if (i.factoryId !== factoryId || i.material === "gold" || i.material === "diamond") continue;
+    if (i.factoryId !== factoryId || i.material === "gold" || i.material === "diamond" || !ofCompany(i, companyId)) continue;
     const f = otherFlow(i);
     out[i.material] = (out[i.material] || 0) + f.out - f.in;
   }
@@ -98,10 +104,12 @@ export function factoryOtherBalances(issuances: MaterialIssuance[], factoryId: s
  * physically in the factory's hands. Derived, never stored (same trust level as
  * factoryPoolBalance above).
  */
-export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0): number {
+export function factoryFineGoldBalance(issuances: MaterialIssuance[], factoryId: string, openingFineGold = 0, companyId?: string): number {
   let inFine = 0, outFine = 0;
+  // The opening fine gold was entered before there was more than one company — the first company's.
+  if (companyId && companyId !== "all" && companyId !== "main") openingFineGold = 0;
   for (const i of issuances) {
-    if (i.factoryId !== factoryId || i.material !== "gold") continue;
+    if (i.factoryId !== factoryId || i.material !== "gold" || !ofCompany(i, companyId)) continue;
     if (i.source !== "factoryPool") inFine += toPureGold(i.quantityIssued, i.purityOrQuality);
     if (i.finishedNetWeight != null) {
       // Prefer the actual purity entered at Final Approval; fall back to karat.
@@ -265,10 +273,12 @@ export function factoryPoolBalance(
   factoryId: string,
   material: string,
   purityOrQuality: string,
+  /** One company's share of the pool; unset = the whole pool. */
+  companyId?: string,
 ): number {
   let delivered = 0, drawn = 0;
   for (const i of issuances) {
-    if (i.factoryId !== factoryId || i.material !== material || i.purityOrQuality !== purityOrQuality) continue;
+    if (i.factoryId !== factoryId || i.material !== material || i.purityOrQuality !== purityOrQuality || !ofCompany(i, companyId)) continue;
     if (!i.orderId) delivered += i.quantityIssued;
     // A draw marked "returned" at Final Approval didn't end up consuming pool
     // material after all — exclude it so the pool balance goes back up,
@@ -284,11 +294,12 @@ export function factoryPoolBuckets(
   issuances: MaterialIssuance[],
   factoryId: string,
   material: string,
+  companyId?: string,
 ): { purityOrQuality: string; balance: number }[] {
   const purities = new Set(
-    issuances.filter(i => i.factoryId === factoryId && i.material === material && !i.orderId).map(i => i.purityOrQuality),
+    issuances.filter(i => i.factoryId === factoryId && i.material === material && !i.orderId && ofCompany(i, companyId)).map(i => i.purityOrQuality),
   );
   return [...purities]
-    .map(purityOrQuality => ({ purityOrQuality, balance: factoryPoolBalance(issuances, factoryId, material, purityOrQuality) }))
+    .map(purityOrQuality => ({ purityOrQuality, balance: factoryPoolBalance(issuances, factoryId, material, purityOrQuality, companyId) }))
     .filter(b => b.balance > 0);
 }

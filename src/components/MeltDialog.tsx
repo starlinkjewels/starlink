@@ -1,3 +1,4 @@
+import { companyOf, workCompanyOf } from "@/lib/companies";
 import { useMemo, useState } from "react";
 import { Flame, AlertTriangle, Coins, Gem, Factory as FactoryIcon, Wallet, Warehouse, Sparkles, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
@@ -58,6 +59,8 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
   const loss = Math.round((expected - line.grams) * 1000) / 1000;
   const chargeTo = choice.meltedBy;
 
+  /** Whose stock a stone or material goes back to: the company it was issued from. */
+  const coOfIssue = (issuanceId: string) => companyOf(db.materialIssuances.find(i => i.id === issuanceId));
   const melt = async () => {
     if (!user) return;
     if (to === "factory" && line.grams > 0 && !factoryId) { toast.error("Choose the factory the gold goes to"); return; }
@@ -70,16 +73,16 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
       for (const s of stones) {
         const ref = `${meltId}_d_${s.issuanceId}`;
         if (done.has(ref)) continue;
-        await increaseStock({ material: "diamond", purityOrQuality: s.quality, quantity: s.ct, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
+        await increaseStock({ material: "diamond", companyId: coOfIssue(s.issuanceId), purityOrQuality: s.quality, quantity: s.ct, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
       }
       // Any other material in the piece — back into its own stock, once.
       for (const x of plan.others) {
         const ref = `${meltId}_x_${x.issuanceId}`;
         if (done.has(ref)) continue;
-        await increaseStock({ material: x.material, purityOrQuality: x.grade, quantity: x.qty, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
+        await increaseStock({ material: x.material, companyId: coOfIssue(x.issuanceId), purityOrQuality: x.grade, quantity: x.qty, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
       }
       if (to === "stock" && line.grams > 0 && !done.has(`${meltId}_g`)) {
-        await increaseStock({ material: "gold", purityOrQuality: line.purity, quantity: line.grams, refType: "manual", refId: `${meltId}_g`, createdBy: user.id, note: `Melted ${order.orderNumber}${as === "24k" ? " — refined to 24K" : ""}` });
+        await increaseStock({ material: "gold", companyId: workCompanyOf(db, order), purityOrQuality: line.purity, quantity: line.grams, refType: "manual", refId: `${meltId}_g`, createdBy: user.id, note: `Melted ${order.orderNumber}${as === "24k" ? " — refined to 24K" : ""}` });
       }
       updateDbAs({ summary: `Melted ${order.orderNumber}` }, d => { applyMelt(d, order.id, plan, choice, { id: user.id, name: user.name }, at); });
       toast.success(`${order.orderNumber} melted — ${line.grams} g ${line.purity} ${to === "stock" ? "into our stock" : `to ${nameOf(factoryId)}`}${stoneTotal || plan.packetIds.length ? ", stones back in stock" : ""}`);

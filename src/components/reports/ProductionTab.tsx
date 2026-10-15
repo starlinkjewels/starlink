@@ -20,7 +20,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
     return {
       k, kp, open, late: lateOpen(orders),
       spread: BUCKETS.map(([key, a, b]) => ({ key, count: days.filter(d => d >= a && d <= b).length })),
-      factories: factoryTable(db, period).filter(f => f.pieces || f.openJobs || f.labourPendingInr),
+      factories: factoryTable(db, period, ctx.companyId).filter(f => f.pieces || f.openJobs || f.labourPendingInr),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db, orders, period.from, period.to, prev?.from, prev?.to, version]);

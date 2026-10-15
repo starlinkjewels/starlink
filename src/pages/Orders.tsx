@@ -1,4 +1,4 @@
-import { companiesOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
+import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -107,7 +107,7 @@ export function OrdersPage() {
     else if (status === "returned") list = list.filter(o => !!o.returns?.length);
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
-    if (companyFilter !== "all") list = list.filter(o => companyIdOfClient(db.clients.find(c => c.id === o.clientId)) === companyFilter);
+    if (companyFilter !== "all") list = list.filter(o => companyOfOrder(db, o) === companyFilter);
     if (employeeFilter !== "all" && user!.role === "admin") {
       const managed = new Set(db.clients.filter(c => c.accountManagerId === employeeFilter).map(c => c.id));
       list = list.filter(o => o.assignedEmployeeId === employeeFilter || managed.has(o.clientId));

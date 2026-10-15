@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { subscribeStockLevels, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
+import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -10,29 +10,42 @@ import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus } from 
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
 import { MaterialEditor } from "@/components/MaterialsSettings";
+import { CompanyFilter, useMultiCo } from "@/components/CompanyFields";
+import { StockTransferDialog } from "@/components/StockTransfer";
+import { companiesOf, companyOf } from "@/lib/companies";
+import { ArrowRightLeft } from "lucide-react";
 
 export function StockPage() {
   const { user } = useAuth();
   const db = useDb();
-  const [levels, setLevels] = useState<StockLevels | null>(null);
+  // Each company holds its own stock, with its own counter behind the floor check.
+  const [levelsBy, setLevelsBy] = useState<Record<string, StockLevels>>({});
   const [recomputing, setRecomputing] = useState(false);
   const [addingMaterial, setAddingMaterial] = useState(false);
+  const [moving, setMoving] = useState(false);
+  const multiCo = useMultiCo();
+  const [co, setCo] = useState<string>(() => { try { return localStorage.getItem("stock-company") || "all"; } catch { return "all"; } });
+  const pickCo = (v: string) => { setCo(v); try { localStorage.setItem("stock-company", v); } catch { /* ignore */ } };
+  const coIds = companiesOf(db.settings).map(c => c.id);
+  const coKey = coIds.join(",");
+  /** The company being looked at, or every company's stock together. */
+  const view = multiCo ? co : "all";
 
-  useEffect(() => subscribeStockLevels(setLevels), []);
+  useEffect(() => subscribeStockLevelsByCompany(coKey.split(","), setLevelsBy), [coKey]);
 
   // Balances derived from the movement ledger (the true record) so every screen agrees.
-  const goldBal = deriveStockBalances(db.stockMovements, "gold");
-  const diamondBal = deriveStockBalances(db.stockMovements, "diamond");
+  const goldBal = deriveStockBalances(db.stockMovements, "gold", view);
+  const diamondBal = deriveStockBalances(db.stockMovements, "diamond", view);
   const goldTotal = Object.values(goldBal).reduce((s, g) => s + g, 0);
   const diamondTotal = Object.values(diamondBal).reduce((s, c) => s + c, 0);
   const goldPurities = Object.entries(goldBal).filter(([, g]) => g !== 0).length;
   const diamondShapes = Object.entries(diamondBal).filter(([, c]) => c !== 0).length;
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (view === "all" || companyOf(p) === view));
   // Every other material (Settings → Materials): offered ones, and any switched
   // off that still has stock or history.
   const others = materialDefs(db.settings)
     .map(m => {
-      const bal = deriveStockBalances(db.stockMovements, m.id);
+      const bal = deriveStockBalances(db.stockMovements, m.id, view);
       return { m, bal, total: Object.values(bal).reduce((s, q) => s + q, 0), grades: Object.values(bal).filter(q => q !== 0).length, moved: (db.stockMovements ?? []).some(x => x.material === m.id) };
     })
     .filter(x => x.m.active !== false || x.moved);
@@ -40,15 +53,18 @@ export function StockPage() {
   // The cached counter (used by the floor-check when issuing) can drift from the
   // ledger. Displayed balances already come from the ledger; flag drift so an
   // admin can resync the counter so issuing stays accurate too.
-  const cacheDrift = !!levels && (() => {
-    const cmp = (a: Record<string, number>, b: Record<string, number>) => {
-      for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (Math.abs((a[k] || 0) - (b[k] || 0)) > 0.001) return true;
-      return false;
-    };
-    const lv = levels as unknown as Record<string, Record<string, number> | undefined>;
-    return cmp(goldBal, levels.gold || {}) || cmp(diamondBal, levels.diamond || {})
-      || others.some(o => cmp(o.bal, lv[o.m.id] || {}));
-  })();
+  // Checked company by company: each counter against that company's own ledger.
+  const cmp = (a: Record<string, number>, b: Record<string, number>) => {
+    for (const k of new Set([...Object.keys(a), ...Object.keys(b)])) if (Math.abs((a[k] || 0) - (b[k] || 0)) > 0.001) return true;
+    return false;
+  };
+  const materialsAll = ["gold", "diamond", ...materialDefs(db.settings).map(m => m.id)];
+  const driftingCos = coIds.filter(id => {
+    const lv = levelsBy[id] as unknown as Record<string, Record<string, number> | undefined> | undefined;
+    if (!lv) return false;
+    return materialsAll.some(mat => cmp(deriveStockBalances(db.stockMovements, mat, id), lv[mat] || {}));
+  });
+  const cacheDrift = driftingCos.length > 0;
 
   // Auto-heal: when the cached counter drifts from the ledger, silently resync
   // it from history — no banner, no modal, no button to click. The displayed
@@ -61,14 +77,15 @@ export function StockPage() {
   useEffect(() => {
     if (user?.role !== "admin" || !cacheDrift || healed.current) return;
     healed.current = true;
-    recomputeStockFromHistory(db.stockMovements).then(setLevels).catch(() => { /* manual button remains */ });
-  }, [cacheDrift, user, db.stockMovements]);
+    // A company with no movements of its own yet has nothing to rebuild from — left alone.
+    Promise.all(driftingCos.filter(id => (db.stockMovements ?? []).some(m => companyOf(m) === id))
+      .map(id => recomputeStockFromHistory(db.stockMovements, id))).catch(() => { /* manual button remains */ });
+  }, [cacheDrift, user, db.stockMovements, driftingCos]);
 
   const recompute = async () => {
     setRecomputing(true);
     try {
-      const fresh = await recomputeStockFromHistory(db.stockMovements);
-      setLevels(fresh);
+      for (const id of coIds) if (id === "main" || (db.stockMovements ?? []).some(m => companyOf(m) === id)) await recomputeStockFromHistory(db.stockMovements, id);
       toast.success("Stock recomputed from history");
     } catch {
       toast.error("Recompute failed");
@@ -82,12 +99,19 @@ export function StockPage() {
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Stock</h1>
           <p className="text-sm text-muted-foreground">Gold, diamonds{others.length ? " and other materials" : ""} on hand</p>
         </div>
-        {user?.role === "admin" && (
-          <AsyncButton variant="outline" onClick={recompute} disabled={recomputing} className="rounded-xl gap-2">
-            <RotateCcw className="h-4 w-4" /> Recompute from History
-          </AsyncButton>
-        )}
+        <div className="flex items-center gap-2 flex-wrap">
+          <CompanyFilter value={co} onChange={pickCo} />
+          {multiCo && user?.role === "admin" && (
+            <Button variant="outline" onClick={() => setMoving(true)} className="rounded-xl gap-2"><ArrowRightLeft className="h-4 w-4" /> Move between companies</Button>
+          )}
+          {user?.role === "admin" && (
+            <AsyncButton variant="outline" onClick={recompute} disabled={recomputing} className="rounded-xl gap-2">
+              <RotateCcw className="h-4 w-4" /> Recompute from History
+            </AsyncButton>
+          )}
+        </div>
       </div>
+      {moving && <StockTransferDialog onClose={() => setMoving(false)} />}
 
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -103,7 +127,7 @@ export function StockPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Total across all purities</p>
           <div className="mt-4 pt-3 border-t border-border/50">
             <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to="/stock/gold"><History className="h-4 w-4 text-primary" />View History</Link>
+              <Link to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
             </Button>
           </div>
         </div>
@@ -120,7 +144,7 @@ export function StockPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Pooled by shape, total carats</p>
           <div className="mt-4 pt-3 border-t border-border/50">
             <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to="/stock/diamond"><History className="h-4 w-4 text-primary" />View History</Link>
+              <Link to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
             </Button>
           </div>
         </div>
@@ -137,7 +161,7 @@ export function StockPage() {
           <p className="text-xs text-muted-foreground mt-0.5">Packet{inStockPackets.length !== 1 ? "s" : ""} in stock</p>
           <div className="mt-4 pt-3 border-t border-border/50">
             <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to="/stock/certified"><History className="h-4 w-4 text-primary" />View History</Link>
+              <Link to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
             </Button>
           </div>
         </div>
@@ -157,7 +181,7 @@ export function StockPage() {
               <p className="text-xs text-muted-foreground mt-0.5">Total across all grades</p>
               <div className="mt-4 pt-3 border-t border-border/50">
                 <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-                  <Link to={`/stock/${m.id}`}><History className="h-4 w-4 text-primary" />View History</Link>
+                  <Link to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
                 </Button>
               </div>
             </div>

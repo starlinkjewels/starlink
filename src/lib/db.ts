@@ -422,6 +422,9 @@ export interface Order {
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
   /** The finished piece was melted (lib/melt.ts) — it no longer exists. */
   melted?: OrderMelt;
+  /** The company the order is for, fixed when it is placed: the client's, or
+   *  for an in-house build the one chosen. Unset (older orders) = the client's. */
+  companyId?: string;
   /** Pieces the client sent back after the sale (lib/salesReturn.ts). */
   returns?: OrderReturn[];
   // Gift card redeemed onto this order (a discount — reduces orderTotal). The card's
@@ -1056,6 +1059,8 @@ export interface OtherPurchaseDetail {
  */
 export interface DiamondPacket {
   id: string;
+  /** The company this belongs to — each company holds its own stock. Unset = the first company. */
+  companyId?: string;
   stockNumber?: string; // short sequential label ("DP-0007") assigned at creation — how staff find one specific stone among hundreds in stock, since shape/carat/cert alone isn't quick to scan or search
   shape: string;
   carat: number; // size / weight
@@ -1086,6 +1091,8 @@ export interface DiamondPacket {
  *  instead (it's never pooled). */
 export interface DiamondSale {
   id: string;
+  /** The company this belongs to — each company holds its own stock. Unset = the first company. */
+  companyId?: string;
   kind: "loose" | "certified";
   shape: string; // bucket key (loose) or the packet's own shape (certified)
   quality?: string; // loose only, optional
@@ -1199,6 +1206,8 @@ export interface Purchase {
   gold?: GoldPurchaseDetail; // present iff material === "gold"
   diamond?: DiamondPurchaseDetail; // present iff material === "diamond"
   other?: OtherPurchaseDetail; // present iff material is an admin-defined material
+  /** The company this belongs to — each company holds its own stock. Unset = the first company. */
+  companyId?: string;
   purpose: PurchasePurpose;
   orderId?: string; // required iff purpose === "order"
 
@@ -1270,6 +1279,8 @@ export interface ReadyStockItem {
   createdAt: string;
   /** A piece a client sent back — its cost is that order's cost per piece. */
   fromReturn?: { orderId: string; returnId: string };
+  /** The company this belongs to — each company holds its own stock. Unset = the first company. */
+  companyId?: string;
 }
 
 export const READY_STOCK_LOCATIONS = ["US", "Hong Kong", "India", "Other"] as const;
@@ -1308,9 +1319,13 @@ export interface MaterialIssuance {
   material: MaterialKey;
   purityOrQuality: string;
   quantityIssued: number; // in the material's unit: grams (gold), carats (diamond), or the material's own
+  /** Whose material this is at the factory — each company's pool and fine gold
+   *  are kept apart. Unset = the first company. */
+  companyId?: string;
   /** "melt": gold from a melted piece handed back to the factory (lib/melt.ts) —
    *  a delivery into its pool like any other, but not out of our stock. */
-  source: "stock" | "purchase" | "factoryPool" | "melt";
+  /** "transfer": a share of a factory's pool moved from one company to another. */
+  source: "stock" | "purchase" | "factoryPool" | "melt" | "transfer";
   /** source "melt": the order whose piece was melted. */
   meltOf?: string;
   sourcePurchaseId?: string; // set iff source === "purchase"
@@ -1363,7 +1378,8 @@ export interface StockMovement {
   companyId?: string;
   purityOrQuality: string;
   quantity: number; // always positive; direction implied by `type`
-  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual" | "opening";
+  /** "transfer": moved between our companies (in at the sending company's average cost). */
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual" | "opening" | "transfer";
   refId?: string;
   // Value of this movement in ₹ — set for an "opening" stock entry (migration
   // stock already owned). Lets the stock ledger show the opening amount without
