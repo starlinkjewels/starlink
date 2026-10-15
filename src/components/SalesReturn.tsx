@@ -161,18 +161,18 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
                   const img = thumb(o);
                   const unit = Math.round(((o.amount || 0) / (o.quantity || 1)) * 100) / 100;
                   return (
-                    <div key={o.id} className={`rounded-xl border p-2.5 flex items-center gap-3 ${n > 0 ? "border-primary/50 bg-primary/5" : "border-border/60"} ${why ? "opacity-60" : ""}`}>
+                    <div key={o.id} className={`rounded-xl border p-2.5 flex flex-wrap items-center gap-3 ${n > 0 ? "border-primary/50 bg-primary/5" : "border-border/60"} ${why ? "opacity-60" : ""}`}>
                       <div className="h-12 w-12 rounded-lg bg-secondary/60 overflow-hidden shrink-0 grid place-items-center">
                         {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : <PackageCheck className="h-5 w-5 text-muted-foreground" />}
                       </div>
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 basis-[55%]">
                         <p className="font-semibold text-brand-dark text-sm truncate">{o.orderNumber} <span className="font-normal text-muted-foreground">· {describe(o)}</span></p>
                         <p className="text-[11px] text-muted-foreground">
                           {why ?? `${fmtMoney(unit)} a piece · client has ${kept} of ${o.quantity || 1}`}
                         </p>
                         {n > 0 && (
                           <div className="flex items-center gap-1.5 mt-1">
-                            <Label className="text-[11px] text-muted-foreground font-normal" htmlFor={`rp_${o.id}`}>Ready Stock price</Label>
+                            <Label className="text-[11px] text-muted-foreground font-normal whitespace-nowrap" htmlFor={`rp_${o.id}`}>Ready Stock price</Label>
                             <Input id={`rp_${o.id}`} type="number" inputMode="decimal" min="0" value={price[o.id] ?? String(unit)} onChange={e => setPrice(p => ({ ...p, [o.id]: e.target.value }))}
                               className="h-7 w-28 rounded-lg text-xs" aria-label={`Ready Stock price for ${o.orderNumber}`} />
                           </div>
@@ -180,11 +180,11 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
                       </div>
                       {!why && (
                         kept === 1 ? (
-                          <Button type="button" size="sm" variant={n ? "default" : "outline"} className="rounded-lg shrink-0" onClick={() => set(n ? 0 : 1)} aria-pressed={!!n}>
+                          <Button type="button" size="sm" variant={n ? "default" : "outline"} className="rounded-lg shrink-0 ml-auto" onClick={() => set(n ? 0 : 1)} aria-pressed={!!n}>
                             {n ? "Returning" : "Return it"}
                           </Button>
                         ) : (
-                          <div className="flex items-center gap-1 shrink-0" role="group" aria-label={`Pieces back of ${o.orderNumber}`}>
+                          <div className="flex items-center gap-1 shrink-0 ml-auto" role="group" aria-label={`Pieces back of ${o.orderNumber}`}>
                             <Button type="button" size="icon" variant="outline" className="h-8 w-8 rounded-lg" onClick={() => set(n - 1)} aria-label="One less"><Minus className="h-3.5 w-3.5" /></Button>
                             <span className="w-14 text-center text-sm tabular-nums"><span className="font-semibold">{n}</span> of {kept}</span>
                             <Button type="button" size="icon" variant="outline" className="h-8 w-8 rounded-lg" onClick={() => set(n + 1)} aria-label="One more"><Plus className="h-3.5 w-3.5" /></Button>
