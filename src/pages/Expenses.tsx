@@ -472,12 +472,12 @@ export function ExpensesPage() {
 
       {/* ── Add Expense ── */}
       <Dialog open={showAdd} onOpenChange={v => { if (!v) { setShowAdd(false); setError(""); setForm(EMPTY_FORM); } }}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-3xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-xl text-brand-dark">Add Expense</DialogTitle>
             <DialogDescription className="text-xs">Recording as {user?.name}</DialogDescription>
           </DialogHeader>
-              <div className="space-y-4">
+              <div className="dlg-cols">
                 {error && (
                   <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-xl px-3 py-2.5">
                     <X className="h-4 w-4 shrink-0" />

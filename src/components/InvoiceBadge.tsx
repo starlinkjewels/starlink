@@ -13,8 +13,8 @@ export function needsInvoice(o: Order): boolean {
  * Billing is done a parcel at a time, and an order left out of one simply
  * stopped being mentioned — it looked exactly like an order that had been
  * invoiced, and the only way to find it was to open the Invoices page and work
- * out what was missing. A billed piece carries its invoice number in red; a
- * dispatched piece with none says so.
+ * out what was missing. A billed piece carries its invoice number in green; a
+ * dispatched piece with none says so — in plain words, not a badge.
  *
  * Only dispatched work is marked as missing one: a piece still in production
  * has nothing to be billed for yet, and flagging it would be noise on every
@@ -27,13 +27,15 @@ export function InvoiceBadge({ invoice, dispatched, onOpen, className = "", size
   className?: string;
   size?: "sm" | "md";
 }) {
-  const box = size === "md" ? "h-7 px-2.5 text-xs gap-1.5 rounded-lg" : "h-6 px-2 text-[11px] gap-1 rounded-md";
+  // Plain words, not a badge: a quiet green invoice number (it opens the
+  // invoice), or a quiet amber note when a dispatched piece has none.
+  const text = size === "md" ? "text-sm" : "text-xs";
   const icon = size === "md" ? "h-3.5 w-3.5" : "h-3 w-3";
   if (!invoice && !dispatched) return null;
   if (!invoice) {
     return (
-      <span title="Dispatched, but not on any invoice yet" className={`inline-flex items-center font-bold bg-amber-500/15 border border-amber-500/40 text-amber-700 whitespace-nowrap ${box} ${className}`}>
-        <FileText className={`${icon} shrink-0`} /> NO INVOICE
+      <span title="Dispatched, but not on any invoice yet" className={`inline-flex items-center gap-1 font-normal text-amber-600 whitespace-nowrap ${text} ${className}`}>
+        <FileText className={`${icon} shrink-0`} /> No invoice
       </span>
     );
   }
@@ -42,9 +44,9 @@ export function InvoiceBadge({ invoice, dispatched, onOpen, className = "", size
       type="button"
       title={`On invoice ${invoice.number} — open it`}
       onClick={e => { e.preventDefault(); e.stopPropagation(); onOpen(invoice.number); }}
-      className={`inline-flex items-center font-bold bg-destructive border border-destructive text-white hover:bg-destructive/85 shadow-sm whitespace-nowrap min-w-0 ${box} ${className}`}
+      className={`inline-flex items-center gap-1 font-normal text-success hover:underline underline-offset-2 whitespace-nowrap min-w-0 ${text} ${className}`}
     >
-      <FileText className={`${icon} shrink-0`} /><span className="opacity-80 font-semibold">INV</span><span className="truncate">{invoice.number}</span>
+      <FileText className={`${icon} shrink-0`} /><span className="truncate">INV {invoice.number}</span>
     </button>
   );
 }

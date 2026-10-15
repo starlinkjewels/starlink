@@ -33,7 +33,7 @@ export function BandDialog({ open, onOpenChange, presets, showPrice, onGenerate 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent className="max-w-lg rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl flex items-center gap-2"><Tag className="h-5 w-5 text-primary" /> Jewellery Band</DialogTitle>
         </DialogHeader>

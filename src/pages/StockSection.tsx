@@ -765,7 +765,7 @@ function CertifiedSection() {
       {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}
       {editPacket && (
         <Dialog open onOpenChange={v => { if (!v) setEditPacket(null); }}>
-          <DialogContent className="max-w-lg rounded-2xl">
+          <DialogContent className="max-w-3xl rounded-2xl">
             <DialogHeader>
               <DialogTitle className="font-display text-xl text-brand-dark">Edit Certified Diamond</DialogTitle>
               <DialogDescription className="text-xs">Correct the certificate, grading details or cost for this packet.</DialogDescription>

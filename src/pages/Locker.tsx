@@ -663,9 +663,9 @@ export function LockerPage() {
       )}
 
       <Dialog open={!!editId} onOpenChange={open => !open && setEditId(null)}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-2xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-2xl">Edit Locker</DialogTitle></DialogHeader>
-          <div className="space-y-3 mt-2">
+          <div className="dlg-cols mt-2">
             <div>
               <Label className="text-xs">Account Name</Label>
               <Input value={ef.name} onChange={e => setEf({ ...ef, name: e.target.value })} className="rounded-xl mt-1" />
@@ -713,7 +713,7 @@ export function LockerPage() {
       {/* Apply a loose income row to a client's bill (repairs a payment that was
           typed in as a plain locker entry and never reached their orders). */}
       <Dialog open={!!fixTxnId} onOpenChange={o => { if (!o) setFixTxnId(null); }}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-2xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-xl">Apply to a client&rsquo;s bill</DialogTitle></DialogHeader>
           {(() => {
             const txn = db.lockerTransactions.find(t => t.id === fixTxnId);

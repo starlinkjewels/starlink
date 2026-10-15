@@ -259,7 +259,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       <LoadOlder w={w} />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditing(null); }}>
-        <DialogContent className="max-w-md rounded-2xl">
+        <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader><DialogTitle className="font-display text-xl">Correct this entry</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground -mt-1">
             {editing?.party}{editing?.against ? ` · ${editing.against}` : ""}. The account it came from moves with it,

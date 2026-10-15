@@ -84,7 +84,7 @@ function alsoSees(db: DB, o: Order): string | null {
   if (manager && manager.id !== o.assignedEmployeeId) parts.push(`${manager.name} (manages this client)`);
   const wide = db.users.filter(u => u.role === "employee" && u.status !== "inactive" && u.id !== o.assignedEmployeeId && u.id !== manager?.id
     && reachOf(u, db.roles ?? []) === "all");
-  if (wide.length) parts.push(`${wide.length} employee${wide.length !== 1 ? "s" : ""} whose role sees every order`);
+  if (wide.length) parts.push(`${wide.length} employee${wide.length !== 1 ? "s" : ""} who may see every order`);
   return parts.length ? parts.join(" · ") : null;
 }
 
@@ -149,7 +149,7 @@ export function AssignOrdersDialog({ orders, onClose }: { orders: Order[]; onClo
 
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent className="max-w-xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><Users className="h-5 w-5 text-primary" /> Assign {orders.length} order{orders.length !== 1 ? "s" : ""}</DialogTitle>
         </DialogHeader>

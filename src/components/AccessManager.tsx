@@ -307,7 +307,8 @@ export function AccessFields({ draft, onChange, docs, by }: {
     toast.success(`Template "${t.name}" deleted`);
   };
   return (
-    <div className="space-y-4">
+    <div className="grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-x-6 gap-y-4 items-start">
+    <div className="space-y-4 min-w-0">
       <div className="space-y-1.5">
         <Label className="text-xs">Fill in from a template</Label>
         <div className="flex flex-wrap gap-1.5">
@@ -348,7 +349,8 @@ export function AccessFields({ draft, onChange, docs, by }: {
         <p className="text-[11px] text-muted-foreground">Employees, Settings and Activity belong to admins only. The dashboard is open to everyone. A dash means the section has no such action. <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded bg-amber-500/20 ring-1 ring-amber-500/40" /> temporary access running now</span></p>
       </div>
 
-      <div className="space-y-2">
+    </div>
+      <div className="space-y-2 min-w-0 xl:sticky xl:top-0 xl:rounded-2xl xl:border xl:border-border/60 xl:p-4">
         <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-4 w-4 text-amber-600" /> Temporary access</p>
         <p className="text-[11px] text-muted-foreground -mt-1">Extra access for a while — covering for someone, a month-end, a project. It ends by itself and stays in the history.</p>
         <TempList temp={draft.temp} onEnd={id => onChange({ ...draft, temp: draft.temp.map(t => t.id === id ? { ...t, endedAt: new Date().toISOString(), endedByName: by.name } : t) })} />
@@ -385,7 +387,7 @@ export function ManageAccessDialog({ u, onClose }: { u: User; onClose: () => voi
   };
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
-      <DialogContent className="max-w-3xl rounded-2xl">
+      <DialogContent className="max-w-6xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-2xl flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary" /> Access — {u.name}</DialogTitle>
           <DialogDescription className="text-xs">Tick exactly what this person may see and do — a template fills it in one click. Give temporary access that ends by itself. Saved changes apply at once.</DialogDescription>

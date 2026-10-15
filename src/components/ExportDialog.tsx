@@ -53,11 +53,12 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
     // Capped and scrollable: a factory offers eight download options and the
     // last of them were off the bottom of the screen with no way to reach them.
     <Dialog open onOpenChange={v => { if (!v) onClose(); }}>
-      <DialogContent className="max-w-md rounded-2xl">
+      <DialogContent className="max-w-3xl rounded-2xl">
         <DialogHeader>
           <DialogTitle className="font-display text-xl text-brand-dark">Export{title ? ` — ${title}` : ""}</DialogTitle>
           <DialogDescription className="text-xs">Choose a date range (optional), then what to download.</DialogDescription>
         </DialogHeader>
+        <div className="grid md:grid-cols-2 gap-x-8 gap-y-4">
         <div>
 
         <div className="flex flex-wrap gap-1.5 mb-3">
@@ -80,6 +81,8 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
           </div>
         )}
 
+        </div>
+        <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Download</p>
         <div className="space-y-1.5">
           {options.map((o, i) => (
@@ -89,6 +92,7 @@ export function ExportDialog({ open, onClose, title, options, extraFilter }: {
               <span className="flex-1 min-w-0"><span className="block text-sm font-medium">{o.label}</span>{o.sublabel && <span className="block text-[11px] text-muted-foreground">{o.sublabel}</span>}</span>
             </button>
           ))}
+        </div>
         </div>
         </div>
       </DialogContent>

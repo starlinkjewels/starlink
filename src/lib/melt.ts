@@ -3,9 +3,12 @@
  * turned down, and that is not going into Ready Stock.
  *
  * The piece stops existing; what was in it does not:
- *   • the metal goes back to a factory — at the piece's own karat, or refined
- *     to 24KT — as a delivery into that factory's pool, ready for its next job
- *     (or, if chosen, into our own stock);
+ *   • the metal goes where it is wanted — into a factory's pool, ready for its
+ *     next job, or into our own gold stock — and as it is wanted: at the
+ *     piece's own karat, as melted, or refined to 24KT. Any melting loss is
+ *     entered as the grams that actually came back;
+ *   • a melting or refining charge, if the factory makes one, is owed to it in
+ *     its ledger, whichever way the gold went;
  *   • the stones go back into stock: loose diamonds by their quality, certified
  *     packets back to "in stock";
  *   • the labour stays exactly where it is — the factory did the work and is
@@ -25,7 +28,9 @@ import { issuanceUsed } from "./manufacturing";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
-export type MeltGoldTo = "factory-karat" | "factory-24k" | "stock-karat";
+/** Where the metal goes, and in what form. */
+export type MeltTo = "factory" | "stock";
+export type MeltAs = "karat" | "24k";
 
 /** A loose-diamond line coming back out of the piece. */
 export interface MeltStone { issuanceId: string; quality: string; ct: number; pcs?: number }
@@ -94,9 +99,16 @@ export function meltPlan(db: DB, o: Order): MeltPlan {
 }
 
 export interface MeltChoice {
-  goldTo: MeltGoldTo;
-  /** The factory the metal goes to (factory options). */
+  /** Into a factory's pool, or into our own stock. */
+  to: MeltTo;
+  /** At the piece's own karat (as melted), or refined to 24K. */
+  as: MeltAs;
+  /** The factory the metal goes to (to: "factory"). */
   factoryId?: string;
+  /** Who melted it, when the metal comes to us: a factory, or in-house (unset). */
+  meltedBy?: string;
+  /** What the melting factory charges for melting / refining, ₹ — owed in its ledger. */
+  chargeInr?: number;
   /** Grams that actually came back (after any melting loss). */
   goldGrams: number;
   /** Carats back per loose line (issuanceId → ct). Unlisted = all of it. */
@@ -106,7 +118,7 @@ export interface MeltChoice {
 
 /** The metal as it is recorded: its purity label and grams. */
 export function meltGoldLine(plan: MeltPlan, c: MeltChoice): { purity: string; grams: number } {
-  return { purity: c.goldTo === "factory-24k" ? "24K" : plan.karat, grams: r3(Math.max(0, c.goldGrams)) };
+  return { purity: c.as === "24k" ? "24K" : plan.karat, grams: r3(Math.max(0, c.goldGrams)) };
 }
 
 /** The loose stones as they go back to stock, after any the user marked lost. */
@@ -126,18 +138,32 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
   if (!o || o.melted) return null;
   const gold = meltGoldLine(plan, c);
   let goldRec: OrderMelt["gold"];
-  if (gold.grams > 0 && c.goldTo !== "stock-karat" && c.factoryId) {
+  if (!d.materialIssuances) d.materialIssuances = [];
+  const charge = Math.max(0, Math.round(c.chargeInr || 0));
+  // The factory that melted it is owed its charge: the one the gold goes to,
+  // or — when the gold comes to us — the one named as having melted it.
+  const chargeTo = c.to === "factory" ? c.factoryId : c.meltedBy;
+  if (gold.grams > 0 && c.to === "factory" && c.factoryId) {
     const mi: MaterialIssuance = {
       id: uid("mi_"), factoryId: c.factoryId, material: "gold", purityOrQuality: gold.purity,
       quantityIssued: gold.grams, source: "melt", meltOf: o.id, issuedAt: at, issuedBy: by.id, status: "open",
-      finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
+      finishedPieces: [], makingCharges: { amountInr: chargeTo === c.factoryId ? charge : 0, payments: [] },
       notes: `Melted ${o.orderNumber}${c.reason ? ` — ${c.reason}` : ""}`,
     };
-    if (!d.materialIssuances) d.materialIssuances = [];
     d.materialIssuances.unshift(mi);
     goldRec = { to: "factory", factoryId: c.factoryId, grams: gold.grams, purity: gold.purity, issuanceId: mi.id };
-  } else if (gold.grams > 0 && c.goldTo === "stock-karat") {
+  } else if (gold.grams > 0 && c.to === "stock") {
     goldRec = { to: "stock", grams: gold.grams, purity: gold.purity };
+  }
+  // A charge owed to a factory that did not get the gold back: a line of its
+  // own in that factory's books — no gold moves with it, only the charge.
+  if (charge > 0 && chargeTo && !(goldRec?.to === "factory" && goldRec.factoryId === chargeTo)) {
+    d.materialIssuances.unshift({
+      id: uid("mi_"), factoryId: chargeTo, material: "gold", purityOrQuality: gold.purity,
+      quantityIssued: 0, source: "melt", meltOf: o.id, issuedAt: at, issuedBy: by.id, status: "closed",
+      finishedPieces: [], makingCharges: { amountInr: charge, payments: [] },
+      notes: `Melting charge — ${o.orderNumber}`,
+    });
   }
   for (const p of d.diamondPackets ?? []) {
     if (plan.packetIds.includes(p.id)) { p.status = "in_stock"; p.orderId = undefined; }
@@ -153,6 +179,7 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
     at, by: by.id, byName: by.name, reason: c.reason?.trim() || undefined,
     gold: goldRec, diamonds: meltStones(plan, c).map(s => ({ quality: s.quality, ct: s.ct })),
     packetIds: plan.packetIds, labourInr: plan.labourInr, advanceToCredit: paid > 0 ? paid : undefined,
+    meltedBy: chargeTo || undefined, chargeInr: charge > 0 && chargeTo ? charge : undefined,
   };
   o.melted = rec;
   o.status = "Rejected";

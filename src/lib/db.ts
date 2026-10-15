@@ -348,6 +348,9 @@ export interface OrderMelt {
   labourInr: number;
   /** Advance the client had paid, moved to their credit. */
   advanceToCredit?: number;
+  /** The factory that melted it (when there was one), and its melting / refining charge, owed in its ledger. */
+  meltedBy?: string;
+  chargeInr?: number;
 }
 
 export interface ManufacturingLogEntry {

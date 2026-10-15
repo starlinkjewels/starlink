@@ -284,9 +284,9 @@ export function ReadyStockPage() {
               <Button onClick={openAdd} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />Add Item</Button>
             </DialogTrigger>
           )}
-          <DialogContent className="max-w-2xl rounded-2xl max-h-[90vh] overflow-y-auto">
+          <DialogContent className="max-w-5xl rounded-2xl">
             <DialogHeader><DialogTitle className="font-display text-2xl">{editingId ? "Edit Item" : "Add Ready Stock Item"}</DialogTitle></DialogHeader>
-            <div className="space-y-3 mt-2">
+            <div className="dlg-cols mt-2">
               <div className="grid grid-cols-3 gap-3">
                 {images.map((src, i) => (
                   <div key={i} className="relative group aspect-square rounded-xl overflow-hidden border border-border">
@@ -681,7 +681,7 @@ export function ReadyStockPage() {
 
       {/* Product video viewer */}
       <Dialog open={!!videoView} onOpenChange={o => { if (!o) setVideoView(null); }}>
-        <DialogContent className="max-w-2xl rounded-2xl p-2 sm:p-3">
+        <DialogContent className="max-w-4xl rounded-2xl p-2 sm:p-3">
           <DialogHeader className="px-2 pt-1"><DialogTitle className="font-display text-lg">Product Video</DialogTitle></DialogHeader>
           {videoView && <video src={videoView} controls autoPlay muted playsInline preload="metadata" className="w-full max-h-[70vh] rounded-xl bg-black" />}
         </DialogContent>
