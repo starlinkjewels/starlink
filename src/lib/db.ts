@@ -353,6 +353,43 @@ export interface OrderMelt {
   chargeInr?: number;
 }
 
+/**
+ * Pieces of a sold order that the client sent back — a sales return, written
+ * once by lib/salesReturn.ts. The sale itself is never edited: the credit
+ * comes off what the client owes on this order (orderTotal), and the credit
+ * note that carries it is printed against the original invoice. One credit
+ * note can cover pieces from several orders (they share `noteId`).
+ */
+export interface OrderReturn {
+  id: string;
+  noteId: string;
+  creditNoteNo: string;     // "CN-0001"
+  invoiceId?: string;       // the invoice the pieces were billed on, when there was one
+  at: string;
+  by: string;
+  byName: string;
+  reason?: string;
+  qty: number;              // pieces back (of order.quantity)
+  valueUsd: number;         // their share of the order value
+  giftBackUsd?: number;     // their share of a redeemed gift card — back on that card
+  shippingBackUsd?: number; // shipping refunded with them
+  certificateBackUsd?: number;
+  feeUsd?: number;          // a return / restocking charge the client still pays
+  cashbackBackUsd?: number; // cashback the pieces had earned, taken back off the unused card
+  cashbackChargedUsd?: number; // …and the part the client had already spent, left on their bill
+  /** What comes off the bill: value − giftBack + shippingBack + certificateBack − fee. */
+  creditUsd: number;
+  /** Money already paid on the order that the credit freed — moved to the client's credit. */
+  toCreditUsd?: number;
+  /** "coming" until the parcel reaches us; then the piece is in Ready Stock. */
+  status: "coming" | "received";
+  location?: string;        // where it comes back to (Ready Stock location)
+  priceUsd?: number;        // selling price per piece for Ready Stock
+  receivedAt?: string;
+  receivedBy?: string;
+  readyStockId?: string;    // the Ready Stock item it went into
+}
+
 export interface ManufacturingLogEntry {
   id: string;
   type: ManufacturingLogEntryType;
@@ -381,6 +418,8 @@ export interface Order {
   readyStockCreatedId?: string; // ReadyStockItem.id created from this order (once "Add to Ready Stock" is done)
   /** The finished piece was melted (lib/melt.ts) — it no longer exists. */
   melted?: OrderMelt;
+  /** Pieces the client sent back after the sale (lib/salesReturn.ts). */
+  returns?: OrderReturn[];
   // Gift card redeemed onto this order (a discount — reduces orderTotal). The card's
   // remaining balance is DERIVED from all orders that reference it (never trusted from the card doc).
   giftCardId?: string;
@@ -550,6 +589,8 @@ export interface GiftCard {
   expiresAt: string;        // ISO — 30 days from issue
   revoked?: boolean;        // admin cancelled it
   sourceOrderId?: string;   // for cashback: the order that earned it
+  /** Cashback taken back because pieces of the order that earned it were returned. */
+  takenBackUsd?: number;
 }
 
 export const GIFT_CARD_EXPIRY_DAYS = 30;
@@ -617,7 +658,7 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
   const eligible = orderIds.filter(oid => {
     const o = d.orders.find(x => x.id === oid);
     return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected"
-      && orderIsDispatched(o) && !orderInvoiced(d.invoices, oid);
+      && orderIsDispatched(o) && !orderInvoiced(d.invoices, oid) && keptQty(o) > 0;
   });
   if (!eligible.length) return null;
   const amount = eligible.reduce((s, oid) => {
@@ -1208,6 +1249,8 @@ export interface ReadyStockItem {
   notes?: string;
   createdBy: string;
   createdAt: string;
+  /** A piece a client sent back — its cost is that order's cost per piece. */
+  fromReturn?: { orderId: string; returnId: string };
 }
 
 export const READY_STOCK_LOCATIONS = ["US", "Hong Kong", "India", "Other"] as const;
@@ -1460,9 +1503,32 @@ export function orderGrossTotal(order: Order): number {
   return order.amount + (order.shippingCharge || 0) + (order.certificateFee || 0);
 }
 
-/** The amount the client owes in full — gross minus any redeemed gift card (a discount). */
+/** The amount the client owes in full — gross minus any redeemed gift card (a
+ *  discount) and minus the credit for any pieces they sent back. */
 export function orderTotal(order: Order): number {
-  return Math.max(0, Math.round((orderGrossTotal(order) - (order.giftCardRedeemed || 0)) * 100) / 100);
+  return Math.max(0, Math.round((orderGrossTotal(order) - (order.giftCardRedeemed || 0) - returnedCredit(order)) * 100) / 100);
+}
+
+// ── Sales returns (lib/salesReturn.ts writes them) ──
+/** Pieces of this order sent back. */
+export function returnedQty(o: Order): number {
+  return (o.returns ?? []).reduce((s, r) => s + r.qty, 0);
+}
+/** Pieces the client still has. */
+export function keptQty(o: Order): number {
+  return Math.max(0, (o.quantity || 1) - returnedQty(o));
+}
+/** What the returns took off the bill. */
+export function returnedCredit(o: Order): number {
+  return Math.round((o.returns ?? []).reduce((s, r) => s + r.creditUsd, 0) * 100) / 100;
+}
+/** The order value of the pieces the client kept (order value less returned pieces). */
+export function keptValue(o: Order): number {
+  return Math.max(0, Math.round(((o.amount || 0) - (o.returns ?? []).reduce((s, r) => s + r.valueUsd, 0)) * 100) / 100);
+}
+/** Every piece came back. */
+export function fullyReturned(o: Order): boolean {
+  return (o.returns?.length ?? 0) > 0 && keptQty(o) === 0;
 }
 
 export function balanceDue(order: Order): number {
@@ -1475,9 +1541,11 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
 
 /** USD still available on a card = granted − everything redeemed across live orders. */
 export function giftCardRemaining(card: GiftCard, orders: Order[]): number {
+  // A returned piece puts its share of the discount back on the card.
   const used = orders.reduce((s, o) =>
-    (o.giftCardId === card.id && o.status !== "Rejected") ? s + (o.giftCardRedeemed || 0) : s, 0);
-  return r2(Math.max(0, card.amount - used));
+    (o.giftCardId === card.id && o.status !== "Rejected")
+      ? s + (o.giftCardRedeemed || 0) - (o.returns ?? []).reduce((g, r) => g + (r.giftBackUsd || 0), 0) : s, 0);
+  return r2(Math.max(0, card.amount - (card.takenBackUsd || 0) - used));
 }
 
 export function giftCardExpired(card: GiftCard): boolean {
@@ -1542,12 +1610,17 @@ export function giftCardStatus(card: GiftCard, orders: Order[]): GiftCardStatus 
 export interface GiftCardStats { issued: number; used: number; pending: number; expired: number; count: number }
 /** Reconciling totals across a set of cards: issued = used + pending + expired.
  *  pending = remaining on still-usable cards; expired = remaining that lapsed unused. */
+/** What a card is worth: granted, less cashback taken back when its order's pieces were returned. */
+export function giftCardGranted(card: GiftCard): number {
+  return r2(Math.max(0, card.amount - (card.takenBackUsd || 0)));
+}
+
 export function giftCardStats(cards: GiftCard[], orders: Order[]): GiftCardStats {
   let issued = 0, used = 0, pending = 0, expired = 0;
   for (const c of cards) {
     const remaining = giftCardRemaining(c, orders);
-    issued = r2(issued + c.amount);
-    used = r2(used + (c.amount - remaining));
+    issued = r2(issued + giftCardGranted(c));
+    used = r2(used + (giftCardGranted(c) - remaining));
     if (!c.revoked && !giftCardExpired(c)) pending = r2(pending + remaining);
     else expired = r2(expired + remaining);
   }

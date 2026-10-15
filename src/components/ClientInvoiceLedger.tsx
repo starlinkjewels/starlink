@@ -1,11 +1,11 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import {
-  fmtMoney, fmtDate, orderTotal, orderGrossTotal, totalAdvance, balanceDue,
+  fmtMoney, fmtDate, orderTotal, orderGrossTotal, totalAdvance, balanceDue, returnedCredit,
   invoiceOrderIds, type Order, type Invoice, type Client,
 } from "@/lib/db";
 import { Input } from "@/components/ui/input";
-import { Search, Download, ChevronRight, FileText, Package } from "lucide-react";
+import { Search, Download, ChevronRight, FileText, Package, Undo2 } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
 
 export interface InvoiceBlock {
@@ -20,17 +20,22 @@ export interface InvoiceBlock {
     qty: number;
     gross: number;
     gift: number;
+    /** Credit for pieces sent back (credit notes). */
+    returned: number;
     net: number;
     received: number;
     balance: number;
   }[];
   gross: number;
   gift: number;
+  returned: number;
   net: number;
   received: number;
   balance: number;
   /** Payments received against this invoice's orders, for the drill-down. */
   payments: { id: string; date: string; note: string; amount: number }[];
+  /** Credit notes for pieces sent back, for the drill-down. */
+  credits: { id: string; date: string; note: string; amount: number }[];
 }
 
 /** One line per piece, the way it reads on the invoice itself. */
@@ -68,6 +73,7 @@ export function buildInvoiceBlocks(
     qty: o.quantity,
     gross: orderGrossTotal(o),
     gift: o.giftCardRedeemed || 0,
+    returned: returnedCredit(o),
     net: orderTotal(o),
     received: totalAdvance(o),
     balance: balanceDue(o),
@@ -75,6 +81,7 @@ export function buildInvoiceBlocks(
   const sum = (items: InvoiceBlock["items"]) => ({
     gross: items.reduce((s, i) => s + i.gross, 0),
     gift: items.reduce((s, i) => s + i.gift, 0),
+    returned: Math.round(items.reduce((s, i) => s + i.returned, 0) * 100) / 100,
     net: items.reduce((s, i) => s + i.net, 0),
     received: items.reduce((s, i) => s + i.received, 0),
     balance: items.reduce((s, i) => s + i.balance, 0),
@@ -106,6 +113,20 @@ export function buildInvoiceBlocks(
       .sort((a, b) => +new Date(a.date) - +new Date(b.date));
   };
 
+  // One line per credit note, however many of the invoice's orders it covers.
+  const creditsOf = (os: Order[]) => {
+    const by = new Map<string, { id: string; date: string; no: string; qty: number; amount: number; toCredit: number }>();
+    for (const o of os) for (const r of o.returns ?? []) {
+      const g = by.get(r.noteId) ?? { id: r.noteId, date: r.at, no: r.creditNoteNo, qty: 0, amount: 0, toCredit: 0 };
+      g.qty += r.qty; g.amount = Math.round((g.amount + r.creditUsd) * 100) / 100; g.toCredit = Math.round((g.toCredit + (r.toCreditUsd || 0)) * 100) / 100;
+      by.set(r.noteId, g);
+    }
+    return [...by.values()].map(g => ({
+      id: g.id, date: g.date, amount: g.amount,
+      note: `${g.no} — ${g.qty} piece${g.qty !== 1 ? "s" : ""} returned${g.toCredit > 0 ? ` · ${fmtMoney(g.toCredit)} already paid held as credit` : ""}`,
+    })).sort((a, b) => +new Date(a.date) - +new Date(b.date));
+  };
+
   for (const inv of invoices.filter(i => i.clientId === clientId)) {
     const os = invoiceOrderIds(inv)
       .map(id => mine.find(o => o.id === id))
@@ -113,7 +134,7 @@ export function buildInvoiceBlocks(
     const items = os.map(lineOf);
     blocks.push({
       id: inv.id, number: inv.number, date: inv.createdAt,
-      items, ...sum(items), payments: paymentsOf(os),
+      items, ...sum(items), payments: paymentsOf(os), credits: creditsOf(os),
     });
   }
 
@@ -153,9 +174,9 @@ export function ClientInvoiceLedger({
   }, [blocks, q, only]);
 
   const T = filtered.reduce((t, b) => ({
-    gross: t.gross + b.gross, gift: t.gift + b.gift,
+    gross: t.gross + b.gross, gift: t.gift + b.gift, returned: t.returned + b.returned,
     received: t.received + b.received, balance: t.balance + b.balance,
-  }), { gross: 0, gift: 0, received: 0, balance: 0 });
+  }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
   const closing = openingDebit - openingCredit + T.balance;
 
   const toggle = (id: string) =>
@@ -180,7 +201,7 @@ export function ClientInvoiceLedger({
         )}
       </div>
 
-      <div className="px-5 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
+      <div className={`px-5 pt-4 grid grid-cols-2 gap-2.5 ${T.returned > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
         <div className="rounded-xl p-3 text-center bg-secondary/60 text-brand-dark">
           <p className="text-[10px] uppercase tracking-wider opacity-70">Billed</p>
           <p className="text-base font-semibold mt-0.5">{fmtMoney(T.gross)}</p>
@@ -189,6 +210,12 @@ export function ClientInvoiceLedger({
           <p className="text-[10px] uppercase tracking-wider opacity-80">Gift card used</p>
           <p className="text-base font-semibold mt-0.5">{fmtMoney(T.gift)}</p>
         </div>
+        {T.returned > 0 && (
+          <div className="rounded-xl p-3 text-center bg-amber-500/10 text-amber-800">
+            <p className="text-[10px] uppercase tracking-wider opacity-80">Returned</p>
+            <p className="text-base font-semibold mt-0.5">{fmtMoney(T.returned)}</p>
+          </div>
+        )}
         <div className="rounded-xl p-3 text-center bg-success/10 text-success">
           <p className="text-[10px] uppercase tracking-wider opacity-80">Received</p>
           <p className="text-base font-semibold mt-0.5">{fmtMoney(T.received)}</p>
@@ -216,7 +243,7 @@ export function ClientInvoiceLedger({
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-sm min-w-[820px]">
+        <table className="w-full text-sm min-w-[900px]">
           <thead className="bg-secondary/60 text-muted-foreground text-xs">
             <tr>
               <th className="px-4 py-2 text-left font-semibold w-8" />
@@ -225,6 +252,7 @@ export function ClientInvoiceLedger({
               <th className="px-2 py-2 text-left font-semibold">Pieces</th>
               <th className="px-2 py-2 text-right font-semibold">Billed</th>
               <th className="px-2 py-2 text-right font-semibold">Gift card</th>
+              <th className="px-2 py-2 text-right font-semibold">Returned</th>
               <th className="px-2 py-2 text-right font-semibold">Received</th>
               <th className="px-4 py-2 text-right font-semibold">Balance</th>
             </tr>
@@ -236,12 +264,13 @@ export function ClientInvoiceLedger({
                 <td className="px-2 py-2.5 font-medium" colSpan={3}>Balance brought forward</td>
                 <td className="px-2 py-2.5 text-right">{openingDebit ? fmtMoney(openingDebit) : ""}</td>
                 <td />
+                <td />
                 <td className="px-2 py-2.5 text-right text-success">{openingCredit ? fmtMoney(openingCredit) : ""}</td>
                 <td className="px-4 py-2.5 text-right font-semibold">{fmtMoney(openingDebit - openingCredit)}</td>
               </tr>
             ) : null}
             {filtered.length === 0 ? (
-              <tr><td colSpan={8} className="px-5 py-10 text-center text-muted-foreground">Nothing to show.</td></tr>
+              <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">Nothing to show.</td></tr>
             ) : filtered.map(b => (
               <>
                 <tr key={b.id} onClick={() => toggle(b.id)}
@@ -256,6 +285,7 @@ export function ClientInvoiceLedger({
                   <td className="px-2 py-2.5 text-xs text-muted-foreground">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</td>
                   <td className="px-2 py-2.5 text-right font-medium">{fmtMoney(b.gross)}</td>
                   <td className="px-2 py-2.5 text-right text-primary">{b.gift ? `−${fmtMoney(b.gift)}` : ""}</td>
+                  <td className="px-2 py-2.5 text-right text-amber-800">{b.returned ? `−${fmtMoney(b.returned)}` : ""}</td>
                   <td className="px-2 py-2.5 text-right text-success">{b.received ? fmtMoney(b.received) : ""}</td>
                   <td className={`px-4 py-2.5 text-right font-semibold ${b.balance > 0.009 ? "text-destructive" : "text-success"}`}>
                     {b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"}
@@ -275,8 +305,19 @@ export function ClientInvoiceLedger({
                     </td>
                     <td className="px-2 py-1.5 text-right">{fmtMoney(i.gross)}</td>
                     <td className="px-2 py-1.5 text-right text-primary">{i.gift ? `−${fmtMoney(i.gift)}` : ""}</td>
+                    <td className="px-2 py-1.5 text-right text-amber-800">{i.returned ? `−${fmtMoney(i.returned)}` : ""}</td>
                     <td className="px-2 py-1.5 text-right text-success">{i.received ? fmtMoney(i.received) : ""}</td>
                     <td className="px-4 py-1.5 text-right">{i.balance > 0.009 ? fmtMoney(i.balance) : "—"}</td>
+                  </tr>
+                ))}
+
+                {open.has(b.id) && b.credits.map(c => (
+                  <tr key={`${b.id}-${c.id}`} className="bg-amber-500/5 text-xs">
+                    <td />
+                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(c.date)}</td>
+                    <td colSpan={4} className="px-2 py-1.5 text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 text-amber-700" />Credit note {c.note}</span></td>
+                    <td className="px-2 py-1.5 text-right text-amber-800 font-medium">−{fmtMoney(c.amount)}</td>
+                    <td colSpan={2} />
                   </tr>
                 ))}
 
@@ -284,7 +325,7 @@ export function ClientInvoiceLedger({
                   <tr key={`${b.id}-${p.id}`} className="bg-success/5 text-xs">
                     <td />
                     <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(p.date)}</td>
-                    <td colSpan={4} className="px-2 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
+                    <td colSpan={5} className="px-2 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
                     <td className="px-2 py-1.5 text-right text-success font-medium">{fmtMoney(p.amount)}</td>
                     <td className="px-2 py-1.5 text-right">
                       {onReversePayment && (
@@ -306,6 +347,7 @@ export function ClientInvoiceLedger({
               <td className="px-2 py-2.5" colSpan={3}>Totals</td>
               <td className="px-2 py-2.5 text-right">{fmtMoney(T.gross + openingDebit)}</td>
               <td className="px-2 py-2.5 text-right text-primary">{T.gift ? `−${fmtMoney(T.gift)}` : ""}</td>
+              <td className="px-2 py-2.5 text-right text-amber-800">{T.returned ? `−${fmtMoney(T.returned)}` : ""}</td>
               <td className="px-2 py-2.5 text-right text-success">{fmtMoney(T.received + openingCredit)}</td>
               <td className={`px-4 py-2.5 text-right ${closing > 0.009 ? "text-destructive" : "text-success"}`}>
                 {fmtMoney(Math.max(0, closing))}

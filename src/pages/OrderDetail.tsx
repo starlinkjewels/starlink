@@ -11,7 +11,7 @@ import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import { collectionLoaded,
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
   isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder,
@@ -33,6 +33,7 @@ import {
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
   Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame,
   CalendarClock, CalendarDays, Hash, UserRound,
+  Undo2,
 } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { motion, AnimatePresence } from "framer-motion";
@@ -55,6 +56,8 @@ import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRO
 import { downloadAsZip } from "@/lib/zipDownload";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesReturn";
+import { returnBlocker } from "@/lib/salesReturn";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -322,6 +325,8 @@ function OrderDetailPageBody() {
   const [issuing, setIssuing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [meltOpen, setMeltOpen] = useState(false);
+  const [returnOpen, setReturnOpen] = useState(false);
+  const mayReturn = useMayReturn();
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
@@ -2088,6 +2093,10 @@ function OrderDetailPageBody() {
                     <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700">{order.priority} priority</span>
                   )}
                   {order.melted && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive inline-flex items-center gap-1"><Flame className="h-3 w-3" />Melted</span>}
+                  {!!order.returns?.length && (() => {
+                    const back = order.returns.reduce((s, r) => s + r.qty, 0), of = order.quantity || 1;
+                    return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
+                  })()}
                 </div>
                 <h1 className="font-display text-3xl md:text-4xl text-brand-dark mt-1.5 leading-tight">{order.jewelleryType} in {order.metal}</h1>
                 <p className="text-sm text-muted-foreground mt-1">
@@ -2130,12 +2139,17 @@ function OrderDetailPageBody() {
                   </Button>
                   </IfExport>
                 )}
+                {mayReturn && !returnBlocker(order) && (
+                  <Button variant="outline" onClick={() => setReturnOpen(true)} className="rounded-xl text-amber-800 hover:text-amber-900 hover:bg-amber-500/10" title="The client sent pieces back — credit note, and the pieces into Ready Stock">
+                    <Undo2 className="h-4 w-4 mr-2" />Return
+                  </Button>
+                )}
                 {user!.role === "admin" && !order.melted && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
                   <Button variant="outline" onClick={() => setMeltOpen(true)} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" title="Melt this piece — gold back to a factory or stock, stones back to stock">
                     <Flame className="h-4 w-4 mr-2" />Melt
                   </Button>
                 )}
-                {user!.role === "admin" && order.status !== "Rejected" && (
+                {user!.role === "admin" && order.status !== "Rejected" && !order.returns?.length && (
                   <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
                     Cancel Order
                   </AsyncButton>
@@ -2242,7 +2256,8 @@ function OrderDetailPageBody() {
                     <p className={`font-semibold text-lg tabular-nums ${order.amount ? "text-brand-dark" : "text-muted-foreground italic font-medium text-base"}`}>
                       {order.amount ? fmtMoney(order.amount) : "Pricing pending"}
                     </p>
-                    {/* Its invoice, in red, right beside the price — or plainly none. */}
+                    {returnedCredit(order) > 0 && <span className="text-xs font-medium text-amber-800">−{fmtMoney(returnedCredit(order))} returned</span>}
+                    {/* Its invoice, in green, right beside the price — or plainly none. */}
                     {(() => {
                       const inv = findInvoiceForOrder(db.invoices, order.id);
                       if (inv || needsInvoice(order)) return <InvoiceBadge invoice={inv} dispatched={needsInvoice(order)} size="md" onOpen={n => nav(`/invoices?q=${encodeURIComponent(n)}`)} />;
@@ -2341,6 +2356,7 @@ function OrderDetailPageBody() {
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
           </div>
         )}
+        <OrderReturns order={order} />
         {order.melted && user!.role !== "client" && (() => {
           const m = order.melted;
           const fac = db.factories.find(f => f.id === m.gold?.factoryId)?.name;
@@ -2928,11 +2944,12 @@ function OrderDetailPageBody() {
           const shipping = order.shippingCharge || 0;
           const certFee  = order.certificateFee || 0;
           const total    = orderTotal(order);
-          const extraCols = (shipping > 0 ? 1 : 0) + (certFee > 0 ? 1 : 0);
+          const returned = returnedCredit(order);
+          const extraCols = (shipping > 0 ? 1 : 0) + (certFee > 0 ? 1 : 0) + (returned > 0 ? 1 : 0);
           // Three base tiles (Order Value, Total Paid, Balance Due) + optional
           // Shipping/Certificate — one tile per column so they sit on ONE row.
           const totalCols = 3 + extraCols;
-          const gridCols = totalCols <= 3 ? "sm:grid-cols-3" : totalCols === 4 ? "sm:grid-cols-4" : "sm:grid-cols-5";
+          const gridCols = totalCols <= 3 ? "sm:grid-cols-3" : totalCols === 4 ? "sm:grid-cols-4" : totalCols === 5 ? "sm:grid-cols-5" : "sm:grid-cols-6";
           return (
             <div className={`grid gap-3 grid-cols-2 ${gridCols}`}>
               <div className="p-3 rounded-xl bg-secondary text-center">
@@ -2951,6 +2968,12 @@ function OrderDetailPageBody() {
                   <p className="font-semibold text-sm text-amber-700">{fmtMoney(certFee)}</p>
                 </div>
               )}
+              {returned > 0 && (
+                <div className="p-3 rounded-xl bg-amber-500/5 border border-amber-500/30 text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Returned</p>
+                  <p className="font-semibold text-sm text-amber-800">−{fmtMoney(returned)}</p>
+                </div>
+              )}
               <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
                 <p className="text-xs text-muted-foreground mb-1">Total Paid</p>
                 <p className="font-semibold text-sm text-success">{fmtMoney(advTotal)}</p>
@@ -2958,13 +2981,14 @@ function OrderDetailPageBody() {
               <div className={`p-3 rounded-xl text-center border ${balance > 0 ? "bg-destructive/5 border-destructive/20" : orderTotal(order) <= 0 ? "bg-secondary border-border/40" : "bg-success/8 border-success/20"}`}>
                 <p className="text-xs text-muted-foreground mb-1">Balance Due</p>
                 <p className={`font-semibold text-sm ${balance > 0 ? "text-destructive" : orderTotal(order) <= 0 ? "text-muted-foreground" : "text-success"}`}>
-                  {balance > 0 ? fmtMoney(balance) : orderTotal(order) <= 0 ? "Pricing pending" : "✓ Cleared"}
+                  {balance > 0 ? fmtMoney(balance) : orderTotal(order) <= 0 ? (returned > 0 ? "Nothing due" : "Pricing pending") : "✓ Cleared"}
                 </p>
               </div>
-              {(shipping > 0 || certFee > 0) && (
+              {(shipping > 0 || certFee > 0 || returned > 0) && (
                 <div className={`col-span-2 ${gridCols.replace("sm:grid-cols-", "sm:col-span-")} px-1 pt-0.5 text-xs text-muted-foreground`}>
                   Order Total: <span className="font-semibold text-foreground">{fmtMoney(total)}</span>
                   {certFee > 0 && <span className="ml-1 text-amber-600">(incl. {fmtMoney(certFee)} certificate fee)</span>}
+                  {returned > 0 && <span className="ml-1 text-amber-800">(after {fmtMoney(returned)} returned)</span>}
                 </div>
               )}
             </div>
@@ -4271,6 +4295,7 @@ function OrderDetailPageBody() {
     </AnimatePresence>
 
     {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
+    {returnOpen && <ReturnDialog orders={[order]} invoice={findInvoiceForOrder(db.invoices, order.id)} onClose={() => setReturnOpen(false)} />}
 
     {/* ── Barcode band print/download modal ── */}
     <BandDialog

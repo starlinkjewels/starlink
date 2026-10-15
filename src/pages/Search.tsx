@@ -15,7 +15,9 @@ export function SearchPage() {
   const orders = q ? currentUserOrders(db, user!).filter(o =>
     o.orderNumber.toLowerCase().includes(ql) ||
     o.jewelleryType.toLowerCase().includes(ql) ||
-    (o.designNumber || "").toLowerCase().includes(ql)
+    (o.designNumber || "").toLowerCase().includes(ql) ||
+    // A credit note number finds the order its pieces came back from.
+    (o.returns ?? []).some(r => r.creditNoteNo.toLowerCase().includes(ql))
   ).slice(0, 8) : [];
   // Employees search the clients within their work; clients don't search the client list at all.
   const scopedClients = user!.role === "employee"
@@ -35,9 +37,9 @@ export function SearchPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Search</h1>
-      <Input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders, clients, employees, invoices..." className="rounded-xl h-12" />
+      <Input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders, clients, employees, invoices, credit notes..." className="rounded-xl h-12" />
       {q && <div className="space-y-4">
-        <Section title="Orders" icon={Package} items={orders.map(o => ({ id: o.id, to: `/orders/${o.id}`, title: o.orderNumber, sub: `${o.jewelleryType} - ${o.status}${o.designNumber ? ` · Design #${o.designNumber}` : ""}` }))} />
+        <Section title="Orders" icon={Package} items={orders.map(o => ({ id: o.id, to: `/orders/${o.id}`, title: o.orderNumber, sub: `${o.jewelleryType} - ${o.status}${o.designNumber ? ` · Design #${o.designNumber}` : ""}${o.returns?.length ? ` · returned on ${[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")}` : ""}` }))} />
         <Section title="Clients" icon={Users} items={clients.map(c => ({ id: c.id, to: `/clients`, title: c.companyName, sub: c.ownerName }))} />
         <Section title="Employees" icon={Briefcase} items={employees.map(u => ({ id: u.id, to: `/employees`, title: u.name, sub: u.department || "" }))} />
         <Section title="Invoices" icon={FileText} items={invoices.map(i => ({ id: i.id, to: `/invoices`, title: i.number, sub: `$${i.amount}` }))} />

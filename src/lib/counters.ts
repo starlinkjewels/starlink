@@ -150,6 +150,20 @@ export async function reserveVoucherNumber(txns: { voucherNo?: string }[]): Prom
 }
 
 
+/** Reserve a credit-note number for a sales return — "CN-0001". The floor is
+ *  the highest number already on any order's returns. */
+export async function reserveCreditNoteNumber(orders: { returns?: { creditNoteNo: string }[] }[]): Promise<string> {
+  const floor = highestSuffix(orders.flatMap((o) => (o.returns ?? []).map((r) => r.creditNoteNo)), 0) + 1;
+  const seq = await reserveSequence("creditNoteNo", floor);
+  return `CN-${String(seq).padStart(4, "0")}`;
+}
+
+/** Hand a credit-note number back when the return it was reserved for was never written. */
+export async function releaseCreditNoteNumber(no: string): Promise<void> {
+  const n = parseInt(no.replace(/^CN-/, ""), 10);
+  if (n > 0) await releaseSequence("creditNoteNo", n);
+}
+
 /** Reserve a globally-unique certified-diamond stock number ("DP-0007"). */
 export async function reserveDiamondStockNumber(packets: { stockNumber?: string }[]): Promise<string> {
   const floor = highestSuffix(packets.map((p) => p.stockNumber), 0) + 1;

@@ -8,7 +8,7 @@ import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,12 @@ function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; on
 
 /** The factory has reported back: net weight, purity and the finished piece are
  *  recorded, so the job itself is done even if the order has not shipped. */
+/** "RETURNED", or "2 OF 4 RETURNED" when the client kept some. */
+function returnTag(o: Order): string {
+  const back = returnedQty(o), of = o.quantity || 1;
+  return back >= of ? "RETURNED" : `${back} OF ${of} RETURNED`;
+}
+
 function jobFinished(o: Order): boolean {
   return !!(o.actualNetWeight || o.actualGrossWeight || o.actualDiamondWeight);
 }
@@ -97,6 +103,8 @@ export function OrdersPage() {
     // Shipped work that nobody has billed yet — the whole point of the badge,
     // gathered into one list instead of spotted by scrolling.
     else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
+    // Pieces the client sent back — whole orders or some of their pieces.
+    else if (status === "returned") list = list.filter(o => !!o.returns?.length);
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
     if (companyFilter !== "all") list = list.filter(o => companyIdOfClient(db.clients.find(c => c.id === o.clientId)) === companyFilter);
@@ -113,7 +121,8 @@ export function OrdersPage() {
     if (terms.length) list = list.filter(o => terms.some(t =>
       o.orderNumber.toLowerCase().includes(t) ||
       o.jewelleryType.toLowerCase().includes(t) ||
-      (o.designNumber ?? "").toLowerCase().includes(t)
+      (o.designNumber ?? "").toLowerCase().includes(t) ||
+      (o.returns ?? []).some(r => r.creditNoteNo.toLowerCase().includes(t))
     ));
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
@@ -205,6 +214,7 @@ export function OrdersPage() {
             <SelectItem value="all">All status</SelectItem>
             <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
             {isStaff && <SelectItem value="uninvoiced">Not invoiced (shipped)</SelectItem>}
+            <SelectItem value="returned">Returned by client</SelectItem>
             {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
               <SelectItem key={s} value={s}>{s}</SelectItem>)}
           </SelectContent>
@@ -416,6 +426,9 @@ export function OrdersPage() {
                       {o.melted ? "MELTED" : "JOB FINISH"}
                     </span>
                   )}
+                  {!!o.returns?.length && (
+                    <span className="self-start mt-1.5 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-800">{returnTag(o)}</span>
+                  )}
                   {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-1.5 text-xs" />}
                   {isStaff && (() => {
                     const wp = pieceWeights(o, db.materialIssuances).problem;
@@ -432,7 +445,8 @@ export function OrdersPage() {
                     {/* The price, with its invoice number in red right before it. */}
                     <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 mt-3 pt-2.5 border-t border-border/60">
                       {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} className="max-w-full" />}
-                      <span className="font-bold text-base tabular-nums text-brand-dark">{fmtMoney(o.amount)}</span>
+                      {!!o.returns?.length && <span className="text-xs tabular-nums text-muted-foreground line-through">{fmtMoney(o.amount)}</span>}
+                      <span className="font-bold text-base tabular-nums text-brand-dark">{fmtMoney(o.returns?.length ? keptValue(o) : o.amount)}</span>
                     </div>
                   </div>
                 </div>
@@ -493,6 +507,7 @@ export function OrdersPage() {
                     ) : jobFinished(o) && (
                       <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
                     )}
+                    {!!o.returns?.length && <p className="text-xs font-bold text-amber-800 mt-0.5">{returnTag(o)} — {[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")}</p>}
                     {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-0.5 text-xs" />}
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
@@ -554,7 +569,8 @@ export function OrdersPage() {
                     </div>
                     <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 shrink-0">
                       {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
-                      <span className="font-semibold text-sm">{fmtMoney(o.amount)}</span>
+                      {!!o.returns?.length && <span className="text-xs tabular-nums text-muted-foreground line-through">{fmtMoney(o.amount)}</span>}
+                      <span className="font-semibold text-sm">{fmtMoney(o.returns?.length ? keptValue(o) : o.amount)}</span>
                     </span>
                   </div>
                 </div>

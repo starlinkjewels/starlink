@@ -213,6 +213,11 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
   if (changes.some(c => c.col === "orders" && c.after?.melted && !c.before?.melted)) {
     return "A melt put metal and stones back in stock. It cannot be undone from here.";
   }
+  // A sales return reaches the client's credit, gift cards and Ready Stock;
+  // receiving or cancelling one does too. Its own Cancel return undoes it whole.
+  if (changes.some(c => c.col === "orders" && JSON.stringify(c.after?.returns ?? null) !== JSON.stringify(c.before?.returns ?? null))) {
+    return "A return changed the client's bill, their credit and Ready Stock. Use \"Cancel return\" on the order instead.";
+  }
   if (changes.some(c => c.col === "stockMovements")) {
     return "Stock levels moved with this. Reverse it with the record's own Remove or Cancel, which puts the stock back too.";
   }

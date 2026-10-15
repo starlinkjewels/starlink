@@ -10,13 +10,15 @@ import {
   fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, updateDb, uid,
   invoiceOrderIds, createInvoiceFromOrders, recordOrderPayment,
   mainDiamondShape, applyCreditToBills,
-  findInvoiceForOrder, worksOnClient, worksOnOrder, currentUserClients,
+  findInvoiceForOrder, worksOnClient, worksOnOrder, currentUserClients, keptQty,
 } from "@/lib/db";
 import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useSearchParams } from "react-router-dom";
-import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift } from "lucide-react";
+import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift, Undo2 } from "lucide-react";
+import { ReturnDialog, useMayReturn, printNote } from "@/components/SalesReturn";
+import { invoiceCreditNotes, returnBlocker } from "@/lib/salesReturn";
 import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -62,6 +64,9 @@ export function InvoicesPage() {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   // Invoice detail modal + inline per-order payment form.
   const [detailInvId, setDetailInvId] = useState<string | null>(null);
+  // Pieces sent back from an invoice — which orders, and how many of each to start with.
+  const [returning, setReturning] = useState<{ inv: Invoice; start?: Record<string, number> } | null>(null);
+  const mayReturn = useMayReturn();
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
@@ -578,9 +583,14 @@ export function InvoicesPage() {
                       <p className="font-medium">{client?.companyName || "—"}</p>
                       <p className="text-xs text-muted-foreground">{fmtDate(detailInv.createdAt)} · {orders.length} order{orders.length !== 1 ? "s" : ""}</p>
                     </div>
-                    <IfExport>
-                    <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
-                    </IfExport>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {mayReturn && orders.some(o => !returnBlocker(o)) && (
+                        <Button size="sm" variant="outline" onClick={() => setReturning({ inv: detailInv })} className="rounded-xl gap-2"><Undo2 className="h-3.5 w-3.5" /> Record return</Button>
+                      )}
+                      <IfExport>
+                      <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
+                      </IfExport>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-3 gap-2">
@@ -595,6 +605,17 @@ export function InvoicesPage() {
                       <span className="font-semibold text-primary">−{fmtMoney(gift)}</span>
                     </div>
                   )}
+
+                  {/* Pieces the client sent back: each credit note, and what it took off. */}
+                  {invoiceCreditNotes(db, orders.map(o => o.id)).map(n => (
+                    <div key={n.noteId} className="flex items-center justify-between gap-3 rounded-xl bg-amber-500/5 border border-amber-500/30 px-3 py-2 text-sm flex-wrap">
+                      <span className="flex items-center gap-1.5 text-muted-foreground"><Undo2 className="h-3.5 w-3.5 text-amber-700" /> Returned — credit note <span className="font-semibold text-brand-dark">{n.no}</span> · {n.qty} pc{n.qty !== 1 ? "s" : ""} · {fmtDate(n.at)}</span>
+                      <span className="flex items-center gap-2">
+                        <span className="font-semibold text-amber-800">−{fmtMoney(n.creditUsd)}</span>
+                        <IfExport><Button size="sm" variant="ghost" onClick={() => printNote(n.noteId)} className="rounded-lg h-7 px-2 gap-1 text-xs"><Printer className="h-3.5 w-3.5" /> Print</Button></IfExport>
+                      </span>
+                    </div>
+                  ))}
 
                   {/* Credit is money the client has sent that no invoice has
                       claimed yet. It sits on their account until somebody puts
@@ -630,11 +651,17 @@ export function InvoicesPage() {
                             <div className="min-w-0">
                               <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-sm font-semibold">{o.orderNumber}</Link>
                               <p className="text-[11px] text-muted-foreground">{o.jewelleryType} · {fmtMoney(orderTotal(o))} · paid {fmtMoney(oAdv)}{o.giftCardRedeemed ? ` · gift −${fmtMoney(o.giftCardRedeemed)}` : ""}</p>
+                              {!!o.returns?.length && (
+                                <p className="text-[11px] text-amber-700 font-medium">{o.returns.reduce((s, r) => s + r.qty, 0)} of {o.quantity || 1} pc{(o.quantity || 1) !== 1 ? "s" : ""} returned · {[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")}{o.returns.some(r => r.status === "coming") ? " · on its way back" : ""}</p>
+                              )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
                               <span className={`text-xs font-semibold ${oBal > 0 ? "text-destructive" : "text-success"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
                               {isStaff && can("payments", "add") && oBal > 0 && payOrderId !== o.id && (
                                 <Button size="sm" variant="outline" onClick={() => startPay(o.id)} className="rounded-lg h-8 gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Receive</Button>
+                              )}
+                              {mayReturn && !returnBlocker(o) && (
+                                <Button size="sm" variant="ghost" onClick={() => setReturning({ inv: detailInv, start: { [o.id]: keptQty(o) } })} className="rounded-lg h-8 gap-1.5 text-amber-800 hover:text-amber-900 hover:bg-amber-500/10"><Undo2 className="h-3.5 w-3.5" /> Return</Button>
                               )}
                             </div>
                           </div>
@@ -685,6 +712,11 @@ export function InvoicesPage() {
           })()}
         </DialogContent>
       </Dialog>
+      {returning && (
+        <ReturnDialog
+          orders={invoiceOrderIds(returning.inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o)}
+          invoice={returning.inv} start={returning.start} onClose={() => setReturning(null)} />
+      )}
     </div>
   );
 }

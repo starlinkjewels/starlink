@@ -1,6 +1,6 @@
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { activeGiftCardsFor, giftCardRemaining, giftMaxRedeemPctFor, fmtMoney, fmtDate } from "@/lib/db";
+import { activeGiftCardsFor, giftCardRemaining, giftCardGranted, giftMaxRedeemPctFor, fmtMoney, fmtDate } from "@/lib/db";
 import { Gift, Clock } from "lucide-react";
 
 function daysLeft(iso: string): number {
@@ -56,7 +56,7 @@ export function GiftCardPage() {
                   </span>
                 </div>
                 <p className="font-display text-2xl text-brand-dark mt-2">{fmtMoney(remaining)}</p>
-                <p className="text-xs text-muted-foreground">of {fmtMoney(c.amount)} · expires {fmtDate(c.expiresAt)}</p>
+                <p className="text-xs text-muted-foreground">of {fmtMoney(giftCardGranted(c))} · expires {fmtDate(c.expiresAt)}</p>
                 {c.note && <p className="text-xs text-muted-foreground mt-2 italic">"{c.note}"</p>}
               </div>
             );

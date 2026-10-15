@@ -1,7 +1,7 @@
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
 import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle } from "lucide-react";
@@ -79,7 +79,7 @@ export function Dashboard() {
     return months.map(({ m, y, month }) => ({
       name: m,
       orders: orders.filter(o => { const d = new Date(o.createdAt); return d.getMonth() === month && d.getFullYear() === y; }).length,
-      revenue: orders.filter(o => { const d = new Date(o.createdAt); return d.getMonth() === month && d.getFullYear() === y; }).reduce((s, o) => s + o.amount, 0),
+      revenue: orders.filter(o => { const d = new Date(o.createdAt); return d.getMonth() === month && d.getFullYear() === y; }).reduce((s, o) => s + keptValue(o), 0),
     }));
   }, [orders]);
 
@@ -109,7 +109,7 @@ export function Dashboard() {
     if (user?.role !== "employee") return 0;
     return db.orders
       .filter(o => o.assignedEmployeeId === user.id && o.status === "Delivered")
-      .reduce((s, o) => s + o.amount, 0);
+      .reduce((s, o) => s + keptValue(o), 0);
   }, [db.orders, user]);
   const myProfit = myRevenue - myExpenseTotal;
 

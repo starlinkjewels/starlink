@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
@@ -38,7 +38,7 @@ export function EmployeeDetailPage() {
 
   const activeOrders = orders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
   const deliveredOrders = orders.filter(o => o.status === "Delivered").length;
-  const totalValue = orders.reduce((s, o) => s + o.amount, 0);
+  const totalValue = orders.reduce((s, o) => s + keptValue(o), 0);
 
   const tasks = (db.tasks ?? []).filter(t => t.assignedTo === employee.id);
   const pendingTasks = tasks.filter(t => !t.completed).length;

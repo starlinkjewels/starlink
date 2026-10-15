@@ -22,6 +22,7 @@ import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { ReturnsComingPanel } from "@/components/SalesReturn";
 
 const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
 const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
@@ -438,6 +439,8 @@ export function ReadyStockPage() {
         )}
       </div>
 
+      {canManage && <ReturnsComingPanel />}
+
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[160px] sm:w-64 sm:flex-none">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -551,6 +554,9 @@ export function ReadyStockPage() {
                   <MapPin className="h-2.5 w-2.5" /> {item.location}
                 </span>
               )}
+              {canManage && item.fromReturn && (
+                <span title={item.notes} className="inline-flex items-center gap-1 mt-1 self-start text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>
+              )}
               <div className="flex items-center justify-between mt-3">
                 <p className="font-display text-xl font-bold text-brand-dark">{fmtMoney(item.price)}</p>
                 {canManage && can("readyStock", "edit") ? (
@@ -632,6 +638,9 @@ export function ReadyStockPage() {
                   <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">
                     <MapPin className="h-2.5 w-2.5" /> {item.location}
                   </span>
+                )}
+                {canManage && item.fromReturn && (
+                  <span title={item.notes} className="inline-flex items-center gap-1 mt-1 ml-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>
                 )}
               </div>
               <div className="text-right shrink-0">

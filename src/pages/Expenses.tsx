@@ -3,7 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Expense, ExpenseCategory } from "@/lib/db";
@@ -133,7 +133,7 @@ export function ExpensesPage() {
     if (!isEmployee) return 0;
     return db.orders
       .filter(o => o.assignedEmployeeId === user!.id && o.status === "Delivered")
-      .reduce((s, o) => s + o.amount, 0);
+      .reduce((s, o) => s + keptValue(o), 0);
   }, [db.orders, user, isEmployee]);
 
   // Per-employee summary for admin passbook cards
