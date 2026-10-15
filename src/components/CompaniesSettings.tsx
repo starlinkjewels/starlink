@@ -58,6 +58,10 @@ export function CompaniesSettings() {
 
   const clientsOf = (id: string) => db.clients.filter(c => companyIdOfClient(c) === id).length;
   const invoicesOf = (id: string) => (db.invoices ?? []).filter(i => companyIdOfInvoice(i) === id).length;
+  // Stock, purchases, factory work, Ready Stock and orders kept under it — any of
+  // these means it holds something, and deleting it would orphan them.
+  const holdingsOf = (id: string) => [db.orders, db.purchases, db.stockMovements, db.materialIssuances, db.readyStock, db.diamondPackets, db.diamondSales]
+    .reduce((n, list) => n + ((list as { companyId?: string }[] | undefined) ?? []).filter(r => r.companyId === id).length, 0);
 
   const toggle = async (c: Company) => {
     if (c.id === MAIN_COMPANY_ID) return;
@@ -68,6 +72,7 @@ export function CompaniesSettings() {
   };
   const remove = async (c: Company) => {
     if (clientsOf(c.id) || invoicesOf(c.id)) { toast.error("It has clients or invoices — stop using it instead."); return; }
+    if (holdingsOf(c.id)) { toast.error("It holds stock, orders or factory work — stop using it instead."); return; }
     if (!(await confirmBox(`Delete ${c.name}? It has no clients or invoices.`))) return;
     updateDb(d => { d.settings.companies = (d.settings.companies ?? []).filter(y => y.id !== c.id); });
     toast.success(`${c.name} deleted`);

@@ -16,6 +16,8 @@ export interface ReportCtx {
   clientIds?: Set<string>;
   /** Set when the admin looks at one employee's work. */
   employeeId?: string;
+  /** One of our companies, when one is chosen — its orders, purchases and factory work. */
+  companyId?: string;
   /** Changes whenever the data does — memo key. */
   version: number;
   /** A short name for the range, for export file names. */

@@ -1,3 +1,4 @@
+import { companyOf } from "@/lib/companies";
 import { DataTable } from "@/components/DataTable";
 import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
@@ -137,10 +138,12 @@ export interface ReportSectionsProps {
   scope?: (o: Order) => boolean;
   /** Changes when `scope` does, so the sections recompute. */
   scopeKey?: string;
+  /** One of our companies: its purchases and stock ledgers. */
+  companyId?: string;
 }
 
 /* ─────────────────────────────────────────────────────────────── */
-export function ReportSections({ embedded = false, show, period, clientId, scope, scopeKey = "" }: ReportSectionsProps = {}) {
+export function ReportSections({ embedded = false, show, period, clientId, scope, scopeKey = "", companyId }: ReportSectionsProps = {}) {
   const vis = (k: SectionKey) => !show || show.includes(k);
   const { user } = useAuth();
   const isClient   = user?.role === "client";
@@ -199,7 +202,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     if (!canSeeAll) return null;
     const inRange = makeInRange(matFrom, matTo);
     // Purchase date = supplier invoice date when recorded, else when it was entered.
-    const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt));
+    const rows = (db.purchases ?? []).filter(p => inRange(p.invoiceDate || p.createdAt) && (!companyId || companyOf(p) === companyId));
     const mk = () => ({ qty: 0, amount: 0, count: 0, stockQty: 0, stockAmt: 0, orderQty: 0, orderAmt: 0 });
     const g = mk(), dl = mk(), dc = mk(), ot = mk();
     const byPurity = new Map<string, { qty: number; amount: number }>();
@@ -229,7 +232,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       byPurity: [...byPurity.entries()].sort((a, b) => b[1].amount - a[1].amount),
       byShape:  [...byShape.entries()].sort((a, b) => b[1].amount - a[1].amount),
     };
-  }, [db.purchases, matFrom, matTo, canSeeAll]);
+  }, [db.purchases, matFrom, matTo, canSeeAll, companyId]);
 
   const matPeriodLabel   = periodLabel(matFrom, matTo);
   const payPeriodLabel   = periodLabel(payFrom, payTo);
@@ -555,7 +558,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const all = materialLedger(db.stockMovements ?? [], material, {
       purchases: db.purchases ?? [], issuances: db.materialIssuances ?? [], orders: db.orders ?? [],
       factories: db.factories ?? [], suppliers: db.suppliers ?? [], diamondSales: db.diamondSales ?? [], clients: db.clients ?? [],
-    });
+    }, companyId);
     return all.filter(r => {
       const k = ymd(r.createdAt);
       if (matFrom && k < matFrom) return false;

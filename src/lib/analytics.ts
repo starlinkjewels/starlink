@@ -1,3 +1,4 @@
+import { companyOf } from "@/lib/companies";
 import { orderTotal, balanceDue, toPureGold, pureFromPurity, type DB, type Order, type MaterialIssuance } from "./db";
 import { recognisedSale, saleDate, profitReport, rateOn } from "./orderCost";
 import { supplierAccount, factoryAccount } from "./manufacturing";
@@ -393,9 +394,10 @@ const fineOf = (mi: MaterialIssuance) => {
 };
 
 /** What each factory turned out in the period, the gold it used and what it charged. */
-export function factoryTable(db: DB, p: Period): FactoryRow[] {
+export function factoryTable(db: DB, p: Period, companyId?: string): FactoryRow[] {
   return db.factories.map(f => {
-    const iss = (db.materialIssuances ?? []).filter(i => i.factoryId === f.id);
+    // One company's work at the factory, when one is chosen.
+    const iss = (db.materialIssuances ?? []).filter(i => i.factoryId === f.id && (!companyId || companyOf(i) === companyId));
     const finishes = iss.filter(i => i.material === "gold" && i.finishedNetWeight != null && inPeriod(p, i.finishedPieces?.[0]?.recordedAt ?? i.issuedAt));
     const orderIds = new Set(finishes.map(i => i.orderId).filter(Boolean) as string[]);
     const days: number[] = [];
@@ -411,7 +413,8 @@ export function factoryTable(db: DB, p: Period): FactoryRow[] {
       if (charge > 0 && inPeriod(p, i.finishedPieces?.[0]?.recordedAt ?? i.issuedAt)) labourInr += charge;
     }
     // Owed today, the way the factory's own account reads it.
-    const labourPendingInr = Math.max(0, factoryAccount(iss, f, (db.factoryPayments ?? []).filter(x => x.factoryId === f.id)).chargesPending);
+    const firstCo = !companyId || companyId === "main"; // the opening balance and advances are the first company's
+    const labourPendingInr = Math.max(0, factoryAccount(iss, firstCo ? f : undefined, firstCo ? (db.factoryPayments ?? []).filter(x => x.factoryId === f.id) : []).chargesPending);
     const openOrders = new Set(iss.filter(i => i.status === "open" && i.orderId).map(i => i.orderId));
     return {
       id: f.id, name: f.name,
@@ -424,12 +427,12 @@ export function factoryTable(db: DB, p: Period): FactoryRow[] {
 }
 
 /** Material bought, month by month, in rupees — gold, diamonds and everything else apart. */
-export function purchasesMonthly(db: DB, p: Period, orders: Order[]): { month: string; label: string; goldInr: number; diamondInr: number; otherInr: number }[] {
+export function purchasesMonthly(db: DB, p: Period, orders: Order[], companyId?: string): { month: string; label: string; goldInr: number; diamondInr: number; otherInr: number }[] {
   return monthsOf(p, orders).map(month => {
     let goldInr = 0, diamondInr = 0, otherInr = 0;
     for (const pu of db.purchases ?? []) {
       const at = pu.invoiceDate || pu.createdAt;
-      if (monthKey(at) !== month || !inPeriod(p, at)) continue;
+      if (monthKey(at) !== month || !inPeriod(p, at) || (companyId && companyOf(pu) !== companyId)) continue;
       if (pu.material === "gold") goldInr += pu.totalInr;
       else if (pu.material === "diamond") diamondInr += pu.totalInr;
       else otherInr += pu.totalInr; // platinum, gemstones, findings (Settings → Materials)

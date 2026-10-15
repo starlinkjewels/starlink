@@ -1,4 +1,4 @@
-import type { Client, Company, DB, Invoice, Settings, User } from "./db";
+import type { Client, Company, DB, Invoice, Order, Settings, User } from "./db";
 
 /**
  * Our companies — separate businesses, often in different countries, each
@@ -52,6 +52,36 @@ export function companyById(s: Settings, id: string | undefined): Company {
 /** The company a client buys from. */
 export function companyIdOfClient(c: Pick<Client, "companyId"> | undefined): string {
   return c?.companyId || MAIN_COMPANY_ID;
+}
+
+/** The company a record belongs to — anything without one is the first company's. */
+export function companyOf(r: { companyId?: string } | undefined): string {
+  return r?.companyId || MAIN_COMPANY_ID;
+}
+
+/** For writing: the field to put on a record, or nothing for the first company
+ *  (older records have none, and they are the first company's). */
+export function coField(companyId: string | undefined): { companyId?: string } {
+  return companyId && companyId !== MAIN_COMPANY_ID ? { companyId } : {};
+}
+
+/** The company an order is for: fixed on it when placed; older orders, their client's. */
+export function companyOfOrder(db: Pick<DB, "clients">, o: Pick<Order, "companyId" | "clientId" | "forReadyStock"> | undefined): string {
+  if (!o) return MAIN_COMPANY_ID;
+  if (o.companyId) return o.companyId;
+  if (o.forReadyStock || !o.clientId) return MAIN_COMPANY_ID;
+  return companyIdOfClient(db.clients.find(c => c.id === o.clientId));
+}
+
+/**
+ * Whose stock and factory account an order's material work uses. A job that
+ * already has material at the factory keeps that company — so an order begun
+ * before stock was kept per company stays where its gold went — and a new job
+ * uses the order's own company.
+ */
+export function workCompanyOf(db: Pick<DB, "clients" | "materialIssuances">, o: Pick<Order, "id" | "companyId" | "clientId" | "forReadyStock">): string {
+  const first = (db.materialIssuances ?? []).find(i => i.orderId === o.id && i.source !== "melt");
+  return first ? companyOf(first) : companyOfOrder(db, o);
 }
 
 /** The company that issued an invoice — fixed when it was raised. */

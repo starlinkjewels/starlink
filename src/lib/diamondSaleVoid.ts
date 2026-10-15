@@ -1,3 +1,4 @@
+import { companyOf } from "@/lib/companies";
 import { updateDb, type DB, type DiamondSale } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
 import { fmtMoneyInr } from "@/lib/manufacturing";
@@ -50,7 +51,7 @@ export async function voidDiamondSale(db: DB, sale: DiamondSale, userId: string)
   // removed with the stone never coming back.
   if (sale.kind === "loose") {
     await increaseStock({
-      material: "diamond", purityOrQuality: sale.shape, quantity: sale.carat,
+      material: "diamond", companyId: companyOf(sale), purityOrQuality: sale.shape, quantity: sale.carat,
       refType: "manual", refId: sale.id, createdBy: userId,
       note: "Sale cancelled — returned to stock",
     });

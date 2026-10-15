@@ -66,6 +66,26 @@ export function subscribeStockLevels(onChange: (levels: StockLevels) => void, co
   );
 }
 
+/** Every company's counter at once, by company — call the returned unsubscribe on unmount. */
+export function subscribeStockLevelsByCompany(companyIds: string[], onChange: (byCompany: Record<string, StockLevels>) => void): () => void {
+  const got: Record<string, StockLevels> = {};
+  const offs = companyIds.map(id => subscribeStockLevels(levels => { got[id] = levels; onChange({ ...got }); }, id));
+  return () => offs.forEach(off => off());
+}
+
+/** Several counters added together — the whole business's stock. */
+export function sumStockLevels(list: StockLevels[]): StockLevels {
+  const out: Record<string, Record<string, number>> = { gold: {}, diamond: {} };
+  for (const lv of list) {
+    for (const [field, map] of Object.entries(lv as unknown as Record<string, unknown>)) {
+      if (!map || typeof map !== "object") continue;
+      const into = (out[field] ??= {});
+      for (const [k, q] of Object.entries(map as Record<string, number>)) into[k] = (into[k] || 0) + (Number(q) || 0);
+    }
+  }
+  return { ...out, updatedAt: new Date().toISOString(), version: 0 } as unknown as StockLevels;
+}
+
 export async function fetchStockLevels(companyId?: string): Promise<StockLevels> {
   const snap = await getDoc(stockRef(companyId));
   if (!snap.exists()) {
@@ -95,9 +115,9 @@ export async function increaseStock(args: {
   companyId?: string;
   purityOrQuality: string;
   quantity: number;
-  refType: "purchase" | "manual" | "opening";
+  refType: "purchase" | "manual" | "opening" | "transfer";
   refId?: string;
-  valueInr?: number; // only for an "opening" stock entry — its ₹ valuation
+  valueInr?: number; // an "opening" entry's ₹ valuation, or a "transfer"'s cost at the sending company
   createdBy: string;
   note?: string;
   createdAt?: string; // as-of date (opening stock) — defaults to now
@@ -142,7 +162,7 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "materialIssuance" | "order" | "purchase" | "diamondSale";
+  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "transfer";
   refId?: string;
   createdBy: string;
   note?: string;
@@ -254,6 +274,36 @@ export async function decreaseStockSelfHealing(
       throw e;
     }
   }
+}
+
+/**
+ * Move stock from one of our companies to another: out of the sender's
+ * counter (floor-checked, as any issue), into the receiver's, both legs
+ * sharing one id. The receiving leg carries what it cost the sender, so the
+ * receiver's own average cost is right from the first gram.
+ */
+export async function transferStock(args: {
+  material: MaterialKey;
+  purityOrQuality: string;
+  quantity: number;
+  fromCompany: string;
+  toCompany: string;
+  valueInr?: number;
+  createdBy: string;
+  note?: string;
+}): Promise<string> {
+  if (args.fromCompany === args.toCompany) throw new Error("Choose two different companies.");
+  const refId = uid("tr_");
+  const what = `${args.quantity} ${args.purityOrQuality}`;
+  await decreaseStock({
+    material: args.material, companyId: args.fromCompany, purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+    type: "issuance_out", refType: "transfer", refId, createdBy: args.createdBy, note: args.note ?? `Moved ${what} to another company`,
+  });
+  await increaseStock({
+    material: args.material, companyId: args.toCompany, purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+    refType: "transfer", refId, valueInr: args.valueInr, createdBy: args.createdBy, note: args.note ?? `Moved in ${what} from another company`,
+  });
+  return refId;
 }
 
 /**

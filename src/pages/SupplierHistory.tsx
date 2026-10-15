@@ -1,5 +1,7 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
+import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
+import { coField, workCompanyOf } from "@/lib/companies";
 import { isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -179,6 +181,8 @@ function SupplierHistoryPageBody() {
   // required because a purchase book is checked against it: without one there is
   // no telling which chitthis have been entered and which are still waiting.
   const [billNo, setBillNo] = useState("");
+  // Whose stock the bill goes into; a line bought for an order goes to that order's company.
+  const [billCompany, setBillCompany] = useState(useDefaultCompany());
   const roundOffInr = Math.round(Number(roundOff) || 0);
   const grandTotalInr = linesTotalInr + roundOffInr;
 
@@ -215,9 +219,10 @@ function SupplierHistoryPageBody() {
     }
 
     const now = new Date().toISOString();
-    const entries = resolved.map(({ line, linkedOrderId }) => ({
-      id: uid("pur_"), line, linkedOrderId, totalInr: purchaseLineTotalInr(line),
-    }));
+    const entries = resolved.map(({ line, linkedOrderId }) => {
+      const order = linkedOrderId ? db.orders.find(o => o.id === linkedOrderId) : undefined;
+      return { id: uid("pur_"), line, linkedOrderId, totalInr: purchaseLineTotalInr(line), companyId: order ? workCompanyOf(db, order) : billCompany };
+    });
     if (roundOffInr !== 0 && entries.length > 0) entries[0].totalInr += roundOffInr;
 
     setRecordingPurchase(true);
@@ -231,7 +236,7 @@ function SupplierHistoryPageBody() {
         // own packet (created in the updateDb below). Loose diamonds pool by shape.
         if (line.material === "diamond" && line.diaKind === "certified") continue;
         await increaseStock({
-          material: line.material,
+          material: line.material, companyId: entry.companyId,
           purityOrQuality: line.material === "gold" ? line.goldPurity : isOtherMaterial(line.material) ? (line.otherGrade.trim() || "—") : line.diaShape,
           quantity: line.material === "gold" ? Number(line.goldWeight) : isOtherMaterial(line.material) ? Number(line.otherQty) : Number(line.diaCarat),
           refType: "purchase",
@@ -247,6 +252,7 @@ function SupplierHistoryPageBody() {
             id: entry.id,
             supplierId: id!,
             material: line.material,
+            ...coField(entry.companyId),
             gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
             other: isOtherMaterial(line.material) ? { qty: Number(line.otherQty), grade: line.otherGrade.trim() || "—", ratePerUnit: Number(line.otherRate) || 0 } : undefined,
             diamond: line.material === "diamond" ? {
@@ -281,6 +287,7 @@ function SupplierHistoryPageBody() {
             d.diamondPackets.unshift({
               id: uid("dp_"),
               stockNumber: nextDiamondStockNumber(d),
+              ...coField(entry.companyId),
               shape: line.diaShape,
               carat,
               quality: line.diaQuality || undefined,
@@ -725,6 +732,7 @@ function SupplierHistoryPageBody() {
           <div className="pt-2 border-t border-border/60 space-y-3">
             <p className="text-sm font-medium text-brand-dark">Record Purchase</p>
 
+            <CompanyPicker value={billCompany} onChange={setBillCompany} label="Company — whose stock this is" hint="A line bought for a particular order goes to that order's company." />
             <div>
               <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
               <Input value={billNo} onChange={e => setBillNo(e.target.value)}

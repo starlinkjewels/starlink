@@ -1,3 +1,4 @@
+import { companyOf } from "@/lib/companies";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
@@ -11,7 +12,8 @@ import type { ReportCtx } from "./context";
 export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
   const { db, orders, period, version } = ctx;
   const data = useMemo(() => {
-    const inP = (db.purchases ?? []).filter(p => inPeriod(period, p.invoiceDate || p.createdAt));
+    // One company's purchases, when one is chosen.
+    const inP = (db.purchases ?? []).filter(p => inPeriod(period, p.invoiceDate || p.createdAt) && (!ctx.companyId || companyOf(p) === ctx.companyId));
     const gold = inP.filter(p => p.material === "gold");
     const dia = inP.filter(p => p.material === "diamond");
     const oth = inP.filter(p => p.material !== "gold" && p.material !== "diamond");
@@ -27,7 +29,7 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
       othCount: oth.length,
       pay: payables(db),
       fine: fineGoldRate(db, period.to ? `${period.to}T23:59:59` : new Date().toISOString()),
-      months: purchasesMonthly(db, period, orders),
+      months: purchasesMonthly(db, period, orders, ctx.companyId),
       suppliers: [...bySupplier.entries()].map(([id, v]) => ({ id, name: db.suppliers.find(s => s.id === id)?.name ?? "—", value: v })).sort((a, b) => b.value - a.value).slice(0, 8),
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -36,8 +38,11 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
 
   return (
     <div className="space-y-4">
-      {(ctx.employeeId || ctx.clientIds) && (
+      {(ctx.employeeId || ctx.clientIds) && !ctx.companyId && (
         <p className="text-[11px] text-muted-foreground px-1">Purchases and what suppliers and factories are owed are for the whole business — they are not split by client or employee.</p>
+      )}
+      {ctx.companyId && (
+        <p className="text-[11px] text-muted-foreground px-1">Purchases are this company&rsquo;s; what suppliers and factories are owed is for the whole business, since payments are not yet kept per company.</p>
       )}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />

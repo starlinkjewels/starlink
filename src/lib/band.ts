@@ -4,7 +4,7 @@
 //   • "label" — a 50×30mm spec label (barcode + type/metal/weights + optional price).
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
-import { brandFor, companyIdOfClient } from "./companies";
+import { brandFor, companyOf, companyOfOrder } from "./companies";
 import { pieceWeights } from "./weights";
 import { jsPDF } from "jspdf";
 import { exportAllowed } from "./access";
@@ -107,8 +107,8 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
 export function generateBand(order: Order, settings: Settings, opts: BandOpts): void {
   const d = loadDb();
   const { gross, net, diamondCt: diaCt } = pieceWeights(order, d.materialIssuances ?? []);
-  // The tag names the company selling the piece — the client's.
-  const seller = brandFor(settings, companyIdOfClient(d.clients.find(c => c.id === order.clientId)));
+  // The tag names the company selling the piece — the order's own.
+  const seller = brandFor(settings, companyOfOrder(d, order));
   runBand({
     code: order.orderNumber,
     label: order.designNumber ? `#${order.designNumber}` : "",
@@ -122,10 +122,12 @@ export function generateBand(order: Order, settings: Settings, opts: BandOpts): 
 /** Band for a Ready Stock item (barcode = SKU, or the item id when no SKU). */
 export function generateStockBand(item: ReadyStockItem, settings: Settings, opts: BandOpts): void {
   const gross = item.grossWeight ?? 0, net = item.netWeight ?? 0, diaCt = item.diamondWeight ?? 0;
+  // The company whose Ready Stock the piece is in.
+  const owner = brandFor(settings, companyOf(item));
   runBand({
     code: item.sku || item.id,
     label: item.sku ? `#${item.sku}` : item.name.slice(0, 14),
-    company: settings.companyName || "STARLINK JEWELS",
+    company: owner.companyName || "STARLINK JEWELS",
     jewelleryType: item.jewelleryType,
     metalLine: `${item.metal}${item.productKarats ? ` ${item.productKarats}` : ""}`,
     gross, net, less: lessWeight(gross, net, diaCt), diaCt, price: item.price,

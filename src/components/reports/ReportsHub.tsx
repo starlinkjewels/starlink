@@ -1,4 +1,5 @@
-import { companiesOf, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
+import { companiesOf, companyById, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
+import type { Order } from "@/lib/db";
 import { useMemo, useState } from "react";
 import { Building2, BarChart3, CalendarDays, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog, X } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -68,9 +69,10 @@ export function ReportsHub() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [emp?.id, version]);
   const empScope = emp ? (o: { assignedEmployeeId?: string; clientId: string }) => o.assignedEmployeeId === emp.id || empClients.has(o.clientId) : undefined;
+  // An order is its company's — fixed when it was placed, in-house builds included.
   const orders = useMemo(
     () => allOrders.filter(o => (clientId === "all" || o.clientId === clientId) && (!empScope || empScope(o))
-      && (companyId === "all" || coClients.has(o.clientId))),
+      && (companyId === "all" || companyOfOrder(db, o) === companyId)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [allOrders, clientId, emp?.id, empClients, companyId, coClients],
   );
@@ -88,6 +90,7 @@ export function ReportsHub() {
     withProfit: isAdmin && costDataReady(), isAdmin,
     clientIds: scopeClients,
     employeeId: emp?.id,
+    companyId: companyId === "all" ? undefined : companyId,
     version,
     fileTag: [period.from || "start", period.to || "today"].join("_to_")
       + (clientId !== "all" ? `_${(db.clients.find(c => c.id === clientId)?.companyName ?? "client").replace(/\W+/g, "-")}` : "")
@@ -95,7 +98,7 @@ export function ReportsHub() {
   };
   const preset = presetOf(period);
   const combinedScope = empScope || companyId !== "all"
-    ? (o: { assignedEmployeeId?: string; clientId: string }) => (!empScope || empScope(o)) && (companyId === "all" || coClients.has(o.clientId))
+    ? (o: Order) => (!empScope || empScope(o)) && (companyId === "all" || companyOfOrder(db, o) === companyId)
     : undefined;
   const clients = [...db.clients]
     .filter(c => companyId === "all" || coClients.has(c.id))
@@ -200,7 +203,7 @@ export function ReportsHub() {
               The company Profit &amp; Loss — running costs, exchange differences, net profit — is for the whole business, so it is not shown for one person. Their profit by client and by item is above.
             </p>
           )}
-          <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
+          <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
         </>
       )}
       {activeTab === "clients" && <ClientsTab ctx={ctx} />}
@@ -208,17 +211,17 @@ export function ReportsHub() {
       {activeTab === "production" && (
         <>
           <ProductionTab ctx={ctx} />
-          <ReportSections embedded show={["speed", "stages"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
+          <ReportSections embedded show={["speed", "stages"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
         </>
       )}
       {activeTab === "purchases" && (
         <>
           <PurchasesTab ctx={ctx} />
-          <ReportSections embedded show={["purchases", "payments"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
+          <ReportSections embedded show={["purchases", "payments"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
         </>
       )}
       {activeTab === "orders" && (
-        <ReportSections embedded show={["orders"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} />
+        <ReportSections embedded show={["orders"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />
       )}
     </div>
   );

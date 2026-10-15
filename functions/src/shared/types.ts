@@ -31,6 +31,7 @@ export interface MaterialIssuance {
   finishDisposition?: string;
   finishReturnedCt?: number;
   finishReturnedQty?: number;
+  companyId?: string;
   finishedNetWeight?: number;
   finishedPurity?: number;
   finishedKarat?: string;

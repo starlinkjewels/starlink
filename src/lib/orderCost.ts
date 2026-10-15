@@ -1,6 +1,10 @@
 import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/materials";
+import { companyOf } from "@/lib/companies";
+
+/** In one company's books — or every company's when none is given. */
+const inCo = (r: { companyId?: string }, companyId?: string) => !companyId || companyId === "all" || companyOf(r) === companyId;
 
 const fmtRate = (n: number, unit: string) =>
   `₹${n.toLocaleString("en-IN", { maximumFractionDigits: 2 })}/${unit}`;
@@ -121,11 +125,20 @@ const qtyOf = (p: Purchase) => purchaseQty(p);
  *
  * Null when nothing in the pool has ever had a price.
  */
-export function stockAverageRate(db: DB, material: string, bucket: string, at: string): number | null {
+export function stockAverageRate(db: DB, material: string, bucket: string, at: string, companyId?: string): number | null {
+  // Each company holds its own stock, so its pool is valued from its own
+  // arrivals; with nothing priced of its own yet, every company's together.
+  if (companyId && companyId !== "all") return poolAverage(db, material, bucket, at, companyId) ?? poolAverage(db, material, bucket, at);
+  return poolAverage(db, material, bucket, at);
+}
+
+function poolAverage(db: DB, material: string, bucket: string, at: string, companyId?: string): number | null {
   const purchases = new Map((db.purchases ?? []).map(p => [p.id, p]));
   const cutoff = +new Date(at);
   const moves = (db.stockMovements ?? [])
-    .filter(m => m.material === material && m.purityOrQuality === bucket && +new Date(m.createdAt) <= cutoff)
+    .filter(m => m.material === material && m.purityOrQuality === bucket && +new Date(m.createdAt) <= cutoff
+      // One company's pool; or all together, where a move between our companies is no arrival at all.
+      && (companyId ? companyOf(m) === companyId : m.refType !== "transfer"))
     .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
 
   let bal = 0;
@@ -142,7 +155,9 @@ export function stockAverageRate(db: DB, material: string, bucket: string, at: s
       if (p?.orderId) continue; // bought for one order, never in the pool
       const pq = p ? qtyOf(p) : 0;
       if (p && pq > 0) rate = p.totalInr / pq;
-    } else if (m.refType === "opening" && m.valueInr != null && q > 0) {
+    } else if ((m.refType === "opening" || m.refType === "transfer") && m.valueInr != null && q > 0) {
+      // Opening stock at the value it was entered with; stock moved in from
+      // another of our companies at what it cost there.
       rate = m.valueInr / q;
     }
 
@@ -168,15 +183,28 @@ export function stockAverageRate(db: DB, material: string, bucket: string, at: s
  * on file is used instead, and the basis says so. Null when no gold has ever
  * been bought with a price — then gold is reported as missing, never guessed.
  */
-export function fineGoldRate(db: DB, at: string): { rate: number; basis: string } | null {
+export function fineGoldRate(db: DB, at: string, companyId?: string): { rate: number; basis: string } | null {
+  // One company's gold lots; with none of its own yet, every company's together.
+  if (companyId && companyId !== "all") {
+    const own = fineGoldLots(db, at, companyId);
+    if (own) return own;
+    const all = fineGoldLots(db, at);
+    return all && { ...all, basis: `${all.basis}, across all our companies` };
+  }
+  return fineGoldLots(db, at);
+}
+
+function fineGoldLots(db: DB, at: string, companyId?: string): { rate: number; basis: string } | null {
   const lots: { at: number; fine: number; inr: number }[] = [];
   for (const p of db.purchases ?? []) {
-    if (p.material !== "gold" || !p.gold || !(p.totalInr > 0)) continue;
+    if (p.material !== "gold" || !p.gold || !(p.totalInr > 0) || !inCo(p, companyId)) continue;
     const fine = toPureGold(p.gold.weightGrams || 0, p.gold.purity);
     if (fine > 0) lots.push({ at: +new Date(p.createdAt), fine, inr: p.totalInr });
   }
   for (const m of db.stockMovements ?? []) {
-    if (m.material !== "gold" || m.refType !== "opening" || m.valueInr == null || !(m.valueInr > 0)) continue;
+    // Opening stock — and, inside one company, gold moved in from another of ours at its cost there.
+    const lot = m.refType === "opening" || (companyId && m.refType === "transfer" && m.type === "purchase_in");
+    if (m.material !== "gold" || !lot || m.valueInr == null || !(m.valueInr > 0) || !inCo(m, companyId)) continue;
     const fine = toPureGold(Math.abs(m.quantity), m.purityOrQuality);
     if (fine > 0) lots.push({ at: +new Date(m.createdAt), fine, inr: m.valueInr });
   }
@@ -231,7 +259,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       const fine = finishedFine(mi);
       if (fine <= 0) continue;
       const when = mi.finishedPieces?.[0]?.recordedAt ?? mi.issuedAt;
-      const fg = fineGoldRate(db, when);
+      const fg = fineGoldRate(db, when, companyOf(mi));
       const purityTxt = mi.finishedPurity != null ? `${mi.finishedPurity}‰` : (mi.finishedKarat || mi.purityOrQuality);
       if (!fg) {
         out.missing.push({
@@ -297,14 +325,15 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     // factory — which is our gold too, sent there earlier from the same pool.
     // Valued at the pool's average on the day it went out. If our stock of
     // that purity has never had a price on it, it is reported, not guessed.
-    const avg = stockAverageRate(db, mi.material, mi.purityOrQuality, mi.issuedAt)
-      ?? stockAverageRate(db, mi.material, mi.purityOrQuality, new Date().toISOString());
+    // Valued in the books of the company whose material it was.
+    const avg = stockAverageRate(db, mi.material, mi.purityOrQuality, mi.issuedAt, companyOf(mi))
+      ?? stockAverageRate(db, mi.material, mi.purityOrQuality, new Date().toISOString(), companyOf(mi));
     const where = mi.source === "factoryPool" ? `from ${mi.material === "gold" ? "gold" : "material"} held at the factory` : "from stock";
     if (avg === null && mi.material === "gold") {
       // No purchase of this exact karat — value its fine content instead, at
       // what fine gold has cost. Provisional until the finished piece is in.
       const fine = toPureGold(used, mi.purityOrQuality);
-      const fg = fineGoldRate(db, mi.issuedAt);
+      const fg = fineGoldRate(db, mi.issuedAt, companyOf(mi));
       if (fg && fine > 0) {
         bucket.push({
           label: `${used}g ${mi.purityOrQuality} ${where} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis}) — until the finished weight is in`,

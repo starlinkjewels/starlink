@@ -16,6 +16,8 @@ import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layer
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
+import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
+import { coField, companyOf } from "@/lib/companies";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 type Mode = "buy" | "assign" | "sell" | "opening";
@@ -80,6 +82,7 @@ type BuyKind = "gold" | "loose" | "certified" | "other";
 function OpeningStock() {
   const { user } = useAuth();
   const db = useDb();
+  const [companyId, setCompanyId] = useState(useDefaultCompany()); // whose stock it is
   const [kind, setKind] = useState<BuyKind>("gold"); // gold | loose | certified | other
   const [materialId, setMaterialId] = useState("");
   const [grade, setGrade] = useState("");
@@ -116,7 +119,7 @@ function OpeningStock() {
         updateDb(d => {
           if (!d.diamondPackets) d.diamondPackets = [];
           d.diamondPackets.unshift({
-            id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape, carat: q,
+            id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape, carat: q, ...coField(companyId),
             quality: quality.trim() || undefined,
             color: color.trim() || undefined, clarity: clarity.trim() || undefined,
             cut: cut.trim() || undefined, polish: polish.trim() || undefined, symmetry: sym.trim() || undefined,
@@ -134,7 +137,7 @@ function OpeningStock() {
       const material: MaterialKey = kind === "gold" ? "gold" : kind === "other" ? (materialId as MaterialKey) : "diamond";
       const bucket = kind === "gold" ? purity : kind === "other" ? (grade.trim() || "—") : shape;
       await increaseStock({
-        material,
+        material, companyId,
         purityOrQuality: bucket,
         quantity: q,
         refType: "opening",
@@ -155,6 +158,7 @@ function OpeningStock() {
       <p className="text-sm text-muted-foreground -mt-1">
         Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.
       </p>
+      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
 
       {/* Material kind — gold / loose diamond / certified diamond */}
       <div className="grid grid-cols-4 gap-1 p-1 bg-secondary rounded-xl">
@@ -242,6 +246,8 @@ function AssignGold() {
   const db = useDb();
   const addNew = useAddNew();
   const [factoryId, setFactoryId] = useState("");
+  // Whose stock it leaves, and whose share of the factory's pool it joins.
+  const [companyId, setCompanyId] = useState(useDefaultCompany());
   const [what, setWhat] = useState<"gold" | "other">("gold");
   const [materialId, setMaterialId] = useState("");
   const [grade, setGrade] = useState("");
@@ -255,8 +261,8 @@ function AssignGold() {
   const material: MaterialKey = what === "gold" ? "gold" : (materialId as MaterialKey);
   const bucket = what === "gold" ? purity : (grade.trim() || "—");
   const unit = materialUnit(db.settings, material);
-  const otherStock = what === "other" && materialId ? deriveStockBalances(db.stockMovements, materialId) : {};
-  const inStock = what === "gold" ? (deriveStockBalances(db.stockMovements, "gold")[purity] ?? 0) : (otherStock[bucket] ?? 0);
+  const otherStock = what === "other" && materialId ? deriveStockBalances(db.stockMovements, materialId, companyId) : {};
+  const inStock = what === "gold" ? (deriveStockBalances(db.stockMovements, "gold", companyId)[purity] ?? 0) : (otherStock[bucket] ?? 0);
 
   const submit = async () => {
     if (!factoryId) { toast.error("Choose a factory"); return; }
@@ -270,14 +276,14 @@ function AssignGold() {
     setSaving(true);
     try {
       await decreaseStockSelfHealing({
-        material, purityOrQuality: bucket, quantity: g,
+        material, companyId, purityOrQuality: bucket, quantity: g,
         type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
         note: `Assigned to ${factory?.name || "factory"}`,
       }, db.stockMovements);
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
         const mi: MaterialIssuance = {
-          id: issuanceId, factoryId, orderId: undefined, material,
+          id: issuanceId, factoryId, orderId: undefined, material, ...coField(companyId),
           purityOrQuality: bucket, quantityIssued: g, source: "stock",
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
@@ -296,6 +302,7 @@ function AssignGold() {
 
   return (
     <div className="space-y-3">
+      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock it leaves" />
       <div>
         <Label className="text-xs">Factory</Label>
         <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
@@ -303,7 +310,7 @@ function AssignGold() {
           <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
         </Select>
         {factoryId && (
-          <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold)}g fine (24KT)</span></p>
+          <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold, companyId)}g fine (24KT)</span></p>
         )}
       </div>
       <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
@@ -342,6 +349,7 @@ function SellDiamond() {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
+  const [companyId, setCompanyId] = useState(useDefaultCompany()); // whose stock it is sold from
   const [kind, setKind] = useState<SellKind>("loose");
   const [shape, setShape] = useState("Round");
   const [packetId, setPacketId] = useState("");
@@ -359,9 +367,9 @@ function SellDiamond() {
 
   const clients = db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
   const lockers = db.lockers.filter(l => l.active && (l.currency || "INR") === currency);
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock").sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const selectedPacket = inStockPackets.find(p => p.id === packetId);
-  const looseInStock = deriveStockBalances(db.stockMovements, "diamond")[shape] ?? 0;
+  const looseInStock = deriveStockBalances(db.stockMovements, "diamond", companyId)[shape] ?? 0;
 
   const effectiveCarat = kind === "certified" ? (selectedPacket?.carat ?? 0) : (Number(carat) || 0);
   const baseAmount = effectiveCarat * (Number(rate) || 0);
@@ -388,7 +396,7 @@ function SellDiamond() {
     try {
       if (kind === "loose") {
         await decreaseStockSelfHealing({
-          material: "diamond", purityOrQuality: shape, quantity: effectiveCarat,
+          material: "diamond", companyId, purityOrQuality: shape, quantity: effectiveCarat,
           type: "issuance_out", refType: "diamondSale", refId: saleId, createdBy: user!.id,
           note: `Sold to ${buyerLabel}`,
         }, db.stockMovements);
@@ -396,7 +404,7 @@ function SellDiamond() {
       updateDb(d => {
         if (!d.diamondSales) d.diamondSales = [];
         d.diamondSales.unshift({
-          id: saleId, kind, shape: saleShape, packetId: kind === "certified" ? packetId : undefined,
+          id: saleId, kind, shape: saleShape, packetId: kind === "certified" ? packetId : undefined, ...coField(companyId),
           carat: effectiveCarat, ratePerCarat: Number(rate), currency,
           totalUsd: currency === "USD" ? Math.round(baseAmount * 100) / 100 : undefined,
           exchangeRate: currency === "USD" ? Number(xrate) : undefined,
@@ -431,6 +439,7 @@ function SellDiamond() {
 
   return (
     <div className="space-y-3">
+      <CompanyPicker value={companyId} onChange={v => { setCompanyId(v); setPacketId(""); }} label="Company — whose stock it is sold from" />
       <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
         {(["loose", "certified"] as const).map(k => (
           <button key={k} type="button" onClick={() => { setKind(k); setPacketId(""); }}

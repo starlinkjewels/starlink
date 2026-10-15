@@ -37,6 +37,8 @@ import {
 } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
+import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
+import { CompanyBadge } from "@/components/CompanyFields";
 import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, purchaseText, type MaterialKey } from "@/lib/materials";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
@@ -347,6 +349,8 @@ function OrderDetailPageBody() {
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/orders" className="text-primary underline">Back</Link></div>;
+  // Whose stock and factory share this order's material work uses — each company holds its own.
+  const workCo = workCompanyOf(db, order);
 
   const client = db.clients.find(c => c.id === order.clientId);
   const employee = db.users.find(u => u.id === order.assignedEmployeeId);
@@ -547,7 +551,7 @@ function OrderDetailPageBody() {
       const first = entries.length;
       for (const line of bill.lines) {
         entries.push({ bill, line, purchase: {
-          id: uid("pur_"),
+          id: uid("pur_"), ...coField(workCo),
           supplierId: bill.supplierId,
           material: line.material,
           gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
@@ -609,7 +613,7 @@ function OrderDetailPageBody() {
       for (let i = 0; i < newPurchases.length; i++) {
         const { isCertified, qty, purityOrQuality } = lineMeta[i];
         if (isCertified) continue;
-        await logOrderDirectPurchase({
+        await logOrderDirectPurchase({ companyId: workCo,
           material: newPurchases[i].material, purityOrQuality, quantity: qty,
           purchaseId: newPurchases[i].id, orderId: order.id, createdBy: user!.id,
           // Same instant as the purchase itself, so the two legs stay findable.
@@ -647,7 +651,7 @@ function OrderDetailPageBody() {
             if (!d.diamondPackets) d.diamondPackets = [];
             const packetId = uid("dp_");
             const carat = Number(line.diaCarat) || 0;
-            d.diamondPackets.unshift({
+            d.diamondPackets.unshift({ ...coField(workCo),
               id: packetId, stockNumber: nextDiamondStockNumber(d), shape: line.diaShape, carat, quality: line.diaQuality || undefined,
               color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
               cut: line.diaCut.trim() || undefined, polish: line.diaPolish.trim() || undefined,
@@ -670,7 +674,7 @@ function OrderDetailPageBody() {
           if (!factoryId) continue;
           const issuanceId = uid("mi_");
           d.materialIssuances.unshift({
-            id: issuanceId, factoryId, orderId: order.id, material: purchase.material,
+            id: issuanceId, factoryId, orderId: order.id, material: purchase.material, ...coField(workCo),
             purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
             diamondKind: purchase.material === "diamond" ? line.diaKind : undefined,
             piecesIssued: purchase.material === "diamond" && line.diaKind === "loose" && Number(line.diaPcs) > 0
@@ -737,14 +741,14 @@ function OrderDetailPageBody() {
     try {
       // Stock first — an insufficient-stock error aborts before any record is written.
       if (goldG > 0 && rwGoldDir === "add" && rwGoldFrom === "stock") {
-        await decreaseStockSelfHealing({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${goldG}g ${rwGoldKarat} gold for ${order.orderNumber}` }, db.stockMovements);
+        await decreaseStockSelfHealing({ material: "gold", companyId: workCo, purityOrQuality: rwGoldKarat, quantity: goldG, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${goldG}g ${rwGoldKarat} gold for ${order.orderNumber}` }, db.stockMovements);
       } else if (goldG > 0 && rwGoldDir === "remove") {
-        await increaseStock({ material: "gold", purityOrQuality: rwGoldKarat, quantity: goldG, refType: "manual", createdBy: user!.id, note: `Rework −${goldG}g ${rwGoldKarat} gold from ${order.orderNumber} → stock` });
+        await increaseStock({ material: "gold", companyId: workCo, purityOrQuality: rwGoldKarat, quantity: goldG, refType: "manual", createdBy: user!.id, note: `Rework −${goldG}g ${rwGoldKarat} gold from ${order.orderNumber} → stock` });
       }
       if (diaCt > 0 && rwDiaDir === "add") {
-        await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: rwDiaShape, quantity: diaCt, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${diaCt}ct ${rwDiaShape} for ${order.orderNumber}` }, db.stockMovements);
+        await decreaseStockSelfHealing({ material: "diamond", companyId: workCo, purityOrQuality: rwDiaShape, quantity: diaCt, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${diaCt}ct ${rwDiaShape} for ${order.orderNumber}` }, db.stockMovements);
       } else if (diaCt > 0 && rwDiaDir === "remove") {
-        await increaseStock({ material: "diamond", purityOrQuality: rwDiaShape, quantity: diaCt, refType: "manual", createdBy: user!.id, note: `Rework −${diaCt}ct ${rwDiaShape} from ${order.orderNumber} → stock` });
+        await increaseStock({ material: "diamond", companyId: workCo, purityOrQuality: rwDiaShape, quantity: diaCt, refType: "manual", createdBy: user!.id, note: `Rework −${diaCt}ct ${rwDiaShape} from ${order.orderNumber} → stock` });
       }
 
       updateDb(d => {
@@ -758,7 +762,7 @@ function OrderDetailPageBody() {
           const purMille = KARAT_PURITY[kn] ? Math.round(KARAT_PURITY[kn] * 1000) : undefined;
           const iid = uid("mi_");
           d.materialIssuances.unshift({
-            id: iid, factoryId, orderId: o.id, material: "gold", purityOrQuality: rwGoldKarat,
+            id: iid, factoryId, orderId: o.id, material: "gold", ...coField(workCo), purityOrQuality: rwGoldKarat,
             quantityIssued: goldG, source: rwGoldFrom === "stock" ? "stock" : "factoryPool",
             finishedNetWeight: goldG, finishedKarat: rwGoldKarat, finishedPurity: purMille,
             finishedPieces: [{ id: uid("fp_"), quantityUsed: goldG, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
@@ -773,7 +777,7 @@ function OrderDetailPageBody() {
         if (diaCt > 0 && rwDiaDir === "add") {
           const iid = uid("mi_");
           d.materialIssuances.unshift({
-            id: iid, factoryId, orderId: o.id, material: "diamond", purityOrQuality: rwDiaShape,
+            id: iid, factoryId, orderId: o.id, material: "diamond", ...coField(workCo), purityOrQuality: rwDiaShape,
             quantityIssued: diaCt, source: "stock", diamondKind: "loose", finishReturnedCt: 0,
             finishedPieces: [{ id: uid("fp_"), quantityUsed: diaCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
             issuedAt: now, issuedBy: user!.id, status: "closed",
@@ -788,7 +792,7 @@ function OrderDetailPageBody() {
         if (charge > 0 && !chargeAttached) {
           const iid = uid("mi_");
           d.materialIssuances.unshift({
-            id: iid, factoryId, orderId: o.id, material: "gold", purityOrQuality: "—",
+            id: iid, factoryId, orderId: o.id, material: "gold", ...coField(workCo), purityOrQuality: "—",
             quantityIssued: 0, source: "factoryPool",
             finishedPieces: [], issuedAt: now, issuedBy: user!.id, status: "closed",
             makingCharges: { amountInr: charge, payments: [] },
@@ -846,7 +850,8 @@ function OrderDetailPageBody() {
     toast.success("Diamond totals saved");
   };
 
-  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock");
+  // The stones this order's company holds.
+  const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === workCo);
 
   // ── Final Approval popup: one window for all the actual details ──
   const [faIdx, setFaIdx] = useState<number | null>(null);
@@ -996,7 +1001,7 @@ function OrderDetailPageBody() {
       const releasesToPool = leftover > 0 && issuance.source === "factoryPool";
       if (returnsToStock) {
         await increaseStock({
-          material: issuance.material, purityOrQuality: issuance.purityOrQuality, quantity: leftover,
+          material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: leftover,
           refType: "manual", createdBy: user!.id,
           note: `Unused material returned on receiving finished piece for ${factory?.name || "factory"}`,
         });
@@ -1056,7 +1061,7 @@ function OrderDetailPageBody() {
         updateDb(d => {
           if (!d.materialIssuances) d.materialIssuances = [];
           d.materialIssuances.unshift({
-            id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: "diamond",
+            id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: "diamond", ...coField(workCo),
             purityOrQuality: "Certified", quantityIssued: totalCarat,
             source: "stock", diamondKind: "certified", diamondPacketIds: packets.map(p => p.id),
             issuedAt: now, issuedBy: user!.id, status: "open",
@@ -1104,7 +1109,7 @@ function OrderDetailPageBody() {
     try {
       if (resolvedSource === "stock") {
         await decreaseStockSelfHealing({
-          material: issueMaterial, purityOrQuality, quantity: qty,
+          material: issueMaterial, companyId: workCo, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
         }, db.stockMovements);
@@ -1112,7 +1117,7 @@ function OrderDetailPageBody() {
       updateDb(d => {
         if (!d.materialIssuances) d.materialIssuances = [];
         const issuance: MaterialIssuance = {
-          id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial,
+          id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial, ...coField(workCo),
           purityOrQuality, quantityIssued: qty,
           source: resolvedSource,
           issuedAt: now, issuedBy: user!.id, status: "open",
@@ -1346,9 +1351,9 @@ function OrderDetailPageBody() {
         const returnedBefore = i.finishReturnedCt || 0;
         const delta = Math.round((returnedNow - returnedBefore) * 1000) / 1000;
         if (delta > 0) {
-          await increaseStock({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}` });
+          await increaseStock({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}` });
         } else if (delta < 0) {
-          await decreaseStockSelfHealing({ material: "diamond", purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
+          await decreaseStockSelfHealing({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
         }
       }
       // Other materials the same way: only what came out of our stock goes back to it, by the change.
@@ -1357,9 +1362,9 @@ function OrderDetailPageBody() {
         const delta = Math.round((faXReturnedOf(i) - (i.finishReturnedQty || 0)) * 1000) / 1000;
         const u = materialUnit(db.settings, i.material), name = materialName(db.settings, i.material);
         if (delta > 0) {
-          await increaseStock({ material: i.material, purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}${u} ${name} returned on final approval for ${order.orderNumber}` });
+          await increaseStock({ material: i.material, companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}${u} ${name} returned on final approval for ${order.orderNumber}` });
         } else if (delta < 0) {
-          await decreaseStockSelfHealing({ material: i.material, purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `${name} re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
+          await decreaseStockSelfHealing({ material: i.material, companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `${name} re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
         }
       }
       updateDb(d => {
@@ -1370,7 +1375,7 @@ function OrderDetailPageBody() {
           let finish = d.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
           if (!finish) {
             finish = {
-              id: uid("mi_"), factoryId, orderId: order.id, material: "gold", purityOrQuality: karat,
+              id: uid("mi_"), factoryId, orderId: order.id, material: "gold", ...coField(workCo), purityOrQuality: karat,
               quantityIssued: 0, source: "factoryPool", issuedAt: now, issuedBy: user!.id, status: "closed",
               finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
             };
@@ -1503,13 +1508,13 @@ function OrderDetailPageBody() {
         // Stock-sourced: return only the part not actually consumed into a piece.
         const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
         const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
-        if (remaining > 0) await increaseStock({ material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user!.id, note: `Returned from cancelled order ${order.orderNumber}` });
+        if (remaining > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user!.id, note: `Returned from cancelled order ${order.orderNumber}` });
       } else if (mi.source === "purchase") {
         // Bought new for THIS order and sent to the factory (never entered the
         // shared pool). On cancel the piece isn't being made, so the material
         // comes back from the factory into general Stock, available for reuse.
         // The supplier purchase itself stays — that money was really spent.
-        if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user!.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock` });
+        if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user!.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock` });
       }
     }
     updateDb(d => {
@@ -2077,6 +2082,8 @@ function OrderDetailPageBody() {
         images: imgs,
         sku: o.designNumber || undefined,
         notes: `Built in-house from order ${o.orderNumber}`,
+        // The build's company — whose stock it was made from.
+        ...coField(companyOfOrder(db, o)),
         createdBy: user!.id,
         createdAt: new Date().toISOString(),
       });
@@ -2141,6 +2148,7 @@ function OrderDetailPageBody() {
                     <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700">{order.priority} priority</span>
                   )}
                   {order.melted && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive inline-flex items-center gap-1"><Flame className="h-3 w-3" />Melted</span>}
+                  {user!.role !== "client" && <CompanyBadge id={companyOfOrder(db, order)} />}
                   {!!order.returns?.length && (() => {
                     const back = order.returns.reduce((s, r) => s + r.qty, 0), of = order.quantity || 1;
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
@@ -3665,7 +3673,7 @@ function OrderDetailPageBody() {
                   <OtherMaterialSelect value={issueMaterial} onChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }} />
                   <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
                   <p className="text-[11px] text-muted-foreground sm:col-span-2">
-                    In stock: {fmtQty(deriveStockBalances(db.stockMovements, issueMaterial)[issueGrade.trim() || "—"] ?? 0, materialUnit(db.settings, issueMaterial))} of {issueGrade.trim() || "—"}
+                    In stock{hasCompanies(db.settings) ? ` (${companyById(db.settings, workCo).name})` : ""}: {fmtQty(deriveStockBalances(db.stockMovements, issueMaterial, workCo)[issueGrade.trim() || "—"] ?? 0, materialUnit(db.settings, issueMaterial))} of {issueGrade.trim() || "—"}
                   </p>
                 </div>
               ) : (

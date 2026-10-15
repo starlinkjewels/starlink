@@ -20,6 +20,7 @@
  * MaterialIssuance with no order), so the factory's fine-gold balance, its
  * pool and the totals the server keeps all count it with no new rule.
  */
+import { coField, workCompanyOf } from "./companies";
 import { isOtherMaterial, type MaterialKey } from "./materials";
 import {
   findInvoiceForOrder, toPureGold, pureFromPurity, uid, isDiamondOnlyOrder,
@@ -155,7 +156,7 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
   const chargeTo = c.to === "factory" ? c.factoryId : c.meltedBy;
   if (gold.grams > 0 && c.to === "factory" && c.factoryId) {
     const mi: MaterialIssuance = {
-      id: uid("mi_"), factoryId: c.factoryId, material: "gold", purityOrQuality: gold.purity,
+      id: uid("mi_"), factoryId: c.factoryId, material: "gold", ...coField(workCompanyOf(d, o)), purityOrQuality: gold.purity,
       quantityIssued: gold.grams, source: "melt", meltOf: o.id, issuedAt: at, issuedBy: by.id, status: "open",
       finishedPieces: [], makingCharges: { amountInr: chargeTo === c.factoryId ? charge : 0, payments: [] },
       notes: `Melted ${o.orderNumber}${c.reason ? ` — ${c.reason}` : ""}`,
@@ -169,7 +170,7 @@ export function applyMelt(d: DB, orderId: string, plan: MeltPlan, c: MeltChoice,
   // own in that factory's books — no gold moves with it, only the charge.
   if (charge > 0 && chargeTo && !(goldRec?.to === "factory" && goldRec.factoryId === chargeTo)) {
     d.materialIssuances.unshift({
-      id: uid("mi_"), factoryId: chargeTo, material: "gold", purityOrQuality: gold.purity,
+      id: uid("mi_"), factoryId: chargeTo, material: "gold", ...coField(workCompanyOf(d, o)), purityOrQuality: gold.purity,
       quantityIssued: 0, source: "melt", meltOf: o.id, issuedAt: at, issuedBy: by.id, status: "closed",
       finishedPieces: [], makingCharges: { amountInr: charge, payments: [] },
       notes: `Melting charge — ${o.orderNumber}`,

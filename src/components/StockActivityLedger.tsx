@@ -21,6 +21,7 @@ import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
+import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 
 const PAGE = 12;
 
@@ -33,6 +34,8 @@ interface Row {
   material: string;
   /** The materials on the row ("gold", "diamond", "mat_…") — what the Materials filter matches. */
   mats: string[];
+  /** Whose stock it was. */
+  co: string;
   qty: number;
   unit: MaterialUnit;
   amountInr?: number;
@@ -62,6 +65,7 @@ export function StockActivityLedger() {
   const [to, setTo] = useState("");
   const [kind, setKind] = useState("");
   const [material, setMaterial] = useState("");
+  const [company, setCompany] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [billFilter, setBillFilter] = useState("");
   const [editing, setEditing] = useState<Purchase | null>(null);
@@ -200,7 +204,7 @@ export function StockActivityLedger() {
       id: p.id, date: p.createdAt, kind: "Purchase",
       forOrder,
       party: db.suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier",
-      material: label, mats: [p.material], qty, unit, amountInr: p.totalInr,
+      material: label, mats: [p.material], co: companyOf(p), qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
       remark: p.notes || undefined,
       items: [{ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
@@ -216,7 +220,7 @@ export function StockActivityLedger() {
     if (m.refType !== "opening") continue;
     all.push({
       id: m.id, date: m.createdAt, kind: "Opening stock", party: "—",
-      material: `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(), mats: [m.material],
+      material: `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(), mats: [m.material], co: companyOf(m),
       qty: m.quantity, unit: materialUnit(db.settings, m.material),
       amountInr: m.valueInr, remark: m.note,
     });
@@ -228,7 +232,7 @@ export function StockActivityLedger() {
     all.push({
       id: i.id, date: i.issuedAt, kind: "Assigned to factory",
       party: db.factories.find(f => f.id === i.factoryId)?.name ?? "Factory",
-      material: `${materialName(db.settings, i.material)} ${i.purityOrQuality}`.trim(), mats: [i.material],
+      material: `${materialName(db.settings, i.material)} ${i.purityOrQuality}`.trim(), mats: [i.material], co: companyOf(i),
       qty: i.quantityIssued, unit: materialUnit(db.settings, i.material),
       remark: i.notes,
     });
@@ -239,7 +243,7 @@ export function StockActivityLedger() {
     all.push({
       id: s.id, date: s.createdAt, kind: "Diamond sold",
       party: s.clientId ? (db.clients.find(c => c.id === s.clientId)?.companyName ?? "Client") : (s.buyerName ?? "Buyer"),
-      material: `${s.shape}${s.kind === "certified" ? " (certified)" : ""}`, mats: ["diamond"],
+      material: `${s.shape}${s.kind === "certified" ? " (certified)" : ""}`, mats: ["diamond"], co: companyOf(s),
       qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,
     });
   }
@@ -250,6 +254,7 @@ export function StockActivityLedger() {
       if (!inDateRange(r.date, from, to)) return false;
       if (kind && r.kind !== kind) return false;
       if (material && !r.mats.includes(material)) return false;
+      if (company && r.co !== company) return false;
       // Purchases entered before the bill number was required — the ones that
       // still need tying back to a chitthi.
       if (billFilter === "none" && r.billNo) return false;
@@ -261,8 +266,8 @@ export function StockActivityLedger() {
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
-  const filtered = !!(ql || from || to || kind || material || billFilter);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setPage(1); };
+  const filtered = !!(ql || from || to || kind || material || billFilter || company);
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setCompany(""); setPage(1); };
   const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.date, { filtered, resetKey: [ql, from, to, kind, material, billFilter] });
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
@@ -336,6 +341,8 @@ export function StockActivityLedger() {
               ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
           { label: "Bills", value: billFilter, onChange: v => { setBillFilter(v); setPage(1); },
             options: [{ value: "none", label: "No bill number" }] },
+          ...(hasCompanies(db.settings) ? [{ label: "Companies", value: company, onChange: (v: string) => { setCompany(v); setPage(1); },
+            options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
         ]}
         active={filtered} onReset={reset}
         onPdf={exportPdf} onCsv={exportCsv}

@@ -1,3 +1,5 @@
+import { CompanyPicker, CompanyBadge, useDefaultCompany } from "@/components/CompanyFields";
+import { coField, companyOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { middleStages } from "@/lib/stages";
 import { WeightCheck } from "@/components/WeightCheck";
@@ -145,6 +147,10 @@ export function NewOrderPage() {
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
   const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
+  // The company the order is for: the client's; for an in-house build, the one chosen.
+  const [buildCompany, setBuildCompany] = useState(useDefaultCompany());
+  const orderCompany = forReadyStock ? buildCompany
+    : companyIdOfClient(db.clients.find(c => c.id === (isClient ? user?.clientId : f.clientId)));
   // Selling an EXISTING finished piece — specs come from the item, so the custom
   // design/production fields and the manufacturing timeline don't apply.
   const isReadyStockSale = f.materialSourcing === "readyStock";
@@ -176,7 +182,8 @@ export function NewOrderPage() {
 
   // ── Sell from Ready Stock (optional) — picking a finished piece auto-fills
   // the specs/price below instead of the client/staff typing a custom order.
-  const readyStockItems = db.readyStock.filter(i => i.quantity > 0).sort((a, b) => a.name.localeCompare(b.name));
+  // A piece is sold from the stock of the company the order is for.
+  const readyStockItems = db.readyStock.filter(i => i.quantity > 0 && (!hasCompanies(db.settings) || companyOf(i) === orderCompany)).sort((a, b) => a.name.localeCompare(b.name));
   const selectedStockItem = db.readyStock.find(i => i.id === f.readyStockItemId);
   // Search within Ready Stock (by name, SKU, type, metal or product ID) — helps
   // when there are many finished pieces to pick from.
@@ -283,6 +290,8 @@ export function NewOrderPage() {
         orderNumber: num,
         clientId,
         forReadyStock: forReadyStock || undefined,
+        // Fixed now: moving the client to another company later never moves this order.
+        ...coField(orderCompany),
         assignedEmployeeId,
         contactPerson: user!.name,
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
@@ -484,6 +493,12 @@ export function NewOrderPage() {
                 <PackageCheck className="h-5 w-5 text-primary shrink-0" />
                 <p className="text-xs text-muted-foreground">In-house build — no client, no billing. Produce it, then add the finished piece to Ready Stock from the order page.</p>
               </div>
+            )}
+            {forReadyStock && (
+              <div className="mt-3"><CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company — whose stock it is made from, whose Ready Stock it joins" /></div>
+            )}
+            {!forReadyStock && f.clientId && hasCompanies(db.settings) && (
+              <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1.5">For <CompanyBadge id={orderCompany} /> — the client&rsquo;s company: its stock and its Ready Stock.</p>
             )}
 
             {f.clientId && !forReadyStock && (() => {
