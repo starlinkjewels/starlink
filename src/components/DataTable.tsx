@@ -367,7 +367,11 @@ export function DataTable<T>({
                 </tr>
                 {isOpen && (
                   <tr className="bg-secondary/20">
-                    <td colSpan={cols} className="px-3 sm:px-5 py-4">{expand ? expand.render(r) : autoDetails(r)}</td>
+                    {/* On a phone the table scrolls sideways; what opened stays on the
+                        screen, the screen's width, however wide the table is. */}
+                    <td colSpan={cols} className="p-0">
+                      <div className="px-3 sm:px-5 py-4 max-md:sticky max-md:left-0 max-md:w-[calc(100vw-3.5rem)]">{expand ? expand.render(r) : autoDetails(r)}</div>
+                    </td>
                   </tr>
                 )}
                 </Fragment>
