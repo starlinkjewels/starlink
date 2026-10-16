@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate, type LockerTransaction } from "@/lib/db";
-import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
+import { lockerBalance } from "@/lib/manufacturing";
+import { ccy, fmtCcy, fmtCcyPdf } from "@/lib/currency";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
@@ -41,8 +42,11 @@ export function DayBook() {
   const [dir, setDir] = useState("");
 
   const locker = db.lockers.find(l => l.id === lockerId);
-  const ccy = (locker?.currency ?? "INR") as "INR" | "USD";
-  const money = (n: number) => fmtLockerAmount(n, ccy);
+  // Any currency the account is held in; on screen with its symbol, on the
+  // PDF in a form its font can draw (no ₹).
+  const code = ccy(locker?.currency);
+  const money = (n: number) => fmtCcy(n, code);
+  const pdfMoney = (n: number) => fmtCcyPdf(n, code);
 
   // Everything on this account, oldest first — the order the book is written in.
   const ledger = (db.lockerTransactions ?? [])
@@ -85,7 +89,7 @@ export function DayBook() {
   const particulars = (t: LockerTransaction) =>
     [t.category || t.type, t.note].filter(Boolean).join(" · ");
 
-  const HEAD = ["Date", "Voucher", "Particulars", `In (${ccy})`, `Out (${ccy})`, `Balance (${ccy})`];
+  const HEAD = ["Date", "Voucher", "Particulars", `In (${code})`, `Out (${code})`, `Balance (${code})`];
   // The download keeps the book's own order — oldest first — because a printed
   // page gets laid beside the written rojmel, which runs that way down the page.
   const body = matching.map(({ t, balance }) => [
@@ -99,13 +103,13 @@ export function DayBook() {
     title: `Day Book — ${locker?.name ?? "Account"}`,
     subjectLines: [
       `${matching.length} entr${matching.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)} · oldest first`,
-      `Opening ${money(locker?.openingBalance || 0)} · Closing ${money(closing)}`,
+      `Opening ${pdfMoney(locker?.openingBalance || 0)} · Closing ${pdfMoney(closing)}`,
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
-      { label: "Money in", value: money(totalIn) },
-      { label: "Money out", value: money(totalOut) },
-      { label: "Balance", value: money(closing) },
+      { label: "Money in", value: pdfMoney(totalIn) },
+      { label: "Money out", value: pdfMoney(totalOut) },
+      { label: "Balance", value: pdfMoney(closing) },
     ],
     landscape: true,
     columns: [
@@ -115,7 +119,7 @@ export function DayBook() {
     align: ["left", "left", "left", "right", "right", "right"],
     rows: matching.map(({ t, balance }) => [
       fmtDate(t.createdAt), t.voucherNo ?? "", particulars(t).slice(0, 62),
-      isIn(t) ? money(t.amountInr) : "", isIn(t) ? "" : money(t.amountInr), money(balance),
+      isIn(t) ? pdfMoney(t.amountInr) : "", isIn(t) ? "" : pdfMoney(t.amountInr), pdfMoney(balance),
     ]),
     filename: `Day-Book-${locker?.name?.replace(/\s+/g, "-") ?? "account"}`,
   });
@@ -159,7 +163,7 @@ export function DayBook() {
               className={`px-3 py-2 rounded-xl border text-left transition-colors ${on ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/60"}`}>
               <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{l.name}</span>
               <span className={`block text-sm font-semibold ${on ? "text-primary" : "text-brand-dark"}`}>
-                {fmtLockerAmount(bal, (l.currency ?? "INR") as "INR" | "USD")}
+                {fmtCcy(bal, l.currency)}
               </span>
             </button>
           );

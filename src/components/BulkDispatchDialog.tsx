@@ -11,6 +11,7 @@ import {
   type DispatchPlan, type ShippingCost,
 } from "@/lib/dispatch";
 import { orderDispatchedEmail, sendMail } from "@/lib/email";
+import { ccy, ccySymbol } from "@/lib/currency";
 import { Truck, AlertTriangle, Ban, PackageCheck } from "lucide-react";
 import { toast } from "sonner";
 
@@ -332,8 +333,10 @@ export function ShippingCostFields({ value, onChange, pieces }: {
   const db = loadDb();
   const lockers = (db.lockers ?? []).filter(l => l.active);
   const locker = lockers.find(l => l.id === value.lockerId);
-  const currency = locker ? ((locker.currency || "INR") === "USD" ? "USD" : "INR") : value.currency;
-  const sym = currency === "USD" ? "$" : "₹";
+  // The paying account's own currency, whatever it is (an AUD account's freight
+  // is A$); with no account, the ₹ / $ the courier bills in.
+  const currency = locker ? ccy(locker.currency) : ccy(value.currency);
+  const sym = ccySymbol(currency).trim();
   const num = (s: string) => Math.max(0, Number(s) || 0);
   return (
     <div className="rounded-xl border border-border/60 p-3 space-y-2.5">
@@ -368,7 +371,7 @@ export function ShippingCostFields({ value, onChange, pieces }: {
             onChange={e => onChange({ ...value, lockerId: e.target.value || undefined })}
             className="w-full h-9 mt-1 rounded-xl border border-input bg-background px-2 text-sm">
             <option value="">Not paid yet — courier bills later</option>
-            {lockers.map(l => <option key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</option>)}
+            {lockers.map(l => <option key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</option>)}
           </select>
         </div>
       </div>

@@ -19,6 +19,9 @@ const POOL_VERSION = 2;
  *  Materials) out of the diamond carats. A factory total from before it is
  *  not trusted: the page works the figures out from the records instead. */
 const FACTORY_VERSION = 3;
+/** The first version whose locker balance keeps its cents — a dollar or
+ *  dirham account. An older one is not trusted: worked out from the records. */
+const LOCKER_VERSION = 4;
 
 export type FactoryFigures = ReturnType<typeof factoryAccount> & { fineGold: number; goldPool: number; diaPool: number };
 export type SupplierFigures = ReturnType<typeof supplierAccount>;
@@ -36,7 +39,8 @@ export function totalsCovered(db: DB, kind: TotalsKind, withPool = false): boole
   const parties: { id: string }[] = kind === "factory" ? db.factories : kind === "supplier" ? db.suppliers : db.lockers;
   return parties.every(p => {
     const s = summaryOf(`${kind}_${p.id}`);
-    return !!s && (!withPool || num(s.v) >= POOL_VERSION) && (kind !== "factory" || num(s.v) >= FACTORY_VERSION);
+    return !!s && (!withPool || num(s.v) >= POOL_VERSION) && (kind !== "factory" || num(s.v) >= FACTORY_VERSION)
+      && (kind !== "locker" || num(s.v) >= LOCKER_VERSION);
   });
 }
 
@@ -78,7 +82,8 @@ export function supplierFigures(db: DB, sup: Supplier): SupplierFigures {
 
 /** A locker's balance, in its own currency. */
 export function lockerFigure(db: DB, l: Locker): number {
-  const s = collectionsLoaded(TOTALS_COLS.locker) ? undefined : summaryOf(`locker_${l.id}`);
+  const raw = collectionsLoaded(TOTALS_COLS.locker) ? undefined : summaryOf(`locker_${l.id}`);
+  const s = raw && num(raw.v) >= LOCKER_VERSION ? raw : undefined;
   if (s) return num(s.balance);
   return lockerBalance(l, db.lockerTransactions);
 }

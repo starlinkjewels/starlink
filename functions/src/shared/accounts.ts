@@ -249,7 +249,9 @@ export function lockerBalance(locker: Locker, transactions: LockerTransaction[])
     if (t.type === "income" || t.type === "transfer_in") bal += t.amountInr;
     else bal -= t.amountInr; // "expense" | "transfer_out"
   }
-  return r0(bal);
+  // To the cent: a dollar, dirham or euro account is counted in cents (and a
+  // rupee one shows whole rupees anyway).
+  return Math.round(bal * 100) / 100;
 }
 
 /**

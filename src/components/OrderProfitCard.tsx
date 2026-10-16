@@ -109,7 +109,7 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
             )}
             {x.heldUsd > 0 && (
               <p className="text-muted-foreground mt-1">
-                {fmtMoney(x.heldUsd)} is still in a dollar account — its gain or loss is realised when it is converted.
+                {fmtMoney(x.heldUsd)} is still held in a foreign account — its gain or loss is realised when it is converted.
               </p>
             )}
           </div>

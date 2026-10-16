@@ -11,6 +11,8 @@ import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { receiptForAdvance } from "@/lib/receipts";
+import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
+import { useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
@@ -377,7 +379,7 @@ export function NewOrderPage() {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
             id: advTxnId, lockerId: f.advanceLockerId, type: "income", amountInr: Number(f.advanceLockerAmount),
-            currency: locker.currency || "INR", category: `Client Payment — ${order.orderNumber}`,
+            currency: ccy(locker.currency), category: `Client Payment — ${order.orderNumber}`,
             refType: "clientPayment", refId: order.id, recordedBy: user!.id, createdAt: new Date().toISOString(),
           });
         }
@@ -437,6 +439,9 @@ export function NewOrderPage() {
   const certFee    = f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0;
   const grandTotal = Number(f.orderValue) + shipping + certFee;
   const balanceDue = Math.max(0, grandTotal - Number(f.advanceAmount));
+  // The advance is billed in USD; the locker it lands in can hold any currency.
+  const advLockerCcy = ccy(db.lockers.find(l => l.id === f.advanceLockerId)?.currency);
+  const advRate = useSuggestedRate("USD", advLockerCcy);
   const autoValue  = Math.round(Number(f.estimatedNetWeight) * metalRate + Number(f.diamondWeight) * diamondRate);
 
   // ── Gift card on this new order ──
@@ -1036,20 +1041,34 @@ export function NewOrderPage() {
                 <div className="grid md:grid-cols-2 gap-3">
                   <Field label="Deposited to Locker *">
                     <Select value={f.advanceLockerId} onValueChange={addNew("locker", v => {
-                      const l = loadDb().lockers.find(x => x.id === v);
-                      setF(prev => ({ ...prev, advanceLockerId: v, advanceLockerAmount: l?.currency === "USD" ? String(prev.advanceAmount) : "" }));
+                      const db0 = loadDb();
+                      const l = db0.lockers.find(x => x.id === v);
+                      const lc = ccy(l?.currency);
+                      // Dollars land as they are. Any other currency starts from the
+                      // Settings rate — still typed over with what actually landed.
+                      const rate = l && lc !== "USD" ? tableRate(db0.settings.currencyRates, "USD", lc) : undefined;
+                      setF(prev => ({
+                        ...prev, advanceLockerId: v,
+                        advanceLockerAmount: l && lc === "USD" ? String(prev.advanceAmount)
+                          : rate && Number(prev.advanceAmount) > 0 ? String(roundCcy(Number(prev.advanceAmount) * rate, lc)) : "",
+                      }));
                     })}>
                       <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                       <SelectContent>
-                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
                       <AddNewItem kind="locker" /></SelectContent>
                     </Select>
                   </Field>
                   {f.advanceLockerId && (
-                    <Field label={`Amount Deposited (${db.lockers.find(l => l.id === f.advanceLockerId)?.currency === "USD" ? "$" : "₹"})`}>
+                    <Field label={`Amount Deposited (${ccySymbol(advLockerCcy).trim()})`}>
                       <Input type="number" min={0} step="0.01" value={f.advanceLockerAmount}
                         onChange={e => set("advanceLockerAmount", e.target.value)}
                         className="rounded-xl h-11" />
+                      {advLockerCcy !== "USD" && advRate && Number(f.advanceAmount) > 0 && (
+                        <p className="text-[11px] text-muted-foreground">
+                          {fmtCcy(Number(f.advanceAmount), "USD")} at {rateText("USD", advLockerCcy, advRate)} is {fmtCcy(roundCcy(Number(f.advanceAmount) * advRate, advLockerCcy), advLockerCcy)} — enter what actually landed.
+                        </p>
+                      )}
                     </Field>
                   )}
                 </div>

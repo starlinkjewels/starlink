@@ -4,8 +4,9 @@ import { Lock, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate } from "@/lib/db";
-import { fmtLockerAmount } from "@/lib/manufacturing";
-import { listEntries, editEntry, deleteEntry, entryImpact, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
+import { ccy, ccyOrder, ccySymbol, fmtCcy, fmtCcyMix, fmtCcyPdf, rateOf, sumByCcy, type CurrencyCode } from "@/lib/currency";
+import { listEntries, editEntry, deleteEntry, entryImpact, transferLegs, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
+import { RateInput } from "@/components/CurrencyFields";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,6 +41,12 @@ const NOUN: Record<EntryKind, string> = {
   expense: "expense",
   locker: "transaction",
 };
+
+/** Totals in several currencies for a PDF, each kept apart — its font has no ₹. */
+function fmtMixPdf(m: Map<CurrencyCode, number>): string {
+  const parts = [...m.entries()].filter(([, v]) => Math.abs(v) > 0.0001).sort(([a], [b]) => ccyOrder(a, b));
+  return parts.length ? parts.map(([c, v]) => fmtCcyPdf(v, c)).join(" + ") : fmtCcyPdf(0, "INR");
+}
 
 /**
  * One table for every kind of money that isn't a client receipt. Each row can be
@@ -79,29 +86,55 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const filtered = !!(ql || from || to || party || acct || dir);
   const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); };
 
-  const totalOut = rows.filter(r => r.direction === "out").reduce((s, r) => s + r.amount, 0);
-  const totalIn = rows.filter(r => r.direction === "in").reduce((s, r) => s + r.amount, 0);
-  const anyUsd = rows.some(r => r.currency === "USD");
+  // Each currency totalled on its own — rupees and dollars are never added up.
+  const totalOut = sumByCcy(rows.filter(r => r.direction === "out"), r => r.amount, r => r.currency);
+  const totalIn = sumByCcy(rows.filter(r => r.direction === "in"), r => r.amount, r => r.currency);
+  const anyOf = (m: Map<CurrencyCode, number>) => [...m.values()].some(v => v > 0);
+
+  const lockerCcy = (id?: string) => ccy(db.lockers.find(l => l.id === id)?.currency);
+  /** The rate a transfer was recorded at, as 1 from = ? to, for this pair of accounts. */
+  const recordedRate = (entryId: string, fromId: string, toId: string): string => {
+    const legs = transferLegs(db, entryId);
+    const f = lockerCcy(fromId), t = lockerCcy(toId);
+    const r = legs && f !== t ? rateOf(legs.out, f, t) ?? rateOf(legs.inn, f, t) : undefined;
+    return r ? String(r) : "";
+  };
 
   const open = (e: MoneyEntry) => {
     if (e.locked) { toast.error(e.locked); return; }
     setEditing(e);
     // A transfer opens with both sides, so the destination can be corrected —
-    // sending money to the wrong account is the single most common slip.
-    const pair = e.transfer ? db.lockerTransactions.find(t => t.id === e.id) : undefined;
+    // sending money to the wrong account is the single most common slip. It
+    // opens the money's way round (from the account it left, for the amount
+    // that left it) whichever of its two rows was clicked; one whose other
+    // row is gone opens as itself, as before.
+    const legs = e.transfer ? transferLegs(db, e.id) : undefined;
+    const row = e.transfer && !legs ? db.lockerTransactions.find(t => t.id === e.id) : undefined;
+    const fromId = legs ? legs.out.lockerId : e.lockerId ?? "";
+    const toId = legs ? legs.inn.lockerId : row?.pairedLockerId ?? "";
+    const orphanRate = row && rateOf(row, lockerCcy(fromId), lockerCcy(toId));
     setEf({
-      amount: String(e.amount), date: e.date.slice(0, 10), note: e.note ?? "",
-      lockerId: e.lockerId ?? "",
-      toLockerId: pair?.pairedLockerId ?? "",
-      rate: pair?.exchangeRate ? String(pair.exchangeRate) : "",
+      amount: String(legs ? legs.out.amountInr : e.amount), date: e.date.slice(0, 10), note: e.note ?? "",
+      lockerId: fromId,
+      toLockerId: toId,
+      rate: legs ? recordedRate(e.id, fromId, toId) : orphanRate && orphanRate !== 1 ? String(orphanRate) : "",
     });
   };
+
+  /** A transfer's account changed: a rate for another pair of currencies means
+   *  nothing for this one, so it starts again from what the transfer was
+   *  recorded at between these two, else the rate field offers Settings' rate. */
+  const pickTransferSide = (side: "lockerId" | "toLockerId", v: string) => setEf(f => {
+    const next = { ...f, [side]: v };
+    const samePair = lockerCcy(f.lockerId) === lockerCcy(next.lockerId) && lockerCcy(f.toLockerId) === lockerCcy(next.toLockerId);
+    return samePair || !editing ? next : { ...next, rate: recordedRate(editing.id, next.lockerId, next.toLockerId) };
+  });
 
   const save = () => {
     if (!editing) return;
     const amt = Number(ef.amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    editEntry(editing, {
+    const refused = editEntry(editing, {
       amount: amt,
       date: `${ef.date}T${editing.date.slice(11) || "00:00:00.000Z"}`,
       note: ef.note,
@@ -110,6 +143,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       toLockerId: ef.toLockerId || undefined,
       exchangeRate: Number(ef.rate) || undefined,
     });
+    // Nothing was written — say why and leave the dialog open to fix it.
+    if (refused) { toast.error(refused); return; }
     toast.success("Entry corrected");
     setEditing(null);
   };
@@ -143,8 +178,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
-      { label: "Total out", value: fmtLockerAmount(totalOut, anyUsd ? undefined : "INR") },
-      { label: "Total in", value: fmtLockerAmount(totalIn, anyUsd ? undefined : "INR") },
+      { label: "Total out", value: fmtMixPdf(totalOut) },
+      { label: "Total in", value: fmtMixPdf(totalIn) },
     ],
     landscape: true,
     columns: [
@@ -157,8 +192,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
     rows: rows.map((e, i) => [
       String(i + 1), e.voucherNo ?? "", fmtDate(e.date),
       (e.party || "").slice(0, 30), (e.against ?? "").slice(0, 32),
-      e.direction === "out" ? fmtLockerAmount(e.amount, e.currency) : "",
-      e.direction === "in" ? fmtLockerAmount(e.amount, e.currency) : "",
+      e.direction === "out" ? fmtCcyPdf(e.amount, e.currency) : "",
+      e.direction === "in" ? fmtCcyPdf(e.amount, e.currency) : "",
       (db.lockers.find(l => l.id === e.lockerId)?.name ?? "").slice(0, 16),
       (e.note ?? "").slice(0, 16),
     ]),
@@ -186,9 +221,9 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
     { key: "against", header: "Against", sortValue: e => e.against ?? "",
       cell: e => <span className="block text-xs text-muted-foreground max-w-[150px] truncate" title={e.against ?? ""}>{e.against ?? "—"}</span> },
     { key: "out", header: "Out", align: "right", kind: "number", sortValue: e => (e.direction === "out" ? e.amount : null),
-      cell: e => (e.direction === "out" ? <CellAmount tone="out">{fmtLockerAmount(e.amount, e.currency)}</CellAmount> : null) },
+      cell: e => (e.direction === "out" ? <CellAmount tone="out">{fmtCcy(e.amount, e.currency)}</CellAmount> : null) },
     { key: "in", header: "In", align: "right", kind: "number", sortValue: e => (e.direction === "in" ? e.amount : null),
-      cell: e => (e.direction === "in" ? <CellAmount tone="in">{fmtLockerAmount(e.amount, e.currency)}</CellAmount> : null) },
+      cell: e => (e.direction === "in" ? <CellAmount tone="in">{fmtCcy(e.amount, e.currency)}</CellAmount> : null) },
     { key: "account", header: "Account", sortValue: e => lockerName(e.lockerId),
       cell: e => <span className="block text-xs text-muted-foreground max-w-[120px] truncate">{lockerName(e.lockerId) || "—"}</span> },
     { key: "remarks", header: "Remarks", sortValue: e => e.note ?? "",
@@ -201,8 +236,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         <p className="font-display text-lg text-brand-dark leading-tight">{TITLES[kind]}</p>
         <p className="text-xs text-muted-foreground">
           {rows.length} entr{rows.length !== 1 ? "ies" : "y"}{filtered ? ` of ${all.length}` : ""}
-          {totalOut > 0 && <> · out {fmtLockerAmount(totalOut, anyUsd ? undefined : "INR")}</>}
-          {totalIn > 0 && <> · in {fmtLockerAmount(totalIn, anyUsd ? undefined : "INR")}</>}
+          {anyOf(totalOut) && <> · out {fmtCcyMix(totalOut)}</>}
+          {anyOf(totalIn) && <> · in {fmtCcyMix(totalIn)}</>}
           {(from || to) && <> · {rangeLabel(from, to)}</>}
         </p>
       </div>
@@ -262,7 +297,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           )}
           <div className="grid grid-cols-2 gap-3 mt-1">
             <div>
-              <Label className="text-xs">Amount ({editing?.currency === "USD" ? "$" : "₹"})</Label>
+              {/* A transfer's amount is what left the FROM account, in its currency. */}
+              <Label className="text-xs">Amount ({ccySymbol(editing?.transfer ? lockerCcy(ef.lockerId) : editing?.currency).trim()})</Label>
               <Input type="number" min={0} step="0.01" value={ef.amount} disabled={!!editing?.legIds}
                 onChange={e => setEf({ ...ef, amount: e.target.value })}
                 className="rounded-xl h-10 mt-1 disabled:opacity-60" />
@@ -275,25 +311,35 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
           </div>
           <div>
             <Label className="text-xs">{editing?.transfer ? "From account" : "Account"}</Label>
-            <Select value={ef.lockerId || "none"} onValueChange={v => setEf({ ...ef, lockerId: v === "none" ? "" : v })}>
+            <Select value={ef.lockerId || "none"}
+              onValueChange={v => (editing?.transfer ? pickTransferSide("lockerId", v === "none" ? "" : v) : setEf({ ...ef, lockerId: v === "none" ? "" : v }))}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No account</SelectItem>
-                {db.lockers.filter(l => l.active !== false).map(l => (
-                  <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                {/* Anything but a transfer can only move to an account in its own
+                    currency — the amount would otherwise be read as another
+                    currency's money. Its current account is always listed. */}
+                {db.lockers.filter(l => l.active !== false
+                  && (editing?.transfer || ccy(l.currency) === ccy(editing?.currency) || l.id === editing?.lockerId)).map(l => (
+                  <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            {editing && !editing.transfer && db.lockers.some(l => l.active !== false && ccy(l.currency) !== ccy(editing.currency)) && (
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Only {ccy(editing.currency)} accounts — this entry is in {ccy(editing.currency)}. Money that changed currency is a transfer.
+              </p>
+            )}
           </div>
           {editing?.transfer && (
             <>
               <div>
                 <Label className="text-xs">To account</Label>
-                <Select value={ef.toLockerId} onValueChange={v => setEf({ ...ef, toLockerId: v })}>
+                <Select value={ef.toLockerId} onValueChange={v => pickTransferSide("toLockerId", v)}>
                   <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose the destination" /></SelectTrigger>
                   <SelectContent>
                     {db.lockers.filter(l => l.active !== false && l.id !== ef.lockerId).map(l => (
-                      <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                      <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -301,14 +347,13 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
               {(() => {
                 const from = db.lockers.find(l => l.id === ef.lockerId);
                 const to = db.lockers.find(l => l.id === ef.toLockerId);
-                if (!from || !to || (from.currency || "INR") === (to.currency || "INR")) return null;
+                if (!from || !to || ccy(from.currency) === ccy(to.currency)) return null;
+                // Always 1 FROM-currency = rate TO-currency, however it is shown.
                 return (
-                  <div>
-                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                    <Input type="number" min={0} step="0.01" value={ef.rate}
-                      onChange={e => setEf({ ...ef, rate: e.target.value })}
-                      className="rounded-xl h-10 mt-1" placeholder="e.g. 101.15" />
-                  </div>
+                  <RateInput id="ledger-transfer-rate" from={ccy(from.currency)} to={ccy(to.currency)}
+                    value={Number(ef.rate) > 0 ? Number(ef.rate) : ""}
+                    onChange={r => setEf(f => ({ ...f, rate: r === "" ? "" : String(r) }))}
+                    amount={Number(ef.amount) || undefined} at={ef.date} />
                 );
               })()}
               <p className="text-[11px] text-muted-foreground">

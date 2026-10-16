@@ -4,7 +4,8 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { fmtMoney, fmtDate, type ClientReceipt } from "@/lib/db";
-import { fmtLockerAmount } from "@/lib/manufacturing";
+import { ccy, fmtCcy, fmtCcyPdf, fmtRate, rateText, roundCcy } from "@/lib/currency";
+import { RateInput } from "@/components/CurrencyFields";
 import { editReceipt, deleteReceipt, deleteImpact, listReceipts, receiptApplied } from "@/lib/receipts";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { Input } from "@/components/ui/input";
@@ -37,7 +38,9 @@ export function ReceiptLedger() {
   const [acct, setAcct] = useState("");
   const [mode, setMode] = useState("");
   const [editId, setEditId] = useState<string | null>(null);
-  const [ef, setEf] = useState({ amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "" });
+  // `rate` is the account's currency for $1 (₹ per $, A$ per $…), as on the receipt.
+  const [ef, setEf] = useState<{ amount: string; date: string; method: string; remarks: string; lockerId: string; rate: number | "" }>(
+    { amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "" });
 
   const allReceipts = listReceipts(db);
   const ql = q.trim().toLowerCase();
@@ -64,11 +67,35 @@ export function ReceiptLedger() {
 
   const editing = editId ? db.clientReceipts?.find(x => x.id === editId) : undefined;
   const editLocker = db.lockers.find(l => l.id === ef.lockerId);
-  const editLockerCcy = (editLocker?.currency || "INR") as "INR" | "USD";
+  const editLockerCcy = ccy(editLocker?.currency);
+
+  // The currency a receipt's deposit is in. Older receipts may not name it;
+  // their account does (unset is rupees).
+  const depositCcy = (r: ClientReceipt) =>
+    ccy(r.lockerCurrency ?? (r.lockerId ? db.lockers.find(l => l.id === r.lockerId)?.currency : undefined));
+  // "1 USD = ₹83.5", "1 USD = A$1.52" — the rate is that currency for $1.
+  const rateLabel = (r: ClientReceipt) => {
+    if (!r.exchangeRate) return "";
+    const c = depositCcy(r);
+    return c === "USD" ? String(r.exchangeRate) : rateText("USD", c, r.exchangeRate);
+  };
+  // The PDF font draws neither ₹ nor A$, and the column is narrow: the figure
+  // as it always was for rupees, with its code for any other currency.
+  const rateLabelPdf = (r: ClientReceipt) => {
+    if (!r.exchangeRate) return "";
+    const c = depositCcy(r);
+    return c === "INR" || c === "USD" ? String(r.exchangeRate) : `${c} ${fmtRate(r.exchangeRate)}`;
+  };
 
   const open = (id: string) => {
     const r = db.clientReceipts?.find(x => x.id === id);
     if (!r) return;
+    // A deposit typed straight in (an order's advance) has no rate on record.
+    // Start from the one it actually landed at, so saving a corrected remark
+    // leaves the deposit exactly as it was instead of re-working it at today's
+    // Settings rate.
+    const c = depositCcy(r);
+    const landedAt = r.lockerId && c !== "USD" && r.lockerAmount && r.amountUsd > 0 ? r.lockerAmount / r.amountUsd : undefined;
     setEditId(id);
     setEf({
       amount: String(r.amountUsd),
@@ -76,7 +103,7 @@ export function ReceiptLedger() {
       method: r.method,
       remarks: r.remarks ?? "",
       lockerId: r.lockerId ?? "",
-      rate: r.exchangeRate ? String(r.exchangeRate) : "",
+      rate: r.exchangeRate || landedAt || "",
     });
   };
 
@@ -96,8 +123,9 @@ export function ReceiptLedger() {
       method: ef.method,
       remarks: ef.remarks,
       lockerId: ef.lockerId || undefined,
+      // Billed in USD; what lands is that × the account's currency for $1.
       lockerAmount: editLocker
-        ? (editLockerCcy === "USD" ? amt : Math.round(amt * rate * 100) / 100)
+        ? (editLockerCcy === "USD" ? amt : roundCcy(amt * rate, editLockerCcy))
         : undefined,
       lockerCurrency: editLocker ? editLockerCcy : undefined,
       exchangeRate: editLocker && editLockerCcy !== "USD" ? rate : undefined,
@@ -115,8 +143,9 @@ export function ReceiptLedger() {
       const client = db.clients.find(c => c.id === r.clientId)?.companyName ?? "";
       const locker = db.lockers.find(l => l.id === r.lockerId)?.name ?? "";
       const asCredit = Math.round((r.amountUsd - receiptApplied(db, r.id)) * 100) / 100;
+      // Rate stays a plain figure (the deposit currency for $1) for spreadsheets.
       return [i + 1, r.receiptNo, fmtDate(r.date), client, r.amountUsd, r.exchangeRate ?? "",
-        r.lockerAmount ?? r.amountUsd, r.lockerCurrency ?? "", locker, r.method, r.remarks ?? "",
+        r.lockerAmount ?? r.amountUsd, r.lockerId ? depositCcy(r) : (r.lockerCurrency ?? ""), locker, r.method, r.remarks ?? "",
         asCredit > 0.009 ? asCredit : ""];
     }),
   );
@@ -142,8 +171,8 @@ export function ReceiptLedger() {
     rows: rows.map((r, i) => [
       String(i + 1), r.receiptNo, fmtDate(r.date),
       (db.clients.find(c => c.id === r.clientId)?.companyName ?? "").slice(0, 40),
-      fmtMoney(r.amountUsd), r.exchangeRate ? String(r.exchangeRate) : "",
-      r.lockerId ? fmtLockerAmount(r.lockerAmount ?? r.amountUsd, r.lockerCurrency) : "",
+      fmtMoney(r.amountUsd), rateLabelPdf(r),
+      r.lockerId ? fmtCcyPdf(r.lockerAmount ?? r.amountUsd, depositCcy(r)) : "",
       (db.lockers.find(l => l.id === r.lockerId)?.name ?? "").slice(0, 16),
       r.method.slice(0, 14),
     ]),
@@ -174,9 +203,9 @@ export function ReceiptLedger() {
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountUsd,
       cell: r => <CellAmount tone="in">{fmtMoney(r.amountUsd)}</CellAmount> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.exchangeRate,
-      cell: r => <span className="text-xs text-muted-foreground tabular-nums">{r.exchangeRate ?? "—"}</span> },
+      cell: r => <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{rateLabel(r) || "—"}</span> },
     { key: "deposited", header: "Deposited", align: "right", kind: "number", sortValue: r => (r.lockerId ? r.lockerAmount ?? r.amountUsd : null),
-      cell: r => <span className="text-xs tabular-nums whitespace-nowrap">{r.lockerId ? fmtLockerAmount(r.lockerAmount ?? r.amountUsd, r.lockerCurrency) : "—"}</span> },
+      cell: r => <span className="text-xs tabular-nums whitespace-nowrap">{r.lockerId ? fmtCcy(r.lockerAmount ?? r.amountUsd, depositCcy(r)) : "—"}</span> },
     { key: "account", header: "Account", sortValue: r => lockerName(r.lockerId),
       cell: r => <span className="block text-xs text-muted-foreground max-w-[120px] truncate">{lockerName(r.lockerId) || "—"}</span> },
     { key: "mode", header: "Mode", sortValue: r => r.method, cell: r => <span className="text-xs whitespace-nowrap">{r.method}</span> },
@@ -259,22 +288,27 @@ export function ReceiptLedger() {
           </div>
           <div>
             <Label className="text-xs">Deposited to account</Label>
-            <Select value={ef.lockerId || "none"} onValueChange={v => setEf({ ...ef, lockerId: v === "none" ? "" : v })}>
+            <Select value={ef.lockerId || "none"} onValueChange={v => {
+              const lockerId = v === "none" ? "" : v;
+              const next = db.lockers.find(l => l.id === lockerId);
+              // A rate belongs to one currency: an account in another starts afresh
+              // (from Settings) rather than carrying ₹83 into an AUD account.
+              const same = !!editLocker && !!next && ccy(next.currency) === editLockerCcy;
+              setEf(p => ({ ...p, lockerId, rate: same ? p.rate : "" }));
+            }}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="none">No account</SelectItem>
                 {db.lockers.filter(l => l.active !== false).map(l => (
-                  <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                  <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           {editLocker && editLockerCcy !== "USD" && (
-            <div>
-              <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-              <Input type="number" min={0} step="0.01" value={ef.rate}
-                onChange={e => setEf({ ...ef, rate: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="e.g. 83.50" />
-            </div>
+            <RateInput id="receipt-edit-rate" from="USD" to={editLockerCcy} value={ef.rate}
+              onChange={rate => setEf(p => ({ ...p, rate }))}
+              amount={Number(ef.amount) || undefined} at={ef.date || undefined} />
           )}
           <div className="grid grid-cols-2 gap-3">
             <div>

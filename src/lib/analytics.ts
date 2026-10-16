@@ -1,6 +1,6 @@
 import { companyOf } from "@/lib/companies";
 import { orderTotal, balanceDue, toPureGold, pureFromPurity, type DB, type Order, type MaterialIssuance } from "./db";
-import { recognisedSale, saleDate, profitReport, rateOn } from "./orderCost";
+import { recognisedSale, saleDate, profitReport, inrOn } from "./orderCost";
 import { supplierAccount, factoryAccount } from "./manufacturing";
 
 /**
@@ -342,7 +342,10 @@ export interface TeamRow {
   id: string; name: string; role: string;
   clients: number; received: number; sold: number; salesUsd: number;
   profitUsd: number | null; collectedUsd: number;
-  expensesInr: number; tasksDone: number; tasksOpen: number;
+  expensesInr: number;
+  /** Their expenses left out of expensesInr — in a currency with no rate on file. */
+  expensesUncounted: number;
+  tasksDone: number; tasksOpen: number;
   avgCycleDays: number | null; onTimePct: number | null; open: number;
 }
 
@@ -359,11 +362,14 @@ export function teamTable(db: DB, orders: Order[], p: Period, withProfit: boolea
     const pr = withProfit && sold.length ? profitReport(db, sold).totals : null;
     const cycles = sold.map(cycleDays).filter((x): x is number => x !== null);
     const ot = sold.map(onTime).filter((x): x is boolean => x !== null);
-    let expensesInr = 0;
+    let expensesInr = 0, expensesUncounted = 0;
     for (const e of db.expenses ?? []) {
       if (e.employeeId !== u.id || !inPeriod(p, e.createdAt)) continue;
-      if (e.currency === "USD") { const fx = rateOn(db, e.createdAt); expensesInr += fx ? e.amount * fx.rate : 0; }
-      else expensesInr += e.amount;
+      // In rupees at the rate on the day it was paid, whatever account it came
+      // from. With no rate on file it is left out — never counted as rupees.
+      const perUnit = inrOn(db, e.currency, e.createdAt);
+      if (perUnit === undefined) { expensesUncounted++; continue; }
+      expensesInr += e.amount * perUnit;
     }
     const tasks = (db.tasks ?? []).filter(t => t.assignedTo === u.id);
     return {
@@ -373,7 +379,7 @@ export function teamTable(db: DB, orders: Order[], p: Period, withProfit: boolea
       sold: sold.length, salesUsd: r2(sold.reduce((s, o) => s + orderTotal(o), 0)),
       profitUsd: pr?.profitUsd ?? null,
       collectedUsd: collectionsIn(db, p, undefined, u.id),
-      expensesInr: r2(expensesInr),
+      expensesInr: r2(expensesInr), expensesUncounted,
       tasksDone: tasks.filter(t => t.completed && inPeriod(p, t.completedAt ?? t.createdAt)).length,
       tasksOpen: tasks.filter(t => !t.completed).length,
       avgCycleDays: mean(cycles), onTimePct: ot.length ? Math.round((ot.filter(Boolean).length / ot.length) * 1000) / 10 : null,

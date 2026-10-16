@@ -13,8 +13,9 @@ import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { RateInput } from "@/components/CurrencyFields";
+import { ccy, fmtCcy, roundCcy } from "@/lib/currency";
 import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/components/DataTable";
 import type { Order } from "@/lib/db";
 import {
@@ -131,15 +132,23 @@ function ClientHistoryPageBody() {
   const [payRemark, setPayRemark] = useState("");
   const [payInvoiceId, setPayInvoiceId] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
-  const [payExchangeRate, setPayExchangeRate] = useState("");
+  // The locker's currency for $1 (₹ per $, A$ per $…).
+  const [payExchangeRate, setPayExchangeRate] = useState<number | "">("");
   const [showPayForm, setShowPayForm] = useState(false);
   const account = clientAccount(billableOrders, client?.creditBalance || 0, client);
   const payLocker = db.lockers.find(l => l.id === payLockerId);
-  const payLockerCurrency = payLocker?.currency || "INR";
-  // A client always pays in USD (that's what the order is billed in) — only
-  // an INR locker needs converting for the deposit side.
+  const payLockerCurrency = ccy(payLocker?.currency);
+  // A client always pays in USD (that's what the order is billed in) — a
+  // locker in any other currency needs converting for the deposit side.
   const payNeedsRate = !!payLocker && payLockerCurrency !== "USD";
   const payRate = Number(payExchangeRate);
+  // A rate belongs to one currency: picking a locker in another starts it
+  // afresh (from Settings) instead of carrying ₹83 into an AUD locker.
+  const pickPayLocker = (v: string) => {
+    const next = db.lockers.find(l => l.id === v);
+    if (!next || ccy(next.currency) !== payLockerCurrency) setPayExchangeRate("");
+    setPayLockerId(v);
+  };
 
   // Which invoice this money is for. Left blank it is held as credit on the
   // client's account rather than being spread over their oldest bills.
@@ -160,7 +169,7 @@ function ClientHistoryPageBody() {
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
     if (payNeedsRate && (!payRate || payRate <= 0)) { toast.error("Enter the exchange rate before saving this payment"); return; }
-    const depositAmt = payNeedsRate ? Math.round(amt * payRate * 100) / 100 : amt;
+    const depositAmt = payNeedsRate ? roundCcy(amt * payRate, payLockerCurrency) : amt;
     // Note recorded on each payment entry → shows in the Income Passbook.
     const note = payRemark.trim() ? `${payMethod} · ${payRemark.trim()}` : payMethod;
     // The advances this payment creates are noted so it can be given its
@@ -186,7 +195,7 @@ function ClientHistoryPageBody() {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
             id: txnId, lockerId: payLockerId, type: "income", amountInr: depositAmt,
-            currency: locker.currency || "INR", category: `Client Payment — ${c.companyName}`,
+            currency: ccy(locker.currency), category: `Client Payment — ${c.companyName}`,
             refType: "clientPayment", refId: c.id, note: note, recordedBy: user!.id, createdAt: now,
             exchangeRate: payNeedsRate ? payRate : undefined,
           });
@@ -618,7 +627,8 @@ function ClientHistoryPageBody() {
         </div>
 
         {showPayForm && (() => {
-          const payDepositPreview = payAmount && payNeedsRate && payRate > 0 ? Number(payAmount) * payRate : payAmount ? Number(payAmount) : null;
+          // No rate yet → nothing to show, rather than the dollar figure in another currency.
+          const payDepositPreview = !payAmount ? null : !payNeedsRate ? Number(payAmount) : payRate > 0 ? Number(payAmount) * payRate : null;
           return (
           <div className="pt-2 border-t border-border/60 space-y-2.5">
             <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
@@ -670,18 +680,18 @@ function ClientHistoryPageBody() {
                 No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
               </p>
             )}
-            <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+            <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
               <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
               <SelectContent>
-                {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
               <AddNewItem kind="locker" /></SelectContent>
             </Select>
 
             {payNeedsRate && (
               <div className="p-3 rounded-xl bg-secondary space-y-2">
-                <Label className="text-xs">Exchange Rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                <Input type="number" min={0} step="0.01" value={payExchangeRate} onChange={e => setPayExchangeRate(e.target.value)} className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
-                <p className="text-xs text-muted-foreground">This locker holds INR, not USD — enter today's rate to convert what lands in it.</p>
+                <RateInput id="client-pay-rate" from="USD" to={payLockerCurrency} value={payExchangeRate}
+                  onChange={setPayExchangeRate} amount={Number(payAmount) || undefined} />
+                <p className="text-xs text-muted-foreground">This locker holds {payLockerCurrency}, not USD — the rate converts what lands in it.</p>
               </div>
             )}
 
@@ -699,7 +709,7 @@ function ClientHistoryPageBody() {
                 {payDepositPreview != null && payLocker && (
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">Deposited to {payLocker.name}</span>
-                    <span className="font-semibold text-foreground">{payLockerCurrency === "USD" ? "$" : "₹"}{payDepositPreview.toFixed(2)}</span>
+                    <span className="font-semibold text-foreground">{fmtCcy(roundCcy(payDepositPreview, payLockerCurrency), payLockerCurrency)}</span>
                   </div>
                 )}
               </div>

@@ -17,8 +17,8 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { fmtMoneyInr } from "@/lib/manufacturing";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { ccy, ccyOrder, fmtCcy, fmtCcyPdf, type CurrencyCode } from "@/lib/currency";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
@@ -30,7 +30,7 @@ type PassbookRowType =
 type PassbookRow = {
   id: string;
   date: string; // ISO string
-  currency: "USD" | "INR";
+  currency: CurrencyCode; // any — a locker can hold AUD, EUR…
   direction: "in" | "out";
   type: PassbookRowType;
   clientId?: string;
@@ -66,7 +66,7 @@ export function IncomePage() {
   const isClient = user!.role === "client";
 
   /* Filters */
-  const [curTab, setCurTab] = useState<"USD" | "INR">("USD");
+  const [curTab, setCurTab] = useState<CurrencyCode>("USD");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo]     = useState("");
   const [clientFilter, setClientFilter] = useState("all");
@@ -142,7 +142,7 @@ export function IncomePage() {
     if (!isClient) {
       db.expenses.forEach(exp => {
         rows.push({
-          id: exp.id, date: exp.createdAt, currency: exp.currency ?? "INR", direction: "out", type: "Expense",
+          id: exp.id, date: exp.createdAt, currency: ccy(exp.currency), direction: "out", type: "Expense",
           party: "Staff Expense", description: exp.title + (exp.note ? ` — ${exp.note}` : ""),
           link: { label: "Expenses", to: "/expenses" },
           amount: exp.amount,
@@ -155,7 +155,7 @@ export function IncomePage() {
         .filter(t => t.refType !== "clientPayment" && t.refType !== "expense")
         .forEach(t => {
           const locker = db.lockers.find(l => l.id === t.lockerId);
-          const currency = t.currency || "INR";
+          const currency = ccy(t.currency);
           const direction: "in" | "out" = (t.type === "income" || t.type === "transfer_in") ? "in" : "out";
           const type: PassbookRowType =
             t.refType === "purchase" ? "Supplier Payment"
@@ -174,7 +174,20 @@ export function IncomePage() {
     return rows.sort((a, b) => +new Date(b.date) - +new Date(a.date));
   }, [db, user, isClient]);
 
-  const tabRows = useMemo(() => allRows.filter(r => r.currency === curTab), [allRows, curTab]);
+  /* One tab per currency: client billing in dollars and the rupee books
+     always, then one for each other currency an account holds (AUD, EUR…) —
+     so no row falls between the tabs, and none is ever added to another
+     currency's total. */
+  const tabs = useMemo<CurrencyCode[]>(() => {
+    const others = [...new Set(allRows.map(r => r.currency))].filter(c => c !== "USD" && c !== "INR").sort(ccyOrder);
+    return ["USD", "INR", ...others];
+  }, [allRows]);
+  // A tab whose last row has gone falls back to client billing.
+  const tab = tabs.includes(curTab) ? curTab : "USD";
+  const tabLabel = (c: CurrencyCode) =>
+    c === "USD" ? "Client Billing (USD)" : c === "INR" ? "Sourcing & Costs (INR)" : `${c} account`;
+
+  const tabRows = useMemo(() => allRows.filter(r => r.currency === tab), [allRows, tab]);
 
   /* Apply filters */
   const filtered = useMemo(() => {
@@ -187,7 +200,8 @@ export function IncomePage() {
     });
   }, [tabRows, dateFrom, dateTo, clientFilter]);
 
-  const fmt = curTab === "USD" ? fmtMoney : fmtMoneyInr;
+  // In the tab's own currency: $1,234.56 · ₹1,23,456 · A$980.
+  const fmt = (n: number) => fmtCcy(n, tab);
 
   /* Summary totals */
   const totalIn = filtered.filter(r => r.direction === "in").reduce((s, r) => s + r.amount, 0);
@@ -225,8 +239,8 @@ export function IncomePage() {
 
   const exportCsv = () => {
     downloadCsv(
-      `Passbook-${curTab}`,
-      ["Date", "Party", "Reference", "Type", "Description", `Money In (${curTab})`, `Money Out (${curTab})`],
+      `Passbook-${tab}`,
+      ["Date", "Party", "Reference", "Type", "Description", `Money In (${tab})`, `Money Out (${tab})`],
       filtered.map(r => [
         fmtDate(r.date), r.party, r.link?.label || "", r.type, r.description,
         r.direction === "in" ? r.amount : "", r.direction === "out" ? r.amount : "",
@@ -234,18 +248,26 @@ export function IncomePage() {
     );
   };
 
+  // The PDF's font has no ₹: totals carry their currency, the narrow In/Out
+  // columns only the figure. Dollars and rupees print exactly as they always
+  // have; any other currency through fmtCcyPdf ("AUD 1,200").
+  const pdfTotal = (n: number) =>
+    tab === "USD" ? fmtMoney(n) : tab === "INR" ? fmtInrPlain(n) + " " + tab : fmtCcyPdf(n, tab);
+  const pdfFigure = (n: number) =>
+    tab === "USD" ? fmtMoney(n).replace("$", "") : tab === "INR" ? fmtInrPlain(n).replace("Rs. ", "") : fmtCcyPdf(n, tab).replace(`${tab} `, "");
+
   const exportPdf = () => {
     downloadLedgerPdf({
-      title: `Passbook (${curTab})`,
+      title: `Passbook (${tab})`,
       subjectLines: [
-        `Currency: ${curTab}`,
+        `Currency: ${tab}`,
         hasActiveFilter ? "Filters applied — see on-screen view for details" : "All entries",
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
-        { label: "Money In", value: curTab === "USD" ? fmtMoney(totalIn) : fmtInrPlain(totalIn) + " " + curTab },
-        { label: "Money Out", value: curTab === "USD" ? fmtMoney(totalOut) : fmtInrPlain(totalOut) + " " + curTab },
-        { label: "Net", value: curTab === "USD" ? fmtMoney(net) : fmtInrPlain(net) + " " + curTab },
+        { label: "Money In", value: pdfTotal(totalIn) },
+        { label: "Money Out", value: pdfTotal(totalOut) },
+        { label: "Net", value: pdfTotal(net) },
       ],
       columns: [
         { header: "Date", x: 20 },
@@ -256,10 +278,10 @@ export function IncomePage() {
       ],
       rows: filtered.map(r => [
         fmtDate(r.date), r.party.slice(0, 20), r.type,
-        r.direction === "in" ? (curTab === "USD" ? fmtMoney(r.amount).replace("$", "") : fmtInrPlain(r.amount).replace("Rs. ", "")) : "—",
-        r.direction === "out" ? (curTab === "USD" ? fmtMoney(r.amount).replace("$", "") : fmtInrPlain(r.amount).replace("Rs. ", "")) : "—",
+        r.direction === "in" ? pdfFigure(r.amount) : "—",
+        r.direction === "out" ? pdfFigure(r.amount) : "—",
       ]),
-      filename: `Passbook-${curTab}`,
+      filename: `Passbook-${tab}`,
     });
   };
 
@@ -282,18 +304,18 @@ export function IncomePage() {
         </IfExport>
       </div>
 
-      {/* ── Currency tabs — never blend USD client billing with INR sourcing/cost ── */}
+      {/* ── Currency tabs — never blend USD client billing with INR sourcing/cost, or either with any other account's currency ── */}
       {!isClient && (
-        <div className="flex gap-1 p-1 bg-secondary rounded-xl w-fit">
-          {(["USD", "INR"] as const).map(c => (
+        <div className="flex flex-wrap gap-1 p-1 bg-secondary rounded-xl w-fit max-w-full">
+          {tabs.map(c => (
             <button
               key={c}
               onClick={() => setCurTab(c)}
               className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
-                curTab === c ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"
+                tab === c ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              {c === "USD" ? "Client Billing (USD)" : "Sourcing & Costs (INR)"}
+              {tabLabel(c)}
             </button>
           ))}
         </div>
@@ -387,7 +409,7 @@ export function IncomePage() {
             tab and filters so a new view starts from its newest entry. */}
         <div className="p-3 sm:p-4">
           <DataTable
-            resetKey={`${curTab}|${dateFrom}|${dateTo}|${clientFilter}`}
+            resetKey={`${tab}|${dateFrom}|${dateTo}|${clientFilter}`}
             id="passbook"
             noun="transaction"
             rows={filtered}

@@ -27,6 +27,8 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { RateInput } from "@/components/CurrencyFields";
+import { ccy, roundCcy } from "@/lib/currency";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
 import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 // The same rule the Orders page bills by, so the two lists can never disagree
@@ -68,7 +70,8 @@ export function InvoicesPage() {
   const [payOrderId, setPayOrderId] = useState<string | null>(null);
   const [payAmount, setPayAmount] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
-  const [payRate, setPayRate] = useState("");
+  // The locker's currency for $1 (₹ per $, A$ per $…).
+  const [payRate, setPayRate] = useState<number | "">("");
   const [payNote, setPayNote] = useState("");
 
   // ── Invoice list (filtered) ──
@@ -178,7 +181,16 @@ export function InvoicesPage() {
   // ── Per-order payment (order-wise collection from the invoice detail). ──
   const startPay = (orderId: string) => { setPayOrderId(orderId); setPayAmount(""); setPayLockerId(""); setPayRate(""); setPayNote(""); };
   const payLocker = db.lockers.find(l => l.id === payLockerId);
-  const payNeedsRate = !!payLocker && (payLocker.currency || "INR") !== "USD";
+  const payLockerCcy = ccy(payLocker?.currency);
+  // Billed in USD: a locker in any other currency needs the rate.
+  const payNeedsRate = !!payLocker && payLockerCcy !== "USD";
+  // A rate belongs to one currency: picking a locker in another starts it
+  // afresh (from Settings) instead of carrying ₹83 into an AUD locker.
+  const pickPayLocker = (v: string) => {
+    const next = db.lockers.find(l => l.id === v);
+    if (!next || ccy(next.currency) !== payLockerCcy) setPayRate("");
+    setPayLockerId(v);
+  };
 
   const submitPayment = async (orderId: string) => {
     const o = db.orders.find(x => x.id === orderId);
@@ -188,7 +200,7 @@ export function InvoicesPage() {
     if (!payLockerId) { toast.error("Choose which locker this was deposited into"); return; }
     const rate = Number(payRate);
     if (payNeedsRate && (!rate || rate <= 0)) { toast.error("Enter the exchange rate"); return; }
-    const depositAmt = payNeedsRate ? Math.round(amt * rate * 100) / 100 : amt;
+    const depositAmt = payNeedsRate ? roundCcy(amt * rate, payLockerCcy) : amt;
     // Minted here so the payment can be given its receipt number afterwards.
     const advanceId = uid("adv_");
     const txnId = uid("ltx_");
@@ -599,18 +611,15 @@ export function InvoicesPage() {
                                 </div>
                                 <div>
                                   <Label className="text-xs">Deposited to locker</Label>
-                                  <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+                                  <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
                                     <SelectTrigger className="h-9 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-                                    <SelectContent>{db.lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+                                    <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
                                   </Select>
                                 </div>
                               </div>
                               {payNeedsRate && (
-                                <div>
-                                  <Label className="text-xs">Exchange rate ($1 → {payLocker?.currency})</Label>
-                                  <Input type="number" min={0} step="0.01" value={payRate} onChange={e => setPayRate(e.target.value)} className="h-9 rounded-xl mt-1" placeholder="e.g. 83.5" />
-                                  {payAmount && Number(payRate) > 0 && <p className="text-[11px] text-muted-foreground mt-1">Deposit: {(Number(payAmount) * Number(payRate)).toLocaleString("en-IN")} {payLocker?.currency}</p>}
-                                </div>
+                                <RateInput id={`inv-pay-rate-${o.id}`} from="USD" to={payLockerCcy} value={payRate}
+                                  onChange={setPayRate} amount={Number(payAmount) || undefined} />
                               )}
                               <div>
                                 <Label className="text-xs">Note (optional)</Label>

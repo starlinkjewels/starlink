@@ -1,3 +1,4 @@
+import { expensesInUsd, inrOn } from "@/lib/orderCost";
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
@@ -12,6 +13,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import type { Order } from "@/lib/db";
 import { fmtMoneyInr } from "@/lib/manufacturing";
+import { ccy, ccyOrder, fmtCcy, fmtCcyMix, fmtRate, rateText, sumByCcy, tableRate } from "@/lib/currency";
 import { subscribeStockLevelsByCompany, sumStockLevels, type StockLevels } from "@/lib/stock";
 import { companiesOf } from "@/lib/companies";
 
@@ -54,13 +56,26 @@ export function Dashboard() {
   // not earned).
   const [inrPerUsd, setInrPerUsd] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
-  const usdLockers = activeLockers.filter(l => (l.currency || "INR") === "USD");
-  const inrLockers = activeLockers.filter(l => (l.currency || "INR") === "INR");
+  const usdLockers = activeLockers.filter(l => ccy(l.currency) === "USD");
+  const inrLockers = activeLockers.filter(l => ccy(l.currency) === "INR");
   const usdProfit = usdLockers.reduce((s, l) => s + (lockerFigure(db, l) - (l.openingBalance || 0)), 0);
   const inrProfit = inrLockers.reduce((s, l) => s + (lockerFigure(db, l) - (l.openingBalance || 0)), 0);
-  const rate = Number(inrPerUsd) || 0;
-  const combinedUsd = rate > 0 ? usdProfit + inrProfit / rate : null;
-  const combinedInr = rate > 0 ? usdProfit * rate + inrProfit : null;
+  // Lockers in any other currency (AUD, EUR, AED…) — each currency its own
+  // figure, in that currency; they used to be left out altogether.
+  const otherLockers = activeLockers.filter(l => !["INR", "USD"].includes(ccy(l.currency)));
+  const otherProfit = sumByCcy(otherLockers, l => lockerFigure(db, l) - (l.openingBalance || 0), l => l.currency);
+  const otherCodes = [...otherProfit.keys()].sort(ccyOrder);
+  // One combined figure: every currency into rupees at Settings → Exchange
+  // rates. Dollars at the rate typed here when there is one, else that table's.
+  const settingsUsd = tableRate(db.settings.currencyRates, "USD", "INR");
+  const rate = Number(inrPerUsd) > 0 ? Number(inrPerUsd) : settingsUsd ?? 0;
+  const otherInr = otherCodes.map(c => ({ c, perUnit: tableRate(db.settings.currencyRates, c, "INR") }));
+  // A currency with nothing in it changes no total, so only one that holds
+  // something and has no rate is named as left out.
+  const leftOut = otherInr.filter(x => !x.perUnit && Math.abs(otherProfit.get(x.c) ?? 0) > 0.005).map(x => x.c);
+  const otherAsInr = otherInr.reduce((s, x) => s + (x.perUnit ? (otherProfit.get(x.c) ?? 0) * x.perUnit : 0), 0);
+  const combinedUsd = rate > 0 ? usdProfit + (inrProfit + otherAsInr) / rate : null;
+  const combinedInr = rate > 0 ? usdProfit * rate + inrProfit + otherAsInr : null;
 
   const today = new Date().toDateString();
   const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
@@ -105,7 +120,9 @@ export function Dashboard() {
     () => (db.expenses ?? []).filter(e => e.employeeId === user?.id),
     [db.expenses, user?.id]
   );
-  const myExpenseTotal = myExpenses.reduce((s, e) => s + e.amount, 0);
+  // Each currency apart for the tile; in dollars (at each day's rate) for the profit.
+  const myExpenseMix = sumByCcy(myExpenses, e => e.amount, e => e.currency);
+  const myExpenseUsd = expensesInUsd(db, myExpenses);
 
   // Employee: revenue = value of their delivered assigned orders
   const myRevenue = useMemo(() => {
@@ -114,7 +131,7 @@ export function Dashboard() {
       .filter(o => o.assignedEmployeeId === user.id && o.status === "Delivered")
       .reduce((s, o) => s + keptValue(o), 0);
   }, [db.orders, user]);
-  const myProfit = myRevenue - myExpenseTotal;
+  const myProfit = myRevenue - myExpenseUsd.usd;
 
   // Admin: certificate stats
   const certOrders = db.orders.filter(o => o.certificate === true);
@@ -123,18 +140,22 @@ export function Dashboard() {
 
   // Admin: total expenses across all staff, per-employee breakdown
   const allExpenses = db.expenses ?? [];
-  const totalExpenses = allExpenses.reduce((s, e) => s + e.amount, 0);
+  const totalExpenseMix = sumByCcy(allExpenses, e => e.amount, e => e.currency);
+  // Bars and order compare like with like: each person's spending in rupees at
+  // each day's rate (an expense with no rate on file counts as nothing there,
+  // though it still shows in that person's own figure).
+  const inInr = (e: (typeof allExpenses)[number]) => e.amount * (inrOn(db, e.currency, e.createdAt) ?? 0);
+  const totalExpensesInr = allExpenses.reduce((s, e) => s + inInr(e), 0);
   const staffExpenseSummary = useMemo(() => {
     const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
     return staff
-      .map(u => ({
-        user: u,
-        total: allExpenses.filter(e => e.employeeId === u.id).reduce((s, e) => s + e.amount, 0),
-        count: allExpenses.filter(e => e.employeeId === u.id).length,
-      }))
+      .map(u => {
+        const mine = allExpenses.filter(e => e.employeeId === u.id);
+        return { user: u, mix: sumByCcy(mine, e => e.amount, e => e.currency), inr: mine.reduce((s, e) => s + inInr(e), 0), count: mine.length };
+      })
       .filter(s => s.count > 0)
-      .sort((a, b) => b.total - a.total);
-  }, [db.users, allExpenses]);
+      .sort((a, b) => b.inr - a.inr);
+  }, [db.users, allExpenses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5th element = optional link target (clicking the card opens that filtered view).
   const stats: [string, string | number, any, string, string?][] = user!.role === "admin"
@@ -231,7 +252,7 @@ export function Dashboard() {
                 <TrendingDown className="h-3.5 w-3.5 text-rose-600" />
                 <p className="text-xs font-medium text-rose-700">Expenses</p>
               </div>
-              <p className="text-lg font-bold text-rose-700">{fmtMoney(myExpenseTotal)}</p>
+              <p className="text-lg font-bold text-rose-700">{fmtCcyMix(myExpenseMix, "USD")}</p>
               <p className="text-[11px] text-rose-600/70 mt-0.5">{myExpenses.length} entries</p>
             </div>
             <div className={`rounded-xl border p-3.5 ${myProfit >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"}`}>
@@ -239,7 +260,8 @@ export function Dashboard() {
                 <Wallet className={`h-3.5 w-3.5 ${myProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`} />
                 <p className={`text-xs font-medium ${myProfit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>Net Profit</p>
               </div>
-              <p className={`text-lg font-bold ${myProfit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{fmtMoney(myProfit)}</p>
+              <p className={`text-lg font-bold ${myProfit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{myExpenseUsd.converted ? "≈ " : ""}{fmtMoney(myProfit)}</p>
+              {myExpenseUsd.left.size > 0 && <p className="text-[11px] text-amber-700 mt-0.5">{fmtCcyMix(myExpenseUsd.left)} not counted — no exchange rate on file</p>}
               <p className={`text-[11px] mt-0.5 ${myProfit >= 0 ? "text-emerald-600/70" : "text-rose-600/70"}`}>Revenue − Expenses</p>
             </div>
           </div>
@@ -340,6 +362,16 @@ export function Dashboard() {
               <p className={`text-xl font-bold ${inrProfit >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(inrProfit)}</p>
               <p className="text-[11px] text-muted-foreground mt-0.5">INR Profit ({inrLockers.length} locker{inrLockers.length !== 1 ? "s" : ""})</p>
             </Link>
+            {otherCodes.map(c => {
+              const v = otherProfit.get(c) ?? 0;
+              const n = otherLockers.filter(l => ccy(l.currency) === c).length;
+              return (
+                <Link key={c} to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
+                  <p className={`text-xl font-bold ${v >= 0 ? "text-success" : "text-destructive"}`}>{fmtCcy(v, c)}</p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">{c} Profit ({n} locker{n !== 1 ? "s" : ""})</p>
+                </Link>
+              );
+            })}
           </div>
 
           <div className="mt-4 pt-4 border-t border-border/60">
@@ -347,8 +379,11 @@ export function Dashboard() {
               <label className="text-xs text-muted-foreground shrink-0">Consolidate at rate (₹ per $):</label>
               <input
                 type="number" min={0} step="0.01" value={inrPerUsd} onChange={e => setInrPerUsd(e.target.value)}
-                placeholder="e.g. 83.5" className="w-28 h-8 px-2.5 rounded-lg border border-border text-sm outline-none focus:border-primary"
+                placeholder={settingsUsd ? fmtRate(settingsUsd) : "e.g. 83.5"} className="w-28 h-8 px-2.5 rounded-lg border border-border text-sm outline-none focus:border-primary"
               />
+              {settingsUsd && !(Number(inrPerUsd) > 0) && (
+                <span className="text-[11px] text-muted-foreground">Settings rate, until you type one</span>
+              )}
             </div>
             {combinedUsd !== null && combinedInr !== null ? (
               <div className="grid grid-cols-2 gap-3 mt-3">
@@ -360,6 +395,16 @@ export function Dashboard() {
                   <p className={`text-lg font-bold ${combinedInr >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(combinedInr)}</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5">Total Profit (INR)</p>
                 </div>
+                {otherCodes.length > 0 && (
+                  <p className="col-span-2 text-[11px] text-muted-foreground">
+                    {otherInr.filter(x => x.perUnit).length > 0 && (
+                      <>Converted at {otherInr.filter(x => x.perUnit).map(x => rateText(x.c, "INR", x.perUnit!)).join(" · ")} (Settings → Exchange rates). </>
+                    )}
+                    {leftOut.length > 0 && (
+                      <span className="text-warning">Left out — no rate in Settings → Exchange rates: {leftOut.map(c => `${c} ${fmtCcy(otherProfit.get(c) ?? 0, c)}`).join(", ")}.</span>
+                    )}
+                  </p>
+                )}
               </div>
             ) : (
               <p className="text-xs text-muted-foreground mt-2">Enter today's exchange rate to see one combined profit figure.</p>
@@ -374,7 +419,7 @@ export function Dashboard() {
           <div className="flex items-center justify-between mb-4">
             <div>
               <h3 className="font-semibold">Staff Expenses</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Total: <span className="font-semibold text-destructive">{fmtMoneyInr(totalExpenses)}</span> across {allExpenses.length} entries</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Total: <span className="font-semibold text-destructive">{fmtCcyMix(totalExpenseMix)}</span> across {allExpenses.length} entries</p>
             </div>
             <Link to="/expenses?tab=passbook" className="text-sm text-primary flex items-center gap-1 hover:underline">
               Full Passbook <ArrowRight className="h-3 w-3" />
@@ -387,8 +432,8 @@ export function Dashboard() {
             </div>
           ) : (
             <div className="space-y-2">
-              {staffExpenseSummary.map(({ user: u, total, count }) => {
-                const pct = totalExpenses > 0 ? (total / totalExpenses) * 100 : 0;
+              {staffExpenseSummary.map(({ user: u, mix, inr, count }) => {
+                const pct = totalExpensesInr > 0 ? (inr / totalExpensesInr) * 100 : 0;
                 const initials = u.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase();
                 return (
                   <div key={u.id} className="flex items-center gap-3">
@@ -398,7 +443,7 @@ export function Dashboard() {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-sm font-medium text-foreground truncate">{u.name}</span>
-                        <span className="text-sm font-bold text-destructive tabular-nums ml-2">{fmtMoneyInr(total)}</span>
+                        <span className="text-sm font-bold text-destructive tabular-nums ml-2 text-right">{fmtCcyMix(mix)}</span>
                       </div>
                       <div className="h-1.5 w-full rounded-full bg-secondary overflow-hidden">
                         <div

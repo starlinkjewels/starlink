@@ -2,13 +2,15 @@ import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, DEFAULT_LOCKER_CATEGORIES, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
+import { lockerBalance } from "@/lib/manufacturing";
+import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateFields, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
+import { CurrencySelect, RateInput } from "@/components/CurrencyFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -20,7 +22,7 @@ import { PaginationBar } from "@/components/PaginationBar";
 import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, FileText, FileSpreadsheet, HandCoins } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
-import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
+import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -30,9 +32,10 @@ import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 10;
 
-/** Bare number for CSV/PDF cells (no currency symbol) — jsPDF can't render ₹. */
-function plainAmt(n: number, currency?: "INR" | "USD"): string {
-  return currency === "USD" ? fmtMoney(n).replace("$", "") : fmtInrPlain(n).replace("Rs. ", "");
+/** Bare, signed number for PDF cells — the statement names its currency once
+ *  at the top, and jsPDF can't draw ₹ anyway. */
+function pdfNum(n: number, currency?: string): string {
+  return `${n < 0 ? "-" : ""}${fmtCcyNumber(n, currency)}`;
 }
 
 /** A line of the ledger table. `t: null` is the opening balance — pinned under
@@ -63,13 +66,16 @@ export function LockerPage() {
   const [txnCategory, setTxnCategory] = useState("");
   // Managed in Settings → Categories, and required on every entry so the ledger
   // can be grouped and totalled rather than holding free text.
+  // The fallback is db.ts's list, shared with Payments and Settings → Categories.
   const lockerCats = db.settings.lockerCategories?.length
     ? db.settings.lockerCategories
-    : ["Client Payment", "Supplier Payment", "Factory Making Charges", "Owner Deposit",
-       "Owner Withdrawal", "Bank Charges", "Local Expense", "Transfer", "Other"];
+    : DEFAULT_LOCKER_CATEGORIES;
   const [txnNote, setTxnNote] = useState("");
   const [txnTargetLocker, setTxnTargetLocker] = useState("");
-  const [txnExchangeRate, setTxnExchangeRate] = useState("");
+  // "1 from = rate to": for a transfer, this locker → the destination; for a
+  // client's payment, 1 USD in this locker's currency. Cleared whenever the
+  // pair changes, so a rate typed for one pair is never saved for another.
+  const [txnExchangeRate, setTxnExchangeRate] = useState<number | "">("");
   // Income can be a REAL client payment rather than a loose cash entry: pick the
   // client (and the invoice it settles) and the money is allocated to their
   // orders, instead of sitting in the locker while the invoice still reads unpaid.
@@ -81,7 +87,7 @@ export function LockerPage() {
   const [fixTxnId, setFixTxnId] = useState<string | null>(null);
   const [fixClientId, setFixClientId] = useState("");
   const [fixInvoiceId, setFixInvoiceId] = useState("");
-  const [fixRate, setFixRate] = useState("");
+  const [fixRate, setFixRate] = useState<number | "">("");
 
   const lockers = db.lockers.filter(l => l.active !== false);
   const selected = lockers.find(l => l.id === selectedId) ?? null;
@@ -112,14 +118,17 @@ export function LockerPage() {
 
   // ── Edit locker ──
   const [editId, setEditId] = useState<string | null>(null);
-  const [ef, setEf] = useState<{ name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string }>({
+  const [ef, setEf] = useState<{ name: string; type: LockerType; currency: CurrencyCode; accountNumberLast4: string; openingBalance: string }>({
     name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0",
   });
   const [editSaving, setEditSaving] = useState(false);
+  // Every entry on a locker is in its currency, so once it has any the
+  // currency is fixed — changing it would re-read all of them as another money.
+  const editHasEntries = !!editId && (db.lockerTransactions ?? []).some(t => t.lockerId === editId);
 
   const openEditLocker = (l: typeof lockers[number]) => {
     setEditId(l.id);
-    setEf({ name: l.name, type: l.type, currency: l.currency || "INR", accountNumberLast4: l.accountNumberLast4 || "", openingBalance: String(l.openingBalance) });
+    setEf({ name: l.name, type: l.type, currency: ccy(l.currency), accountNumberLast4: l.accountNumberLast4 || "", openingBalance: String(l.openingBalance) });
   };
 
   const saveEditLocker = () => {
@@ -132,7 +141,7 @@ export function LockerPage() {
         if (!l) return;
         l.name = ef.name.trim();
         l.type = ef.type;
-        l.currency = ef.currency;
+        if (!(d.lockerTransactions ?? []).some(t => t.lockerId === l.id)) l.currency = ef.currency;
         l.accountNumberLast4 = ef.accountNumberLast4.trim() || undefined;
         l.openingBalance = Math.max(0, Number(ef.openingBalance) || 0);
       });
@@ -151,12 +160,14 @@ export function LockerPage() {
     if (txnType !== "transfer_out" && !txnCategory) { toast.error("Choose a category"); return; }
     if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
     const target = txnType === "transfer_out" ? lockers.find(l => l.id === txnTargetLocker) : undefined;
-    const crossCurrency = !!target && (target.currency || "INR") !== (selected.currency || "INR");
+    const currency = ccy(selected.currency);
+    const targetCcy = target ? ccy(target.currency) : currency;
+    const crossCurrency = !!target && targetCcy !== currency;
     const rate = Number(txnExchangeRate);
     if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
-    // An INR locker taking a USD-billed client payment needs the rate to know
-    // how much of their bill this actually settles.
-    if (txnType === "income" && txnClientId && (selected.currency || "INR") !== "USD" && (!rate || rate <= 0)) {
+    // A non-dollar locker taking a USD-billed client payment needs the rate to
+    // know how much of their bill this actually settles.
+    if (txnType === "income" && txnClientId && currency !== "USD" && (!rate || rate <= 0)) {
       toast.error("Enter the exchange rate — the client is billed in USD"); return;
     }
     // Overdraw warning — money leaving the locker (expense / transfer out) that
@@ -167,9 +178,8 @@ export function LockerPage() {
     if (txnType === "expense" || txnType === "transfer_out") {
       const bal = lockerBalance(selected, db.lockerTransactions);
       if (amt > bal) {
-        const cur = selected.currency || "INR";
         const ok = (await confirmBox(
-          `This ${txnType === "expense" ? "expense" : "transfer"} of ${fmtLockerAmount(amt, selected.currency)} is more than ${selected.name}'s balance of ${fmtLockerAmount(bal, selected.currency)} ${cur}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
+          `This ${txnType === "expense" ? "expense" : "transfer"} of ${fmtCcy(amt, currency)} is more than ${selected.name}'s balance of ${fmtCcy(bal, currency)} ${currency}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
         ));
         if (!ok) return;
       }
@@ -192,25 +202,27 @@ export function LockerPage() {
     // callback, which TypeScript's flow analysis cannot follow.
     const receiptFor: { draft: ClientReceiptDraft | null } = { draft: null };
     const xferId = uid("xfer_");
-    const currency = selected.currency || "INR";
     updateDb(d => {
       if (!d.lockerTransactions) d.lockerTransactions = [];
       if (txnType === "transfer_out") {
         const target = d.lockers.find(l => l.id === txnTargetLocker);
         if (!target) return;
-        const destAmount = crossCurrency
-          ? Math.round((currency === "USD" ? amt * rate : amt / rate) * 100) / 100
-          : amt;
+        // Any two currencies: the rate is "1 of this locker's = rate of the
+        // destination's", so what arrives is simply amount × rate.
+        const destAmount = crossCurrency ? roundCcy(amt * rate, targetCcy) : amt;
+        // The same rate on both legs ({fx}, plus the old ₹-per-$ figure for a
+        // rupee/dollar pair); nothing at all on a same-currency transfer.
+        const fx = crossCurrency ? rateFields(currency, targetCcy, rate) : {};
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency,
           category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: target.id, note: txnNote.trim() || undefined,
-          exchangeRate: crossCurrency ? rate : undefined,
+          ...fx,
           recordedBy: user!.id, createdAt: now,
         });
         d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: destAmount, currency: target.currency || "INR",
+          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: destAmount, currency: targetCcy,
           category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: selected.id, note: txnNote.trim() || undefined,
-          exchangeRate: crossCurrency ? rate : undefined,
+          ...fx,
           recordedBy: user!.id, createdAt: now,
         });
       } else {
@@ -223,7 +235,8 @@ export function LockerPage() {
           : undefined;
         if (payClient) {
           // Orders are billed in USD; the amount typed here is in the LOCKER's
-          // currency, so an INR locker converts back through the entered rate.
+          // currency, so any other locker converts back through the entered
+          // rate (this locker's currency for $1 — what exchangeRate means here).
           const billed = currency === "USD" ? amt : (rate > 0 ? Math.round((amt / rate) * 100) / 100 : 0);
           const noteText = txnNote.trim() || undefined;
           const beforeIds = advanceIds(d, payClient.id);
@@ -303,6 +316,33 @@ export function LockerPage() {
     t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type);
   const txnSigned = (t: (typeof txns)[number]) => (t.type === "income" || t.type === "transfer_in" ? t.amountInr : -t.amountInr);
 
+  // The rate an entry moved money at, the way people say it ("1 AUD = ₹55.2"),
+  // or "" when no currency changed hands. Older rows carry only exchangeRate
+  // (₹ per $); rateOf reads either.
+  const rateLabel = (t: LockerTransaction): string => {
+    const own = ccy(t.currency ?? selected?.currency);
+    let from: CurrencyCode, to: CurrencyCode, r: number | undefined;
+    if (t.type === "transfer_in" || t.type === "transfer_out") {
+      // The other leg's currency is its locker's; failing that, whatever the
+      // recorded rate names (an older rupee/dollar row: the other of the two).
+      const paired = db.lockers.find(l => l.id === t.pairedLockerId);
+      const other = paired ? ccy(paired.currency)
+        : t.fx ? (ccy(t.fx.from) === own ? ccy(t.fx.to) : ccy(t.fx.from))
+        : t.exchangeRate ? (own === "USD" ? "INR" : "USD") : own;
+      [from, to] = t.type === "transfer_out" ? [own, other] : [other, own];
+      r = rateOf(t, from, to);
+    } else if (t.refType === "clientPayment") {
+      // A client's dollars landing here: exchangeRate is this locker's currency for $1.
+      [from, to] = ["USD", own];
+      r = rateOf(t, from, to) ?? t.exchangeRate;
+    } else if (t.fx) {
+      [from, to, r] = [t.fx.from, t.fx.to, t.fx.rate];
+    } else if (t.exchangeRate) {
+      [from, to, r] = ["USD", "INR", t.exchangeRate];
+    } else return "";
+    return r && ccy(from) !== ccy(to) ? rateText(from, to, r) : "";
+  };
+
   // Running balance, computed oldest-first from the account's opening balance —
   // a proper statement, not just a flat list of unrelated amounts.
   const txnBalances = new Map<string, number>();
@@ -340,7 +380,7 @@ export function LockerPage() {
                 : t.type === "income" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
             </div>
             {/* The note goes underneath only when the category already titles the line. */}
-            <CellMain title={`${txnLabel(t)}${t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}`}
+            <CellMain title={`${txnLabel(t)}${rateLabel(t) ? ` (@ ${rateLabel(t)})` : ""}`}
               sub={[t.voucherNo, t.category ? t.note : ""].filter(Boolean).join(" · ") || undefined} />
           </div>
         );
@@ -348,42 +388,44 @@ export function LockerPage() {
     { key: "type", header: "Type", sortValue: r => (r.t ? typeOf(r.t).label : ""),
       cell: r => (r.t ? <CellTag tone={typeOf(r.t).tone}>{typeOf(r.t).label}</CellTag> : null) },
     { key: "debit", header: "Debit", align: "right", kind: "number", sortValue: r => (r.t && !isIn(r.t) ? r.t.amountInr : null),
-      cell: r => (r.t && !isIn(r.t) ? <CellAmount tone="out">{fmtLockerAmount(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
+      cell: r => (r.t && !isIn(r.t) ? <CellAmount tone="out">{fmtCcy(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
     { key: "credit", header: "Credit", align: "right", kind: "number", sortValue: r => (r.t && isIn(r.t) ? r.t.amountInr : null),
-      cell: r => (r.t && isIn(r.t) ? <CellAmount tone="in">{fmtLockerAmount(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
+      cell: r => (r.t && isIn(r.t) ? <CellAmount tone="in">{fmtCcy(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
     // Each entry's balance at the time, from the full history — a filter never changes it.
     { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => (r.t ? txnBalances.get(r.t.id) ?? 0 : null),
-      cell: r => <CellAmount>{fmtLockerAmount(r.t ? txnBalances.get(r.t.id) ?? 0 : selected?.openingBalance || 0, selected?.currency)}</CellAmount> },
+      cell: r => <CellAmount>{fmtCcy(r.t ? txnBalances.get(r.t.id) ?? 0 : selected?.openingBalance || 0, selected?.currency)}</CellAmount> },
   ];
 
   const exportCsv = (from: Date | null, to: Date | null) => {
     if (!selected) return;
-    const cur = selected.currency || "INR";
+    const cur = ccy(selected.currency);
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
       ["Date", "Description", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
       txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
-        return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", txnBalances.get(t.id) ?? 0];
+        // Rounded to the currency's cents: adding up dollar or euro amounts
+        // leaves float noise (…0000000004) on a running total.
+        return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
       }),
     );
   };
 
   const exportPdf = (from: Date | null, to: Date | null) => {
     if (!selected) return;
-    const cur = selected.currency || "INR";
+    const cur = ccy(selected.currency);
     downloadLedgerPdf({
       title: "Locker Account Statement",
       subjectLines: [
         `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
         `Type: ${selected.type === "bank" ? "Bank" : "Cash"} · Currency: ${cur}`,
-        `Opening Balance: ${plainAmt(selected.openingBalance || 0, cur)} ${cur}`,
+        `Opening Balance: ${fmtCcyPdf(selected.openingBalance || 0, cur)}`,
         `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
-        { label: "Current Balance", value: `${plainAmt(lockerBalance(selected, db.lockerTransactions), cur)} ${cur}` },
-        { label: "Total In", value: `${plainAmt(totalIn, cur)} ${cur}` },
-        { label: "Total Out", value: `${plainAmt(totalOut, cur)} ${cur}` },
+        { label: "Current Balance", value: fmtCcyPdf(lockerBalance(selected, db.lockerTransactions), cur) },
+        { label: "Total In", value: fmtCcyPdf(totalIn, cur) },
+        { label: "Total Out", value: fmtCcyPdf(totalOut, cur) },
       ],
       columns: [
         { header: "Date", x: 20 },
@@ -396,9 +438,9 @@ export function LockerPage() {
         const signed = txnSigned(t);
         return [
           fmtDate(t.createdAt), txnLabel(t).slice(0, 26),
-          signed > 0 ? plainAmt(signed, cur) : "—",
-          signed < 0 ? plainAmt(-signed, cur) : "—",
-          plainAmt(txnBalances.get(t.id) ?? 0, cur),
+          signed > 0 ? pdfNum(signed, cur) : "—",
+          signed < 0 ? pdfNum(-signed, cur) : "—",
+          pdfNum(txnBalances.get(t.id) ?? 0, cur),
         ];
       }),
       filename: `Locker-${selected.name.replace(/\s+/g, "_")}`,
@@ -429,8 +471,8 @@ export function LockerPage() {
               key={l.id}
               role="button"
               tabIndex={0}
-              onClick={() => { setSelectedId(isSelected ? null : l.id); setTxnMode(false); }}
-              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(isSelected ? null : l.id); setTxnMode(false); } }}
+              onClick={() => { setSelectedId(isSelected ? null : l.id); setTxnMode(false); setTxnExchangeRate(""); }}
+              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(isSelected ? null : l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
               className={`card-luxe p-5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
             >
               {can("locker", "edit") && <button
@@ -447,11 +489,11 @@ export function LockerPage() {
                 <div className="min-w-0">
                   <p className="font-display text-lg text-brand-dark truncate leading-tight">{l.name}</p>
                   <p className="text-xs text-muted-foreground">
-                    {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {l.currency || "INR"}
+                    {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {ccy(l.currency)}
                   </p>
                 </div>
               </div>
-              <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtLockerAmount(bal, l.currency)}</p>
+              <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtCcy(bal, l.currency)}</p>
               <p className="text-xs text-muted-foreground mt-0.5">Current balance</p>
             </div>
           );
@@ -494,15 +536,15 @@ export function LockerPage() {
           <div className="grid grid-cols-3 gap-3">
             <div className="p-3 rounded-xl bg-secondary text-center">
               <p className="text-xs text-muted-foreground mb-1">Balance</p>
-              <p className="font-semibold text-sm">{fmtLockerAmount(lockerBalance(selected, db.lockerTransactions), selected.currency)}</p>
+              <p className="font-semibold text-sm">{fmtCcy(lockerBalance(selected, db.lockerTransactions), selected.currency)}</p>
             </div>
             <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
               <p className="text-xs text-muted-foreground mb-1">Total In</p>
-              <p className="font-semibold text-sm text-success">{fmtLockerAmount(totalIn, selected.currency)}</p>
+              <p className="font-semibold text-sm text-success">{fmtCcy(totalIn, selected.currency)}</p>
             </div>
             <div className="p-3 rounded-xl bg-destructive/5 border border-destructive/20 text-center">
               <p className="text-xs text-muted-foreground mb-1">Total Out</p>
-              <p className="font-semibold text-sm text-destructive">{fmtLockerAmount(totalOut, selected.currency)}</p>
+              <p className="font-semibold text-sm text-destructive">{fmtCcy(totalOut, selected.currency)}</p>
             </div>
           </div>
 
@@ -531,7 +573,7 @@ export function LockerPage() {
             <div className="pt-2 border-t border-border/60 space-y-2.5">
               <p className="text-sm font-medium text-brand-dark">Record Transaction</p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Select value={txnType} onValueChange={v => setTxnType(v as typeof txnType)}>
+                <Select value={txnType} onValueChange={v => { setTxnType(v as typeof txnType); setTxnExchangeRate(""); }}>
                   <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="income">Income (money in)</SelectItem>
@@ -539,14 +581,14 @@ export function LockerPage() {
                     <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
                   </SelectContent>
                 </Select>
-                <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder={`Amount (${selected.currency === "USD" ? "$" : "₹"})`} />
+                <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder={`Amount (${ccySymbol(selected.currency).trim()})`} />
                 {txnType === "transfer_out" ? (
-                  <Select value={txnTargetLocker} onValueChange={setTxnTargetLocker}>
+                  <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker" /></SelectTrigger>
                     <SelectContent>
                       {lockers.filter(l => l.id !== selected.id).map(l => {
-                        const sameCcy = (l.currency || "INR") === (selected.currency || "INR");
-                        return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${l.currency || "INR"})`}</SelectItem>;
+                        const sameCcy = ccy(l.currency) === ccy(selected.currency);
+                        return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
                       })}
                     </SelectContent>
                   </Select>
@@ -584,19 +626,18 @@ export function LockerPage() {
                       </Select>
                     )}
                   </div>
-                  {txnClientId && (selected.currency || "INR") !== "USD" && (
-                    <>
-                      <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                      <Input type="number" min={0} step="0.01" value={txnExchangeRate} onChange={e => setTxnExchangeRate(e.target.value)}
-                        className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50" />
-                    </>
+                  {txnClientId && ccy(selected.currency) !== "USD" && (
+                    // The client is billed in dollars: how many of this locker's
+                    // currency one dollar was — what turns the amount into their bill.
+                    <RateInput id="txn-client-rate" from="USD" to={ccy(selected.currency)}
+                      value={txnExchangeRate} onChange={setTxnExchangeRate} />
                   )}
                   {txnClientId && (
                     <p className="text-[11px] text-muted-foreground">
                       {(() => {
                         const amt = Number(txnAmount) || 0;
                         const r = Number(txnExchangeRate) || 0;
-                        const billed = (selected.currency || "INR") === "USD" ? amt : (r > 0 ? amt / r : 0);
+                        const billed = ccy(selected.currency) === "USD" ? amt : (r > 0 ? amt / r : 0);
                         const chosen = clientInvoices.find(x => x.inv.id === txnInvoiceId);
                         if (!billed) return "Enter the amount to see what it settles.";
                         return chosen
@@ -612,24 +653,19 @@ export function LockerPage() {
               {txnType === "transfer_out" && txnTargetLocker && (() => {
                 const target = lockers.find(l => l.id === txnTargetLocker);
                 if (!target) return null;
-                const crossCurrency = (target.currency || "INR") !== (selected.currency || "INR");
-                if (!crossCurrency) return null;
-                const rate = Number(txnExchangeRate) || 0;
+                const fromCcy = ccy(selected.currency), toCcy = ccy(target.currency);
+                if (fromCcy === toCcy) return null;
                 const amt = Number(txnAmount) || 0;
-                const destAmount = rate > 0 ? (selected.currency === "USD" ? amt * rate : amt / rate) : null;
                 return (
                   <div className="p-3 rounded-xl bg-secondary space-y-2">
-                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                    <Input
-                      type="number" min={0} step="0.01" value={txnExchangeRate}
-                      onChange={e => setTxnExchangeRate(e.target.value)}
-                      className="rounded-xl h-10 bg-white" placeholder="e.g. 83.50"
-                    />
-                    <p className="text-xs text-muted-foreground">
-                      {destAmount != null
-                        ? `${fmtLockerAmount(amt, selected.currency)} → ${fmtLockerAmount(Math.round(destAmount * 100) / 100, target.currency)}`
-                        : "Enter the rate above to see the converted amount — required before you can save this transfer."}
-                    </p>
+                    {/* Shows what the amount becomes in the destination's currency. */}
+                    <RateInput id="txn-transfer-rate" from={fromCcy} to={toCcy}
+                      value={txnExchangeRate} onChange={setTxnExchangeRate} amount={amt || undefined} />
+                    {!(Number(txnExchangeRate) > 0) && (
+                      <p className="text-xs text-muted-foreground">
+                        {target.name} holds {toCcy}, this locker {fromCcy} — enter the rate; it is required before you can save this transfer.
+                      </p>
+                    )}
                   </div>
                 );
               })()}
@@ -656,8 +692,8 @@ export function LockerPage() {
             searchText={r => (r.t ? [txnLabel(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
             searchPlaceholder="Search this ledger"
             totals={{
-              debit: rows => <span className="text-destructive">{fmtLockerAmount(ledgerSum(rows, false), selected.currency)}</span>,
-              credit: rows => <span className="text-success">{fmtLockerAmount(ledgerSum(rows, true), selected.currency)}</span>,
+              debit: rows => <span className="text-destructive">{fmtCcy(ledgerSum(rows, false), selected.currency)}</span>,
+              credit: rows => <span className="text-success">{fmtCcy(ledgerSum(rows, true), selected.currency)}</span>,
             }}
             rowActions={can("locker", "edit") ? r => [
               { label: "Apply to a client’s bill", icon: HandCoins, hint: "Money a client sent — settle their bill with it",
@@ -690,13 +726,10 @@ export function LockerPage() {
               </div>
               <div>
                 <Label className="text-xs">Currency</Label>
-                <Select value={ef.currency} onValueChange={v => setEf({ ...ef, currency: v as "INR" | "USD" })}>
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="INR">INR (₹)</SelectItem>
-                    <SelectItem value="USD">USD ($)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <CurrencySelect value={ef.currency} onChange={v => setEf({ ...ef, currency: v })} disabled={editHasEntries} className="rounded-xl mt-1" />
+                {editHasEntries && (
+                  <p className="text-[11px] text-muted-foreground mt-1">Fixed — this locker&rsquo;s entries are all in {ef.currency}.</p>
+                )}
               </div>
             </div>
             {ef.type === "bank" && (
@@ -706,7 +739,7 @@ export function LockerPage() {
               </div>
             )}
             <div>
-              <Label className="text-xs">Opening Balance ({ef.currency === "USD" ? "$" : "₹"})</Label>
+              <Label className="text-xs">Opening Balance ({ccySymbol(ef.currency).trim()})</Label>
               <Input type="number" min={0} value={ef.openingBalance} onChange={e => setEf({ ...ef, openingBalance: e.target.value })} className="rounded-xl mt-1" />
             </div>
           </div>
@@ -725,7 +758,10 @@ export function LockerPage() {
           {(() => {
             const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
             if (!txn) return null;
-            const isUsd = (txn.currency ?? "INR") === "USD";
+            // Read the same way applyIncomeToClient reads it, so this preview
+            // and what it settles agree.
+            const txnCcy = ccy(txn.currency);
+            const isUsd = txnCcy === "USD";
             const rate = Number(fixRate) || 0;
             const billed = isUsd ? txn.amountInr : (rate > 0 ? txn.amountInr / rate : 0);
             const invs = fixClientId
@@ -737,7 +773,7 @@ export function LockerPage() {
             return (
               <>
                 <p className="text-sm text-muted-foreground -mt-1">
-                  {fmtLockerAmount(txn.amountInr, txn.currency)} received on {fmtDate(txn.createdAt)} is already counted in this locker.
+                  {fmtCcy(txn.amountInr, txn.currency)} received on {fmtDate(txn.createdAt)} is already counted in this locker.
                   It was never applied to anyone&rsquo;s orders, which is why their invoice still shows as pending. No second
                   entry is made here — only the missing allocation.
                 </p>
@@ -766,10 +802,8 @@ export function LockerPage() {
                     </div>
                   )}
                   {!isUsd && (
-                    <div>
-                      <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                      <Input type="number" min={0} step="0.01" value={fixRate} onChange={e => setFixRate(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. 83.50" />
-                    </div>
+                    // Their bill is in dollars: this locker's currency for $1, on the day it came in.
+                    <RateInput id="fix-rate" from="USD" to={txnCcy} value={fixRate} onChange={setFixRate} at={txn.createdAt} />
                   )}
                   {billed > 0 && <p className="text-[11px] text-muted-foreground">Settles {fmtMoney(billed)} of their billing.</p>}
                 </div>
