@@ -37,7 +37,6 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
-import { IfExport } from "@/components/IfExport";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
