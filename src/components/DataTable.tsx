@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, Columns3, Download, Search, ChevronLeft, ChevronRight, Minus, Rows3 } from "lucide-react";
 import { useMayExport } from "@/hooks/useCan";
 import { useNavigate } from "react-router-dom";
@@ -131,6 +131,17 @@ export function DataTable<T>({
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
   const [lastReset, setLastReset] = useState(resetKey);
+  // How wide the table's box shows, so an opened row's details fit it even
+  // when the table itself is wider and scrolls sideways.
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [boxW, setBoxW] = useState<number>();
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   if (resetKey !== lastReset) { setLastReset(resetKey); setPage(1); }
   const full = controls === "full";
   const mayExport = useMayExport();
@@ -306,7 +317,7 @@ export function DataTable<T>({
 
       {/* relative: the hidden column labels are placed inside this box, so
           they can't widen the page past a phone's screen. */}
-      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
+      <div ref={boxRef} className="relative overflow-x-auto rounded-xl border border-border/60 bg-white" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
         <table className="w-full text-sm">
           <thead className={`bg-secondary/40 ${maxHeight ? "sticky top-0 z-10" : ""}`}>
             <tr className="border-b border-border/60">
@@ -367,10 +378,10 @@ export function DataTable<T>({
                 </tr>
                 {isOpen && (
                   <tr className="bg-secondary/20">
-                    {/* On a phone the table scrolls sideways; what opened stays on the
-                        screen, the screen's width, however wide the table is. */}
+                    {/* A wide table scrolls sideways; what opened stays in view, as wide
+                        as the box shows, wherever the table is scrolled to. */}
                     <td colSpan={cols} className="p-0">
-                      <div className="px-3 sm:px-5 py-4 max-md:sticky max-md:left-0 max-md:w-[calc(100vw-3.5rem)]">{expand ? expand.render(r) : autoDetails(r)}</div>
+                      <div className="sticky left-0 px-3 sm:px-5 py-4" style={boxW ? { width: boxW } : undefined}>{expand ? expand.render(r) : autoDetails(r)}</div>
                     </td>
                   </tr>
                 )}
