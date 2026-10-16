@@ -45,6 +45,7 @@ const StockSectionPage = lazy(() => import("./pages/StockSection").then(m => ({ 
 const FactoriesPage = lazy(() => import("./pages/Factories").then(m => ({ default: m.FactoriesPage })));
 const FactoryHistoryPage = lazy(() => import("./pages/FactoryHistory").then(m => ({ default: m.FactoryHistoryPage })));
 const ReadyStockPage = lazy(() => import("./pages/ReadyStock").then(m => ({ default: m.ReadyStockPage })));
+const ReadyStockDetailPage = lazy(() => import("./pages/ReadyStockDetail").then(m => ({ default: m.ReadyStockDetailPage })));
 const GiftCardPage = lazy(() => import("./pages/GiftCard").then(m => ({ default: m.GiftCardPage })));
 const GiftCardsAdminPage = lazy(() => import("./pages/GiftCardsAdmin").then(m => ({ default: m.GiftCardsAdminPage })));
 const PaymentsPage = lazy(() => import("./pages/Payments").then(m => ({ default: m.PaymentsPage })));
@@ -116,6 +117,7 @@ export function App() {
         () => import("./pages/Clients"), () => import("./pages/ClientHistory"),
         () => import("./pages/Invoices"), () => import("./pages/Expenses"),
         () => import("./pages/Payments"), () => import("./pages/ReadyStock"),
+        () => import("./pages/ReadyStockDetail"),
         () => import("./pages/Catalog"), () => import("./pages/Notifications"),
         () => import("./pages/Employees"), () => import("./pages/EmployeeDetail"),
         () => import("./pages/Suppliers"), () => import("./pages/SupplierHistory"),
@@ -177,6 +179,7 @@ export function App() {
           <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
           <Route path="ready-stock" element={<Protected roles={["admin","employee","client"]}><ReadyStockPage /></Protected>} />
+          <Route path="ready-stock/:id" element={<Protected roles={["admin","employee","client"]}><ReadyStockDetailPage /></Protected>} />
           <Route path="giftcard" element={<Protected roles={["client"]}><GiftCardPage /></Protected>} />
           <Route path="gift-cards" element={<Protected roles={["admin","employee"]}><GiftCardsAdminPage /></Protected>} />
           <Route path="payments" element={<Protected roles={["admin","employee"]}><PaymentsPage /></Protected>} />

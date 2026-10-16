@@ -5,6 +5,7 @@ import { weightProblem, pieceWeights } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu } from "@/components/MoreMenu";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
+import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -1544,7 +1545,10 @@ function OrderDetailPageBody() {
       // inventory (creation decremented it by one). Guarded so it restores once.
       if (order.materialSourcing === "readyStock" && order.readyStockItemId && order.status !== "Rejected") {
         const item = d.readyStock?.find(x => x.id === order.readyStockItemId);
-        if (item) item.quantity += 1;
+        if (item) {
+          item.quantity += 1;
+          logItem(item, { ...whoOf(user), kind: "unsold", text: `Order ${order.orderNumber} cancelled — back in stock · ${item.quantity - 1} → ${item.quantity}`, ref: { orderId: order.id } });
+        }
       }
       // Any advance already paid on this order becomes client credit — usable on
       // their other orders, or refundable — never stranded on cancelled work.
@@ -1604,7 +1608,11 @@ function OrderDetailPageBody() {
       // returned on cancel/reject).
       if (o.materialSourcing === "readyStock" && o.readyStockItemId) {
         const item = d.readyStock?.find(x => x.id === o.readyStockItemId);
-        if (item) item.quantity = Math.max(0, item.quantity - 1);
+        if (item) {
+          const had = item.quantity;
+          item.quantity = Math.max(0, item.quantity - 1);
+          logItem(item, { ...whoOf(user), kind: "sold", text: `Order ${o.orderNumber} re-opened — sold on it again · ${had} → ${item.quantity}`, ref: { orderId: o.id } });
+        }
       }
     });
     toast.success("Order re-opened — now Waiting");
@@ -2098,7 +2106,7 @@ function OrderDetailPageBody() {
   // sets the selling price & cost in Ready Stock (cost basis mixes INR labour with
   // material, so it's entered there, not guessed here).
   const addToReadyStock = async (office: string) => {
-    if (order.readyStockCreatedId) { nav("/ready-stock"); return; }
+    if (order.readyStockCreatedId) { nav(`/ready-stock/${order.readyStockCreatedId}`); return; }
     // The piece carries whatever weights it has. Without Final Approval those
     // are still the estimates it was ordered on, and a stock item is priced off
     // them — so say so rather than let an estimate pass as the real weight.
@@ -2139,6 +2147,7 @@ function OrderDetailPageBody() {
         ...coField(companyOfOrder(db, o)),
         createdBy: user!.id,
         createdAt: new Date().toISOString(),
+        history: [{ at: new Date().toISOString(), ...whoOf(user), kind: "added", text: `Built in-house on order ${o.orderNumber}${office ? ` · at the ${officeLabel(office)}` : ""}`, ref: { orderId: o.id } }],
       });
       o.readyStockCreatedId = itemId;
       const idx = o.timeline.findIndex(t => t.step === "Ready for Stock");
@@ -2241,7 +2250,7 @@ function OrderDetailPageBody() {
                 {order.forReadyStock
                   ? (user!.role === "admin" && (
                       order.readyStockCreatedId
-                        ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
+                        ? <Button variant="outline" onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
                         : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                     ))
                   : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}

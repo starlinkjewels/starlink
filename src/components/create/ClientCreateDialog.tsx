@@ -1,16 +1,17 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { toast } from "sonner";
+import { UserPlus } from "lucide-react";
 import { loadDb, updateDb, flush, uid, type Client } from "@/lib/db";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
 import { useAuth } from "@/lib/auth";
 import { MAIN_COMPANY_ID, companiesForUser, hasCompanies, worksFor } from "@/lib/companies";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
+import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /**
@@ -78,71 +79,87 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-4xl rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display text-2xl">Create Client</DialogTitle></DialogHeader>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
-            {(["companyName","ownerName","email","phone","country","zip","gstVat","address","password"] as const).map(k => (
-              <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
-                <Label className="text-xs capitalize">
-                  {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)" : k.replace(/([A-Z])/g, " $1")}
-                </Label>
-                <Input
-                  value={(f as Record<string, string>)[k] || ""}
-                  onChange={e => setF({ ...f, [k]: e.target.value })}
-                  className="rounded-xl mt-1"
-                  type={k === "password" ? "password" : k === "email" ? "email" : "text"}
-                />
-              </div>
-            ))}
+    <ActionSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Create Client"
+      description="A buyer's business details, and the email and password they sign in with."
+      icon={UserPlus}
+      size="md"
+      footer={
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New client</p>
+            <p className="text-sm font-semibold text-brand-dark truncate">{f.companyName?.trim() || "—"}</p>
+            {f.email?.trim() && <p className="text-[11px] text-muted-foreground truncate">Signs in as {f.email.trim().toLowerCase()}</p>}
           </div>
-          <div className="mt-3">
-            <OpeningBalanceFields
-              amount={f.openingBalance != null ? String(f.openingBalance) : ""}
-              dir={f.openingDir || "debit"}
-              date={f.openingDate || ""}
-              onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
-              onDir={v => setF({ ...f, openingDir: v })}
-              onDate={v => setF({ ...f, openingDate: v || undefined })}
-              debitLabel="Client owes us (Debit)"
-              creditLabel="We owe client / advance (Credit)"
-              hint="What this client already owed you (or prepaid) when you started using this app. Shown as the first line of their ledger."
+          <div className="flex gap-2 sm:shrink-0">
+            <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl flex-1 sm:flex-none">Cancel</Button>
+            <Button onClick={create} disabled={saving} className="btn-hero rounded-xl px-6 flex-1 sm:flex-none sm:min-w-40">{saving ? "Creating…" : "Create Client"}</Button>
+          </div>
+        </div>
+      }
+    >
+      <div className="grid grid-cols-2 gap-x-3 gap-y-4">
+        {(["companyName","ownerName","email","phone","country","zip","gstVat","address","password"] as const).map(k => (
+          <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
+            <Label className="text-xs capitalize">
+              {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)" : k.replace(/([A-Z])/g, " $1")}
+            </Label>
+            <Input
+              value={(f as Record<string, string>)[k] || ""}
+              onChange={e => setF({ ...f, [k]: e.target.value })}
+              className="rounded-xl mt-1"
+              type={k === "password" ? "password" : k === "email" ? "email" : "text"}
             />
           </div>
-          {multiCo && (
-            <div className="mt-3">
-              <Label className="text-xs">Our company — who bills this client *</Label>
-              <Select value={f.companyId || (myCompanies.length === 1 ? myCompanies[0].id : "")} onValueChange={addNew("company", v => setF(prev => ({ ...prev, companyId: v })))}>
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Choose the company" /></SelectTrigger>
-                <SelectContent>
-                  {myCompanies.map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
-                <AddNewItem kind="company" /></SelectContent>
-              </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">Their invoices, proformas and statements carry this company's name, logo, bank details and invoice numbers.</p>
-            </div>
-          )}
-          {user!.role === "admin" ? (
-            <div className="mt-3">
-              <Label className="text-xs">Assign Employee (optional)</Label>
-              <Select
-                value={f.accountManagerId || "__none"}
-                onValueChange={addNew("employee", v => setF(prev => ({ ...prev, accountManagerId: v === "__none" ? undefined : v })))}
-              >
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-                  {employees.filter(e => !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                <AddNewItem kind="employee" /></SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground mt-1">
-                If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
-              </p>
-            </div>
-          ) : (
-            <p className="text-xs text-muted-foreground mt-3">This client will be added under your account — you'll manage them and their orders.</p>
-          )}
-          <div className="flex justify-end"><Button onClick={create} disabled={saving} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{saving ? "Creating…" : "Create Client"}</Button></div>
-        </DialogContent>
-    </Dialog>
+        ))}
+      </div>
+      <div className="mt-4">
+        <OpeningBalanceFields
+          amount={f.openingBalance != null ? String(f.openingBalance) : ""}
+          dir={f.openingDir || "debit"}
+          date={f.openingDate || ""}
+          onAmount={v => setF({ ...f, openingBalance: v === "" ? undefined : Number(v) })}
+          onDir={v => setF({ ...f, openingDir: v })}
+          onDate={v => setF({ ...f, openingDate: v || undefined })}
+          debitLabel="Client owes us (Debit)"
+          creditLabel="We owe client / advance (Credit)"
+          hint="What this client already owed you (or prepaid) when you started using this app. Shown as the first line of their ledger."
+        />
+      </div>
+      {multiCo && (
+        <div className="mt-4">
+          <Label className="text-xs">Our company — who bills this client *</Label>
+          <Select value={f.companyId || (myCompanies.length === 1 ? myCompanies[0].id : "")} onValueChange={addNew("company", v => setF(prev => ({ ...prev, companyId: v })))}>
+            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Choose the company" /></SelectTrigger>
+            <SelectContent>
+              {myCompanies.map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
+            <AddNewItem kind="company" /></SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground mt-1">Their invoices, proformas and statements carry this company's name, logo, bank details and invoice numbers.</p>
+        </div>
+      )}
+      {user!.role === "admin" ? (
+        <div className="mt-4">
+          <Label className="text-xs">Assign Employee (optional)</Label>
+          <Select
+            value={f.accountManagerId || "__none"}
+            onValueChange={addNew("employee", v => setF(prev => ({ ...prev, accountManagerId: v === "__none" ? undefined : v })))}
+          >
+            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
+              {employees.filter(e => !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+            <AddNewItem kind="employee" /></SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground mt-1">
+            If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
+          </p>
+        </div>
+      ) : (
+        <p className="text-xs text-muted-foreground mt-4">This client will be added under your account — you'll manage them and their orders.</p>
+      )}
+    </ActionSheet>
   );
 }

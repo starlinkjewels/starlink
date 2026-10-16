@@ -27,15 +27,20 @@ function isIn(t: LockerTransaction) {
  * So this shows exactly that, one account at a time, oldest first, because a
  * running balance can only be read downwards. What each entry WAS stays in its
  * own tab; this is for agreeing the day's cash against the book.
+ *
+ * `lockerId`: the account to show when the page around the book already lists
+ * the accounts (Payments' balance strip) — the book then leaves out its own
+ * row of account buttons rather than showing every balance twice.
  */
-export function DayBook() {
+export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const db = useDb();
   const lockers = db.lockers.filter(l => l.active !== false);
   // The account picked, or the first one. Taking the first one ONCE, when the
   // page drew, left the book on "no account" whenever the accounts arrived a
   // moment after the page — it said "Nothing on this account yet" over ₹27 lakh.
   const [picked, setLockerId] = useState("");
-  const lockerId = lockers.some(l => l.id === picked) ? picked : (lockers[0]?.id ?? "");
+  const want = chosen ?? picked;
+  const lockerId = lockers.some(l => l.id === want) ? want : (lockers[0]?.id ?? "");
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -146,15 +151,16 @@ export function DayBook() {
   return (
     <div className="card-luxe p-5">
       <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">Day Book</p>
+        <p className="font-display text-lg text-brand-dark leading-tight">Day Book{chosen !== undefined && locker ? ` — ${locker.name}` : ""}</p>
         <p className="text-xs text-muted-foreground">
           Every movement on one account, newest first — the balance on each line is the balance after it
+          {chosen !== undefined && lockers.length > 1 ? ". Pick another account from the balances above." : ""}
         </p>
       </div>
 
       {/* One account at a time — a running balance across mixed accounts, some in
           rupees and some in dollars, would not mean anything. */}
-      <div className="flex items-center gap-2 flex-wrap mb-3">
+      {chosen === undefined && <div className="flex items-center gap-2 flex-wrap mb-3">
         {lockers.map(l => {
           const bal = lockerBalance(l, db.lockerTransactions ?? []);
           const on = l.id === lockerId;
@@ -168,7 +174,7 @@ export function DayBook() {
             </button>
           );
         })}
-      </div>
+      </div>}
 
       <LedgerFilters
         q={q} onQ={setQ}

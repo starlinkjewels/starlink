@@ -72,6 +72,7 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/expenses": ["lockerTransactions"],
   "/income": ["lockerTransactions"],
   "/ready-stock": [],
+  "/ready-stock/:id": [],
   "/gift-cards": [],
   "/giftcard": [],
   "/catalog": [...PHOTOS, "catalogFavorites"],

@@ -11,26 +11,20 @@ import { useAuth } from "@/lib/auth";
 import { lockerBalance } from "@/lib/manufacturing";
 import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateFields, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
 import { CurrencySelect, RateInput } from "@/components/CurrencyFields";
+import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, FileText, FileSpreadsheet, HandCoins } from "lucide-react";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
-
-const PAGE_SIZE = 10;
 
 /** Bare, signed number for PDF cells — the statement names its currency once
  *  at the top, and jsPDF can't draw ₹ anyway. */
@@ -90,7 +84,10 @@ export function LockerPage() {
   const [fixRate, setFixRate] = useState<number | "">("");
 
   const lockers = db.lockers.filter(l => l.active !== false);
-  const selected = lockers.find(l => l.id === selectedId) ?? null;
+  // The ledger is the page, so one locker is always open: the one picked, or
+  // the first. Resolved on every render, so it still lands on an account when
+  // the lockers arrive a moment after the page.
+  const selected = lockers.find(l => l.id === selectedId) ?? lockers[0] ?? null;
 
   // ── Client payments recorded straight from the locker ──────────────────────
   const clientsSorted = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
@@ -456,55 +453,57 @@ export function LockerPage() {
         </div>
         {can("locker", "add") && (
           <>
-            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
+            <Button onClick={() => setOpen(true)} className="btn-hero h-10 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Locker</Button>
             <LockerCreateDialog open={open} onOpenChange={setOpen} />
           </>
         )}
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
+      {/* The accounts, compact: picking one opens its ledger below. On a phone
+          they scroll sideways inside their own row, so the ledger stays near the top. */}
+      <div className="flex gap-3 overflow-x-auto no-scrollbar p-0.5 sm:p-0 sm:grid sm:grid-cols-2 lg:grid-auto-tiles sm:overflow-visible">
         {lockers.map(l => {
           const bal = lockerBalance(l, db.lockerTransactions);
-          const isSelected = selectedId === l.id;
+          const isSelected = selected?.id === l.id;
           return (
             <div
               key={l.id}
               role="button"
               tabIndex={0}
-              onClick={() => { setSelectedId(isSelected ? null : l.id); setTxnMode(false); setTxnExchangeRate(""); }}
-              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(isSelected ? null : l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
-              className={`card-luxe p-5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
+              aria-pressed={isSelected}
+              onClick={() => { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); }}
+              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
+              className={`card-luxe shrink-0 flex-1 min-w-[15rem] sm:min-w-0 px-4 py-3.5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
             >
               {can("locker", "edit") && <button
                 onClick={e => { e.stopPropagation(); openEditLocker(l); }}
-                className="absolute top-4 right-4 h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                className="absolute top-3 right-3 h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                 title="Edit locker"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </button>}
-              <div className="flex items-center gap-3 pr-8">
-                <div className="h-11 w-11 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 grid place-items-center shrink-0">
-                  {l.type === "bank" ? <Landmark className="h-5 w-5 text-primary" /> : <Wallet className="h-5 w-5 text-primary" />}
+              <div className="flex items-center gap-2.5 pr-8">
+                <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 grid place-items-center shrink-0">
+                  {l.type === "bank" ? <Landmark className="h-4 w-4 text-primary" /> : <Wallet className="h-4 w-4 text-primary" />}
                 </div>
                 <div className="min-w-0">
-                  <p className="font-display text-lg text-brand-dark truncate leading-tight">{l.name}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="font-medium text-brand-dark truncate leading-tight">{l.name}</p>
+                  <p className="text-[11px] text-muted-foreground">
                     {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {ccy(l.currency)}
                   </p>
                 </div>
               </div>
-              <p className="mt-4 text-2xl font-display font-bold text-brand-dark">{fmtCcy(bal, l.currency)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Current balance</p>
+              <p className={`mt-2.5 text-xl font-display font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtCcy(bal, l.currency)}</p>
             </div>
           );
         })}
         {lockers.length === 0 && (
-          <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No lockers yet — add your first bank/cash account.</div>
+          <div className="w-full sm:col-span-full card-luxe p-12 text-center text-muted-foreground">No lockers yet — add your first bank/cash account.</div>
         )}
       </div>
 
       {selected && (
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 space-y-4">
+        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-4 sm:p-5 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
               <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0">
@@ -526,7 +525,7 @@ export function LockerPage() {
                 { label: "Ledger — Excel", sublabel: "Transactions with running balance", kind: "excel", run: exportCsv },
               ]} />
               {can("locker", "add") && (
-                <Button onClick={() => setTxnMode(v => !v)} className="btn-hero rounded-xl gap-2">
+                <Button onClick={() => setTxnMode(true)} className="btn-hero rounded-xl gap-2">
                   <Plus className="h-4 w-4" /> Record Transaction
                 </Button>
               )}
@@ -569,36 +568,111 @@ export function LockerPage() {
             )}
           </div>
 
-          {txnMode && (
-            <div className="pt-2 border-t border-border/60 space-y-2.5">
-              <p className="text-sm font-medium text-brand-dark">Record Transaction</p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Select value={txnType} onValueChange={v => { setTxnType(v as typeof txnType); setTxnExchangeRate(""); }}>
-                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="income">Income (money in)</SelectItem>
-                    <SelectItem value="expense">Expense (money out)</SelectItem>
-                    <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10" placeholder={`Amount (${ccySymbol(selected.currency).trim()})`} />
-                {txnType === "transfer_out" ? (
-                  <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Destination locker" /></SelectTrigger>
+          {/* Opening balance — the starting point every running balance builds on —
+              pinned at the very bottom (after the oldest entry) so the numbers make sense.
+              A new locker or filter starts the table again from its newest entry. */}
+          <DataTable
+            resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterType}`}
+            id="locker-ledger"
+            noun="transaction"
+            rows={ledgerRows}
+            columns={ledgerColumns}
+            rowKey={r => r.id}
+            defaultSort={{ key: "date", dir: "desc" }}
+            pinnedRows={[openingRow]}
+            searchText={r => (r.t ? [txnLabel(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
+            searchPlaceholder="Search this ledger"
+            totals={{
+              debit: rows => <span className="text-destructive">{fmtCcy(ledgerSum(rows, false), selected.currency)}</span>,
+              credit: rows => <span className="text-success">{fmtCcy(ledgerSum(rows, true), selected.currency)}</span>,
+            }}
+            rowActions={can("locker", "edit") ? r => [
+              { label: "Apply to a client’s bill", icon: HandCoins, hint: "Money a client sent — settle their bill with it",
+                show: !!r.t && r.t.type === "income" && r.t.refType !== "clientPayment",
+                onSelect: () => { setFixTxnId(r.t!.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); } },
+            ] : undefined}
+            emptyText={txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
+          />
+        </motion.div>
+      )}
+
+      {/* Record Transaction slides in over the ledger instead of pushing it down,
+          so the entry being matched stays in view. Closing it keeps what was
+          typed (as Cancel always did); saving clears it. */}
+      {selected && (() => {
+        const sym = ccySymbol(selected.currency).trim();
+        const amt = Number(txnAmount) || 0;
+        const bal = lockerBalance(selected, db.lockerTransactions);
+        const after = bal + (txnType === "income" ? amt : -amt);
+        return (
+          <ActionSheet open={txnMode} onOpenChange={setTxnMode} size="md"
+            icon={selected.type === "bank" ? Landmark : Wallet}
+            title="Record Transaction"
+            description={<>{selected.name} · {ccy(selected.currency)} · balance {fmtCcy(bal, selected.currency)}</>}
+            footer={
+              <div className="space-y-3">
+                {amt > 0 && (
+                  <div className="flex items-end justify-between gap-3 flex-wrap">
+                    <div className="min-w-0">
+                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                        {txnType === "income" ? "Money in" : txnType === "expense" ? "Money out" : "Transfer out"}
+                      </p>
+                      <p className={`font-display text-xl font-bold tabular-nums leading-tight ${txnType === "income" ? "text-success" : "text-destructive"}`}>{fmtCcy(amt, selected.currency)}</p>
+                    </div>
+                    <p className="text-xs text-muted-foreground text-right">
+                      Balance after <span className={`font-semibold ${after < 0 ? "text-destructive" : "text-foreground"}`}>{fmtCcy(after, selected.currency)}</span>
+                    </p>
+                  </div>
+                )}
+                <div className="flex items-center justify-end gap-2">
+                  <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
+                  <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save</AsyncButton>
+                </div>
+              </div>
+            }>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Type</Label>
+                  <Select value={txnType} onValueChange={v => { setTxnType(v as typeof txnType); setTxnExchangeRate(""); }}>
+                    <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {lockers.filter(l => l.id !== selected.id).map(l => {
-                        const sameCcy = ccy(l.currency) === ccy(selected.currency);
-                        return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
-                      })}
+                      <SelectItem value="income">Income (money in)</SelectItem>
+                      <SelectItem value="expense">Expense (money out)</SelectItem>
+                      <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+                <div>
+                  <Label className="text-xs">Amount ({sym})</Label>
+                  <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={`Amount (${sym})`} />
+                </div>
+                {txnType === "transfer_out" ? (
+                  <div>
+                    <Label className="text-xs">To locker *</Label>
+                    <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
+                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Destination locker" /></SelectTrigger>
+                      <SelectContent>
+                        {lockers.filter(l => l.id !== selected.id).map(l => {
+                          const sameCcy = ccy(l.currency) === ccy(selected.currency);
+                          return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
+                        })}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 ) : (
-                  <Select value={txnCategory} onValueChange={setTxnCategory}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Category *" /></SelectTrigger>
-                    <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
+                  <div>
+                    <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
+                    <Select value={txnCategory} onValueChange={setTxnCategory}>
+                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Category *" /></SelectTrigger>
+                      <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
                 )}
-                <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+                <div>
+                  <Label className="text-xs">Note</Label>
+                  <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Note (optional)" />
+                </div>
               </div>
 
               {txnType === "income" && (
@@ -649,13 +723,11 @@ export function LockerPage() {
                 </div>
               )}
 
-
               {txnType === "transfer_out" && txnTargetLocker && (() => {
                 const target = lockers.find(l => l.id === txnTargetLocker);
                 if (!target) return null;
                 const fromCcy = ccy(selected.currency), toCcy = ccy(target.currency);
                 if (fromCcy === toCcy) return null;
-                const amt = Number(txnAmount) || 0;
                 return (
                   <div className="p-3 rounded-xl bg-secondary space-y-2">
                     {/* Shows what the amount becomes in the destination's currency. */}
@@ -669,41 +741,10 @@ export function LockerPage() {
                   </div>
                 );
               })()}
-
-              <div className="flex gap-2.5">
-                <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10">Save</AsyncButton>
-                <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10">Cancel</Button>
-              </div>
             </div>
-          )}
-
-          {/* Opening balance — the starting point every running balance builds on —
-              pinned at the very bottom (after the oldest entry) so the numbers make sense.
-              A new locker or filter starts the table again from its newest entry. */}
-          <DataTable
-            resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterType}`}
-            id="locker-ledger"
-            noun="transaction"
-            rows={ledgerRows}
-            columns={ledgerColumns}
-            rowKey={r => r.id}
-            defaultSort={{ key: "date", dir: "desc" }}
-            pinnedRows={[openingRow]}
-            searchText={r => (r.t ? [txnLabel(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
-            searchPlaceholder="Search this ledger"
-            totals={{
-              debit: rows => <span className="text-destructive">{fmtCcy(ledgerSum(rows, false), selected.currency)}</span>,
-              credit: rows => <span className="text-success">{fmtCcy(ledgerSum(rows, true), selected.currency)}</span>,
-            }}
-            rowActions={can("locker", "edit") ? r => [
-              { label: "Apply to a client’s bill", icon: HandCoins, hint: "Money a client sent — settle their bill with it",
-                show: !!r.t && r.t.type === "income" && r.t.refType !== "clientPayment",
-                onSelect: () => { setFixTxnId(r.t!.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); } },
-            ] : undefined}
-            emptyText={txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
-          />
-        </motion.div>
-      )}
+          </ActionSheet>
+        );
+      })()}
 
       <Dialog open={!!editId} onOpenChange={open => !open && setEditId(null)}>
         <DialogContent className="max-w-2xl rounded-2xl">

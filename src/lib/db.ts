@@ -1306,6 +1306,26 @@ export interface ReadyStockItem {
   /** Some pieces of an item moved to another office became this item there:
    *  the item they came from, so later moves rejoin them (lib/offices.ts). */
   splitFrom?: string;
+  /** What happened to this piece, oldest first — the last 200 (lib/readyStockHistory.ts).
+   *  Every client can read Ready Stock, so no cost figure or client name is ever written here. */
+  history?: ReadyStockEvent[];
+}
+
+export type ReadyStockEventKind =
+  | "added" | "edited" | "price" | "qty" | "moved" | "split"
+  | "sold" | "unsold" | "returned" | "returnCancelled" | "cost";
+
+/** One line of a Ready Stock piece's history. */
+export interface ReadyStockEvent {
+  at: string;
+  /** User id of whoever did it. */
+  by: string;
+  /** Their name then — kept for staff only, never a client's. */
+  byName?: string;
+  kind: ReadyStockEventKind;
+  text: string;
+  /** The order, return or other lot it was about. */
+  ref?: { orderId?: string; returnId?: string; itemId?: string };
 }
 
 export const READY_STOCK_LOCATIONS = ["US", "Hong Kong", "India", "Other"] as const;

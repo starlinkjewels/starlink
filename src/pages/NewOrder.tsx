@@ -6,7 +6,7 @@ import { middleStages } from "@/lib/stages";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
@@ -16,6 +16,7 @@ import { useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl } from "@/lib/storage";
+import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -224,6 +225,17 @@ export function NewOrderPage() {
     }));
   };
 
+  // "Sell" on a piece's own page opens here with ?readyStock=<id>: that piece
+  // starts chosen, once it is loaded and on sale for this order's company.
+  const [params] = useSearchParams();
+  const preStock = useRef(params.get("readyStock"));
+  useEffect(() => {
+    const id = preStock.current;
+    if (!id || f.readyStockItemId || !readyStockItems.some(i => i.id === id)) return;
+    preStock.current = null;
+    selectReadyStock(id);
+  });
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
@@ -361,7 +373,12 @@ export function NewOrderPage() {
 
       if (order.materialSourcing === "readyStock" && order.readyStockItemId) {
         const item = d.readyStock.find(x => x.id === order.readyStockItemId);
-        if (item) item.quantity = Math.max(0, item.quantity - 1);
+        if (item) {
+          const had = item.quantity;
+          item.quantity = Math.max(0, item.quantity - 1);
+          // On the piece's own history — the order number only, never the client.
+          logItem(item, { ...whoOf(user), at: order.createdAt, kind: "sold", text: `Sold on ${order.orderNumber} · ${had} → ${item.quantity}`, ref: { orderId: order.id } });
+        }
       }
 
       if (order.assignedFactoryId) {
