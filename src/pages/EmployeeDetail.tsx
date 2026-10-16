@@ -2,7 +2,8 @@ import { useMayExport } from "@/hooks/useCan";
 import { MoreMenu } from "@/components/MoreMenu";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, orderTotal, findInvoiceForOrder, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
+import { filled, when, userName, refLink, refNo, type Detail } from "@/components/rowDetails";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -78,6 +79,39 @@ export function EmployeeDetailPage() {
       cell: o => <CellAmount tone={balanceDue(o) === 0 && totalAdvance(o) > 0 ? "in" : undefined}>{fmtMoney(o.amount)}</CellAmount> },
     { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
   ];
+
+  // What an opened client adds: how to reach them, what they owe, their newest order.
+  const clientDetails = (c: Client): Detail[] => {
+    const mine = orders.filter(o => o.clientId === c.id);
+    const owed = mine.filter(o => o.status !== "Rejected").reduce((s, o) => s + balanceDue(o), 0);
+    const last = mine[0]; // newest first
+    return filled([
+      { label: "Email", value: c.email },
+      { label: "Phone", value: c.phone },
+      { label: "Country", value: c.country },
+      { label: "Client since", value: fmtDate(c.createdAt) },
+      c.status !== "active" && { label: "Status", value: "Inactive" },
+      { label: "Outstanding", value: owed > 0 ? <span className="font-semibold text-destructive">{fmtMoney(owed)}</span> : "Cleared" },
+      !!last && { label: "Last order", value: <>{refLink(`/orders/${last.id}`, last.orderNumber)} · {fmtDate(last.createdAt)} · {last.status}</> },
+    ]);
+  };
+  // What an opened order adds: the piece, its stage, what is paid and its invoice.
+  const orderDetails = (o: Order): Detail[] => {
+    const st = o.timeline.find(t => t.status === "in_progress") ?? [...o.timeline].reverse().find(t => t.status === "done");
+    const total = orderTotal(o), due = balanceDue(o);
+    const inv = findInvoiceForOrder(db.invoices, o.id);
+    return filled([
+      { label: "Piece", value: [o.metal, o.productKarats, `${o.quantity} pc${o.quantity !== 1 ? "s" : ""}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },
+      !!st && { label: "Stage", value: [st.step, st.date && when(st.date)].filter(Boolean).join(" · ") },
+      { label: "Placed", value: when(o.createdAt) },
+      { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
+      { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
+      total > 0 && Math.abs(total - o.amount) > 0.005 && { label: "Order total", value: fmtMoney(total) },
+      total > 0 && { label: "Paid", value: fmtMoney(totalAdvance(o)) },
+      total > 0 && { label: "Balance due", value: due > 0 ? <span className="font-semibold text-destructive">{fmtMoney(due)}</span> : "Cleared" },
+      !!inv && { label: "Invoice", value: refNo(inv.number) },
+    ]);
+  };
 
   // Salary / wages / advances paid to this employee (expenses tagged to them).
   const salaryLedger = employeePayments(db.expenses, employee.id);
@@ -329,6 +363,7 @@ export function EmployeeDetailPage() {
               columns={clientColumns}
               rowKey={c => c.id}
               rowHref={c => `/clients/${c.id}`}
+              details={clientDetails}
               // Just the table for a handful; search, columns and Excel once it grows.
               controls={clients.length > 10 ? "full" : "none"}
               searchText={c => `${c.companyName} ${c.ownerName}`}
@@ -358,6 +393,7 @@ export function EmployeeDetailPage() {
               rowKey={o => o.id}
               defaultSort={{ key: "date", dir: "desc" }}
               rowHref={o => `/orders/${o.id}`}
+              details={orderDetails}
               controls="none"
             />
           </div>

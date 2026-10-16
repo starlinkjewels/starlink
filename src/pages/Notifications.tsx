@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, type Notification } from "@/lib/db";
+import { loadDb, updateDb, currentUserOrders, type Notification } from "@/lib/db";
+import { filled, refLink, linkList, type Detail } from "@/components/rowDetails";
 import { Bell, Info, Package, AlertCircle, Trash2 } from "lucide-react";
 import { AsyncButton } from "@/components/AsyncButton";
 import { DataTable, CellMain, CellTag, CellDate, type DataColumn } from "@/components/DataTable";
@@ -81,6 +82,16 @@ export function NotificationsPage() {
     { key: "when", header: "When", kind: "date", sortValue: n => n.createdAt, cell: n => <CellDate>{when(n.createdAt)}</CellDate> },
   ];
 
+  // An opened notification links the orders it names — only ones this person
+  // can open (a client's own, an employee's within their work).
+  const notificationDetails = (n: Notification): Detail[] => {
+    const words = new Set(`${n.title} ${n.body}`.split(/[^\w-]+/).filter(Boolean));
+    const named = currentUserOrders(db, user!).filter(o => words.has(o.orderNumber));
+    return filled([
+      named.length > 0 && { label: named.length > 1 ? "Orders" : "Order", value: linkList(named.map(o => ({ key: o.id, node: refLink(`/orders/${o.id}`, o.orderNumber) }))) },
+    ]);
+  };
+
   return (
     <div className="max-w-3xl mx-auto space-y-4">
       <PushPermissionBanner />
@@ -115,6 +126,7 @@ export function NotificationsPage() {
           searchPlaceholder="Search notifications"
           onRowClick={n => { if (!n.read) markOne(n.id); }}
           canClickRow={n => !n.read}
+          details={notificationDetails}
           rowClassName={n => (n.read ? "opacity-75" : "bg-primary/[0.04]")}
           rowActions={n => [
             { label: "Delete", icon: Trash2, danger: true, onSelect: () => deleteOne(n.id) },

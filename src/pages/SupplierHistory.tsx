@@ -40,6 +40,9 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
+import { fmtCcy } from "@/lib/currency";
+import { companyById, hasCompanies } from "@/lib/companies";
+import { filled, lockerLabel, noteText, recorded, userName, type Detail } from "@/components/rowDetails";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -694,6 +697,66 @@ function SupplierHistoryPageBody() {
       cell: p => (purchasePending(p) > 0 ? <CellAmount tone="out">{fmtMoneyInr(purchasePending(p))}</CellAmount> : <CellTag tone="green">Paid</CellTag>) },
   ];
 
+  // An opened purchase: the bill as entered — description, rate, discount and
+  // rounding, the bill's date and notes, the company and the stones it brought
+  // in — then each payment made against it, and who recorded it.
+  const purchaseRate = (p: Purchase) => {
+    const cur = p.currency === "USD" ? "USD" : "INR";
+    if (p.material === "gold") return p.gold?.ratePerGram ? `${fmtCcy(p.gold.ratePerGram, cur)}/g` : "";
+    if (p.material === "diamond") return p.diamond?.ratePerCarat ? `${fmtCcy(p.diamond.ratePerCarat, cur)}/ct` : "";
+    return p.other?.ratePerUnit ? `${fmtCcy(p.other.ratePerUnit, cur)}/${materialUnit(db.settings, p.material)}` : "";
+  };
+  const purchaseDetails = (p: Purchase): Detail[] => {
+    const packets = (db.diamondPackets ?? []).filter(x => x.purchaseId === p.id);
+    const pays = [...(p.payments ?? [])].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    return filled([
+      { label: "Description", value: purchaseDesc(p) },
+      { label: "Rate", value: purchaseRate(p) },
+      !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Added on", value: `${Math.abs(p.discountPct)}%` },
+      !!p.roundOffInr && { label: "Rounded off", value: `${p.roundOffInr > 0 ? "+" : "−"}${fmtMoneyInr(Math.abs(p.roundOffInr))}` },
+      !!p.invoiceDate && { label: "Bill date", value: fmtDate(p.invoiceDate) },
+      { label: "Notes", value: noteText(p.notes) },
+      hasCompanies(db.settings) && { label: "Company", value: companyById(db.settings, p.companyId).name },
+      packets.length > 0 && { label: packets.length > 1 ? "Stones" : "Stone", value: packets.map(x => x.stockNumber || `${x.certificateLab || "Cert"} ${x.certificateNumber}`).join(", ") },
+      pays.length > 0 && { label: pays.length > 1 ? `Payments (${pays.length})` : "Payment", value: (
+        <ul className="space-y-0.5">
+          {pays.map(pay => (
+            <li key={pay.id}>
+              <span className="font-medium tabular-nums">{fmtMoneyInr(pay.amountInr)}</span>
+              <span className="text-muted-foreground"> · {fmtDate(pay.createdAt)}{lockerLabel(db, pay.lockerId) ? ` · ${lockerLabel(db, pay.lockerId)}` : ""}{pay.note ? ` · ${pay.note}` : ""}{userName(db, pay.recordedBy) ? ` · ${userName(db, pay.recordedBy)}` : ""}</span>
+            </li>
+          ))}
+        </ul>
+      ) },
+      { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) },
+    ]);
+  };
+
+  // An opened statement line: the account the money went through, its note as
+  // typed, and who recorded it; a purchase, its notes.
+  const statementDetails = (r: StatementRow): Detail[] => {
+    const p = purchases.find(x => x.id === r.id);
+    if (p) return filled([{ label: "Notes", value: noteText(p.notes) }, { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) }]);
+    const pay = purchases.flatMap(x => x.payments ?? []).find(x => x.id === r.id);
+    if (pay) {
+      // One payment split across bills: what each bill got.
+      const parts = purchases.flatMap(x => (x.payments ?? []).filter(y => (y.lockerId ?? "") === (pay.lockerId ?? "") && y.createdAt === pay.createdAt).map(y => ({ x, y })));
+      return filled([
+        { label: "Paid from", value: lockerLabel(db, pay.lockerId) },
+        parts.length > 1 && { label: "Split across", value: parts.map(({ x, y }) => `${x.invoiceNumber || "No bill no."} · ${fmtMoneyInr(y.amountInr)}`).join(", ") },
+        { label: "Note", value: noteText(pay.note) },
+        { label: "Recorded", value: recorded(db, pay.createdAt, pay.recordedBy) },
+      ]);
+    }
+    const other = receipts.find(x => x.id === r.id) ?? advances.find(x => x.id === r.id);
+    if (other) return filled([
+      { label: r.kind === "Received" ? "Into account" : "Paid from", value: lockerLabel(db, other.lockerId) },
+      { label: "Note", value: noteText(other.note) },
+      { label: "Recorded", value: recorded(db, other.createdAt, other.recordedBy) },
+    ]);
+    return [];
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <button onClick={() => navigate("/suppliers")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -804,6 +867,7 @@ function SupplierHistoryPageBody() {
         fmt={fmtMoneyInr}
         debitLabel="Bill"
         creditLabel="Paid"
+        details={statementDetails}
         onExport={() => setShowExport(true)}
         summary={[
           { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
@@ -833,6 +897,7 @@ function SupplierHistoryPageBody() {
             searchText={p => [purchaseTitle(p), purchaseDesc(p), p.invoiceNumber, orderOf(p)?.orderNumber, p.purpose === "order" ? "order" : "stock", p.notes].filter(Boolean).join(" ")}
             searchPlaceholder="Search purchases"
             exportName={`Supplier-${supplier.name.replace(/\s+/g, "_")}-Purchases`}
+            details={purchaseDetails}
             totals={{
               total: rows => fmtMoneyInr(rows.reduce((s, p) => s + p.totalInr, 0)),
               paid: rows => <span className="text-success">{fmtMoneyInr(rows.reduce((s, p) => s + purchasePaid(p), 0))}</span>,

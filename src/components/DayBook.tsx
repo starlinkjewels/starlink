@@ -6,6 +6,8 @@ import { ccy, fmtCcy, fmtCcyPdf } from "@/lib/currency";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { lockerTxnDetails } from "@/components/rowDetails";
+import { useCan } from "@/hooks/useCan";
 
 /** One line of the book: the entry, and the account's balance after it. */
 type Line = { t: LockerTransaction; balance: number };
@@ -34,6 +36,7 @@ function isIn(t: LockerTransaction) {
  */
 export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const db = useDb();
+  const can = useCan();
   const lockers = db.lockers.filter(l => l.active !== false);
   // The account picked, or the first one. Taking the first one ONCE, when the
   // page drew, left the book on "no account" whenever the accounts arrived a
@@ -209,6 +212,9 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
         columns={columns}
         rowKey={r => r.t.id}
         defaultSort={{ key: "date", dir: "desc" }}
+        // Opened: the note as typed, who recorded it and when, and what the
+        // movement was — the other account of a transfer, the client, bill or job.
+        details={({ t }) => lockerTxnDetails(db, t, m => can(m), { note: true })}
         emptyText={filtered ? "Nothing matches these filters." : "Nothing on this account yet."}
       />
     </div>

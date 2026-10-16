@@ -25,6 +25,7 @@ import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { lockerTxnDetails } from "@/components/rowDetails";
 
 /** Bare, signed number for PDF cells — the statement names its currency once
  *  at the top, and jsPDF can't draw ₹ anyway. */
@@ -591,6 +592,11 @@ export function LockerPage() {
                 show: !!r.t && r.t.type === "income" && r.t.refType !== "clientPayment",
                 onSelect: () => { setFixTxnId(r.t!.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); } },
             ] : undefined}
+            // Opened: the voucher and note on their own lines, who recorded it and
+            // when, the other account of a transfer and its rate, and whatever it
+            // settled — a client's receipt, supplier bills, factory jobs, an expense.
+            // The category already titles the line; with none, the note does.
+            details={r => (r.t ? lockerTxnDetails(db, r.t, m => can(m), { voucher: true, note: !!r.t.category }) : [])}
             emptyText={txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
           />
         </motion.div>

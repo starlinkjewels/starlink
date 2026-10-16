@@ -1,4 +1,5 @@
 import { DataTable } from "@/components/DataTable";
+import { filled, type Detail } from "@/components/rowDetails";
 import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Legend } from "recharts";
@@ -23,6 +24,17 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
   const active = rows.filter(r => (ctx.employeeId ? r.id === ctx.employeeId : (r.received || r.sold || r.collectedUsd || r.tasksDone || r.tasksOpen || r.open || r.expensesInr)));
   const maxSales = Math.max(0, ...active.map(r => r.salesUsd));
   const best = active.find(r => r.salesUsd > 0);
+
+  // A person, opened: what the Expenses column leaves out, and how to reach them.
+  const personDetails = (r: TeamRow): Detail[] => {
+    const u = db.users.find(x => x.id === r.id);
+    return filled([
+      r.expensesUncounted > 0 && { label: "Expenses not counted", value: `${r.expensesUncounted} in a currency with no rate on file — add it in Settings → Exchange rates` },
+      { label: "Department", value: u?.department },
+      { label: "Email", value: u?.email },
+      { label: "Phone", value: u?.phone },
+    ]);
+  };
 
   const exportTeam = () => downloadCsv(`Team_${fileTag}.csv`,
     ["Name", "Role", "Clients managed", "Orders in", "Shipped", "Sales ($)", ...(withProfit ? ["Profit ($)"] : []), "Collected ($)", "Expenses (₹)", "Open orders", "Avg days to dispatch", "On-time %", "Tasks done", "Tasks open"],
@@ -61,6 +73,7 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
           id="reports-team"
           rows={active}
           rowKey={r => r.id}
+          details={personDetails}
           defaultSort={{ key: "sales", dir: "desc" }}
           searchText={r => r.name}
           emptyText="No activity by anyone in this period."

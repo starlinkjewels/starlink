@@ -8,6 +8,7 @@ import { ccy, ccyOrder, ccySymbol, fmtCcy, fmtCcyMix, fmtCcyPdf, rateOf, sumByCc
 import { listEntries, editEntry, deleteEntry, entryImpact, transferLegs, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
 import { RateInput } from "@/components/CurrencyFields";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { filled, linkList, lockerTxnDetails, recorded, refLink, type Detail } from "@/components/rowDetails";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -211,6 +212,58 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   };
 
   const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
+
+  // An opened row: who recorded it and when, the page of the party it was
+  // with, how one payment was split across bills, the orders it was for —
+  // read from the record the row stands for.
+  const orderLinks = (ids: (string | undefined)[]) => linkList([...new Set(ids.filter((x): x is string => !!x))].map(id => ({
+    key: id, node: refLink(`/orders/${id}`, db.orders.find(o => o.id === id)?.orderNumber ?? "Order", can("orders")),
+  })));
+  const entryDetails = (e: MoneyEntry): Detail[] => {
+    const ids = e.legIds ?? [e.id];
+    // Corrected from another tab: say which, as the ⋯ menu does.
+    const where = e.lockedWhere ? { label: "Recorded in", value: e.lockedWhere } : e.locked ? { label: "Editing", value: e.locked } : undefined;
+    if (kind === "supplier") {
+      const parts = (db.purchases ?? []).flatMap(p => (p.payments ?? []).filter(pay => ids.includes(pay.id)).map(pay => ({ p, pay })));
+      const other = (db.supplierReceipts ?? []).find(r => r.id === e.id) ?? (db.supplierPayments ?? []).find(a => a.id === e.id);
+      const supplierId = parts[0]?.p.supplierId ?? other?.supplierId;
+      return filled([
+        !!supplierId && can("suppliers") && { label: "Supplier page", value: refLink(`/suppliers/${supplierId}`, e.party || "Supplier") },
+        parts.length > 1 && { label: "Split across", value: parts.map(x => `${x.p.invoiceNumber || "No bill no."} · ${fmtCcy(x.pay.amountInr, "INR")}`).join(", ") },
+        { label: "For order", value: orderLinks(parts.map(x => x.p.orderId)) },
+        { label: "Recorded", value: recorded(db, e.date, parts[0]?.pay.recordedBy ?? other?.recordedBy) },
+        where,
+      ]);
+    }
+    if (kind === "factory") {
+      const parts = (db.materialIssuances ?? []).flatMap(mi => (mi.makingCharges?.payments ?? []).filter(pay => ids.includes(pay.id)).map(pay => ({ mi, pay })));
+      const adv = (db.factoryPayments ?? []).find(a => a.id === e.id);
+      const factoryId = parts[0]?.mi.factoryId ?? adv?.factoryId;
+      return filled([
+        !!factoryId && can("factories") && { label: "Factory page", value: refLink(`/factories/${factoryId}`, e.party || "Factory") },
+        parts.length > 1 && { label: "Split across", value: parts.map(x => `${db.orders.find(o => o.id === x.mi.orderId)?.orderNumber ?? "Making charges"} · ${fmtCcy(x.pay.amountInr, "INR")}`).join(", ") },
+        { label: parts.length > 1 ? "Orders" : "Order", value: orderLinks(parts.map(x => x.mi.orderId)) },
+        { label: "Recorded", value: recorded(db, e.date, parts[0]?.pay.recordedBy ?? adv?.recordedBy) },
+        where,
+      ]);
+    }
+    if (kind === "expense") {
+      const x = db.expenses.find(ex => ex.id === e.id);
+      const client = x?.clientId ? db.clients.find(c => c.id === x.clientId) : undefined;
+      return filled([
+        !!client && { label: "Client", value: refLink(`/clients/${client.id}`, client.companyName, can("clients")) },
+        { label: (x?.orderIds?.length ?? 0) > 1 ? "For orders" : "For order", value: orderLinks(x?.orderIds ?? []) },
+        { label: "Shipment", value: x?.shipmentRef },
+        { label: "Recorded", value: recorded(db, x?.createdAt ?? e.date, x?.employeeId) },
+        where,
+      ]);
+    }
+    // An account entry: the movement itself — voucher, remarks, account and
+    // category already have their columns.
+    const t = (db.lockerTransactions ?? []).find(x => x.id === e.id);
+    return [...(t ? lockerTxnDetails(db, t, m => can(m)) : []), ...filled([where])];
+  };
+
   const columns: DataColumn<MoneyEntry>[] = [
     { key: "party", header: kind === "expense" ? "Expense" : "Party", always: true, sortValue: e => e.party,
       cell: e => <CellMain title={e.party || "—"} className="max-w-[180px]" /> },
@@ -271,6 +324,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         rowKey={e => e.id}
         defaultSort={{ key: "date", dir: "desc" }}
         emptyText={filtered ? "Nothing matches these filters." : "No entries yet."}
+        details={entryDetails}
         rowActions={e => e.locked
           // Owned by another tab: say where it is corrected instead.
           ? [{ label: e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked", hint: e.locked, icon: Lock, disabled: true, onSelect: () => {} }]

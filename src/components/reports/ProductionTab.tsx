@@ -6,6 +6,7 @@ import { downloadCsv } from "@/lib/ledgerExport";
 import { fmtDate, type Order } from "@/lib/db";
 import { kpis, lateOpen, factoryTable, soldIn, cycleDays, pctChange } from "@/lib/analytics";
 import { DataTable, CellAmount } from "@/components/DataTable";
+import { filled, when, userName, type Detail } from "@/components/rowDetails";
 import { C, SERIES, KpiCard, Panel, ChartTip, ExportButton, Empty, inr, pct, num } from "./ui";
 import type { ReportCtx } from "./context";
 
@@ -32,6 +33,20 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
   const today = new Date();
   const daysLate = (o: Order) => Math.floor((+today - +new Date(o.expectedDelivery)) / 86_400_000);
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
+  // A late order, opened: the date promised, the piece, where it is now and with whom.
+  const lateDetails = (o: Order): Detail[] => {
+    const st = o.timeline.find(t => t.status === "in_progress") ?? [...o.timeline].reverse().find(t => t.status === "done");
+    const factories = [...new Set((db.materialIssuances ?? []).filter(i => i.orderId === o.id).map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))];
+    return filled([
+      { label: "Promised", value: fmtDate(o.expectedDelivery) },
+      { label: "Placed", value: fmtDate(o.createdAt) },
+      o.priority !== "Normal" && { label: "Priority", value: o.priority },
+      { label: "Piece", value: [o.jewelleryType, o.metal, o.productKarats, `${o.quantity} pc${o.quantity !== 1 ? "s" : ""}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },
+      !!st && { label: "Current step", value: [st.step, st.date && `since ${when(st.date)}`].filter(Boolean).join(" · ") },
+      { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
+      factories.length > 0 && { label: factories.length > 1 ? "Factories" : "Factory", value: factories.join(", ") },
+    ]);
+  };
 
   const exportLate = () => downloadCsv(`Late-orders_${fileTag}.csv`, ["Order", "Client", "Item", "Status", "Promised", "Days late"],
     data.late.map(o => [o.orderNumber, db.clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status, fmtDate(o.expectedDelivery),
@@ -78,6 +93,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
               rows={data.late}
               rowKey={o => o.id}
               rowHref={o => `/orders/${o.id}`}
+              details={lateDetails}
               maxHeight="14rem"
               defaultSort={{ key: "late", dir: "desc" }}
               searchText={o => `${o.orderNumber} ${clientName(o.clientId)} ${o.status}`}

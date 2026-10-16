@@ -19,6 +19,8 @@ import { RateInput } from "@/components/CurrencyFields";
 import { ccy, fmtCcy, roundCcy } from "@/lib/currency";
 import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/components/DataTable";
 import type { Order } from "@/lib/db";
+import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
+import { pieceWeights } from "@/lib/weights";
 import {
   ArrowLeft, Package, Mail, Phone, MapPin, Globe, Undo2,
   FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
@@ -429,6 +431,52 @@ function ClientHistoryPageBody() {
     { key: "date", header: "Date", kind: "date", sortValue: o => +new Date(o.createdAt), csv: o => fmtDate(o.createdAt), cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
   ];
 
+  // What an opened order adds to its columns: the piece, where it is, how the
+  // bill is made up and each payment on it. Weights from the order's own
+  // figures (this page doesn't load the factory issues). Never a cost.
+  const orderDetails = (o: Order): Detail[] => {
+    const inv = findInvoiceForOrder(allInvoices, o.id);
+    const st = o.timeline.find(t => t.status === "in_progress") ?? [...o.timeline].reverse().find(t => t.status === "done");
+    const by = userName(db, st?.employeeId);
+    const pw = pieceWeights(o);
+    const weights = [pw.gross ? `Gross ${pw.gross} g` : "", pw.net ? `Net ${pw.net} g` : "", pw.diamondCt ? `${pw.diamondCt} ct` : ""].filter(Boolean).join(" · ");
+    const returned = (o.returns ?? []).reduce((s, r) => s + r.creditUsd, 0);
+    const parts = [
+      `Value ${fmtMoney(o.amount)}`,
+      (o.shippingCharge || 0) > 0 ? `shipping ${fmtMoney(o.shippingCharge)}` : "",
+      (o.certificateFee || 0) > 0 ? `certificate ${fmtMoney(o.certificateFee || 0)}` : "",
+      (o.giftCardRedeemed || 0) > 0 ? `gift card −${fmtMoney(o.giftCardRedeemed || 0)}` : "",
+      returned > 0 ? `returned −${fmtMoney(returned)}` : "",
+    ].filter(Boolean);
+    return filled([
+      !!inv && { label: "Invoice", value: <>{refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, can("invoices"))} · {fmtDate(inv.createdAt)}</> },
+      !!st && { label: "Stage", value: [st.step, st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
+      { label: "Placed", value: when(o.createdAt) },
+      { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
+      { label: "Piece", value: [o.productKarats, o.productColor, o.productSize && `size ${o.productSize}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },
+      { label: pw.estimated ? "Weights (estimated)" : "Weights", value: weights },
+      { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
+      !!o.courierName && { label: "Courier", value: (
+        <>{o.courierName}{o.trackingNumber ? <> · {refNo(o.trackingNumber)}</> : null}{o.trackingLink ? <> · <a href={o.trackingLink} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">Track</a></> : null}</>
+      ) },
+      !!o.dispatchedAt && { label: "Dispatched", value: fmtDate(o.dispatchedAt) },
+      !!o.deliveredAt && { label: "Delivered", value: fmtDate(o.deliveredAt) },
+      parts.length > 1 && { label: "Bill made up of", value: parts.join(" · ") },
+      (o.advances ?? []).length > 0 && { label: "Payments", value: (
+        <ul className="space-y-0.5">
+          {(o.advances ?? []).map(a => <li key={a.id}>{fmtDate(a.createdAt)} · {fmtMoney(a.amount)}{a.fromCredit ? " · from credit" : ""}{a.note ? ` · ${a.note}` : ""}</li>)}
+        </ul>
+      ) },
+      !!o.returns?.length && { label: "Returns", value: (
+        <ul className="space-y-0.5">
+          {(o.returns ?? []).map(r => <li key={r.id}>{r.creditNoteNo} · {fmtDate(r.at)} · {r.qty} pc{r.qty !== 1 ? "s" : ""} · −{fmtMoney(r.creditUsd)} · {r.status === "coming" ? "on its way back" : "received"}</li>)}
+        </ul>
+      ) },
+      !!o.melted && { label: "Melted", value: `${fmtDate(o.melted.at)} by ${o.melted.byName}${o.melted.reason ? ` — ${o.melted.reason}` : ""}` },
+      { label: "Instructions", value: noteText(o.instructions) },
+    ]);
+  };
+
   /**
    * Client order report. This was hand-drawn onto a jsPDF page and cut every
    * field to a fixed length — orderNumber.slice(-10) turned SLJ-2026-1025 into
@@ -658,6 +706,7 @@ function ClientHistoryPageBody() {
             columns={orderColumns}
             rowKey={o => o.id}
             rowHref={o => `/orders/${o.id}`}
+            details={orderDetails}
             defaultSort={{ key: "date", dir: "desc" }}
             pageSizes={[10, 25, 50]}
             searchText={o => [o.orderNumber, o.jewelleryType, o.metal, o.diamondType, o.priority, o.status, findInvoiceForOrder(allInvoices, o.id)?.number].filter(Boolean).join(" ")}

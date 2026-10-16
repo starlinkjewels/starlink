@@ -5,7 +5,7 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
-import type { Expense, ExpenseCategory } from "@/lib/db";
+import type { DB, Expense, ExpenseCategory } from "@/lib/db";
 import { ccy, ccySymbol, fmtCcyMix, sumByCcy } from "@/lib/currency";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -15,6 +15,7 @@ import {
   TrendingUp, TrendingDown, CalendarDays, Trash2,
 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { filled, linkList, lockerLabel, noteText, recorded, refLink, when } from "@/components/rowDetails";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 
@@ -397,6 +398,8 @@ export function ExpensesPage() {
             showEmployee={isAdmin && mineFilter !== "self"}
             users={db.users}
             clients={db.clients}
+            lockers={db.lockers}
+            orders={db.orders}
             onDelete={handleDelete}
             mayDelete={can("expenses", "delete")}
             currentUserId={user!.id}
@@ -487,6 +490,8 @@ export function ExpensesPage() {
             showEmployee={true}
             users={db.users}
             clients={db.clients}
+            lockers={db.lockers}
+            orders={db.orders}
             onDelete={handleDelete}
             mayDelete={can("expenses", "delete")}
             currentUserId={user!.id}
@@ -658,13 +663,17 @@ interface ExpenseListProps {
   showEmployee: boolean;
   users: any[];
   clients: any[];
+  /** For an opened row: the account it was paid from, the orders it was for. */
+  lockers: DB["lockers"];
+  orders: DB["orders"];
   onDelete: (id: string) => void;
   currentUserId: string;
   /** Whether this person's role lets them delete expenses at all. */
   mayDelete: boolean;
 }
 
-function ExpenseList({ expenses, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
+function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
+  const can = useCan();
   // A nil total reads in the list's one currency ("$0"), else in rupees.
   const codes = new Set(expenses.map(e => ccy(e.currency)));
   const nilCcy = codes.size === 1 ? [...codes][0] : "INR";
@@ -703,6 +712,19 @@ function ExpenseList({ expenses, showEmployee, users, clients, onDelete, current
         rowActions={e => [
           { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), show: mayDelete && e.employeeId === currentUserId },
         ]}
+        // Opened: the account it was paid from, who recorded it and when, the note
+        // as typed, and the client and orders it was for.
+        details={e => filled([
+          { label: "Paid from", value: lockerLabel({ lockers }, e.lockerId) },
+          { label: "Recorded", value: showEmployee ? when(e.createdAt) : recorded({ users }, e.createdAt, e.employeeId) },
+          { label: "Note", value: noteText(e.note) },
+          !!e.clientId && can("clients") && { label: "Client page", value: refLink(`/clients/${e.clientId}`, clientName(e.clientId) || "Client") },
+          !!e.orderIds?.length && { label: e.orderIds.length > 1 ? "For orders" : "For order", value: linkList(e.orderIds.map(id => {
+            const o = orders.find(x => x.id === id);
+            return { key: id, node: refLink(`/orders/${id}`, o?.orderNumber ?? "Order", can("orders")) };
+          })) },
+          { label: "Shipment", value: e.shipmentRef },
+        ])}
         emptyText={<span className="inline-flex flex-col items-center gap-1"><Receipt className="h-7 w-7 text-muted-foreground/40" /><span className="font-medium">No expenses found</span><span className="text-xs text-muted-foreground/70">Add your first expense using the button above.</span></span>}
       />
     </div>

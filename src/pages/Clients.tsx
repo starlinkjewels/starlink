@@ -5,7 +5,8 @@ import { useCan, useMayExport } from "@/hooks/useCan";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { loadDb, updateDb, fmtMoney, clientAccount, isOnline, timeAgo, currentUserClients, type Client } from "@/lib/db";
+import { loadDb, updateDb, fmtMoney, fmtDate, clientAccount, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
+import { filled, refLink, noteText, type Detail } from "@/components/rowDetails";
 import { AccountSummary } from "@/components/AccountSummary";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
@@ -283,6 +284,12 @@ export function ClientsPage() {
     orderStats.set(o.clientId, s);
   }
   const statsOf = (c: Client) => orderStats.get(c.id) ?? { total: 0, active: 0 };
+  // Each client's newest order, for an opened row.
+  const lastOrder = new Map<string, Order>();
+  for (const o of db.orders) {
+    const prev = lastOrder.get(o.clientId);
+    if (o.clientId && (!prev || o.createdAt > prev.createdAt)) lastOrder.set(o.clientId, o);
+  }
   const loginOf = new Map<string, (typeof db.users)[number]>();
   for (const u of db.users) if (u.clientId && !loginOf.has(u.clientId)) loginOf.set(u.clientId, u);
   const accountOf = (c: Client) => accounts.get(c.id)!;
@@ -329,6 +336,27 @@ export function ClientsPage() {
         return isOnline(u.lastActiveAt) ? <CellTag tone="green">Online</CellTag> : <CellDate>{timeAgo(u.lastActiveAt)}</CellDate>;
       } },
   ];
+
+  // What an opened row adds: how to reach them, where they are, and the
+  // account facts the grid card and the client's page show. Gift cards are the
+  // admin's (as on the client's page); photo access and the opening balance staff's.
+  const clientDetails = (c: Client): Detail[] => {
+    const sub = c.ownerName || c.email || c.phone;
+    const last = lastOrder.get(c.id);
+    return filled([
+      !!c.email && c.email !== sub && { label: "Email", value: <a href={`mailto:${c.email}`} className="text-primary hover:underline break-all">{c.email}</a> },
+      !!c.phone && c.phone !== sub && { label: "Phone", value: <a href={`tel:${c.phone}`} className="text-primary hover:underline">{c.phone}</a> },
+      { label: "Address", value: noteText(c.address) },
+      { label: "Country", value: [c.country, c.zip].filter(Boolean).join(" · ") },
+      { label: "GST / VAT", value: c.gstVat },
+      { label: "Client since", value: fmtDate(c.createdAt) },
+      !!last && { label: "Last order", value: <>{refLink(`/orders/${last.id}`, last.orderNumber)} · {fmtDate(last.createdAt)} · {last.status}</> },
+      staff && { label: "Username", value: c.username && <span className="font-mono text-xs">{c.username}</span> },
+      staff && hasOpeningBalance(c) && { label: "Opening balance", value: `${fmtMoney(c.openingBalance || 0)} ${c.openingDir === "credit" ? "credit (their advance)" : "debit (they owed us)"}${c.openingDate ? ` · as of ${fmtDate(c.openingDate)}` : ""}` },
+      user!.role === "admin" && !!c.giftCardEnabled && { label: "Gift card & cashback", value: `On · ${cashbackPercentFor(db, c)}% cashback · a card covers up to ${Math.round(giftMaxRedeemPctFor(db, c) * 100)}% of an order` },
+      staff && { label: "Product Photos", value: c.productPhotoAccess ? "Access on" : "Access off" },
+    ]);
+  };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
@@ -457,6 +485,7 @@ export function ClientsPage() {
             rowKey={c => c.id}
             defaultSort={{ key: "balance", dir: "desc" }}
             rowHref={c => `/clients/${c.id}`}
+            details={clientDetails}
             exportName="Clients"
             totals={{
               orders: rows => rows.reduce((s, c) => s + statsOf(c).total, 0),
