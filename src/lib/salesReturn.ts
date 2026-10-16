@@ -19,6 +19,7 @@
  * Everything lives on the order (`returns`), the client, the gift card and the
  * Ready Stock item — no new collection, so no rules change.
  */
+import { moveReadyStock, officeOf } from "@/lib/offices";
 import { coField, companyOfOrder } from "./companies";
 import {
   type DB, type Order, type OrderReturn, type GiftCard, type Invoice, type ReadyStockItem,
@@ -219,6 +220,12 @@ export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by:
     if (original.quantity === 0 && r.location) original.location = r.location;
     original.quantity += r.qty;
     r.readyStockId = original.id;
+    // Back at another office than the rest of that piece: counted where it is.
+    if (r.location && officeOf(original) && officeOf(original) !== r.location) {
+      const canCost = (d.adminRecords ?? []).some(x => x.kind === "stockCost" && x.itemId === original.id);
+      const there = moveReadyStock(d, original.id, r.qty, r.location, canCost);
+      if (typeof there !== "string") { r.readyStockId = there.id; return there; }
+    }
     return original;
   }
   const per = o.quantity || 1;
@@ -273,7 +280,11 @@ export function cancelReturn(d: DB, orderId: string, returnId: string, w: { by: 
   if (r.status === "received" && r.readyStockId) {
     const item = d.readyStock.find(i => i.id === r.readyStockId)!;
     if (item.fromReturn?.returnId === r.id && item.quantity === r.qty) d.readyStock = d.readyStock.filter(i => i.id !== item.id);
-    else item.quantity -= r.qty;
+    else {
+      item.quantity -= r.qty;
+      // A lot made only to hold the returned pieces at their office goes with them.
+      if (item.quantity <= 0 && item.splitFrom && !d.orders.some(x => x.readyStockItemId === item.id)) d.readyStock = d.readyStock.filter(i => i.id !== item.id);
+    }
   }
   if ((r.toCreditUsd || 0) > 0) {
     const c = d.clients.find(x => x.id === o.clientId);

@@ -1,9 +1,10 @@
+import { readyStockOffices, officeLabel } from "@/lib/offices";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Undo2, PackageCheck, Truck, Wallet, Gift, Coins, Warehouse, FileText, Minus, Plus, AlertTriangle, Printer, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
-  loadDb, updateDbAs, uid, fmtMoney, fmtDate, keptQty, ensureCollections, mainDiamondShape, READY_STOCK_LOCATIONS,
+  loadDb, updateDbAs, uid, fmtMoney, orderImage, fmtDate, keptQty, ensureCollections, mainDiamondShape,
   type Order, type Invoice, type OrderReturn,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -30,7 +31,7 @@ export function useMayReturn(): boolean {
   return !!user && user.role !== "client" && can("invoices", "edit");
 }
 
-const thumb = (o: Order) => o.cadImage || o.productPhotos?.[0] || o.images?.[0];
+const thumb = (o: Order) => orderImage(o);
 const describe = (o: Order) => [o.productKarats, o.metal !== "None (Diamond only)" ? o.metal : "", o.jewelleryType, o.designNumber ? `#${o.designNumber}` : ""].filter(Boolean).join(" · ");
 const shapes = (orderIds: string[]) => Object.fromEntries(orderIds.map(id => [id, mainDiamondShape(loadDb(), id) ?? ""]));
 
@@ -75,7 +76,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
     Object.fromEntries(live.map(o => [o.id, start?.[o.id] ?? (live.length === 1 && !returnBlocker(o) ? keptQty(o) : 0)])));
   const [reason, setReason] = useState("");
   const [received, setReceived] = useState(false);
-  const [location, setLocation] = useState<string>("US");
+  const [location, setLocation] = useState<string>(() => readyStockOffices(db.settings)[0] ?? "US");
   const [refundShipping, setRefundShipping] = useState(false);
   const [fee, setFee] = useState("");
   const [chargeSpent, setChargeSpent] = useState(true);
@@ -223,7 +224,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
                   <Label className="text-xs">Comes back to</Label>
                   <Select value={location} onValueChange={setLocation}>
                     <SelectTrigger className="h-10 rounded-xl" aria-label="Comes back to"><SelectValue /></SelectTrigger>
-                    <SelectContent>{READY_STOCK_LOCATIONS.map(l => <SelectItem key={l} value={l}>{l === "US" ? "US office" : l}</SelectItem>)}</SelectContent>
+                    <SelectContent>{readyStockOffices(db.settings).map(l => <SelectItem key={l} value={l}>{officeLabel(l)}</SelectItem>)}</SelectContent>
                   </Select>
                 </div>
                 <div className="space-y-1">
@@ -276,7 +277,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
                   </div>
                   <div className="rounded-xl bg-card ring-1 ring-border/60 p-3 flex items-center gap-2.5 text-xs">
                     <Warehouse className="h-5 w-5 text-primary shrink-0" />
-                    <p><span className="font-semibold text-brand-dark text-sm">{t.qty} pc{t.qty !== 1 ? "s" : ""}</span> into Ready Stock ({location === "US" ? "US office" : location}) {received ? "now" : "when they arrive"} — with their photos, weights and cost</p>
+                    <p><span className="font-semibold text-brand-dark text-sm">{t.qty} pc{t.qty !== 1 ? "s" : ""}</span> into Ready Stock ({officeLabel(location)}) {received ? "now" : "when they arrive"} — with their photos, weights and cost</p>
                   </div>
                 </>
               )}
@@ -296,7 +297,8 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
 /** The parcel arrived: into Ready Stock, at a place and price. */
 export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret: OrderReturn; onClose: () => void }) {
   const { user } = useAuth();
-  const [location, setLocation] = useState(ret.location || "US");
+  const offices = readyStockOffices(loadDb().settings);
+  const [location, setLocation] = useState(ret.location || offices[0] || "US");
   const [price, setPrice] = useState(String(ret.priceUsd ?? Math.round(((order.amount || 0) / (order.quantity || 1)) * 100) / 100));
   const go = async () => {
     if (!user) return;
@@ -305,7 +307,7 @@ export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret
     updateDbAs({ summary: `Received return ${ret.creditNoteNo} — ${order.orderNumber}, ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} into Ready Stock` }, d => {
       receiveReturn(d, order.id, ret.id, { by: user.id, at: new Date().toISOString(), location, priceUsd: Number(price) >= 0 ? Number(price) : undefined, costUsd });
     });
-    toast.success(`${order.orderNumber}: ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} in Ready Stock (${location})`);
+    toast.success(`${order.orderNumber}: ${ret.qty} pc${ret.qty !== 1 ? "s" : ""} in Ready Stock (${officeLabel(location)})`);
     onClose();
   };
   return (
@@ -320,7 +322,7 @@ export function ReceiveReturnDialog({ order, ret, onClose }: { order: Order; ret
             <Label className="text-xs">Where it is now</Label>
             <Select value={location} onValueChange={setLocation}>
               <SelectTrigger className="h-10 rounded-xl" aria-label="Where it is now"><SelectValue /></SelectTrigger>
-              <SelectContent>{READY_STOCK_LOCATIONS.map(l => <SelectItem key={l} value={l}>{l === "US" ? "US office" : l}</SelectItem>)}</SelectContent>
+              <SelectContent>{[...offices, ...(offices.includes(location) ? [] : [location])].map(l => <SelectItem key={l} value={l}>{officeLabel(l)}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="space-y-1">
@@ -369,7 +371,7 @@ export function OrderReturns({ order }: { order: Order }) {
           <div className="min-w-0 flex-1">
             <p className="text-xs"><span className="font-semibold text-brand-dark">{r.creditNoteNo}</span> · {fmtDate(r.at)} · {r.qty} pc{r.qty !== 1 ? "s" : ""} · <span className="font-semibold">−{fmtMoney(r.creditUsd)}</span>{r.reason ? ` · ${r.reason}` : ""}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {r.status === "coming" ? <span className="text-amber-700">On its way back to {r.location === "US" || !r.location ? "the US office" : r.location}</span> : <>In Ready Stock ({r.location ?? "US"}) since {fmtDate(r.receivedAt ?? r.at)}</>}
+              {r.status === "coming" ? <span className="text-amber-700">On its way back to the {officeLabel(r.location || "US")}</span> : <>In Ready Stock ({officeLabel(r.location || "US")}) since {fmtDate(r.receivedAt ?? r.at)}</>}
               {r.toCreditUsd ? ` · ${fmtMoney(r.toCreditUsd)} paid moved to credit` : ""}
               {r.feeUsd ? ` · return charge ${fmtMoney(r.feeUsd)}` : ""}
               {r.cashbackBackUsd ? ` · cashback ${fmtMoney(r.cashbackBackUsd)} taken back` : ""}
@@ -408,7 +410,7 @@ export function ReturnsComingPanel() {
               </div>
               <div className="min-w-0 flex-1">
                 <Link to={`/orders/${order.id}`} className="text-sm font-semibold text-primary hover:underline">{order.orderNumber}</Link>
-                <p className="text-[11px] text-muted-foreground truncate">{describe(order)} · {ret.qty} pc{ret.qty !== 1 ? "s" : ""} · {db.clients.find(c => c.id === order.clientId)?.companyName ?? ""} · {ret.creditNoteNo} · to {ret.location === "US" || !ret.location ? "US office" : ret.location}</p>
+                <p className="text-[11px] text-muted-foreground truncate">{describe(order)} · {ret.qty} pc{ret.qty !== 1 ? "s" : ""} · {db.clients.find(c => c.id === order.clientId)?.companyName ?? ""} · {ret.creditNoteNo} · to {officeLabel(ret.location || "US")}</p>
               </div>
               {may && <Button size="sm" className="rounded-lg h-8 gap-1 btn-hero shrink-0" onClick={() => setReceiving({ order, ret })}><PackageCheck className="h-3.5 w-3.5" /> Received</Button>}
             </div>

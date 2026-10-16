@@ -188,6 +188,13 @@ export function isDiamondOnlyOrder(o: { metal: string }): boolean {
   return o.metal === DIAMOND_ONLY_METAL;
 }
 
+/** The picture that stands for an order: its CAD, else a photo of the finished
+ *  piece, else a reference image. A diamond-only order never has a CAD, so its
+ *  product photo or reference image is what shows. */
+export function orderImage(o: { cadImage?: string; productPhotos?: string[]; images?: string[] }): string | undefined {
+  return o.cadImage || o.productPhotos?.[0] || o.images?.[0] || undefined;
+}
+
 /** Stages that exist only because a piece is being MADE. A diamond-only order
  *  has none of them — there is nothing to design, produce or sign off. */
 const PRODUCTION_ONLY_STEPS = new Set(["CAD Designing", "In Production", "Final Approval"]);
@@ -863,6 +870,8 @@ export interface Settings {
   timelineStages?: string[];
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
+  /** Our offices where Ready Stock is kept, in order. Unset = US, Hong Kong, India, Other. */
+  readyStockOffices?: string[];
   barcodeBandEnabled?: boolean; // show the "Print Band" (barcode jewellery tag) option on orders. undefined = on.
   barcodeBandShowPrice?: boolean; // print the price on the band. undefined = on.
   labelPresets?: LabelPreset[]; // admin-defined label sizes/styles for each label printer / stock
@@ -1281,6 +1290,9 @@ export interface ReadyStockItem {
   fromReturn?: { orderId: string; returnId: string };
   /** The company this belongs to — each company holds its own stock. Unset = the first company. */
   companyId?: string;
+  /** Some pieces of an item moved to another office became this item there:
+   *  the item they came from, so later moves rejoin them (lib/offices.ts). */
+  splitFrom?: string;
 }
 
 export const READY_STOCK_LOCATIONS = ["US", "Hong Kong", "India", "Other"] as const;

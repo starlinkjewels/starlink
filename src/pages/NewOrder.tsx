@@ -1,3 +1,4 @@
+import { officeLabel, officeOf } from "@/lib/offices";
 import { CompanyPicker, CompanyBadge, useDefaultCompany } from "@/components/CompanyFields";
 import { coField, companyOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -24,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide, Search } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -195,6 +196,7 @@ export function NewOrderPage() {
         (i.sku || "").toLowerCase().includes(stockQuery) ||
         i.jewelleryType.toLowerCase().includes(stockQuery) ||
         i.metal.toLowerCase().includes(stockQuery) ||
+        officeLabel(officeOf(i)).toLowerCase().includes(stockQuery) ||
         i.id.slice(-6).toLowerCase().includes(stockQuery))
     : readyStockItems;
 
@@ -542,7 +544,7 @@ export function NewOrderPage() {
               {filteredStockItems.map(item => (
                 <SelectItem key={item.id} value={item.id}>
                   <span className="font-mono text-[10px] text-muted-foreground mr-1.5">{item.id.slice(-6).toUpperCase()}</span>
-                  {item.name} — ${item.price.toLocaleString()} ({item.quantity} avail{item.sku ? ` · #${item.sku}` : ""})
+                  {item.name} — ${item.price.toLocaleString()} ({item.quantity} avail{item.sku ? ` · #${item.sku}` : ""}{officeOf(item) ? ` · ${officeLabel(officeOf(item))}` : ""})
                 </SelectItem>
               ))}
               {filteredStockItems.length === 0 && (
@@ -567,6 +569,7 @@ export function NewOrderPage() {
                 <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
                   Product ID {selectedStockItem.id.slice(-6).toUpperCase()}{selectedStockItem.sku ? ` · Design #${selectedStockItem.sku}` : ""}
                 </p>
+                <p className="text-[11px] text-muted-foreground mt-0.5 flex items-center gap-1"><MapPin className="h-3 w-3" />{officeOf(selectedStockItem) ? `Ships from the ${officeLabel(officeOf(selectedStockItem))}` : "No office set for this piece"}</p>
               </div>
               <p className="font-display text-lg font-bold text-brand-dark shrink-0">${selectedStockItem.price.toLocaleString()}</p>
             </div>

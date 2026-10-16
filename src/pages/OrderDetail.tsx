@@ -2,7 +2,9 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights } from "@/lib/weights";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
+import { MoreMenu } from "@/components/MoreMenu";
+import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -14,7 +16,7 @@ import { collectionLoaded,
   loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
   mainDiamondShape,
-  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder,
+  isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder, orderImage,
 } from "@/lib/db";
 import { AssignOrderField } from "@/components/AssignOrder";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
@@ -33,7 +35,7 @@ import {
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
   Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame,
   CalendarClock, CalendarDays, Hash, UserRound,
-  Undo2,
+  Undo2, XCircle,
 } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
@@ -249,6 +251,9 @@ function OrderDetailPageBody() {
   const productPhotoRef = useRef<HTMLInputElement>(null);
   const productVideoRef = useRef<HTMLInputElement>(null);
   const [photoUploading, setPhotoUploading] = useState(false);
+  // Reference images, added after the order was placed (up to 3, as on New Order).
+  const refImageRef = useRef<HTMLInputElement>(null);
+  const [refUploading, setRefUploading] = useState(false);
   const [videoUploading, setVideoUploading] = useState(false);
   const [downloadingAll, setDownloadingAll] = useState(false);
   const MAX_VIDEO_MB = 60;
@@ -336,6 +341,9 @@ function OrderDetailPageBody() {
   const [meltOpen, setMeltOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
   const mayReturn = useMayReturn();
+  const mayExport = useMayExport();
+  // An in-house build going into Ready Stock: which office will keep it.
+  const [rsOffice, setRsOffice] = useState<string | null>(null);
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
@@ -1740,6 +1748,30 @@ function OrderDetailPageBody() {
     setModel3dmUploading(false);
   };
 
+  // ── Reference images ────────────────────────────────────────────────────
+  // Often only thought of later — a diamond-only order has no CAD, and this is
+  // the picture its card shows.
+  const addRefImages = async (files: FileList) => {
+    const incoming = Array.from(files).filter(f => f.type.startsWith("image/"));
+    if (!incoming.length) { toast.error("Please choose image files"); return; }
+    const room = Math.max(0, 3 - (order.images?.length ?? 0));
+    if (room === 0) { toast.error("Up to 3 reference images — remove one first"); return; }
+    setRefUploading(true);
+    try {
+      const urls = await Promise.all(incoming.slice(0, room).map(async f => uploadDataUrl(await compressImg(f), `orders/${order.id}`)));
+      updateDb(d => {
+        const o = d.orders.find(x => x.id === order.id)!;
+        o.images = [...(o.images ?? []), ...urls];
+      });
+      toast.success(`${urls.length} reference image${urls.length !== 1 ? "s" : ""} added${room < incoming.length ? " · max 3" : ""}`);
+    } catch { toast.error("Failed to upload images"); }
+    setRefUploading(false);
+  };
+  const removeRefImage = async (src: string) => {
+    if (!(await confirmBox("Remove this reference image?"))) return;
+    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.images = (o.images ?? []).filter(u => u !== src); });
+  };
+
   // ── Finished-product photography ────────────────────────────────────────
   const addProductPhotos = async (files: FileList) => {
     const current = order.productPhotos?.length ?? 0;
@@ -2045,7 +2077,7 @@ function OrderDetailPageBody() {
   // In-house build → create a Ready Stock item pre-filled from this order. Admin
   // sets the selling price & cost in Ready Stock (cost basis mixes INR labour with
   // material, so it's entered there, not guessed here).
-  const addToReadyStock = async () => {
+  const addToReadyStock = async (office: string) => {
     if (order.readyStockCreatedId) { nav("/ready-stock"); return; }
     // The piece carries whatever weights it has. Without Final Approval those
     // are still the estimates it was ordered on, and a stock item is priced off
@@ -2081,6 +2113,7 @@ function OrderDetailPageBody() {
         quantity: 1,
         images: imgs,
         sku: o.designNumber || undefined,
+        location: office || undefined,
         notes: `Built in-house from order ${o.orderNumber}`,
         // The build's company — whose stock it was made from.
         ...coField(companyOfOrder(db, o)),
@@ -2122,7 +2155,7 @@ function OrderDetailPageBody() {
       {/* Order Header — the piece at a glance: its picture, where it stands,
           what it is, and who has it. */}
       {(() => {
-        const heroImg = order.cadImage || order.productPhotos?.[0] || order.images?.[0];
+        const heroImg = orderImage(order);
         const doneSteps = order.timeline.filter(t => t.status === "done").length;
         const pct = order.timeline.length ? Math.round(doneSteps / order.timeline.length * 100) : 0;
         const stage = order.timeline.find(t => t.status === "in_progress")?.step
@@ -2157,7 +2190,10 @@ function OrderDetailPageBody() {
                 <h1 className="font-display text-3xl md:text-4xl text-brand-dark mt-1.5 leading-tight">{order.jewelleryType} in {order.metal}</h1>
                 <p className="text-sm text-muted-foreground mt-1">
                   {order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
-                  {order.materialSourcing === "readyStock" ? " · 💎 Sold from Ready Stock" : ""}
+                  {order.materialSourcing === "readyStock" ? (() => {
+                    const it = order.readyStockItemId ? db.readyStock.find(i => i.id === order.readyStockItemId) : undefined;
+                    return ` · 💎 Sold from Ready Stock${it && officeOf(it) ? ` — ${officeLabel(officeOf(it))}` : ""}`;
+                  })() : ""}
                   {order.contactPerson ? ` · ${order.contactPerson}` : ""}
                 </p>
                 <div className="flex flex-wrap gap-2 mt-3">
@@ -2180,36 +2216,25 @@ function OrderDetailPageBody() {
                   </span>
                 </div>
               </div>
-              <div className="flex items-center gap-2 flex-wrap lg:justify-end lg:max-w-[46%]">
+              {/* One main action as a button; the rest in the ⋯ menu beside it. */}
+              <div className="flex items-center gap-2 lg:justify-end shrink-0">
                 {order.forReadyStock
                   ? (user!.role === "admin" && (
                       order.readyStockCreatedId
-                        ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
-                        : <Button onClick={addToReadyStock} className="btn-hero rounded-xl"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
+                        ? <Button variant="outline" onClick={() => nav("/ready-stock")} className="rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
+                        : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                     ))
-                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
-                {db.settings.barcodeBandEnabled !== false && user!.role !== "client" && !order.melted && (
-                  <IfExport>
-                  <Button variant="outline" onClick={() => setBandOpen(true)} className="rounded-xl" title="Print / download the barcode jewellery band">
-                    <Tag className="h-4 w-4 mr-2" />Band
-                  </Button>
-                  </IfExport>
-                )}
-                {mayReturn && !returnBlocker(order) && (
-                  <Button variant="outline" onClick={() => setReturnOpen(true)} className="rounded-xl text-amber-800 hover:text-amber-900 hover:bg-amber-500/10" title="The client sent pieces back — credit note, and the pieces into Ready Stock">
-                    <Undo2 className="h-4 w-4 mr-2" />Return
-                  </Button>
-                )}
-                {user!.role === "admin" && !order.melted && !order.returns?.length && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId && (
-                  <Button variant="outline" onClick={() => setMeltOpen(true)} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10" title="Melt this piece — gold back to a factory or stock, stones back to stock">
-                    <Flame className="h-4 w-4 mr-2" />Melt
-                  </Button>
-                )}
-                {user!.role === "admin" && order.status !== "Rejected" && !order.returns?.length && (
-                  <AsyncButton variant="outline" onClick={cancelOrder} disabled={cancelling} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
-                    Cancel Order
-                  </AsyncButton>
-                )}
+                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
+                <MoreMenu title="This order" actions={[
+                  { label: "Print band", icon: Tag, hint: "The barcode jewellery tag", onSelect: () => setBandOpen(true),
+                    show: db.settings.barcodeBandEnabled !== false && user!.role !== "client" && !order.melted && mayExport },
+                  { label: "Return pieces", icon: Undo2, hint: "The client sent pieces back — credit note, pieces into Ready Stock", onSelect: () => setReturnOpen(true),
+                    show: mayReturn && !returnBlocker(order) },
+                  { label: "Melt", icon: Flame, danger: true, hint: "Gold back to a factory or stock, stones back to stock", onSelect: () => setMeltOpen(true),
+                    show: user!.role === "admin" && !order.melted && !order.returns?.length && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId },
+                  { label: "Cancel order", icon: XCircle, danger: true, hint: "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling,
+                    show: user!.role === "admin" && order.status !== "Rejected" && !order.returns?.length },
+                ]} />
               </div>
             </div>
             <div className="mt-5">
@@ -2381,20 +2406,37 @@ function OrderDetailPageBody() {
           </div>
         )}
 
-        {/* Reference images */}
-        {order.images && order.images.length > 0 && (
+        {/* Reference images — staff can add them after the order was placed */}
+        {((order.images?.length ?? 0) > 0 || (user!.role !== "client" && canEditStage() && !order.melted)) && (
           <div className="mt-4">
             <p className="text-xs text-muted-foreground mb-2">Reference Images</p>
             <div className="flex gap-2 flex-wrap">
-              {order.images.map((src, i) => (
-                <button key={i} type="button" onClick={() => setLightboxSrc(src)}
-                  className="h-20 w-20 rounded-xl overflow-hidden border border-border hover:border-primary/50 transition-colors group relative">
-                  <img src={src} alt={`Ref ${i + 1}`} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Eye className="h-4 w-4 text-white" />
-                  </div>
-                </button>
+              {(order.images ?? []).map((src, i) => (
+                <div key={src} className="relative group">
+                  <button type="button" onClick={() => setLightboxSrc(src)}
+                    className="h-20 w-20 rounded-xl overflow-hidden border border-border hover:border-primary/50 transition-colors relative block">
+                    <img src={src} alt={`Ref ${i + 1}`} className="w-full h-full object-cover" />
+                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <Eye className="h-4 w-4 text-white" />
+                    </div>
+                  </button>
+                  {user!.role !== "client" && canEditStage() && (
+                    <button type="button" onClick={() => removeRefImage(src)} aria-label="Remove reference image"
+                      className="absolute -top-1.5 -right-1.5 h-6 w-6 rounded-full bg-destructive text-white grid place-items-center shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
+                      <X className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
               ))}
+              {user!.role !== "client" && canEditStage() && !order.melted && (order.images?.length ?? 0) < 3 && (
+                <button type="button" onClick={() => refImageRef.current?.click()} disabled={refUploading}
+                  className="h-20 w-20 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors flex flex-col items-center justify-center gap-1 text-muted-foreground disabled:opacity-60">
+                  {refUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
+                  <span className="text-[10px] font-medium">{refUploading ? "Uploading…" : "Add image"}</span>
+                </button>
+              )}
+              <input ref={refImageRef} type="file" accept="image/*" multiple className="hidden"
+                onChange={e => { if (e.target.files?.length) addRefImages(e.target.files); e.target.value = ""; }} />
             </div>
           </div>
         )}
@@ -4409,6 +4451,27 @@ function OrderDetailPageBody() {
         );
       })()}
     </AnimatePresence>
+
+    {rsOffice !== null && (
+        <Dialog open onOpenChange={o => { if (!o) setRsOffice(null); }}>
+          <DialogContent className="max-w-md rounded-2xl">
+            <DialogHeader><DialogTitle className="font-display text-2xl">Add to Ready Stock</DialogTitle></DialogHeader>
+            <p className="text-sm text-muted-foreground -mt-2">Which office will keep {order.orderNumber}? It shows there on the Ready Stock page.</p>
+            <Select value={rsOffice} onValueChange={setRsOffice}>
+              <SelectTrigger aria-label="Office" className="rounded-xl"><SelectValue placeholder="Choose the office" /></SelectTrigger>
+              <SelectContent>{readyStockOffices(db.settings).map(l => <SelectItem key={l} value={l}>{officeLabel(l)}</SelectItem>)}</SelectContent>
+            </Select>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setRsOffice(null)} className="rounded-xl">Cancel</Button>
+              <AsyncButton disabled={!rsOffice} className="btn-hero rounded-xl px-6" onClick={async () => {
+                const office = rsOffice; setRsOffice(null);
+                try { localStorage.setItem("rs-build-office", office); } catch { /* ignore */ }
+                await addToReadyStock(office);
+              }}>Add to Ready Stock</AsyncButton>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      )}
 
     {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
     {returnOpen && <ReturnDialog orders={[order]} invoice={findInvoiceForOrder(db.invoices, order.id)} onClose={() => setReturnOpen(false)} />}

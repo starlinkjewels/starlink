@@ -1,3 +1,5 @@
+import { useMayExport } from "@/hooks/useCan";
+import { MoreMenu } from "@/components/MoreMenu";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
@@ -122,6 +124,7 @@ export function SupplierHistoryPage() {
 }
 
 function SupplierHistoryPageBody() {
+  const mayExport = useMayExport();
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -693,9 +696,6 @@ function SupplierHistoryPageBody() {
             </div>
           </div>
           <div className="flex items-center gap-2 flex-wrap">
-            <IfExport>
-            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-            </IfExport>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
               { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
               { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
@@ -706,15 +706,14 @@ function SupplierHistoryPageBody() {
               </Button>
             )}
             {user?.role === "admin" && (
-              <Button onClick={() => { setShowReceiveForm(v => !v); setShowPayForm(false); }} variant="outline" className="rounded-xl gap-2">
-                <ArrowDownCircle className="h-4 w-4" /> Receive
-              </Button>
-            )}
-            {user?.role === "admin" && (
               <Button onClick={() => setShowPurchaseForm(v => !v)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Purchase
               </Button>
             )}
+            <MoreMenu title="Supplier account" actions={[
+              { label: "Receive money", icon: ArrowDownCircle, hint: "A refund or money back from this supplier", onSelect: () => { setShowReceiveForm(v => !v); setShowPayForm(false); }, show: user?.role === "admin" },
+              { label: "Export statement", icon: Download, hint: "Purchases, payments and receipts — PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
+            ]} />
           </div>
         </div>
 

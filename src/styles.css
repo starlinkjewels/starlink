@@ -578,6 +578,8 @@
 
 /* Card grids: a column for every minimum card width that fits. */
 @utility grid-auto-cards { grid-template-columns: repeat(auto-fill, minmax(min(18.5rem, 100%), 1fr)); }
+/* A row that scrolls sideways on a phone (tabs), with no scrollbar drawn. */
+@utility no-scrollbar { scrollbar-width: none; &::-webkit-scrollbar { display: none; } }
 @utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); }
 @utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11rem, 100%), 1fr)); }
 

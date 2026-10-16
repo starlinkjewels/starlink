@@ -1,6 +1,7 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
+import { MoreMenu } from "@/components/MoreMenu";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -57,6 +58,7 @@ export function ClientHistoryPage() {
 }
 
 function ClientHistoryPageBody() {
+  const mayExport = useMayExport();
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -545,24 +547,21 @@ function ClientHistoryPageBody() {
               <p className="text-xs text-muted-foreground">Payments clear the oldest bill first; extra becomes credit</p>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <IfExport>
-            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-            </IfExport>
+          <div className="flex items-center gap-2">
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
               { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
               { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
             ]} />
-            {account.credit > 0 && account.outstanding > 0 && can("payments", "edit") && (
-              <Button variant="outline" onClick={applyCredit} className="rounded-xl gap-2">
-                <CreditCard className="h-4 w-4" /> Apply Credit
-              </Button>
-            )}
             {can("payments", "add") && (
               <Button onClick={() => setShowPayForm(v => !v)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Payment
               </Button>
             )}
+            <MoreMenu title="Account" actions={[
+              { label: "Apply credit", icon: CreditCard, hint: `Use the ${fmtMoney(account.credit)} credit against what is owed`, onSelect: applyCredit,
+                show: account.credit > 0 && account.outstanding > 0 && can("payments", "edit") },
+              { label: "Export statement", icon: Download, hint: "PDF or Excel, invoice by invoice", onSelect: () => setShowExport(true), show: mayExport },
+            ]} />
           </div>
         </div>
 

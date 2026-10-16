@@ -1,3 +1,4 @@
+import { MoreMenu } from "@/components/MoreMenu";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
@@ -111,14 +112,10 @@ export function StockPage() {
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           <CompanyFilter value={co} onChange={pickCo} />
-          {multiCo && user?.role === "admin" && (
-            <Button variant="outline" onClick={() => setMoving(true)} className="rounded-xl gap-2"><ArrowRightLeft className="h-4 w-4" /> Move between companies</Button>
-          )}
-          {user?.role === "admin" && (
-            <AsyncButton variant="outline" onClick={recompute} disabled={recomputing} className="rounded-xl gap-2">
-              <RotateCcw className="h-4 w-4" /> Recompute from History
-            </AsyncButton>
-          )}
+          <MoreMenu title="Stock" actions={[
+            { label: "Move between companies", icon: ArrowRightLeft, hint: "Stock from one of our companies to another", onSelect: () => setMoving(true), show: multiCo && user?.role === "admin" },
+            { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild the stock counters from every movement", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
+          ]} />
         </div>
       </div>
       {moving && <StockTransferDialog onClose={() => setMoving(false)} />}
