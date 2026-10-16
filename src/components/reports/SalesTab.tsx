@@ -1,11 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, ComposedChart, Bar as RBar, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, PieChart, Pie, Cell } from "recharts";
 import { CalendarRange, Gem, Layers, TrendingDown, Users } from "lucide-react";
 import { downloadCsv } from "@/lib/ledgerExport";
-import { monthly, salesBy, soldIn } from "@/lib/analytics";
-import { profitReport } from "@/lib/orderCost";
-import { C, SERIES, Panel, ChartTip, Empty, Bar, ExportButton, Table, usd, pct, num } from "./ui";
+import { monthly, salesBy, soldIn, type MonthRow } from "@/lib/analytics";
+import { profitReport, type ProfitGroup, type ProfitRow } from "@/lib/orderCost";
+import { DataTable, CellMain, CellAmount, type DataColumn } from "@/components/DataTable";
+import { C, SERIES, Panel, ChartTip, Empty, Bar, ExportButton, usd, pct } from "./ui";
 import type { ReportCtx } from "./context";
 
 export function SalesTab({ ctx }: { ctx: ReportCtx }) {
@@ -24,11 +25,12 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
   }, [db, orders, period.from, period.to, withProfit, version]);
 
   const rows = [...data.months].reverse();
-  const tot = data.months.reduce((t, m) => ({
+  // Totals of the months the table is showing — every month, as before.
+  const totOf = (ms: MonthRow[]) => ms.reduce((t, m) => ({
     receivedCount: t.receivedCount + m.receivedCount, soldCount: t.soldCount + m.soldCount, salesUsd: t.salesUsd + m.salesUsd,
     collectedUsd: t.collectedUsd + m.collectedUsd, costUsd: t.costUsd + (m.costUsd ?? 0), profitUsd: t.profitUsd + (m.profitUsd ?? 0),
   }), { receivedCount: 0, soldCount: 0, salesUsd: 0, collectedUsd: 0, costUsd: 0, profitUsd: 0 });
-  const totMargin = tot.salesUsd > 0 && withProfit ? Math.round((tot.profitUsd / tot.salesUsd) * 1000) / 10 : null;
+  const marginOf = (ms: MonthRow[]) => { const t = totOf(ms); return t.salesUsd > 0 && withProfit ? Math.round((t.profitUsd / t.salesUsd) * 1000) / 10 : null; };
   let run = 0;
   const cumulative = new Map(data.months.map(m => { run += m.salesUsd; return [m.month, run]; }));
   const clientMax = data.byClient[0]?.value ?? 0;
@@ -38,6 +40,47 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
     ["Month", "Orders in", "Shipped", "Sales ($)", "Collected ($)", ...(withProfit ? ["Cost ($)", "Profit ($)", "Margin %"] : []), "Cumulative sales ($)"],
     data.months.map(m => [m.label, m.receivedCount, m.soldCount, m.salesUsd, m.collectedUsd,
       ...(withProfit ? [m.costUsd ?? "", m.profitUsd ?? "", m.marginPct ?? ""] : []), Math.round((cumulative.get(m.month) ?? 0) * 100) / 100]));
+
+  const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
+  const n = (v: number) => <span className="tabular-nums">{v || "—"}</span>;
+  const monthColumns: DataColumn<MonthRow>[] = [
+    { key: "month", header: "Month", always: true, kind: "date", sortValue: m => m.month, cell: m => <CellMain title={m.label} /> },
+    { key: "in", header: "Orders in", align: "right", kind: "number", sortValue: m => m.receivedCount, cell: m => n(m.receivedCount) },
+    { key: "sold", header: "Shipped", align: "right", kind: "number", sortValue: m => m.soldCount, cell: m => n(m.soldCount) },
+    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: m => m.salesUsd, cell: m => (m.salesUsd ? <CellAmount>{usd(m.salesUsd)}</CellAmount> : "—") },
+    { key: "collected", header: "Collected", align: "right", kind: "number", sortValue: m => m.collectedUsd,
+      cell: m => <span className="tabular-nums whitespace-nowrap">{m.collectedUsd ? usd(m.collectedUsd) : "—"}</span> },
+    ...(withProfit ? [
+      { key: "cost", header: "Cost", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => m.costUsd,
+        cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.costUsd ? usd(m.costUsd) : "—"}</span> },
+      { key: "profit", header: "Profit", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount ? m.profitUsd : null),
+        cell: (m: MonthRow) => <CellAmount tone={(m.profitUsd ?? 0) < 0 ? "out" : "in"}>{m.profitUsd != null && m.soldCount ? usd(m.profitUsd) : "—"}</CellAmount> },
+      { key: "margin", header: "Margin", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount ? m.marginPct : null),
+        cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.soldCount ? pct(m.marginPct) : "—"}</span> },
+    ] : []),
+    { key: "running", header: "Running total", align: "right", kind: "number", sortValue: m => cumulative.get(m.month) ?? 0,
+      cell: m => <span className="text-muted-foreground tabular-nums whitespace-nowrap">{usd(cumulative.get(m.month) ?? 0, true)}</span> },
+  ];
+  /** Profit by client and by item read the same; only the first column differs. */
+  const groupColumns = (header: string, first: (g: ProfitGroup) => ReactNode): DataColumn<ProfitGroup>[] => [
+    { key: "name", header, always: true, sortValue: g => g.key, cell: first },
+    { key: "pcs", header: "Pcs", align: "right", kind: "number", sortValue: g => g.count, cell: g => <span className="tabular-nums">{g.count}</span> },
+    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd, cell: g => <span className="tabular-nums whitespace-nowrap">{usd(g.sellingUsd)}</span> },
+    { key: "profit", header: "Profit", align: "right", kind: "number", sortValue: g => g.profitUsd,
+      cell: g => <CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{usd(g.profitUsd)}</CellAmount> },
+    { key: "margin", header: "Margin", align: "right", kind: "number", sortValue: g => g.marginPct, cell: g => <span className="tabular-nums">{pct(g.marginPct)}</span> },
+  ];
+  const lossColumns: DataColumn<ProfitRow>[] = [
+    { key: "order", header: "Order", always: true, sortValue: r => r.order.orderNumber,
+      cell: r => <Link to={`/orders/${r.order.id}`} className="font-mono text-primary hover:underline whitespace-nowrap">{r.order.orderNumber}</Link> },
+    { key: "client", header: "Client", sortValue: r => clientName(r.order.clientId),
+      cell: r => <span className="block truncate max-w-[180px]">{clientName(r.order.clientId) || "—"}</span> },
+    { key: "sold", header: "Sold for", align: "right", kind: "number", sortValue: r => r.sellingUsd,
+      cell: r => <span className="tabular-nums whitespace-nowrap">{usd(r.sellingUsd)}{r.sellingUsd <= 5 ? <span className="text-amber-600"> · price not set?</span> : null}</span> },
+    { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: r => r.costUsd, cell: r => <span className="tabular-nums whitespace-nowrap">{usd(r.costUsd)}</span> },
+    // The biggest loss is the most negative figure, so it sorts low → high first.
+    { key: "loss", header: "Loss", align: "right", kind: "number", sortFirst: "asc", sortValue: r => r.profitUsd, cell: r => <CellAmount tone="out">{usd(r.profitUsd)}</CellAmount> },
+  ];
 
   return (
     <div className="space-y-4">
@@ -60,35 +103,25 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
-            <Table minWidth={withProfit ? 860 : 620} head={
-              <tr className="border-b border-border/60">
-                <th className="text-left py-2 pr-2">Month</th><th className="text-right px-2">Orders in</th><th className="text-right px-2">Shipped</th>
-                <th className="text-right px-2">Sales</th><th className="text-right px-2">Collected</th>
-                {withProfit && <><th className="text-right px-2">Cost</th><th className="text-right px-2">Profit</th><th className="text-right px-2">Margin</th></>}
-                <th className="text-right pl-2">Running total</th>
-              </tr>}>
-              {rows.map(m => (
-                <tr key={m.month} className="hover:bg-secondary/40">
-                  <td className="py-2 pr-2 font-medium text-brand-dark">{m.label}</td>
-                  <td className="text-right px-2">{m.receivedCount || "—"}</td>
-                  <td className="text-right px-2">{m.soldCount || "—"}</td>
-                  <td className="text-right px-2 font-semibold">{m.salesUsd ? usd(m.salesUsd) : "—"}</td>
-                  <td className="text-right px-2">{m.collectedUsd ? usd(m.collectedUsd) : "—"}</td>
-                  {withProfit && <>
-                    <td className="text-right px-2">{m.costUsd ? usd(m.costUsd) : "—"}</td>
-                    <td className={`text-right px-2 font-semibold ${(m.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{m.profitUsd != null && m.soldCount ? usd(m.profitUsd) : "—"}</td>
-                    <td className="text-right px-2">{m.soldCount ? pct(m.marginPct) : "—"}</td>
-                  </>}
-                  <td className="text-right pl-2 text-muted-foreground">{usd(cumulative.get(m.month) ?? 0, true)}</td>
-                </tr>
-              ))}
-              <tr className="font-semibold bg-secondary/40">
-                <td className="py-2 pr-2">Total</td><td className="text-right px-2">{tot.receivedCount}</td><td className="text-right px-2">{tot.soldCount}</td>
-                <td className="text-right px-2">{usd(tot.salesUsd)}</td><td className="text-right px-2">{usd(tot.collectedUsd)}</td>
-                {withProfit && <><td className="text-right px-2">{usd(tot.costUsd)}</td><td className="text-right px-2">{usd(tot.profitUsd)}</td><td className="text-right px-2">{pct(totMargin)}</td></>}
-                <td className="text-right pl-2" />
-              </tr>
-            </Table>
+            <DataTable
+              id="reports-sales-months"
+              noun="month"
+              rows={rows}
+              columns={monthColumns}
+              rowKey={m => m.month}
+              defaultSort={{ key: "month", dir: "desc" }}
+              totals={{
+                in: ms => totOf(ms).receivedCount,
+                sold: ms => totOf(ms).soldCount,
+                sales: ms => usd(totOf(ms).salesUsd),
+                collected: ms => usd(totOf(ms).collectedUsd),
+                ...(withProfit ? {
+                  cost: (ms: MonthRow[]) => usd(totOf(ms).costUsd),
+                  profit: (ms: MonthRow[]) => usd(totOf(ms).profitUsd),
+                  margin: (ms: MonthRow[]) => pct(marginOf(ms)),
+                } : {}),
+              }}
+            />
           </>
         ) : <Empty />}
       </Panel>
@@ -150,42 +183,46 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
       {withProfit && data.pr && (
         <div className="grid lg:grid-cols-2 gap-4">
           <Panel title="Profit by client" subtitle="Margin on pieces shipped in the period" icon={Users}>
-            <Table minWidth={460} head={<tr className="border-b border-border/60"><th className="text-left py-2">Client</th><th className="text-right px-2">Pcs</th><th className="text-right px-2">Sales</th><th className="text-right px-2">Profit</th><th className="text-right pl-2">Margin</th></tr>}>
-              {data.pr.byClient.map(g => (
-                <tr key={g.key}>
-                  <td className="py-1.5 truncate max-w-[180px]">{g.key}{g.incomplete ? <span className="text-amber-600"> · {g.incomplete} not fully costed</span> : null}</td>
-                  <td className="text-right px-2">{g.count}</td><td className="text-right px-2">{usd(g.sellingUsd)}</td>
-                  <td className={`text-right px-2 font-semibold ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{usd(g.profitUsd)}</td>
-                  <td className="text-right pl-2">{pct(g.marginPct)}</td>
-                </tr>
+            <DataTable
+              id="reports-sales-profit-client"
+              noun="client"
+              rows={data.pr.byClient}
+              columns={groupColumns("Client", g => (
+                <CellMain className="max-w-[180px]" title={g.key}
+                  sub={g.incomplete ? <span className="text-amber-600">{g.incomplete} not fully costed</span> : undefined} />
               ))}
-            </Table>
+              rowKey={g => g.key}
+              defaultSort={{ key: "sales", dir: "desc" }}
+              searchText={g => g.key}
+              searchPlaceholder="Search clients"
+            />
           </Panel>
           <Panel title="Profit by item" subtitle="Which pieces earn the most" icon={Layers}>
-            <Table minWidth={420} head={<tr className="border-b border-border/60"><th className="text-left py-2">Item</th><th className="text-right px-2">Pcs</th><th className="text-right px-2">Sales</th><th className="text-right px-2">Profit</th><th className="text-right pl-2">Margin</th></tr>}>
-              {data.pr.byType.map(g => (
-                <tr key={g.key}>
-                  <td className="py-1.5">{g.key}</td><td className="text-right px-2">{g.count}</td><td className="text-right px-2">{usd(g.sellingUsd)}</td>
-                  <td className={`text-right px-2 font-semibold ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{usd(g.profitUsd)}</td>
-                  <td className="text-right pl-2">{pct(g.marginPct)}</td>
-                </tr>
-              ))}
-            </Table>
+            <DataTable
+              id="reports-sales-profit-item"
+              noun="item"
+              rows={data.pr.byType}
+              columns={groupColumns("Item", g => <CellMain title={g.key} />)}
+              rowKey={g => g.key}
+              defaultSort={{ key: "sales", dir: "desc" }}
+              searchText={g => g.key}
+              searchPlaceholder="Search items"
+            />
           </Panel>
           {data.pr.losses.length > 0 && (
             <Panel title={`Sold at a loss (${data.pr.losses.length})`} subtitle="Check the price or the cost on these first" icon={TrendingDown} className="lg:col-span-2">
-              <Table minWidth={560} head={<tr className="border-b border-border/60"><th className="text-left py-2">Order</th><th className="text-left px-2">Client</th><th className="text-right px-2">Sold for</th><th className="text-right px-2">Cost</th><th className="text-right pl-2">Loss</th></tr>}>
-                {data.pr.losses.slice(0, 25).map(r => (
-                  <tr key={r.order.id}>
-                    <td className="py-1.5"><Link to={`/orders/${r.order.id}`} className="font-mono text-primary hover:underline">{r.order.orderNumber}</Link></td>
-                    <td className="px-2 truncate max-w-[180px]">{db.clients.find(c => c.id === r.order.clientId)?.companyName ?? "—"}</td>
-                    <td className="text-right px-2">{usd(r.sellingUsd)}{r.sellingUsd <= 5 ? <span className="text-amber-600"> · price not set?</span> : null}</td>
-                    <td className="text-right px-2">{usd(r.costUsd)}</td>
-                    <td className="text-right pl-2 font-semibold text-destructive">{usd(r.profitUsd)}</td>
-                  </tr>
-                ))}
-              </Table>
-              {data.pr.losses.length > 25 && <p className="text-[11px] text-muted-foreground mt-2">{num(data.pr.losses.length - 25)} more in the Profit &amp; Loss export below.</p>}
+              {/* Every loss, a page at a time — the worst first. */}
+              <DataTable
+                id="reports-sales-losses"
+                noun="order"
+                rows={data.pr.losses}
+                columns={lossColumns}
+                rowKey={r => r.order.id}
+                rowHref={r => `/orders/${r.order.id}`}
+                defaultSort={{ key: "loss", dir: "asc" }}
+                searchText={r => `${r.order.orderNumber} ${clientName(r.order.clientId)}`}
+                searchPlaceholder="Search orders"
+              />
             </Panel>
           )}
         </div>

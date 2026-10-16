@@ -3,9 +3,10 @@ import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
 import { Factory, Hammer, AlarmClock, Timer, BadgeCheck, Coins, ClipboardList, Gauge } from "lucide-react";
 import { downloadCsv } from "@/lib/ledgerExport";
-import { fmtDate } from "@/lib/db";
+import { fmtDate, type Order } from "@/lib/db";
 import { kpis, lateOpen, factoryTable, soldIn, cycleDays, pctChange } from "@/lib/analytics";
-import { C, SERIES, KpiCard, Panel, ChartTip, ExportButton, Table, Empty, inr, pct, num } from "./ui";
+import { DataTable, CellAmount } from "@/components/DataTable";
+import { C, SERIES, KpiCard, Panel, ChartTip, ExportButton, Empty, inr, pct, num } from "./ui";
 import type { ReportCtx } from "./context";
 
 const BUCKETS: [string, number, number][] = [["0–7 d", 0, 7], ["8–14 d", 8, 14], ["15–21 d", 15, 21], ["22–30 d", 22, 30], ["31–45 d", 31, 45], ["45+ d", 46, Infinity]];
@@ -29,6 +30,8 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
   const pieces = data.factories.reduce((s, f) => s + f.pieces, 0);
   const fine = Math.round(data.factories.reduce((s, f) => s + f.fineGoldG, 0) * 1000) / 1000;
   const today = new Date();
+  const daysLate = (o: Order) => Math.floor((+today - +new Date(o.expectedDelivery)) / 86_400_000);
+  const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
 
   const exportLate = () => downloadCsv(`Late-orders_${fileTag}.csv`, ["Order", "Client", "Item", "Status", "Promised", "Days late"],
     data.late.map(o => [o.orderNumber, db.clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status, fmtDate(o.expectedDelivery),
@@ -69,18 +72,26 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
         <Panel title={`Late orders (${data.late.length})`} subtitle="Open work past the date promised to the client" icon={AlarmClock}
           actions={data.late.length ? <ExportButton onClick={exportLate} /> : undefined}>
           {data.late.length ? (
-            <div className="max-h-56 overflow-y-auto">
-              <Table minWidth={420} head={<tr className="border-b border-border/60"><th className="text-left py-2">Order</th><th className="text-left px-2">Client</th><th className="text-left px-2">Stage</th><th className="text-right pl-2">Late by</th></tr>}>
-                {data.late.map(o => (
-                  <tr key={o.id}>
-                    <td className="py-1.5"><Link to={`/orders/${o.id}`} className="font-mono text-primary hover:underline">{o.orderNumber}</Link></td>
-                    <td className="px-2 truncate max-w-[160px]">{db.clients.find(c => c.id === o.clientId)?.companyName ?? "—"}</td>
-                    <td className="px-2">{o.status}</td>
-                    <td className="text-right pl-2 font-semibold text-destructive">{Math.floor((+today - +new Date(o.expectedDelivery)) / 86_400_000)} d</td>
-                  </tr>
-                ))}
-              </Table>
-            </div>
+            <DataTable
+              id="reports-late-orders"
+              noun="order"
+              rows={data.late}
+              rowKey={o => o.id}
+              rowHref={o => `/orders/${o.id}`}
+              maxHeight="14rem"
+              defaultSort={{ key: "late", dir: "desc" }}
+              searchText={o => `${o.orderNumber} ${clientName(o.clientId)} ${o.status}`}
+              searchPlaceholder="Search orders"
+              columns={[
+                { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
+                  cell: o => <Link to={`/orders/${o.id}`} className="font-mono text-primary hover:underline whitespace-nowrap">{o.orderNumber}</Link> },
+                { key: "client", header: "Client", sortValue: o => clientName(o.clientId),
+                  cell: o => <span className="block truncate max-w-[160px]">{clientName(o.clientId) || "—"}</span> },
+                { key: "stage", header: "Stage", sortValue: o => o.status, cell: o => <span className="whitespace-nowrap">{o.status}</span> },
+                { key: "late", header: "Late by", align: "right", kind: "number", sortValue: o => daysLate(o),
+                  cell: o => <span className="font-semibold text-destructive tabular-nums whitespace-nowrap">{daysLate(o)} d</span> },
+              ]}
+            />
           ) : <Empty>Nothing is late.</Empty>}
         </Panel>
       </div>
@@ -102,23 +113,30 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
                 </BarChart>
               </ResponsiveContainer>
             </div>
-            <Table minWidth={700} head={
-              <tr className="border-b border-border/60">
-                <th className="text-left py-2">Factory</th><th className="text-right px-2">Pieces</th><th className="text-right px-2">Fine gold used</th>
-                <th className="text-right px-2">Labour billed</th><th className="text-right px-2">Labour owed now</th><th className="text-right px-2">Open jobs</th><th className="text-right pl-2">Avg days</th>
-              </tr>}>
-              {data.factories.map(f => (
-                <tr key={f.id} className="hover:bg-secondary/40">
-                  <td className="py-2"><Link to={`/factories/${f.id}`} className="font-medium text-brand-dark hover:text-primary">{f.name}</Link></td>
-                  <td className="text-right px-2">{f.pieces || "—"}</td>
-                  <td className="text-right px-2">{f.fineGoldG ? `${f.fineGoldG} g` : "—"}</td>
-                  <td className="text-right px-2">{f.labourInr ? inr(f.labourInr) : "—"}</td>
-                  <td className={`text-right px-2 ${f.labourPendingInr ? "font-semibold text-destructive" : ""}`}>{f.labourPendingInr ? inr(f.labourPendingInr) : "—"}</td>
-                  <td className="text-right px-2">{f.openJobs || "—"}</td>
-                  <td className="text-right pl-2">{num(f.avgDays, " d")}</td>
-                </tr>
-              ))}
-            </Table>
+            <DataTable
+              id="reports-factories"
+              noun="factory"
+              rows={data.factories}
+              rowKey={f => f.id}
+              rowHref={f => `/factories/${f.id}`}
+              defaultSort={{ key: "pieces", dir: "desc" }}
+              searchText={f => f.name}
+              searchPlaceholder="Search factories"
+              columns={[
+                { key: "factory", header: "Factory", always: true, sortValue: f => f.name,
+                  cell: f => <Link to={`/factories/${f.id}`} className="font-medium text-brand-dark hover:text-primary whitespace-nowrap">{f.name}</Link> },
+                { key: "pieces", header: "Pieces", align: "right", kind: "number", sortValue: f => f.pieces, cell: f => <span className="tabular-nums">{f.pieces || "—"}</span> },
+                { key: "gold", header: "Fine gold used", align: "right", kind: "number", sortValue: f => f.fineGoldG,
+                  cell: f => <span className="tabular-nums whitespace-nowrap">{f.fineGoldG ? `${f.fineGoldG} g` : "—"}</span> },
+                { key: "billed", header: "Labour billed", align: "right", kind: "number", sortValue: f => f.labourInr,
+                  cell: f => <span className="tabular-nums whitespace-nowrap">{f.labourInr ? inr(f.labourInr) : "—"}</span> },
+                { key: "owed", header: "Labour owed now", align: "right", kind: "number", sortValue: f => f.labourPendingInr,
+                  cell: f => (f.labourPendingInr ? <CellAmount tone="out">{inr(f.labourPendingInr)}</CellAmount> : <span className="text-muted-foreground">—</span>) },
+                { key: "open", header: "Open jobs", align: "right", kind: "number", sortValue: f => f.openJobs, cell: f => <span className="tabular-nums">{f.openJobs || "—"}</span> },
+                { key: "days", header: "Avg days", align: "right", kind: "number", sortValue: f => f.avgDays,
+                  cell: f => <span className="tabular-nums whitespace-nowrap">{num(f.avgDays, " d")}</span> },
+              ]}
+            />
           </>
         ) : <Empty>No factory work in this period.</Empty>}
       </Panel>

@@ -5,8 +5,6 @@ import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, g
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
 import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download } from "lucide-react";
@@ -38,9 +36,6 @@ export function GiftCardsAdminPage() {
     if (ql && !clientName(c.clientId).toLowerCase().includes(ql)) return false;
     return true;
   });
-
-  const PAGE = 15;
-  const { paged, page, setPage, totalPages, total, start, end } = usePagination(rows, PAGE);
 
   // ── Exports (date range on issue date) ──
   const inRange = (iso: string, from: Date | null, to: Date | null) => {

@@ -1,3 +1,4 @@
+import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
@@ -342,6 +343,46 @@ export function ReadyStockPage() {
     { label: "Delete", icon: Trash2, danger: true, onSelect: () => del(item), show: can("readyStock", "delete") },
   ];
 
+  const costOf = (i: ReadyStockItem) => (isAdmin ? stockCostOf(db, i) : undefined);
+  const listColumns: DataColumn<ReadyStockItem>[] = [
+    { key: "piece", header: "Piece", always: true, sortValue: i => i.name,
+      cell: item => (
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="h-12 w-12 rounded-lg bg-white ring-1 ring-border/60 overflow-hidden shrink-0 relative grid place-items-center">
+            {item.images?.[0] ? <img src={item.images[0]} alt="" loading="lazy" className="w-full h-full object-contain" /> : <Gem className="h-5 w-5 text-muted-foreground/40" />}
+            {item.quantity === 0 && <div className="absolute inset-0 bg-black/50 grid place-items-center"><span className="text-white font-semibold text-[8px] tracking-wide">SOLD</span></div>}
+            {item.video && item.quantity !== 0 && (
+              <button onClick={() => setVideoView(item.video!)} title="Play video" className="absolute bottom-0.5 right-0.5 h-5 w-5 rounded-full bg-black/60 hover:bg-black/80 text-white grid place-items-center"><Play className="h-2.5 w-2.5 fill-current" /></button>
+            )}
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-brand-dark leading-snug truncate max-w-[16rem]">{item.name}</p>
+            <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[16rem]">
+              {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}{item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
+            </p>
+            {canManage && item.fromReturn && <div className="mt-0.5"><CellTag tone="amber">Returned by a client</CellTag></div>}
+          </div>
+        </div>
+      ) },
+    { key: "office", header: "Office", sortValue: i => `${String(officeRank(db.settings, officeOf(i))).padStart(5, "0")} ${officeOf(i)}`, csv: i => officeLabel(officeOf(i)),
+      cell: i => <OfficeChip office={officeOf(i)} /> },
+    ...(canManage && multiCo ? [{ key: "company", header: "Company", sortValue: (i: ReadyStockItem) => companyOf(i), cell: (i: ReadyStockItem) => <CompanyBadge id={companyOf(i)} /> }] : []),
+    { key: "weights", header: "Weights", sortValue: i => i.grossWeight ?? null,
+      cell: i => i.grossWeight || i.netWeight ? <span className="whitespace-nowrap text-xs tabular-nums">{i.grossWeight ? `G ${i.grossWeight}g` : ""}{i.grossWeight && i.netWeight ? " · " : ""}{i.netWeight ? `N ${i.netWeight}g` : ""}</span> : <span className="text-muted-foreground/50">—</span> },
+    { key: "sku", header: "Design #", sortValue: i => i.sku ?? null, cell: i => i.sku ? <span className="font-mono text-xs">{i.sku}</span> : <span className="text-muted-foreground/50">—</span> },
+    { key: "id", header: "Product ID", hidden: true, sortValue: i => i.id.slice(-6).toUpperCase(), cell: i => <span className="font-mono text-xs">{i.id.slice(-6).toUpperCase()}</span> },
+    { key: "qty", header: "Qty", align: "center", kind: "number", sortValue: i => i.quantity,
+      cell: item => canManage && can("readyStock", "edit") ? <div className="inline-flex">{qtyStepper(item, true)}</div> : stockPill(item) },
+    { key: "price", header: "Price", align: "right", kind: "number", sortValue: i => i.price, cell: i => <CellAmount>{fmtMoney(i.price)}</CellAmount> },
+    ...(isAdmin ? [
+      { key: "cost", header: "Cost", align: "right" as const, kind: "number" as const, sortValue: (i: ReadyStockItem) => costOf(i) ?? null,
+        cell: (i: ReadyStockItem) => costOf(i) != null ? <span className="tabular-nums whitespace-nowrap text-muted-foreground">{fmtMoney(costOf(i)!)}</span> : <span className="text-muted-foreground/50">—</span> },
+      { key: "profit", header: "Profit", align: "right" as const, kind: "number" as const, sortValue: (i: ReadyStockItem) => costOf(i) != null ? i.price - costOf(i)! : null,
+        cell: (i: ReadyStockItem) => costOf(i) != null ? <CellAmount tone={i.price - costOf(i)! >= 0 ? "in" : "out"}>{i.price - costOf(i)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(i.price - costOf(i)!))}</CellAmount> : <span className="text-muted-foreground/50">—</span> },
+    ] : []),
+    { key: "added", header: "Added", kind: "date", hidden: true, sortValue: i => i.createdAt, cell: i => <CellDate>{fmtDate(i.createdAt)}</CellDate> },
+  ];
+
   /** Office by office, when all are shown: a heading where the office changes. */
   const groupHead = (item: ReadyStockItem, idx: number) => {
     if (officeSel !== "all" || (idx > 0 && officeOf(paged[idx - 1]) === officeOf(item))) return null;
@@ -543,64 +584,27 @@ export function ReadyStockPage() {
       </div>
       )}
 
+      {/* List: the same table as every list — the office a column to sort by. */}
       {view === "list" && (
-        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
-          {paged.map((item, idx) => (
-            <Fragment key={item.id}>
-            {officeSel === "all" && groupHead(item, idx) && <div className="px-3 sm:px-4 py-2 bg-secondary/40">{groupHead(item, idx)}</div>}
-            <div className={`flex items-center gap-3 px-3 sm:px-4 py-3 transition-colors ${sel.has(item.id) ? "bg-primary/5" : "hover:bg-secondary/50"}`}>
-              {canManage && <SelectBox checked={sel.has(item.id)} onToggle={() => toggleSel(item.id)} />}
-              <div className="h-16 w-16 rounded-xl bg-white ring-1 ring-border/60 overflow-hidden shrink-0 relative">
-                {item.images?.[0]
-                  ? <img src={item.images[0]} alt={item.name} loading="lazy" className="w-full h-full object-contain" />
-                  : <div className="w-full h-full grid place-items-center bg-secondary/50 text-muted-foreground/40"><Gem className="h-6 w-6" /></div>}
-                {item.quantity === 0 && <div className="absolute inset-0 bg-black/50 grid place-items-center"><span className="text-white font-semibold text-[9px] tracking-wide">SOLD</span></div>}
-                {item.video && item.quantity !== 0 && (
-                  <button onClick={() => setVideoView(item.video!)} title="Play video"
-                    className="absolute bottom-1 right-1 h-6 w-6 rounded-full bg-black/60 hover:bg-black/80 text-white grid place-items-center transition-colors">
-                    <Play className="h-3 w-3 fill-current" />
-                  </button>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-medium text-brand-dark truncate leading-tight">{item.name}</p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}
-                  {item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
-                </p>
-                <p className="text-[11px] text-muted-foreground truncate">
-                  {item.grossWeight ? `Gross ${item.grossWeight}g` : ""}
-                  {item.grossWeight && item.netWeight ? " · " : ""}
-                  {item.netWeight ? `Net ${item.netWeight}g` : ""}
-                  {item.sku ? `${(item.grossWeight || item.netWeight) ? " · " : ""}Design #${item.sku}` : ""}
-                </p>
-                <div className="flex flex-wrap items-center gap-1 mt-1">
-                  <OfficeChip office={officeOf(item)} />
-                  {canManage && item.fromReturn && (
-                    <span title={item.notes} className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>
-                  )}
-                  {canManage && coSel === "all" && <CompanyBadge id={companyOf(item)} />}
-                  <span className="text-[10px] text-muted-foreground font-mono">ID {item.id.slice(-6).toUpperCase()}</span>
-                </div>
-              </div>
-              <div className="text-right shrink-0">
-                <p className="font-display text-lg font-bold text-brand-dark">{fmtMoney(item.price)}</p>
-                {isAdmin && stockCostOf(db, item) != null && (
-                  <p className={`text-[10px] font-medium ${item.price - stockCostOf(db, item)! >= 0 ? "text-success" : "text-destructive"}`}>
-                    {item.price - stockCostOf(db, item)! >= 0 ? "+" : "−"}{fmtMoney(Math.abs(item.price - stockCostOf(db, item)!))} {item.price - stockCostOf(db, item)! >= 0 ? "profit" : "loss"}
-                  </p>
-                )}
-                {canManage && can("readyStock", "edit") ? qtyStepper(item, true) : <div className="mt-1">{stockPill(item)}</div>}
-              </div>
-              {canManage && <MoreMenu size="sm" label={`Actions for ${item.name}`} actions={itemActions(item)} />}
-            </div>
-            </Fragment>
-          ))}
-          {total === 0 && <div className="p-12 text-center text-muted-foreground">{shelf.length ? "Nothing here matches — try another office or filter." : "No ready stock items yet — add your first finished piece."}</div>}
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="ready-stock"
+            noun="piece"
+            rows={items}
+            columns={listColumns}
+            rowKey={i => i.id}
+            defaultSort={{ key: "office", dir: "asc" }}
+            selected={canManage ? sel : undefined}
+            onSelectedChange={canManage ? setSel : undefined}
+            rowActions={canManage ? itemActions : undefined}
+            totals={{ qty: rows => rows.reduce((s, i) => s + Math.max(0, i.quantity), 0), price: rows => fmtMoney(rows.reduce((s, i) => s + i.price * Math.max(0, i.quantity), 0)) }}
+            totalsLabel="In stock"
+            emptyText={shelf.length ? "Nothing here matches — try another office or filter." : "No ready stock items yet — add your first finished piece."}
+          />
         </div>
       )}
 
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} items` : undefined} />
+      {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} items` : undefined} />}
 
       {/* Add / Edit a piece */}
       <Dialog open={open} onOpenChange={setOpen}>

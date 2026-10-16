@@ -1,10 +1,10 @@
 import { useMemo, useState, type ReactNode } from "react";
 import { fmtDate } from "@/lib/db";
-import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowDownCircle, ArrowUpCircle, Search, Download } from "lucide-react";
+import { Search, Download } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 
 export interface StatementRow {
   id: string;
@@ -65,7 +65,7 @@ export function StatementLedger({
   creditLabel = "Credit",
   fmt,
   onExport,
-  pageSize = 12,
+  pageSize,
   emptyText = "No entries yet.",
   rowAction,
 }: {
@@ -109,15 +109,43 @@ export function StatementLedger({
   }, [rows, q, from, to, kind]);
 
   const active = !!q.trim() || !!from || !!to || kind !== "all";
-  // The last 15 days first, older entries as the reader scrolls; an opening
-  // balance always shows. Balances were worked out over every entry already.
-  const w = useRecentWindow(filtered, r => (r.pinned ? undefined : r.date), { filtered: active, resetKey: [q, from, to, kind] });
-  const paged = w.visible;
   const totalDebit = filtered.reduce((s, r) => s + r.debit, 0);
   const totalCredit = filtered.reduce((s, r) => s + r.credit, 0);
   // A salary ledger only ever pays out — an empty credit label drops the column
   // rather than printing a blank one next to every row.
   const showCredit = creditLabel !== "";
+
+  // An opening balance is context, not an entry to sort: it rides at the end of
+  // the newest-first list. With nothing else to show it is just the one row,
+  // so the table doesn't also print "nothing here" beneath it.
+  const entries = filtered.filter(r => !r.pinned);
+  const pinned = filtered.filter(r => r.pinned);
+  const onlyPinned = entries.length === 0 && pinned.length > 0;
+
+  const refsOf = (r: StatementRow) => {
+    // The order / invoice / reference, each once, and not again when the
+    // particulars already name it ("Payment — 8821").
+    const refs = [...new Set([r.ref, r.orderNo, r.invoiceNo].filter((x): x is string => !!x))]
+      .filter(x => !r.particulars.includes(x));
+    const qty = r.qty ? `${r.qty}${r.unit ?? ""}${r.rate ? ` @ ${fmt(r.rate)}` : ""}` : "";
+    return [...refs, qty].filter(Boolean).join(" · ");
+  };
+
+  const columns: DataColumn<StatementRow>[] = [
+    { key: "date", header: "Date", always: true, kind: "date", sortValue: r => +new Date(r.date),
+      cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+    { key: "particulars", header: "Particulars", always: true, sortValue: r => r.particulars,
+      cell: r => <CellMain title={r.particulars} sub={refsOf(r) || undefined} /> },
+    { key: "debit", header: debitLabel, align: "right", kind: "number", sortValue: r => r.debit,
+      cell: r => (r.debit > 0 ? <CellAmount tone="out">{fmt(r.debit)}</CellAmount> : null) },
+    ...(showCredit ? [{ key: "credit", header: creditLabel, align: "right" as const, kind: "number" as const, sortValue: (r: StatementRow) => r.credit,
+      cell: (r: StatementRow) => (r.credit > 0 ? <CellAmount tone="in">{fmt(r.credit)}</CellAmount> : null) }] : []),
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => r.balance,
+      cell: r => <CellAmount>{fmt(r.balance)}</CellAmount> },
+    // rowAction hands back its own control (a button, say), not menu items,
+    // so it gets a cell of its own rather than the ⋯ menu.
+    ...(rowAction ? [{ key: "action", header: "Action", align: "right" as const, cell: (r: StatementRow) => rowAction(r) }] : []),
+  ];
 
   return (
     <div className="card-luxe overflow-hidden">
@@ -170,70 +198,34 @@ export function StatementLedger({
           </Select>
         )}
         {active && (
+          <span className="text-[11px] text-muted-foreground">{filtered.length} of {rows.length} shown</span>
+        )}
+        {active && (
           <button onClick={() => { setQ(""); setFrom(""); setTo(""); setKind("all"); }}
             className="text-xs text-primary hover:underline">Reset</button>
         )}
       </div>
 
-      {/* Totals for what is on screen — a filtered view answers "how much in
-          August?" without exporting it first. */}
-      {active && filtered.length > 0 && (
-        <div className="px-5 pb-2 text-[11px] text-muted-foreground">
-          {filtered.length} of {rows.length} shown ·
-          <span className="text-destructive font-medium"> {debitLabel} {fmt(totalDebit)}</span>
-          {showCredit && <span className="text-success font-medium"> · {creditLabel} {fmt(totalCredit)}</span>}
-        </div>
-      )}
-
-      {paged.length > 0 && (
-        <div className="hidden sm:flex items-center gap-3 px-5 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          <div className="h-8 w-8 shrink-0" />
-          <div className="flex-1 min-w-0">Particulars</div>
-          <div className="w-24 text-right shrink-0">{debitLabel}</div>
-          {showCredit && <div className="w-24 text-right shrink-0">{creditLabel}</div>}
-          <div className="w-24 text-right shrink-0">Balance</div>
-        </div>
-      )}
-
-      <div className="divide-y divide-border/40">
-        {paged.length === 0 ? (
-          <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-            {active ? "Nothing in that range." : emptyText}
-          </div>
-        ) : paged.map(r => (
-          <div key={r.id} className="flex items-center gap-3 px-5 py-3">
-            <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${
-              r.debit > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-              {r.debit > 0 ? <ArrowUpCircle className="h-4 w-4" /> : <ArrowDownCircle className="h-4 w-4" />}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-medium truncate">{r.particulars}</p>
-              <p className="text-xs text-muted-foreground truncate">
-                {fmtDate(r.date)}{r.ref ? ` · ${r.ref}` : ""}
-                {r.qty ? ` · ${r.qty}${r.unit ?? ""}${r.rate ? ` @ ${fmt(r.rate)}` : ""}` : ""}
-              </p>
-            </div>
-            <div className="w-24 text-right shrink-0 hidden sm:block">
-              {r.debit > 0 && <span className="text-sm font-semibold text-destructive">{fmt(r.debit)}</span>}
-            </div>
-            {showCredit && <div className="w-24 text-right shrink-0 hidden sm:block">
-              {r.credit > 0 && <span className="text-sm font-semibold text-success">{fmt(r.credit)}</span>}
-            </div>}
-            <div className="w-24 text-right shrink-0">
-              <p className="text-sm font-semibold text-foreground sm:hidden">
-                <span className={r.debit > 0 ? "text-destructive" : "text-success"}>
-                  {r.debit > 0 ? fmt(r.debit) : fmt(r.credit)}
-                </span>
-              </p>
-              <p className="text-sm font-medium text-foreground hidden sm:block">{fmt(r.balance)}</p>
-              <p className="text-[11px] text-muted-foreground sm:hidden">Bal {fmt(r.balance)}</p>
-            </div>
-            {rowAction?.(r)}
-          </div>
-        ))}
+      <div className="px-5 pb-5">
+        <DataTable
+          id={`statement-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+          noun="transaction"
+          rows={onlyPinned ? pinned : entries}
+          pinnedRows={onlyPinned ? undefined : pinned}
+          columns={columns}
+          rowKey={r => r.id}
+          defaultSort={{ key: "date", dir: "desc" }}
+          pageSizes={pageSize ? [pageSize, pageSize * 2, pageSize * 4] : undefined}
+          emptyText={active ? "Nothing in that range." : emptyText}
+          // Totals only for a filtered view — it answers "how much in August?"
+          // without exporting first. Unfiltered, the tiles above already say it,
+          // and a second, differently-made total beside them would only confuse.
+          totals={active ? {
+            debit: () => <span className="text-destructive">{fmt(totalDebit)}</span>,
+            ...(showCredit ? { credit: () => <span className="text-success">{fmt(totalCredit)}</span> } : {}),
+          } : undefined}
+        />
       </div>
-
-      <LoadOlder w={w} />
     </div>
   );
 }

@@ -10,21 +10,18 @@ import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manu
 import { recomputeStockFromHistory } from "@/lib/stock";
 import { purchaseEditScope, editPurchase } from "@/lib/purchaseVoid";
 import { AsyncButton } from "@/components/AsyncButton";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Gem, Coins, BadgeCheck, ArrowDownCircle, ArrowUpCircle, Pencil, Trash2, Download, Layers } from "lucide-react";
+import { ArrowLeft, Gem, Coins, BadgeCheck, Pencil, Trash2, Download, Layers } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
-
-const PAGE_SIZE = 15;
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
@@ -90,8 +87,6 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
   const filtersActive = !!filterFrom || !!filterTo;
   const filteredRows = rows.filter(m => inDateRange(m.createdAt, filterFromDate, filterToDate));
-
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filteredRows, PAGE_SIZE);
 
   const materialLabel = material === "gold" ? "Gold Reserve" : material === "diamond" ? "Loose Diamonds" : (def?.name ?? "Material");
   const bucketLabel = material === "gold" ? "Purity" : material === "diamond" ? "Shape" : "Grade"; // purityOrQuality = shape for diamonds, grade for the rest
@@ -159,6 +154,29 @@ function MaterialSection({ material }: { material: MaterialKey }) {
     : m.link.supplierId ? <Link to={`/suppliers/${m.link.supplierId}`} className="text-primary hover:underline">{m.link.label}</Link>
     : m.link.clientId ? <Link to={`/clients/${m.link.clientId}`} className="text-primary hover:underline">{m.link.label}</Link>
     : <span>{m.link.label}</span>;
+
+  type Movement = (typeof rows)[number];
+  const sumQty = (list: Movement[]) => Math.round(list.reduce((s, m) => s + m.quantity, 0) * 1000) / 1000;
+  const dash = <span className="text-muted-foreground/50">—</span>;
+  // In and Out split exactly as before: a purchase is In, everything else Out.
+  const movementColumns: DataColumn<Movement>[] = [
+    { key: "date", header: "Date", always: true, kind: "date", sortValue: m => +new Date(m.createdAt),
+      cell: m => <CellDate>{fmtDate(m.createdAt)}</CellDate> },
+    { key: "bucket", header: bucketLabel, sortValue: m => String(m.purityOrQuality),
+      cell: m => <CellTag tone="blue">{m.purityOrQuality}</CellTag> },
+    { key: "particulars", header: "Particulars", sortValue: m => m.link.label,
+      cell: m => <span>{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</span> },
+    { key: "in", header: `In (${unit})`, align: "right", kind: "number", sortValue: m => (m.type === "purchase_in" ? m.quantity : null),
+      cell: m => (m.type === "purchase_in" ? <CellAmount tone="in">{m.quantity.toLocaleString()}</CellAmount> : dash) },
+    { key: "out", header: `Out (${unit})`, align: "right", kind: "number", sortValue: m => (m.type === "purchase_in" ? null : m.quantity),
+      cell: m => (m.type === "purchase_in" ? dash : <CellAmount tone="out">{m.quantity.toLocaleString()}</CellAmount>) },
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: m => balanceById.get(m.id) ?? 0,
+      cell: m => <span className="tabular-nums whitespace-nowrap font-medium text-brand-dark">{(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}</span> },
+    { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: m => inrRateAmount(m)?.rate,
+      cell: m => { const ra = inrRateAmount(m); return ra ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(ra.rate)}/{unit}</span> : dash; } },
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: m => inrRateAmount(m)?.amount,
+      cell: m => { const ra = inrRateAmount(m); return ra ? <CellAmount>{fmtMoneyInr(ra.amount)}</CellAmount> : dash; } },
+  ];
 
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
@@ -292,76 +310,25 @@ function MaterialSection({ material }: { material: MaterialKey }) {
             </button>
           )}
         </div>
-        {filteredRows.length === 0 ? (
-          <div className="px-5 py-12 text-center text-muted-foreground">
-            {rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
-          </div>
-        ) : (
-          <>
-            {/* Desktop table — where bought / where went, rate & amount */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
-                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">Date</th>
-                    <th className="px-5 py-2.5 font-semibold whitespace-nowrap">{bucketLabel}</th>
-                    <th className="px-5 py-2.5 font-semibold">Particulars</th>
-                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">In ({unit})</th>
-                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Out ({unit})</th>
-                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Balance</th>
-                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Rate</th>
-                    <th className="px-5 py-2.5 font-semibold text-right whitespace-nowrap">Amount</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {paged.map(m => {
-                    const ra = inrRateAmount(m);
-                    const isIn = m.type === "purchase_in";
-                    return (
-                      <tr key={m.id} className="hover:bg-secondary/30">
-                        <td className="px-5 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(m.createdAt)}</td>
-                        <td className="px-5 py-2.5 whitespace-nowrap"><span className="inline-block px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-700 text-xs font-medium">{m.purityOrQuality}</span></td>
-                        <td className="px-5 py-2.5">{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</td>
-                        <td className="px-5 py-2.5 text-right font-semibold text-success whitespace-nowrap">{isIn ? m.quantity.toLocaleString() : "—"}</td>
-                        <td className="px-5 py-2.5 text-right font-semibold text-destructive whitespace-nowrap">{isIn ? "—" : m.quantity.toLocaleString()}</td>
-                        <td className="px-5 py-2.5 text-right font-medium text-brand-dark whitespace-nowrap">{(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}</td>
-                        <td className="px-5 py-2.5 text-right whitespace-nowrap">{ra ? `${fmtMoneyInr(ra.rate)}/${unit}` : "—"}</td>
-                        <td className="px-5 py-2.5 text-right font-medium whitespace-nowrap">{ra ? fmtMoneyInr(ra.amount) : "—"}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="md:hidden divide-y divide-border/40">
-              {paged.map(m => {
-                const ra = inrRateAmount(m);
-                return (
-                  <div key={m.id} className="flex items-center gap-3 px-5 py-3">
-                    <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${m.type === "purchase_in" ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
-                      {m.type === "purchase_in" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate"><span className="text-cyan-700 font-semibold">{m.purityOrQuality}</span> · {particulars(m)}</p>
-                      <p className="text-xs text-muted-foreground">{fmtDate(m.createdAt)} · bal {(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}{ra ? ` · ${fmtMoneyInr(ra.rate)}/${unit}` : ""}</p>
-                    </div>
-                    <div className="text-right shrink-0">
-                      <p className={`text-sm font-semibold ${m.type === "purchase_in" ? "text-success" : "text-destructive"}`}>{m.type === "purchase_in" ? "+" : "−"}{m.quantity} {unit}</p>
-                      {ra && <p className="text-[11px] text-muted-foreground">{fmtMoneyInr(ra.amount)}</p>}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
-        {totalPages > 1 && (
-          <div className="px-5 border-t border-border/60">
-            <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={`Showing ${start + 1}–${end} of ${filteredRows.length}`} />
-          </div>
-        )}
+        {/* Where bought / where went, rate & amount. The date range above
+            narrows the rows; the balances were worked out over every movement. */}
+        <div className="p-3 sm:p-4">
+          <DataTable
+            id="stock-movements"
+            noun="movement"
+            rows={filteredRows}
+            columns={movementColumns}
+            rowKey={m => m.id}
+            defaultSort={{ key: "date", dir: "desc" }}
+            searchText={m => [m.purityOrQuality, m.link.label, m.note].filter(Boolean).join(" ")}
+            searchPlaceholder="Search movements"
+            totals={{
+              in: list => <span className="text-success">{sumQty(list.filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
+              out: list => <span className="text-destructive">{sumQty(list.filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
+            }}
+            emptyText={rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
+          />
+        </div>
       </div>
     </div>
   );
@@ -377,7 +344,6 @@ function CertifiedSection() {
   // Rate is edited as free text so a half-typed number does not snap to 0.
   const [editRate, setEditRate] = useState("");
   const [savingPacket, setSavingPacket] = useState(false);
-  const [search, setSearch] = useState("");
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
   const [showExport, setShowExport] = useState(false);
@@ -397,10 +363,6 @@ function CertifiedSection() {
   const orderNoOf = (id?: string) => (id ? db.orders.find(o => o.id === id)?.orderNumber : undefined);
   const boughtDate = (p: DiamondPacket) => purchaseOf(p.purchaseId)?.invoiceDate || purchaseOf(p.purchaseId)?.createdAt || p.createdAt;
   const STATUS_LABEL: Record<DiamondPacket["status"], string> = { in_stock: "In stock", issued: "Issued", used: "Used in order", sold: "Sold" };
-  const STATUS_CLASS: Record<DiamondPacket["status"], string> = {
-    in_stock: "bg-success/10 text-success", issued: "bg-blue-500/10 text-blue-700",
-    used: "bg-secondary text-muted-foreground", sold: "bg-violet-500/10 text-violet-700",
-  };
 
   const allPackets = [...(db.diamondPackets ?? [])].filter(inCo).sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
   const histFromDate = histFrom ? new Date(histFrom + "T00:00:00") : null;
@@ -495,11 +457,54 @@ function CertifiedSection() {
       filename: "Stock-Certified_Diamonds-History",
     });
   };
-  const inStockPackets = allInStockPackets.filter(p => {
-    const q = search.trim().toLowerCase();
-    if (!q) return true;
-    return [p.stockNumber, p.shape, p.certificateNumber].some(v => v?.toLowerCase().includes(q));
-  });
+  // ── The two packet tables ──
+  const gradeOf = (p: DiamondPacket) => [p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
+    .filter(Boolean).join(" · ");
+  const sumCarat = (list: DiamondPacket[]) => Math.round(list.reduce((s, p) => s + p.carat, 0) * 100) / 100;
+  const packetSearch = (p: DiamondPacket) =>
+    [p.stockNumber, p.shape, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId)].filter(Boolean).join(" ");
+  const dash = <span className="text-muted-foreground/50">—</span>;
+  const STATUS_TONE: Record<DiamondPacket["status"], "green" | "blue" | "neutral" | "violet"> = { in_stock: "green", issued: "blue", used: "neutral", sold: "violet" };
+  const packetCols = {
+    stock: { key: "stock", header: "Stock #", sortValue: p => p.stockNumber, csv: p => p.stockNumber ?? "",
+      cell: p => (p.stockNumber ? <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{p.stockNumber}</span> : dash) },
+    diamond: { key: "diamond", header: "Diamond", always: true, kind: "number", sortValue: p => p.carat, csv: p => `${p.shape} ${p.carat} ct`,
+      cell: p => <CellMain title={<>{p.shape} · <span className="text-cyan-700">{p.carat} ct</span></>} sub={gradeOf(p) || undefined} /> },
+    certificate: { key: "certificate", header: "Certificate", sortValue: p => p.certificateNumber, csv: p => `${p.certificateNumber}${p.certificateLab ? ` ${p.certificateLab}` : ""}`,
+      cell: p => <span className="text-xs text-muted-foreground whitespace-nowrap">{p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</span> },
+    supplier: { key: "supplier", header: "Supplier", sortValue: p => supplierName(p.supplierId), csv: p => supplierName(p.supplierId) ?? "",
+      cell: p => (p.supplierId ? <Link to={`/suppliers/${p.supplierId}`} className="text-primary hover:underline font-medium whitespace-nowrap">{supplierName(p.supplierId)}</Link> : dash) },
+    rate: { key: "rate", header: "Rate/ct", align: "right", kind: "number", sortValue: p => p.ratePerCaratInr,
+      cell: p => (p.ratePerCaratInr ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(p.ratePerCaratInr)}</span> : dash) },
+    bought: { key: "bought", header: "Bought", kind: "date", sortValue: p => +new Date(boughtDate(p)), csv: p => fmtDate(boughtDate(p)),
+      cell: p => <CellDate>{fmtDate(boughtDate(p))}</CellDate> },
+  } satisfies Record<string, DataColumn<DiamondPacket>>;
+  // In stock: what each stone is — stock number first, as on the old cards.
+  const inStockColumns: DataColumn<DiamondPacket>[] = [
+    { ...packetCols.stock, always: true },
+    packetCols.diamond,
+    { key: "measurement", header: "Measurement", sortValue: p => p.measurement, csv: p => p.measurement ?? "",
+      cell: p => (p.measurement ? <span className="text-xs text-muted-foreground whitespace-nowrap">{p.measurement}</span> : dash) },
+    packetCols.certificate,
+    packetCols.supplier,
+    packetCols.rate,
+    packetCols.bought,
+  ];
+  // History: when it was bought, what it cost and where it went.
+  const historyColumns: DataColumn<DiamondPacket>[] = [
+    { ...packetCols.bought, always: true },
+    packetCols.stock,
+    packetCols.diamond,
+    packetCols.certificate,
+    packetCols.supplier,
+    packetCols.rate,
+    { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: p => (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : null),
+      cell: p => (p.ratePerCaratInr ? <CellAmount>{fmtMoneyInr(p.ratePerCaratInr * p.carat)}</CellAmount> : dash) },
+    { key: "status", header: "Status", sortValue: p => STATUS_LABEL[p.status],
+      cell: p => <CellTag tone={STATUS_TONE[p.status]}>{STATUS_LABEL[p.status]}</CellTag> },
+    { key: "order", header: "Order", sortValue: p => orderNoOf(p.orderId),
+      cell: p => (p.orderId ? <Link to={`/orders/${p.orderId}`} className="text-xs text-primary hover:underline whitespace-nowrap">{orderNoOf(p.orderId) ?? "Order"}</Link> : dash) },
+  ];
   const unnumberedCount = (db.diamondPackets ?? []).filter(p => !p.stockNumber).length;
 
   const assignMissingStockNumbers = () => {
@@ -646,63 +651,24 @@ function CertifiedSection() {
         </div>
       )}
 
-      {allInStockPackets.length > 3 && (
-        <Input value={search} onChange={e => setSearch(e.target.value)} className="rounded-xl h-10" placeholder="Search stock #, shape, or certificate…" />
-      )}
-
-      <div className="card-luxe p-5">
-        {allInStockPackets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No certified diamonds in stock.</p>
-        ) : inStockPackets.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No matches for "{search}".</p>
-        ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {inStockPackets.map(p => {
-              const grade = [p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
-                .filter(Boolean).join(" · ");
-              return (
-                <div key={p.id} className="p-3 rounded-xl bg-secondary border border-border/40">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">
-                      {p.stockNumber && <span className="font-mono text-xs font-semibold text-primary mr-1.5">{p.stockNumber}</span>}
-                      {p.shape}
-                    </span>
-                    <span className="text-sm font-semibold text-cyan-700">{p.carat} ct</span>
-                  </div>
-                  {grade && <p className="text-xs text-foreground/70 mt-0.5 truncate">{grade}</p>}
-                  {p.measurement && <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{p.measurement}</p>}
-                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
-                  {(() => {
-                    const sup = p.supplierId ? db.suppliers.find(s => s.id === p.supplierId) : undefined;
-                    const pur = p.purchaseId ? db.purchases.find(x => x.id === p.purchaseId) : undefined;
-                    const bought = pur?.invoiceDate || pur?.createdAt || p.createdAt;
-                    return (
-                      <p className="text-[11px] mt-1 pt-1 border-t border-border/30 truncate">
-                        {sup
-                          ? <Link to={`/suppliers/${sup.id}`} className="text-primary hover:underline font-medium">{sup.name}</Link>
-                          : <span className="text-muted-foreground">Supplier —</span>}
-                        <span className="text-muted-foreground">
-                          {p.ratePerCaratInr ? ` · ${fmtMoneyInr(p.ratePerCaratInr)}/ct` : ""}
-                          {bought ? ` · ${fmtDate(bought)}` : ""}
-                        </span>
-                      </p>
-                    );
-                  })()}
-                  {user?.role === "admin" && (
-                    <div className="flex items-center gap-2 mt-2 pt-2 border-t border-border/40">
-                      <button onClick={() => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); }} className="text-[11px] text-primary inline-flex items-center gap-1 hover:underline">
-                        <Pencil className="h-3 w-3" /> Edit
-                      </button>
-                      <button onClick={() => deletePacket(p)} className="text-[11px] text-destructive inline-flex items-center gap-1 hover:underline">
-                        <Trash2 className="h-3 w-3" /> Delete
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        )}
+      <div className="card-luxe p-3 sm:p-4">
+        <DataTable
+          id="stock-certified-in-stock"
+          noun="packet"
+          rows={allInStockPackets}
+          columns={inStockColumns}
+          rowKey={p => p.id}
+          defaultSort={{ key: "bought", dir: "desc" }}
+          searchText={packetSearch}
+          searchPlaceholder="Search stock #, shape, or certificate…"
+          exportName="Stock-Certified_Diamonds-In_Stock"
+          totals={{ diamond: list => `${sumCarat(list)} ct` }}
+          rowActions={p => [
+            { label: "Edit", icon: Pencil, onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); }, show: user?.role === "admin" },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => deletePacket(p), show: user?.role === "admin" },
+          ]}
+          emptyText="No certified diamonds in stock."
+        />
       </div>
 
       {/* Full history — every certified diamond bought: supplier, rate & where it went */}
@@ -727,62 +693,23 @@ function CertifiedSection() {
           {histActive && <button onClick={() => { setHistFrom(""); setHistTo(""); }} className="text-xs text-primary hover:underline">Reset</button>}
         </div>
 
-        {histRows.length === 0 ? (
-          <div className="px-5 py-12 text-center text-muted-foreground">{allPackets.length === 0 ? "No certified diamonds purchased yet." : "None match this date range."}</div>
-        ) : (
-          <>
-            {/* Desktop table */}
-            <div className="hidden md:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border/60 text-left text-xs text-muted-foreground">
-                    {["Bought", "Stock #", "Diamond", "Certificate", "Supplier", "Rate/ct", "Cost", "Status / Order"].map(h => <th key={h} className="px-5 py-2.5 font-semibold whitespace-nowrap">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {histRows.map(p => (
-                    <tr key={p.id} className="hover:bg-secondary/30">
-                      <td className="px-5 py-2.5 text-muted-foreground whitespace-nowrap">{fmtDate(boughtDate(p))}</td>
-                      <td className="px-5 py-2.5 font-mono text-xs text-primary whitespace-nowrap">{p.stockNumber ?? "—"}</td>
-                      <td className="px-5 py-2.5 whitespace-nowrap">{p.shape} · <span className="font-semibold text-cyan-700">{p.carat} ct</span></td>
-                      <td className="px-5 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</td>
-                      <td className="px-5 py-2.5 whitespace-nowrap">
-                        {p.supplierId ? <Link to={`/suppliers/${p.supplierId}`} className="text-primary hover:underline">{supplierName(p.supplierId)}</Link> : <span className="text-muted-foreground">—</span>}
-                      </td>
-                      <td className="px-5 py-2.5 whitespace-nowrap">{p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr) : "—"}</td>
-                      <td className="px-5 py-2.5 font-medium whitespace-nowrap">{p.ratePerCaratInr ? fmtMoneyInr(p.ratePerCaratInr * p.carat) : "—"}</td>
-                      <td className="px-5 py-2.5 whitespace-nowrap">
-                        <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
-                        {p.orderId && <Link to={`/orders/${p.orderId}`} className="ml-1.5 text-xs text-primary hover:underline">{orderNoOf(p.orderId)}</Link>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile cards */}
-            <div className="md:hidden divide-y divide-border/40">
-              {histRows.map(p => (
-                <div key={p.id} className="px-5 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm font-semibold">{p.stockNumber && <span className="font-mono text-xs text-primary mr-1.5">{p.stockNumber}</span>}{p.shape} · {p.carat} ct</span>
-                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${STATUS_CLASS[p.status]}`}>{STATUS_LABEL[p.status]}</span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Report {p.certificateNumber}{p.certificateLab ? ` · ${p.certificateLab}` : ""}</p>
-                  <div className="flex items-center justify-between gap-2 mt-1 text-xs">
-                    <span>
-                      {p.supplierId ? <Link to={`/suppliers/${p.supplierId}`} className="text-primary hover:underline font-medium">{supplierName(p.supplierId)}</Link> : <span className="text-muted-foreground">Supplier —</span>}
-                      <span className="text-muted-foreground"> · {fmtDate(boughtDate(p))}</span>
-                    </span>
-                    {p.ratePerCaratInr && <span className="font-medium shrink-0">{fmtMoneyInr(p.ratePerCaratInr * p.carat)}</span>}
-                  </div>
-                  {p.orderId && <p className="text-[11px] mt-0.5">→ <Link to={`/orders/${p.orderId}`} className="text-primary hover:underline">Order {orderNoOf(p.orderId)}</Link></p>}
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        <div className="p-3 sm:p-4">
+          <DataTable
+            id="stock-certified-history"
+            noun="packet"
+            rows={histRows}
+            columns={historyColumns}
+            rowKey={p => p.id}
+            defaultSort={{ key: "bought", dir: "desc" }}
+            searchText={p => [packetSearch(p), STATUS_LABEL[p.status], orderNoOf(p.orderId)].filter(Boolean).join(" ")}
+            searchPlaceholder="Search stock #, certificate, supplier…"
+            totals={{
+              diamond: list => `${sumCarat(list)} ct`,
+              cost: list => fmtMoneyInr(list.reduce((s, p) => s + (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : 0), 0)),
+            }}
+            emptyText={allPackets.length === 0 ? "No certified diamonds purchased yet." : "None match this date range."}
+          />
+        </div>
       </div>
 
       {/* Edit certified packet (admin) — fix a mistyped certificate/grade */}

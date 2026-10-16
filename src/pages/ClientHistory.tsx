@@ -15,12 +15,12 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
+import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/components/DataTable";
+import type { Order } from "@/lib/db";
 import {
-  ArrowLeft, Package, Search, Mail, Phone, MapPin, Globe, Undo2,
+  ArrowLeft, Package, Mail, Phone, MapPin, Globe, Undo2,
   FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
-  Download, ExternalLink, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
+  Download, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -121,7 +121,6 @@ function ClientHistoryPageBody() {
   allOrders.forEach(o => { statusCounts[o.status] = (statusCounts[o.status] || 0) + 1; });
 
   // Filters
-  const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
   const [showExport, setShowExport] = useState(false);
@@ -379,14 +378,46 @@ function ClientHistoryPageBody() {
 
 
 
-  const filtered = allOrders.filter(o => {
-    const matchQ = !q || o.orderNumber.toLowerCase().includes(q.toLowerCase()) || o.jewelleryType.toLowerCase().includes(q.toLowerCase());
-    const matchS = statusFilter === "all" || o.status === statusFilter;
-    return matchQ && matchS;
-  });
+  // The status filter narrows the rows; the table's own search box does the rest.
+  const filtered = allOrders.filter(o => statusFilter === "all" || o.status === statusFilter);
 
-  const PAGE_SIZE = 10;
-  const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, PAGE_SIZE);
+  const progressOf = (o: Order) => (o.timeline.length ? Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100) : 0);
+  const orderColumns: DataColumn<Order>[] = [
+    { key: "order", header: "Order #", always: true, sortValue: o => o.orderNumber,
+      cell: o => {
+        const progress = progressOf(o);
+        return (
+          <div className="min-w-0">
+            <p className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</p>
+            <div className="mt-1 flex items-center gap-1.5">
+              <div className="h-1 w-16 rounded-full bg-secondary overflow-hidden">
+                <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
+              </div>
+              <span className="text-[10px] tabular-nums text-muted-foreground">{progress}%</span>
+            </div>
+          </div>
+        );
+      } },
+    { key: "item", header: "Item", sortValue: o => o.jewelleryType, cell: o => <span className="font-medium whitespace-nowrap">{o.jewelleryType}</span> },
+    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.metal}</span> },
+    { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.diamondType}</span> },
+    { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },
+    { key: "priority", header: "Priority", sortValue: o => o.priority,
+      cell: o => <span className={`text-xs font-medium whitespace-nowrap ${o.priority === "Urgent" ? "text-red-500" : o.priority === "High Priority" ? "text-orange-500" : "text-muted-foreground"}`}>{o.priority}</span> },
+    { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
+    { key: "bill", header: "Bill", align: "right", kind: "number", sortValue: o => orderTotal(o), cell: o => <CellAmount>{fmtMoney(orderTotal(o))}</CellAmount> },
+    { key: "advance", header: "Advance", align: "right", kind: "number", sortValue: o => totalAdvance(o),
+      cell: o => (totalAdvance(o) > 0 ? <CellAmount tone="in">{fmtMoney(totalAdvance(o))}</CellAmount> : <span className="text-muted-foreground text-xs">—</span>) },
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: o => balanceDue(o),
+      cell: o => (balanceDue(o) === 0 ? <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Cleared</span> : <CellAmount tone="out">{fmtMoney(balanceDue(o))}</CellAmount>) },
+    { key: "invoice", header: "Invoice", align: "center",
+      sortValue: o => { const inv = findInvoiceForOrder(allInvoices, o.id); return inv ? (inv.paid ? "Paid" : "Unpaid") : ""; },
+      cell: o => {
+        const inv = findInvoiceForOrder(allInvoices, o.id);
+        return inv ? <CellTag tone={inv.paid ? "green" : "red"}>{inv.paid ? "Paid" : "Unpaid"}</CellTag> : <span className="text-xs text-muted-foreground">—</span>;
+      } },
+    { key: "date", header: "Date", kind: "date", sortValue: o => +new Date(o.createdAt), csv: o => fmtDate(o.createdAt), cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
+  ];
 
   /**
    * Client order report. This was hand-drawn onto a jsPDF page and cut every
@@ -705,182 +736,46 @@ function ClientHistoryPageBody() {
           <div>
             <h2 className="font-display text-xl text-brand-dark">Order History</h2>
             <p className="text-xs text-muted-foreground mt-0.5">{filtered.length} of {allOrders.length} orders</p>
-            {filtered.length > 0 && <p className="text-xs text-muted-foreground">Showing {start + 1}–{end}</p>}
-          </div>
-          <div className="flex gap-2 flex-wrap">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" className="pl-8 h-9 w-44 rounded-xl text-sm" />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-40 h-9 rounded-xl text-sm"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Status</SelectItem>
-                {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s => (
-                  <SelectItem key={s} value={s}>{s}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 
-        {/* Desktop table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="table-luxe w-full text-sm">
-            <thead>
-              <tr className="border-b border-border/60 bg-secondary/30">
-                <th className="text-left px-5 py-3 text-xs font-semibold text-muted-foreground">Order #</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Item</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Metal</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Diamond</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Qty</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Priority</th>
-                <th className="text-left px-4 py-3 text-xs font-semibold text-muted-foreground">Status</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Bill</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Advance</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Balance</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Invoice</th>
-                <th className="text-center px-4 py-3 text-xs font-semibold text-muted-foreground">Date</th>
-                <th className="px-4 py-3" />
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map((o, i) => {
-                const invoice = findInvoiceForOrder(allInvoices, o.id);
-                const progress = Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100);
-                const adv = totalAdvance(o);
-                const bal = balanceDue(o);
-                return (
-                  <motion.tr key={o.id} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: i * 0.02 }}
-                    className="border-b border-border/40 hover:bg-secondary/20 transition-colors group">
-                    <td className="px-5 py-3.5">
-                      <p className="font-mono text-xs font-semibold text-brand-dark">{o.orderNumber}</p>
-                      <div className="mt-1.5 h-1 w-20 rounded-full bg-secondary overflow-hidden">
-                        <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
-                      </div>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">{progress}%</p>
-                    </td>
-                    <td className="px-4 py-3.5 font-medium">{o.jewelleryType}</td>
-                    <td className="px-4 py-3.5 text-muted-foreground">{o.metal}</td>
-                    <td className="px-4 py-3.5 text-muted-foreground">{o.diamondType}</td>
-                    <td className="px-4 py-3.5 text-center">{o.quantity}</td>
-                    <td className="px-4 py-3.5">
-                      <span className={`text-xs font-medium ${o.priority === "Urgent" ? "text-red-500" : o.priority === "High Priority" ? "text-orange-500" : "text-muted-foreground"}`}>
-                        {o.priority}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5"><StatusBadge status={o.status} /></td>
-                    <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(orderTotal(o))}</td>
-                    <td className="px-4 py-3.5 text-center">
-                      {adv > 0
-                        ? <span className="text-success font-medium text-xs">{fmtMoney(adv)}</span>
-                        : <span className="text-muted-foreground text-xs">—</span>}
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      <span className={`text-xs font-semibold ${bal === 0 ? "text-success" : "text-destructive"}`}>
-                        {bal === 0 ? "✓ Cleared" : fmtMoney(bal)}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3.5 text-center">
-                      {invoice ? (
-                        <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${invoice.paid ? "bg-success/10 text-success border-success/30" : "bg-destructive/10 text-destructive border-destructive/30"}`}>
-                          {invoice.paid ? "Paid" : "Unpaid"}
-                        </span>
-                      ) : (
-                        <span className="text-xs text-muted-foreground">—</span>
-                      )}
-                    </td>
-                    <td className="px-4 py-3.5 text-center text-xs text-muted-foreground whitespace-nowrap">{fmtDate(o.createdAt)}</td>
-                    <td className="px-4 py-3.5">
-                      <Link to={`/orders/${o.id}`}>
-                        <Button size="sm" variant="ghost" className="h-7 w-7 p-0 rounded-lg opacity-0 group-hover:opacity-100 transition-opacity">
-                          <ExternalLink className="h-3.5 w-3.5" />
-                        </Button>
-                      </Link>
-                    </td>
-                  </motion.tr>
-                );
-              })}
-            </tbody>
-          </table>
+        <div className="p-3 sm:p-4">
+          <DataTable
+            id="client-orders"
+            noun="order"
+            rows={filtered}
+            columns={orderColumns}
+            rowKey={o => o.id}
+            rowHref={o => `/orders/${o.id}`}
+            defaultSort={{ key: "date", dir: "desc" }}
+            pageSizes={[10, 25, 50]}
+            searchText={o => [o.orderNumber, o.jewelleryType, o.metal, o.diamondType, o.priority, o.status, findInvoiceForOrder(allInvoices, o.id)?.number].filter(Boolean).join(" ")}
+            searchPlaceholder="Search orders"
+            exportName={`Client-${client.companyName.replace(/\s+/g, "_")}-Orders`}
+            toolbarExtra={
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-40 h-8 rounded-lg text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s => (
+                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            }
+            totals={{
+              bill: list => fmtMoney(list.reduce((s, o) => s + orderTotal(o), 0)),
+              advance: list => <span className="text-success">{fmtMoney(list.reduce((s, o) => s + totalAdvance(o), 0))}</span>,
+              balance: list => { const bal = list.reduce((s, o) => s + balanceDue(o), 0); return <span className={bal > 0 ? "text-destructive" : "text-success"}>{fmtMoney(bal)}</span>; },
+            }}
+            emptyText={
+              <span className="inline-flex flex-col items-center gap-1">
+                <Package className="h-10 w-10 opacity-20" />
+                <span className="font-medium">{allOrders.length === 0 ? "No orders yet" : "No orders match filters"}</span>
+              </span>
+            }
+          />
         </div>
-
-        {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-border/40">
-          {paged.map(o => {
-            const invoice = findInvoiceForOrder(allInvoices, o.id);
-            const progress = Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100);
-            const adv = totalAdvance(o);
-            const bal = balanceDue(o);
-            return (
-              <Link key={o.id} to={`/orders/${o.id}`} className="flex items-start gap-3 p-4 hover:bg-secondary/20 transition-colors">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0">
-                  <Package className="h-5 w-5 text-primary" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <p className="font-semibold text-sm">{o.orderNumber}</p>
-                    <StatusBadge status={o.status} />
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">{o.jewelleryType} · {o.metal} · {o.diamondType} · {o.quantity} pcs</p>
-                  <div className="mt-2 h-1 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
-                  </div>
-                  <div className="flex items-center justify-between mt-1.5 text-xs text-muted-foreground">
-                    <span>{progress}% · {fmtDate(o.createdAt)}</span>
-                    <div className="flex items-center gap-2">
-                      {adv > 0 && <span className="text-success font-medium">Adv {fmtMoney(adv)}</span>}
-                      {bal > 0
-                        ? <span className="text-destructive font-semibold">Bal {fmtMoney(bal)}</span>
-                        : adv > 0 ? <span className="text-success font-semibold">✓ Cleared</span> : null}
-                      {invoice && (
-                        <span className={`font-medium ${invoice.paid ? "text-success" : "text-destructive"}`}>
-                          {invoice.paid ? "Paid" : "Unpaid"}
-                        </span>
-                      )}
-                      <span className="font-semibold text-foreground">{fmtMoney(orderTotal(o))}</span>
-                    </div>
-                  </div>
-                </div>
-              </Link>
-            );
-          })}
-        </div>
-
-        {filtered.length === 0 && (
-          <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
-            <Package className="h-12 w-12 mb-3 opacity-20" />
-            <p className="font-medium">{allOrders.length === 0 ? "No orders yet" : "No orders match filters"}</p>
-          </div>
-        )}
-
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="px-5 border-t border-border/60">
-            <PaginationBar
-              page={page}
-              totalPages={totalPages}
-              onPageChange={setPage}
-              label={`Showing ${start + 1}–${end} of ${filtered.length} orders`}
-            />
-          </div>
-        )}
-
-        {/* Table footer with totals */}
-        {filtered.length > 0 && (
-          <div className="px-5 py-3 bg-secondary/30 border-t border-border/60 flex items-center justify-between text-sm flex-wrap gap-3">
-            <span className="text-muted-foreground">{filtered.length} order{filtered.length !== 1 ? "s" : ""}</span>
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-muted-foreground">Total <span className="font-semibold text-foreground">{fmtMoney(filtered.reduce((s, o) => s + orderTotal(o), 0))}</span></span>
-              {filtered.some(o => (o.advances||[]).length > 0) && (
-                <>
-                  <span className="text-muted-foreground">Advance <span className="font-semibold text-success">{fmtMoney(filtered.reduce((s, o) => s + totalAdvance(o), 0))}</span></span>
-                  <span className="text-muted-foreground">Balance <span className={`font-semibold ${filtered.reduce((s,o)=>s+balanceDue(o),0)>0?"text-destructive":"text-success"}`}>{fmtMoney(filtered.reduce((s, o) => s + balanceDue(o), 0))}</span></span>
-                </>
-              )}
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

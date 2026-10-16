@@ -26,13 +26,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard, Package, TrendingUp,
+  ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard,
   Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
@@ -660,6 +661,36 @@ function SupplierHistoryPageBody() {
     });
   };
 
+  // ── Purchase History table ──
+  const orderOf = (p: Purchase) => (p.orderId ? db.orders.find(o => o.id === p.orderId) : undefined);
+  const purchaseTitle = (p: Purchase) =>
+    p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold`
+    : p.material === "diamond" ? `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`
+    : purchaseText(db.settings, p);
+  const purchaseColumns: DataColumn<Purchase>[] = [
+    { key: "date", header: "Date", always: true, kind: "date", sortValue: p => +new Date(p.createdAt), csv: p => fmtDate(p.createdAt),
+      cell: p => <CellDate>{fmtDate(p.createdAt)}</CellDate> },
+    { key: "purchase", header: "Purchase", always: true, sortValue: p => purchaseTitle(p), csv: p => purchaseTitle(p),
+      cell: p => <CellMain title={purchaseTitle(p)} sub={p.currency === "USD" ? `$${p.totalUsd} @ ₹${p.exchangeRate}/$` : undefined} /> },
+    { key: "for", header: "For", sortValue: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}` : "Stock"),
+      csv: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}`.trim() : "Stock"),
+      cell: p => {
+        if (p.purpose !== "order") return <CellTag>Stock</CellTag>;
+        const o = orderOf(p);
+        return o
+          ? <Link to={`/orders/${o.id}`} className="hover:opacity-80"><CellTag tone="blue">For Order {o.orderNumber}</CellTag></Link>
+          : <CellTag tone="blue">For Order</CellTag>;
+      } },
+    { key: "invoice", header: "Invoice no.", sortValue: p => p.invoiceNumber, csv: p => p.invoiceNumber ?? "",
+      cell: p => (p.invoiceNumber ? <span className="whitespace-nowrap">{p.invoiceNumber}</span> : <span className="text-muted-foreground/50">—</span>) },
+    { key: "total", header: "Total", align: "right", kind: "number", sortValue: p => p.totalInr,
+      cell: p => <CellAmount>{fmtMoneyInr(p.totalInr)}</CellAmount> },
+    { key: "paid", header: "Paid", align: "right", kind: "number", sortValue: p => purchasePaid(p),
+      cell: p => (purchasePaid(p) > 0 ? <CellAmount tone="in">{fmtMoneyInr(purchasePaid(p))}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
+    { key: "pending", header: "Pending", align: "right", kind: "number", sortValue: p => purchasePending(p),
+      cell: p => (purchasePending(p) > 0 ? <CellAmount tone="out">{fmtMoneyInr(purchasePending(p))}</CellAmount> : <CellTag tone="green">Paid</CellTag>) },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
       <button onClick={() => navigate("/suppliers")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
@@ -985,63 +1016,33 @@ function SupplierHistoryPageBody() {
           <h2 className="font-display text-xl text-brand-dark">Purchase History</h2>
           <p className="text-xs text-muted-foreground mt-0.5">{purchases.length} purchase{purchases.length !== 1 ? "s" : ""}</p>
         </div>
-        <div className="divide-y divide-border/40">
-          {purchases.map(p => {
-            const paid = purchasePaid(p);
-            const pending = purchasePending(p);
-            return (
-              <div key={p.id} className="flex items-start gap-3 p-4">
-                <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-500/15 to-amber-400/15 grid place-items-center shrink-0">
-                  {p.material === "gold" ? <TrendingUp className="h-5 w-5 text-amber-600" /> : <Package className="h-5 w-5 text-amber-600" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <p className="text-sm font-semibold">
-                      {p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold` : p.material === "diamond" ? `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}` : purchaseText(db.settings, p)}
-                    </p>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">
-                      {p.purpose === "order"
-                        ? `For Order${p.orderId && db.orders.find(o => o.id === p.orderId) ? ` ${db.orders.find(o => o.id === p.orderId)!.orderNumber}` : ""}`
-                        : "Stock"}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {fmtDate(p.createdAt)}{p.invoiceNumber ? ` · Invoice ${p.invoiceNumber}` : ""}
-                    {p.currency === "USD" && ` · $${p.totalUsd} @ ₹${p.exchangeRate}/$`}
-                  </p>
-                </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold">{fmtMoneyInr(p.totalInr)}</p>
-                  <p className={`text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>
-                    {pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}
-                  </p>
-                  {paid > 0 && pending > 0 && <p className="text-[10px] text-muted-foreground">{fmtMoneyInr(paid)} paid so far</p>}
-                  {/* Correcting beats voiding and re-entering: a void unwinds the
-                      factory issue, the stock trail and the certified packet with
-                      it. This was the one list where a purchase could be removed
-                      but not put right. */}
-                  {user?.role === "admin" && (
-                    <button
-                      onClick={() => openEditPurchase(p)}
-                      className="mt-1 mr-2 text-[11px] text-primary inline-flex items-center gap-1 hover:underline"
-                    >
-                      <Pencil className="h-3 w-3" /> Edit
-                    </button>
-                  )}
-                  {user?.role === "admin" && paid === 0 && (
-                    <button
-                      onClick={() => voidPurchase(p)}
-                      disabled={voidingId === p.id}
-                      className="mt-1 text-[11px] text-destructive inline-flex items-center gap-1 hover:underline disabled:opacity-50"
-                    >
-                      <Trash2 className="h-3 w-3" /> {voidingId === p.id ? "Voiding…" : "Void"}
-                    </button>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-          {purchases.length === 0 && <div className="px-5 py-12 text-center text-muted-foreground">No purchases recorded yet.</div>}
+        <div className="p-3 sm:p-4">
+          <DataTable
+            id="supplier-purchases"
+            noun="purchase"
+            rows={purchases}
+            columns={purchaseColumns}
+            rowKey={p => p.id}
+            defaultSort={{ key: "date", dir: "desc" }}
+            searchText={p => [purchaseTitle(p), purchaseDesc(p), p.invoiceNumber, orderOf(p)?.orderNumber, p.purpose === "order" ? "order" : "stock", p.notes].filter(Boolean).join(" ")}
+            searchPlaceholder="Search purchases"
+            exportName={`Supplier-${supplier.name.replace(/\s+/g, "_")}-Purchases`}
+            totals={{
+              total: rows => fmtMoneyInr(rows.reduce((s, p) => s + p.totalInr, 0)),
+              paid: rows => <span className="text-success">{fmtMoneyInr(rows.reduce((s, p) => s + purchasePaid(p), 0))}</span>,
+              pending: rows => <span className="text-destructive">{fmtMoneyInr(rows.reduce((s, p) => s + purchasePending(p), 0))}</span>,
+            }}
+            // Correcting beats voiding and re-entering: a void unwinds the
+            // factory issue, the stock trail and the certified packet with it.
+            // This was the one list where a purchase could be removed but not
+            // put right. A void is only offered while nothing has been paid.
+            rowActions={p => [
+              { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), show: user?.role === "admin" },
+              { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true, disabled: voidingId === p.id,
+                onSelect: () => voidPurchase(p), show: user?.role === "admin" && purchasePaid(p) === 0 },
+            ]}
+            emptyText="No purchases recorded yet."
+          />
         </div>
       </div>
       <EditPurchaseDialog

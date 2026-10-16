@@ -1,8 +1,8 @@
 import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type Order } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { applyIncomeToClient } from "@/lib/clientPayments";
@@ -17,7 +17,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, FileText, FileSpreadsheet } from "lucide-react";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, FileText, FileSpreadsheet, HandCoins } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
@@ -34,6 +34,17 @@ const PAGE_SIZE = 10;
 function plainAmt(n: number, currency?: "INR" | "USD"): string {
   return currency === "USD" ? fmtMoney(n).replace("$", "") : fmtInrPlain(n).replace("Rs. ", "");
 }
+
+/** A line of the ledger table. `t: null` is the opening balance — pinned under
+ *  the oldest entry, never sorted or searched with the rest. */
+type LedgerRow = { id: string; t: LockerTransaction | null };
+
+const TXN_TYPE: Record<LockerTxnType, { label: string; tone: "green" | "red" | "blue" }> = {
+  income: { label: "Income", tone: "green" },
+  expense: { label: "Expense", tone: "red" },
+  transfer_in: { label: "Transfer in", tone: "blue" },
+  transfer_out: { label: "Transfer out", tone: "blue" },
+};
 
 export function LockerPage() {
   const { user } = useAuth();
@@ -284,9 +295,6 @@ export function LockerPage() {
   // from the full, unfiltered history, so a filtered view still shows each
   // entry's true balance-at-the-time, like a bank statement search does.
   const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (filterType === "all" || t.type === filterType));
-  // The last 15 days first, older entries as you scroll; the opening balance
-  // shows at the foot once the oldest entry is in view.
-  const { w, paged, page, totalPages } = useScrollPages(filteredTxns, t => t.createdAt, { filtered: filtersActive, resetKey: [selected?.id, filterFrom, filterTo, filterType] });
 
   const totalIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").reduce((s, t) => s + t.amountInr, 0);
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
@@ -305,6 +313,48 @@ export function LockerPage() {
       txnBalances.set(t.id, running);
     }
   }
+
+  // ── The ledger table ──
+  const isIn = (t: LockerTransaction) => t.type === "income" || t.type === "transfer_in";
+  const typeOf = (t: LockerTransaction) => TXN_TYPE[t.type] ?? { label: t.type, tone: "neutral" as const };
+  const ledgerRows: LedgerRow[] = filteredTxns.map(t => ({ id: t.id, t }));
+  const openingRow: LedgerRow = { id: "__opening", t: null };
+  const ledgerSum = (rows: LedgerRow[], credit: boolean) => rows.reduce((s, r) => s + (r.t && isIn(r.t) === credit ? r.t.amountInr : 0), 0);
+  const ledgerColumns: DataColumn<LedgerRow>[] = [
+    { key: "date", header: "Date", always: true, kind: "date", sortValue: r => r.t?.createdAt,
+      cell: r => (r.t ? <CellDate>{fmtDate(r.t.createdAt)}</CellDate> : null) },
+    { key: "particulars", header: "Particulars", always: true, sortValue: r => (r.t ? txnLabel(r.t) : ""),
+      cell: r => {
+        const t = r.t;
+        if (!t) return (
+          <div className="flex items-center gap-2.5">
+            <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-primary/10 text-primary"><History className="h-4 w-4" /></div>
+            <CellMain title="Opening balance" sub="Starting cash when this locker was created" />
+          </div>
+        );
+        return (
+          <div className="flex items-center gap-2.5">
+            <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${isIn(t) ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"}`}>
+              {t.type === "transfer_in" || t.type === "transfer_out"
+                ? <ArrowLeftRight className="h-4 w-4" />
+                : t.type === "income" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
+            </div>
+            {/* The note goes underneath only when the category already titles the line. */}
+            <CellMain title={`${txnLabel(t)}${t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}`}
+              sub={[t.voucherNo, t.category ? t.note : ""].filter(Boolean).join(" · ") || undefined} />
+          </div>
+        );
+      } },
+    { key: "type", header: "Type", sortValue: r => (r.t ? typeOf(r.t).label : ""),
+      cell: r => (r.t ? <CellTag tone={typeOf(r.t).tone}>{typeOf(r.t).label}</CellTag> : null) },
+    { key: "debit", header: "Debit", align: "right", kind: "number", sortValue: r => (r.t && !isIn(r.t) ? r.t.amountInr : null),
+      cell: r => (r.t && !isIn(r.t) ? <CellAmount tone="out">{fmtLockerAmount(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
+    { key: "credit", header: "Credit", align: "right", kind: "number", sortValue: r => (r.t && isIn(r.t) ? r.t.amountInr : null),
+      cell: r => (r.t && isIn(r.t) ? <CellAmount tone="in">{fmtLockerAmount(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
+    // Each entry's balance at the time, from the full history — a filter never changes it.
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => (r.t ? txnBalances.get(r.t.id) ?? 0 : null),
+      cell: r => <CellAmount>{fmtLockerAmount(r.t ? txnBalances.get(r.t.id) ?? 0 : selected?.openingBalance || 0, selected?.currency)}</CellAmount> },
+  ];
 
   const exportCsv = (from: Date | null, to: Date | null) => {
     if (!selected) return;
@@ -591,74 +641,31 @@ export function LockerPage() {
             </div>
           )}
 
-          {paged.length > 0 && (
-            <div className="flex items-center gap-3 px-1 pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <div className="h-8 w-8 shrink-0" />
-              <div className="flex-1 min-w-0">Particulars</div>
-              <div className="w-20 sm:w-24 text-right shrink-0">Debit</div>
-              <div className="w-20 sm:w-24 text-right shrink-0">Credit</div>
-              <div className="w-20 sm:w-24 text-right shrink-0">Balance</div>
-            </div>
-          )}
-          <div className="divide-y divide-border/40 -mx-5">
-            {paged.map(t => {
-              const isCredit = t.type === "income" || t.type === "transfer_in";
-              return (
-              <div key={t.id} className="flex items-center gap-3 px-5 py-3">
-                <div className={`h-8 w-8 rounded-lg grid place-items-center shrink-0 ${
-                  isCredit ? "bg-success/10 text-success" : "bg-destructive/10 text-destructive"
-                }`}>
-                  {t.type === "transfer_in" || t.type === "transfer_out"
-                    ? <ArrowLeftRight className="h-4 w-4" />
-                    : t.type === "income" ? <ArrowDownCircle className="h-4 w-4" /> : <ArrowUpCircle className="h-4 w-4" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">
-                    {t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type)}
-                    {t.exchangeRate ? ` (@ ₹${t.exchangeRate}/$)` : ""}
-                  </p>
-                  <p className="text-xs text-muted-foreground">{fmtDate(t.createdAt)}</p>
-                  {t.type === "income" && t.refType !== "clientPayment" && can("locker", "edit") && (
-                    <button onClick={() => { setFixTxnId(t.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); }}
-                      className="text-[11px] text-primary hover:underline mt-0.5">
-                      Apply to a client’s bill
-                    </button>
-                  )}
-                </div>
-                <div className="w-20 sm:w-24 text-right shrink-0">
-                  {!isCredit && <p className="text-sm font-semibold text-destructive">{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}</p>}
-                </div>
-                <div className="w-20 sm:w-24 text-right shrink-0">
-                  {isCredit && <p className="text-sm font-semibold text-success">{fmtLockerAmount(t.amountInr, t.currency ?? selected.currency)}</p>}
-                </div>
-                <div className="w-20 sm:w-24 text-right shrink-0">
-                  <p className="text-sm font-medium text-foreground">{fmtLockerAmount(txnBalances.get(t.id) ?? 0, selected.currency)}</p>
-                </div>
-              </div>
-              );
-            })}
-            {/* Opening balance — the starting point every running balance builds on,
-                shown at the very bottom (after the oldest entry) so the numbers make sense. */}
-            {page === totalPages && (
-              <div className="flex items-center gap-3 px-5 py-3 bg-secondary/40">
-                <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-primary/10 text-primary">
-                  <History className="h-4 w-4" />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium">Opening balance</p>
-                  <p className="text-xs text-muted-foreground">Starting cash when this locker was created</p>
-                </div>
-                <p className="text-sm font-semibold text-right shrink-0">{fmtLockerAmount(selected.openingBalance || 0, selected.currency)}</p>
-              </div>
-            )}
-            {filteredTxns.length === 0 && (
-              <div className="px-5 py-8 text-center text-sm text-muted-foreground">
-                {txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
-              </div>
-            )}
-          </div>
-
-          <LoadOlder w={w} />
+          {/* Opening balance — the starting point every running balance builds on —
+              pinned at the very bottom (after the oldest entry) so the numbers make sense.
+              A new locker or filter starts the table again from its newest entry. */}
+          <DataTable
+            resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterType}`}
+            id="locker-ledger"
+            noun="transaction"
+            rows={ledgerRows}
+            columns={ledgerColumns}
+            rowKey={r => r.id}
+            defaultSort={{ key: "date", dir: "desc" }}
+            pinnedRows={[openingRow]}
+            searchText={r => (r.t ? [txnLabel(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
+            searchPlaceholder="Search this ledger"
+            totals={{
+              debit: rows => <span className="text-destructive">{fmtLockerAmount(ledgerSum(rows, false), selected.currency)}</span>,
+              credit: rows => <span className="text-success">{fmtLockerAmount(ledgerSum(rows, true), selected.currency)}</span>,
+            }}
+            rowActions={can("locker", "edit") ? r => [
+              { label: "Apply to a client’s bill", icon: HandCoins, hint: "Money a client sent — settle their bill with it",
+                show: !!r.t && r.t.type === "income" && r.t.refType !== "clientPayment",
+                onSelect: () => { setFixTxnId(r.t!.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); } },
+            ] : undefined}
+            emptyText={txns.length === 0 ? "No transactions yet — opening balance only." : "No transactions match this filter."}
+          />
         </motion.div>
       )}
 

@@ -1,3 +1,4 @@
+import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
@@ -14,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Factory as FactoryIcon, Coins, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
@@ -25,7 +26,7 @@ import { reachOf } from "@/lib/permissions";
 import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
-import type { Order } from "@/lib/db";
+import type { Order, MaterialIssuance } from "@/lib/db";
 import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 12;
@@ -167,6 +168,101 @@ export function OrdersPage() {
   const oneClient = chosen.length > 0 && new Set(chosen.map(o => o.clientId)).size === 1;
   const exportRows = chosen.length ? chosen : orders;
   const allShown = orders.length > 0 && orders.every(o => sel.has(o.id));
+
+  // The list view's table. What a card showed, as columns: the less used
+  // ones start hidden and can be shown from Columns.
+  const issByOrder = useMemo(() => {
+    const m = new Map<string, MaterialIssuance[]>();
+    if (isStaff) for (const i of db.materialIssuances) if (i.orderId) m.set(i.orderId, [...(m.get(i.orderId) ?? []), i]);
+    return m;
+  }, [db.materialIssuances, isStaff, dbVersion]); // eslint-disable-line react-hooks/exhaustive-deps
+  const progressOf = (o: Order) => o.timeline.length ? Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100) : 0;
+  const factoriesOf = (o: Order) => [...new Set((issByOrder.get(o.id) ?? []).map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
+  const listColumns: DataColumn<Order>[] = [
+    { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
+      cell: o => {
+        const img = orderImage(o);
+        return (
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="h-11 w-11 rounded-lg overflow-hidden bg-white ring-1 ring-border/60 shrink-0 grid place-items-center">
+              {img ? <img src={img} alt="" loading="lazy" className="w-full h-full object-contain" />
+                : isDiamondOnlyOrder(o) ? <Gem className="h-4 w-4 text-sky-500/50" /> : <Package className="h-4 w-4 text-primary/30" />}
+            </div>
+            <div className="min-w-0">
+              <p className="font-semibold text-brand-dark leading-snug whitespace-nowrap">{o.orderNumber}</p>
+              <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[16rem]">
+                {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
+              </p>
+              {(o.melted || jobFinished(o) || !!o.returns?.length) && (
+                <div className="flex flex-wrap gap-1 mt-0.5">
+                  {o.melted ? <CellTag tone="red">MELTED</CellTag> : jobFinished(o) && <CellTag tone="red">JOB FINISH</CellTag>}
+                  {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      } },
+    ...(isStaff ? [{ key: "client", header: "Client", sortValue: (o: Order) => o.forReadyStock ? "Ready Stock" : db.clients.find(c => c.id === o.clientId)?.companyName ?? "",
+      cell: (o: Order) => o.forReadyStock ? <span className="text-primary font-medium whitespace-nowrap">Ready Stock (in-house)</span>
+        : <span className="whitespace-nowrap">{db.clients.find(c => c.id === o.clientId)?.companyName ?? "—"}</span> }] : []),
+    { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
+    { key: "progress", header: "Progress", kind: "number", sortValue: progressOf,
+      cell: o => {
+        const pct = progressOf(o), active = !["Delivered", "Rejected"].includes(o.status);
+        return (
+          <div className="min-w-[8rem]">
+            <div className="flex items-center gap-2">
+              <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${pct}%` }} /></div>
+              <span className="text-[11px] tabular-nums text-muted-foreground w-8 text-right">{pct}%</span>
+            </div>
+            {active && !o.courierName && <p className="text-[11px] text-primary truncate max-w-[12rem] mt-0.5">{lastTrackingStep(o)}</p>}
+          </div>
+        );
+      } },
+    { key: "due", header: "Due", kind: "date", sortFirst: "asc", sortValue: o => o.expectedDelivery, cell: o => <CellDate>{fmtDate(o.expectedDelivery)}</CellDate> },
+    { key: "weights", header: "Weights", sortValue: o => pieceWeights(o, issByOrder.get(o.id) ?? []).gross || null,
+      cell: o => {
+        const pw = pieceWeights(o, issByOrder.get(o.id) ?? []);
+        if (!pw.gross && !pw.net && !pw.diamondCt) return <span className="text-muted-foreground/50">—</span>;
+        return (
+          <span className="whitespace-nowrap text-xs tabular-nums">
+            {pw.gross ? `G ${pw.gross}g` : ""}{pw.net ? ` · N ${pw.net}g` : ""}{pw.diamondCt ? ` · ${pw.diamondCt}ct` : ""}
+            {pw.problem && isStaff && <span title={pw.problem} className="ml-1 text-destructive font-semibold">⚠</span>}
+          </span>
+        );
+      } },
+    ...(isStaff ? [
+      { key: "factory", header: "Factory", sortValue: (o: Order) => factoriesOf(o).join(", "),
+        cell: (o: Order) => factoriesOf(o).length ? <span className="whitespace-nowrap">{factoriesOf(o).join(", ")}</span> : <span className="text-muted-foreground/50">—</span> },
+      { key: "issued", header: "Issued", hidden: true, sortValue: (o: Order) => (issByOrder.get(o.id) ?? []).filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0) || null,
+        cell: (o: Order) => {
+          const iss = issByOrder.get(o.id) ?? [];
+          const g = iss.filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0), d = iss.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
+          return g || d ? <span className="whitespace-nowrap text-xs tabular-nums">{g ? `${g.toLocaleString()} g gold` : ""}{g && d ? " · " : ""}{d ? `${d.toLocaleString()} ct` : ""}</span> : <span className="text-muted-foreground/50">—</span>;
+        } },
+    ] : []),
+    { key: "courier", header: "Courier", sortValue: o => o.courierName ?? null,
+      cell: o => o.courierName ? (
+        <div className="flex items-center gap-2 whitespace-nowrap">
+          <span className="text-xs"><span className="font-medium capitalize">{o.courierName}</span>{o.trackingNumber && <span className="font-mono text-muted-foreground"> {o.trackingNumber}</span>}</span>
+          {o.trackingLink
+            ? <a href={o.trackingLink} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-md px-2 py-0.5"><ExternalLink className="h-3 w-3" />Track</a>
+            : <button type="button" onClick={() => setTrackingOrder(o)} className="inline-flex items-center gap-1 text-[11px] font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-md px-2 py-0.5"><Truck className="h-3 w-3" />Track</button>}
+        </div>
+      ) : <span className="text-muted-foreground/50">—</span> },
+    ...(isStaff ? [{ key: "invoice", header: "Invoice", sortValue: (o: Order) => findInvoiceForOrder(db.invoices, o.id)?.number ?? (needsInvoice(o) ? "" : null),
+      cell: (o: Order) => <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} /> }] : []),
+    ...(user!.role === "admin" ? [{ key: "profit", header: "Profit", cell: (o: Order) => <OrderProfitBadge db={db} order={o} className="text-xs whitespace-nowrap" /> }] : []),
+    { key: "placed", header: "Placed", kind: "date", hidden: true, sortValue: o => o.createdAt, cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: o => o.returns?.length ? keptValue(o) : o.amount,
+      cell: o => (
+        <span className="whitespace-nowrap">
+          {!!o.returns?.length && <span className="text-[11px] tabular-nums text-muted-foreground line-through mr-1.5">{fmtMoney(o.amount)}</span>}
+          <CellAmount>{fmtMoney(o.returns?.length ? keptValue(o) : o.amount)}</CellAmount>
+        </span>
+      ) },
+  ];
 
   const exportName = () => {
     if (chosen.length) return `Products-Selected-${chosen.length}`;
@@ -456,159 +552,28 @@ export function OrdersPage() {
         </div>
       )}
 
-      {/* ── List view (order cards) ── */}
+      {/* ── List view: the orders as a table — the same table as every list ── */}
       {view === "list" && total > 0 && (
-      <div className="grid gap-3">
-        {paged.map(o => {
-          const client = db.clients.find(c => c.id === o.clientId);
-          const done   = o.timeline.filter(t => t.status === "done").length;
-          const progress = Math.round(done / o.timeline.length * 100);
-          const isActive = !["Delivered","Rejected"].includes(o.status);
-          const rowImg = orderImage(o);
-          // Manufacturing summary (staff only) — which factory, how much gold/diamond issued.
-          const orderIssuances = user!.role !== "client" ? db.materialIssuances.filter(i => i.orderId === o.id) : [];
-          const factoryNames = [...new Set(orderIssuances.map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
-          const goldIssued = orderIssuances.filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0);
-          const diaIssued = orderIssuances.filter(i => i.material === "diamond").reduce((s, i) => s + i.quantityIssued, 0);
-          // Weights — prefer actual (post-production), then estimate, then the
-          // finished-piece net weight recorded on the factory issuance.
-          // One reading of the piece's weights, shared with the band, the
-          // exports and Ready Stock — so the card never disagrees with them.
-          const pw = pieceWeights(o, orderIssuances);
-          const grossWt = pw.gross || undefined;
-          const netWt = pw.net || undefined;
-          const diaWt = pw.diamondCt || undefined;
-
-          return (
-            <Link
-              key={o.id}
-              to={`/orders/${o.id}`}
-              className={`card-luxe card-hover overflow-hidden flex items-stretch min-h-[128px] min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}
-            >
-              {/* ── Left: full-height product / CAD photo ── */}
-              <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">
-                {rowImg
-                  ? <img src={rowImg} alt={o.orderNumber} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                  : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40">{isDiamondOnlyOrder(o) ? <Gem className="h-9 w-9" /> : <Package className="h-9 w-9" />}</div>}
-              </div>
-
-              {/* ── Right: order details ── */}
-              <div className="flex-1 min-w-0 p-4 flex flex-col gap-2">
-                {/* Header — order# + spec + status */}
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-sm leading-tight truncate">{o.orderNumber}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.diamondType} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}
-                      {o.designNumber ? ` · #${o.designNumber}` : ""}
-                    </p>
-                    {o.melted ? (
-                      <p className="text-xs font-bold text-destructive mt-0.5">MELTED — {o.melted.reason || "piece melted"}</p>
-                    ) : jobFinished(o) && (
-                      <p className="text-xs font-bold text-destructive mt-0.5">JOB FINISH — factory details recorded</p>
-                    )}
-                    {!!o.returns?.length && <p className="text-xs font-bold text-amber-800 mt-0.5">{returnTag(o)} — {[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")}</p>}
-                    {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-0.5 text-xs" />}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <StatusBadge status={o.status} />
-                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
-                  </div>
-                </div>
-
-                {/* Weights — gross / net / diamond */}
-                {(grossWt || netWt || diaWt) && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {grossWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Gross {grossWt}g</span> : null}
-                    {netWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Net {netWt}g</span> : null}
-                    {diaWt ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-foreground/70">Dia {diaWt}ct</span> : null}
-                    {pw.problem && user!.role !== "client" && (
-                      <span title={pw.problem} className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive">⚠ Check weights</span>
-                    )}
-                  </div>
-                )}
-
-                {user!.role !== "client" && (o.forReadyStock
-                  ? <p className="text-xs font-medium text-primary truncate">🏭 Ready Stock (in-house)</p>
-                  : client && <p className="text-xs font-medium text-muted-foreground truncate">{client.companyName}</p>)}
-
-                {/* Manufacturing chips — factory · gold used · diamond used (staff only) */}
-                {(factoryNames.length > 0 || goldIssued > 0 || diaIssued > 0) && (
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {factoryNames.map(n => (
-                      <span key={n} className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">
-                        <FactoryIcon className="h-2.5 w-2.5" />{n}
-                      </span>
-                    ))}
-                    {goldIssued > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">
-                        <Coins className="h-2.5 w-2.5" />{goldIssued.toLocaleString()} g gold
-                      </span>
-                    )}
-                    {diaIssued > 0 && (
-                      <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-sky-500/10 text-sky-700">
-                        <Gem className="h-2.5 w-2.5" />{diaIssued.toLocaleString()} ct dia
-                      </span>
-                    )}
-                  </div>
-                )}
-
-                {/* Progress + due + amount — pinned to the bottom */}
-                <div className="mt-auto pt-1">
-                  <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                    <div className="h-full bg-gradient-to-r from-primary to-brand-light transition-all duration-500" style={{ width: `${progress}%` }} />
-                  </div>
-                  <div className="mt-1.5 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="text-xs text-muted-foreground">{progress}% · Due {fmtDate(o.expectedDelivery)}</p>
-                      {isActive && !o.courierName && (
-                        <p className="text-[11px] font-medium text-primary flex items-center gap-1 mt-0.5">
-                          <Truck className="h-3 w-3 shrink-0" /><span className="truncate">{lastTrackingStep(o)}</span>
-                        </p>
-                      )}
-                    </div>
-                    <span className="flex flex-wrap items-center justify-end gap-x-1.5 gap-y-1 shrink-0">
-                      {isStaff && <InvoiceBadge invoice={findInvoiceForOrder(db.invoices, o.id)} dispatched={needsInvoice(o)} onOpen={openInvoice} />}
-                      {!!o.returns?.length && <span className="text-xs tabular-nums text-muted-foreground line-through">{fmtMoney(o.amount)}</span>}
-                      <span className="font-semibold text-sm">{fmtMoney(o.returns?.length ? keptValue(o) : o.amount)}</span>
-                    </span>
-                  </div>
-                </div>
-
-                {/* Courier + tracking */}
-                {o.courierName && (
-                  <div className="flex items-center justify-between gap-3 rounded-xl bg-secondary/60 border border-border/60 px-3 py-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Truck className="h-3.5 w-3.5 text-primary shrink-0" />
-                      <span className="text-xs font-semibold text-foreground capitalize">{o.courierName}</span>
-                      {o.trackingNumber && <span className="text-xs font-mono text-muted-foreground truncate">{o.trackingNumber}</span>}
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {o.trackingLink ? (
-                        <a href={o.trackingLink} target="_blank" rel="noopener noreferrer" onClick={e => e.stopPropagation()}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors">
-                          <ExternalLink className="h-3 w-3" /> Track
-                        </a>
-                      ) : (
-                        <button onClick={e => { e.preventDefault(); e.stopPropagation(); setTrackingOrder(o); }}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-primary bg-primary/10 hover:bg-primary/20 rounded-lg px-2.5 py-1 transition-colors">
-                          <Truck className="h-3 w-3" /> Track
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </Link>
-          );
-        })}
-      </div>
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="orders-list"
+            noun="order"
+            rows={orders}
+            columns={listColumns}
+            rowKey={o => o.id}
+            rowHref={o => `/orders/${o.id}`}
+            defaultSort={{ key: "placed", dir: "desc" }}
+            selected={isStaff ? sel : undefined}
+            onSelectedChange={isStaff ? setSel : undefined}
+            totals={{ amount: rows => fmtMoney(rows.reduce((s, o) => s + (o.returns?.length ? keptValue(o) : o.amount), 0)) }}
+          />
+        </div>
       )}
 
       {/* Board: every order in its stage column — all of them, not one page. */}
       {view === "board" && total > 0 && <OrderBoard orders={orders} />}
 
-      {view !== "board" && <PaginationBar
+      {view === "grid" && <PaginationBar
         page={page}
         totalPages={totalPages}
         onPageChange={setPage}

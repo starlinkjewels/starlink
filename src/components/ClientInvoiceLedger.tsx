@@ -5,8 +5,14 @@ import {
   invoiceOrderIds, type Order, type Invoice, type Client,
 } from "@/lib/db";
 import { Input } from "@/components/ui/input";
-import { Search, Download, ChevronRight, FileText, Package, Undo2 } from "lucide-react";
+import { Search, Download, ChevronDown, FileText, Package, Undo2 } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+
+// The shared DataTable's header and cell classes, so this table reads the same.
+const TH = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
+const TD = "px-3 py-2.5 tabular-nums whitespace-nowrap";
+/** A line under an opened invoice — a piece, a credit note, a payment. */
+const SUB = "px-3 py-1.5 tabular-nums whitespace-nowrap";
 
 export interface InvoiceBlock {
   id: string;
@@ -242,52 +248,56 @@ export function ClientInvoiceLedger({
         </div>
       </div>
 
-      <div className="overflow-x-auto">
+      {/* Drawn like the app's shared DataTable — the same box, header and cell
+          spacing — but kept as its own table: an invoice opens into its pieces,
+          credit notes and payments, which are rows of this table, not a panel. */}
+      <div className="px-5 pb-4">
+      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white">
         <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-secondary/60 text-muted-foreground text-xs">
-            <tr>
-              <th className="px-4 py-2 text-left font-semibold w-8" />
-              <th className="px-2 py-2 text-left font-semibold">Invoice</th>
-              <th className="px-2 py-2 text-left font-semibold">Date</th>
-              <th className="px-2 py-2 text-left font-semibold">Pieces</th>
-              <th className="px-2 py-2 text-right font-semibold">Billed</th>
-              <th className="px-2 py-2 text-right font-semibold">Gift card</th>
-              <th className="px-2 py-2 text-right font-semibold">Returned</th>
-              <th className="px-2 py-2 text-right font-semibold">Received</th>
-              <th className="px-4 py-2 text-right font-semibold">Balance</th>
+          <thead className="bg-secondary/40">
+            <tr className="border-b border-border/60">
+              <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>
+              <th className={`${TH} text-left`}>Invoice</th>
+              <th className={`${TH} text-left`}>Date</th>
+              <th className={`${TH} text-left`}>Pieces</th>
+              <th className={`${TH} text-right`}>Billed</th>
+              <th className={`${TH} text-right`}>Gift card</th>
+              <th className={`${TH} text-right`}>Returned</th>
+              <th className={`${TH} text-right`}>Received</th>
+              <th className={`${TH} text-right`}>Balance</th>
             </tr>
           </thead>
           <tbody>
             {openingDebit > 0 || openingCredit > 0 ? (
-              <tr className="border-t border-border/40 bg-amber-500/5">
+              <tr className="bg-amber-500/5">
                 <td />
-                <td className="px-2 py-2.5 font-medium" colSpan={3}>Balance brought forward</td>
-                <td className="px-2 py-2.5 text-right">{openingDebit ? fmtMoney(openingDebit) : ""}</td>
+                <td className="px-3 py-2.5 font-medium" colSpan={3}>Balance brought forward</td>
+                <td className={`${TD} text-right`}>{openingDebit ? fmtMoney(openingDebit) : ""}</td>
                 <td />
                 <td />
-                <td className="px-2 py-2.5 text-right text-success">{openingCredit ? fmtMoney(openingCredit) : ""}</td>
-                <td className="px-4 py-2.5 text-right font-semibold">{fmtMoney(openingDebit - openingCredit)}</td>
+                <td className={`${TD} text-right text-success`}>{openingCredit ? fmtMoney(openingCredit) : ""}</td>
+                <td className={`${TD} text-right font-semibold`}>{fmtMoney(openingDebit - openingCredit)}</td>
               </tr>
             ) : null}
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">Nothing to show.</td></tr>
+              <tr><td colSpan={9} className="px-3 py-12 text-center text-sm text-muted-foreground">Nothing to show.</td></tr>
             ) : filtered.map(b => (
               <>
                 <tr key={b.id} onClick={() => toggle(b.id)}
-                  className="border-t border-border/40 hover:bg-secondary/30 cursor-pointer">
-                  <td className="px-4 py-2.5 text-muted-foreground">
-                    <ChevronRight className={`h-4 w-4 transition-transform ${open.has(b.id) ? "rotate-90" : ""}`} />
+                  className={`transition-colors hover:bg-secondary/30 cursor-pointer ${open.has(b.id) ? "bg-secondary/30" : ""}`}>
+                  <td className="w-10 px-2 py-2.5 text-center text-muted-foreground">
+                    <ChevronDown className={`inline h-4 w-4 transition-transform ${open.has(b.id) ? "rotate-180" : ""}`} />
                   </td>
-                  <td className="px-2 py-2.5 font-medium whitespace-nowrap">
+                  <td className="px-3 py-2.5 font-medium text-brand-dark whitespace-nowrap">
                     <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span>
                   </td>
-                  <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(b.date)}</td>
-                  <td className="px-2 py-2.5 text-xs text-muted-foreground">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</td>
-                  <td className="px-2 py-2.5 text-right font-medium">{fmtMoney(b.gross)}</td>
-                  <td className="px-2 py-2.5 text-right text-primary">{b.gift ? `−${fmtMoney(b.gift)}` : ""}</td>
-                  <td className="px-2 py-2.5 text-right text-amber-800">{b.returned ? `−${fmtMoney(b.returned)}` : ""}</td>
-                  <td className="px-2 py-2.5 text-right text-success">{b.received ? fmtMoney(b.received) : ""}</td>
-                  <td className={`px-4 py-2.5 text-right font-semibold ${b.balance > 0.009 ? "text-destructive" : "text-success"}`}>
+                  <td className="px-3 py-2.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(b.date)}</td>
+                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</td>
+                  <td className={`${TD} text-right font-semibold text-brand-dark`}>{fmtMoney(b.gross)}</td>
+                  <td className={`${TD} text-right text-primary`}>{b.gift ? `−${fmtMoney(b.gift)}` : ""}</td>
+                  <td className={`${TD} text-right text-amber-800`}>{b.returned ? `−${fmtMoney(b.returned)}` : ""}</td>
+                  <td className={`${TD} text-right text-success`}>{b.received ? fmtMoney(b.received) : ""}</td>
+                  <td className={`${TD} text-right font-semibold ${b.balance > 0.009 ? "text-destructive" : "text-success"}`}>
                     {b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"}
                   </td>
                 </tr>
@@ -295,28 +305,28 @@ export function ClientInvoiceLedger({
                 {open.has(b.id) && b.items.map(i => (
                   <tr key={`${b.id}-${i.orderId}`} className="bg-secondary/20 text-xs">
                     <td />
-                    <td className="px-2 py-1.5 whitespace-nowrap">
+                    <td className="px-3 py-1.5 whitespace-nowrap">
                       <Link to={`/orders/${i.orderId}`} onClick={e => e.stopPropagation()}
                         className="font-mono text-primary hover:underline">{i.orderNo}</Link>
                     </td>
-                    <td colSpan={2} className="px-2 py-1.5 text-muted-foreground">
+                    <td colSpan={2} className="px-3 py-1.5 text-muted-foreground">
                       <span className="inline-flex items-center gap-1.5"><Package className="h-3 w-3" />{i.description || "—"}</span>
                       {i.qty > 1 && <span className="ml-1.5">× {i.qty}</span>}
                     </td>
-                    <td className="px-2 py-1.5 text-right">{fmtMoney(i.gross)}</td>
-                    <td className="px-2 py-1.5 text-right text-primary">{i.gift ? `−${fmtMoney(i.gift)}` : ""}</td>
-                    <td className="px-2 py-1.5 text-right text-amber-800">{i.returned ? `−${fmtMoney(i.returned)}` : ""}</td>
-                    <td className="px-2 py-1.5 text-right text-success">{i.received ? fmtMoney(i.received) : ""}</td>
-                    <td className="px-4 py-1.5 text-right">{i.balance > 0.009 ? fmtMoney(i.balance) : "—"}</td>
+                    <td className={`${SUB} text-right`}>{fmtMoney(i.gross)}</td>
+                    <td className={`${SUB} text-right text-primary`}>{i.gift ? `−${fmtMoney(i.gift)}` : ""}</td>
+                    <td className={`${SUB} text-right text-amber-800`}>{i.returned ? `−${fmtMoney(i.returned)}` : ""}</td>
+                    <td className={`${SUB} text-right text-success`}>{i.received ? fmtMoney(i.received) : ""}</td>
+                    <td className={`${SUB} text-right`}>{i.balance > 0.009 ? fmtMoney(i.balance) : "—"}</td>
                   </tr>
                 ))}
 
                 {open.has(b.id) && b.credits.map(c => (
                   <tr key={`${b.id}-${c.id}`} className="bg-amber-500/5 text-xs">
                     <td />
-                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(c.date)}</td>
-                    <td colSpan={4} className="px-2 py-1.5 text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 text-amber-700" />Credit note {c.note}</span></td>
-                    <td className="px-2 py-1.5 text-right text-amber-800 font-medium">−{fmtMoney(c.amount)}</td>
+                    <td className="px-3 py-1.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(c.date)}</td>
+                    <td colSpan={4} className="px-3 py-1.5 text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 text-amber-700" />Credit note {c.note}</span></td>
+                    <td className={`${SUB} text-right text-amber-800 font-medium`}>−{fmtMoney(c.amount)}</td>
                     <td colSpan={2} />
                   </tr>
                 ))}
@@ -324,10 +334,10 @@ export function ClientInvoiceLedger({
                 {open.has(b.id) && b.payments.map(p => (
                   <tr key={`${b.id}-${p.id}`} className="bg-success/5 text-xs">
                     <td />
-                    <td className="px-2 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(p.date)}</td>
-                    <td colSpan={5} className="px-2 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
-                    <td className="px-2 py-1.5 text-right text-success font-medium">{fmtMoney(p.amount)}</td>
-                    <td className="px-2 py-1.5 text-right">
+                    <td className="px-3 py-1.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(p.date)}</td>
+                    <td colSpan={5} className="px-3 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
+                    <td className={`${SUB} text-right text-success font-medium`}>{fmtMoney(p.amount)}</td>
+                    <td className="px-3 py-1.5 text-right">
                       {onReversePayment && (
                         <button onClick={e => { e.stopPropagation(); onReversePayment(p.date); }}
                           title="Reverse this payment"
@@ -341,20 +351,21 @@ export function ClientInvoiceLedger({
               </>
             ))}
           </tbody>
-          <tfoot>
-            <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
+          <tfoot className="border-t-2 border-border/70 bg-secondary/30">
+            <tr className="font-bold text-brand-dark">
               <td />
-              <td className="px-2 py-2.5" colSpan={3}>Totals</td>
-              <td className="px-2 py-2.5 text-right">{fmtMoney(T.gross + openingDebit)}</td>
-              <td className="px-2 py-2.5 text-right text-primary">{T.gift ? `−${fmtMoney(T.gift)}` : ""}</td>
-              <td className="px-2 py-2.5 text-right text-amber-800">{T.returned ? `−${fmtMoney(T.returned)}` : ""}</td>
-              <td className="px-2 py-2.5 text-right text-success">{fmtMoney(T.received + openingCredit)}</td>
-              <td className={`px-4 py-2.5 text-right ${closing > 0.009 ? "text-destructive" : "text-success"}`}>
+              <td className="px-3 py-2.5 text-xs uppercase tracking-wider" colSpan={3}>Totals</td>
+              <td className={`${TD} text-right`}>{fmtMoney(T.gross + openingDebit)}</td>
+              <td className={`${TD} text-right text-primary`}>{T.gift ? `−${fmtMoney(T.gift)}` : ""}</td>
+              <td className={`${TD} text-right text-amber-800`}>{T.returned ? `−${fmtMoney(T.returned)}` : ""}</td>
+              <td className={`${TD} text-right text-success`}>{fmtMoney(T.received + openingCredit)}</td>
+              <td className={`${TD} text-right ${closing > 0.009 ? "text-destructive" : "text-success"}`}>
                 {fmtMoney(Math.max(0, closing))}
               </td>
             </tr>
           </tfoot>
         </table>
+      </div>
       </div>
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
         Tap an invoice to see the pieces on it and the payments received against it. Only invoiced work appears

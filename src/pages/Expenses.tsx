@@ -1,6 +1,6 @@
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
@@ -12,12 +12,11 @@ import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, Minus, CalendarDays,
+  TrendingUp, TrendingDown, Minus, CalendarDays, Trash2,
 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
-const FALLBACK_CATEGORY_BG = "bg-gray-500/10 text-gray-600";
 
 const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
   Travel:        "bg-blue-50 text-blue-700 ring-1 ring-blue-200",
@@ -28,14 +27,6 @@ const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
   Other:         "bg-gray-50 text-gray-600 ring-1 ring-gray-200",
 };
 
-const CATEGORY_BG: Record<ExpenseCategory, string> = {
-  Travel:        "bg-blue-500/10 text-blue-600",
-  Food:          "bg-orange-500/10 text-orange-600",
-  Tools:         "bg-purple-500/10 text-purple-600",
-  Office:        "bg-slate-500/10 text-slate-600",
-  Communication: "bg-teal-500/10 text-teal-600",
-  Other:         "bg-gray-500/10 text-gray-600",
-};
 
 const EMPTY_FORM = { title: "", amount: "", category: "Other" as ExpenseCategory, note: "", clientId: "", paidToEmployeeId: "" };
 
@@ -629,104 +620,40 @@ interface ExpenseListProps {
 }
 
 function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
-  // The last 15 days first, older expenses as you scroll; the total counts them all.
-  const { w, paged } = useScrollPages(expenses, e => e.createdAt, { resetKey: expenses.length });
   // Format the total in the shared currency; fall back to ₹ when mixed/legacy.
   const listCurrency: "INR" | "USD" = expenses.length && expenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
+  const userName = (id?: string) => (id ? users.find(u => u.id === id)?.name : undefined) ?? "";
+  const clientName = (id?: string) => (id ? clients.find(c => c.id === id)?.companyName : undefined) ?? "";
+  const columns: DataColumn<Expense>[] = [
+    { key: "title", header: "Expense", always: true, sortValue: e => e.title, csv: e => e.title,
+      cell: e => <CellMain title={e.title} sub={e.note} /> },
+    { key: "category", header: "Category", sortValue: e => e.category,
+      cell: e => <span className={`inline-flex items-center whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_STYLE[e.category] ?? FALLBACK_CATEGORY_STYLE}`}>{e.category}</span> },
+    { key: "date", header: "Date", kind: "date", sortValue: e => e.createdAt, csv: e => fmtDate(e.createdAt), cell: e => <CellDate>{fmtDate(e.createdAt)}</CellDate> },
+    { key: "paidTo", header: "Paid to", sortValue: e => userName(e.paidToEmployeeId), cell: e => e.paidToEmployeeId ? <CellTag tone="green">{userName(e.paidToEmployeeId) || "—"}</CellTag> : <span className="text-muted-foreground/50">—</span> },
+    { key: "client", header: "Client", sortValue: e => clientName(e.clientId), cell: e => e.clientId ? <CellTag tone="violet">{clientName(e.clientId) || "—"}</CellTag> : <span className="text-muted-foreground/50">—</span> },
+    ...(showEmployee ? [{ key: "by", header: "Added by", sortValue: (e: Expense) => userName(e.employeeId), cell: (e: Expense) => <span className="whitespace-nowrap">{userName(e.employeeId) || "—"}</span> }] : []),
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: e => e.amount, csv: e => e.amount,
+      cell: e => <CellAmount tone="out">{fmtExpenseAmount(e.amount, e.currency)}</CellAmount> },
+  ];
   return (
-    <div className="card-luxe overflow-hidden">
-      {/* Summary bar */}
-      <div className="px-4 py-3 border-b border-border/60 bg-secondary/30 flex items-center justify-between">
-        <span className="text-sm text-muted-foreground">
-          {expenses.length} {expenses.length === 1 ? "expense" : "expenses"}
-        </span>
-        <div className="flex items-center gap-1.5">
-          <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-          <span className="font-bold text-destructive text-sm">{fmtExpenseAmount(total, listCurrency)}</span>
-        </div>
-      </div>
-
-      {/* Empty state */}
-      {expenses.length === 0 && (
-        <div className="py-14 text-center">
-          <div className="h-14 w-14 rounded-2xl bg-secondary mx-auto grid place-items-center mb-3">
-            <Receipt className="h-7 w-7 text-muted-foreground/40" />
-          </div>
-          <p className="text-sm font-medium text-muted-foreground">No expenses found</p>
-          <p className="text-xs text-muted-foreground/60 mt-1">Add your first expense using the button above.</p>
-        </div>
-      )}
-
-      {/* List */}
-      <div className="divide-y divide-border/40">
-        {paged.map((exp, i) => {
-          const addedBy = users.find(u => u.id === exp.employeeId);
-          const relatedClient = exp.clientId ? clients.find(c => c.id === exp.clientId) : null;
-          const paidTo = exp.paidToEmployeeId ? users.find(u => u.id === exp.paidToEmployeeId) : null;
-          const canDelete = mayDelete && exp.employeeId === currentUserId;
-          return (
-            <motion.div
-              key={exp.id}
-              initial={{ opacity: 0, x: -6 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: Math.min(i * 0.03, 0.3) }}
-              className="flex items-start gap-3 px-4 py-3.5 hover:bg-secondary/20 transition-colors group"
-            >
-              {/* Icon */}
-              <div className={`h-9 w-9 rounded-xl grid place-items-center shrink-0 mt-0.5 ${CATEGORY_BG[exp.category] ?? FALLBACK_CATEGORY_BG}`}>
-                <Receipt className="h-4 w-4" />
-              </div>
-
-              {/* Content */}
-              <div className="flex-1 min-w-0">
-                <div className="flex items-start justify-between gap-2">
-                  <p className="text-sm font-semibold text-foreground truncate">{exp.title}</p>
-                  <span className="font-bold text-sm text-destructive shrink-0 tabular-nums">
-                    {fmtExpenseAmount(exp.amount, exp.currency)}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 mt-1 flex-wrap">
-                  <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${CATEGORY_STYLE[exp.category] ?? FALLBACK_CATEGORY_STYLE}`}>
-                    {exp.category}
-                  </span>
-                  {showEmployee && addedBy && (
-                    <span className="text-[11px] text-muted-foreground font-medium">{addedBy.name}</span>
-                  )}
-                  {relatedClient && (
-                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-violet-50 text-violet-700 ring-1 ring-violet-200">
-                      {relatedClient.companyName}
-                    </span>
-                  )}
-                  {paidTo && (
-                    <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200">
-                      Paid to {paidTo.name}
-                    </span>
-                  )}
-                  <span className="text-[11px] text-muted-foreground">{fmtDate(exp.createdAt)}</span>
-                </div>
-
-                {exp.note && (
-                  <p className="text-xs text-muted-foreground mt-1 truncate">{exp.note}</p>
-                )}
-              </div>
-
-              {/* Delete (own entries only) */}
-              {canDelete && (
-                <button
-                  onClick={() => onDelete(exp.id)}
-                  title="Delete"
-                  className="opacity-0 group-hover:opacity-100 focus:opacity-100 h-7 w-7 rounded-lg bg-destructive/10 grid place-items-center text-destructive hover:bg-destructive/20 transition-all shrink-0 mt-0.5"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </motion.div>
-          );
-        })}
-      </div>
-
-      <LoadOlder w={w} noun="expenses" />
+    <div className="card-luxe p-3 sm:p-4">
+      <DataTable
+        id="expenses"
+        noun="expense"
+        rows={expenses}
+        columns={columns}
+        rowKey={e => e.id}
+        defaultSort={{ key: "date", dir: "desc" }}
+        searchText={e => [e.title, e.category, e.note, userName(e.paidToEmployeeId), clientName(e.clientId), userName(e.employeeId)].filter(Boolean).join(" ")}
+        searchPlaceholder="Search expenses"
+        exportName="Expenses"
+        totals={{ amount: rows => <span className="text-destructive">{fmtExpenseAmount(rows === expenses ? total : rows.reduce((s, e) => s + e.amount, 0), listCurrency)}</span> }}
+        rowActions={e => [
+          { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), show: mayDelete && e.employeeId === currentUserId },
+        ]}
+        emptyText={<span className="inline-flex flex-col items-center gap-1"><Receipt className="h-7 w-7 text-muted-foreground/40" /><span className="font-medium">No expenses found</span><span className="text-xs text-muted-foreground/70">Add your first expense using the button above.</span></span>}
+      />
     </div>
   );
 }

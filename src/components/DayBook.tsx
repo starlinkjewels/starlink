@@ -1,14 +1,13 @@
 import { useState } from "react";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate, type LockerTransaction } from "@/lib/db";
 import { fmtLockerAmount, lockerBalance } from "@/lib/manufacturing";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 
-const PAGE = 25;
+/** One line of the book: the entry, and the account's balance after it. */
+type Line = { t: LockerTransaction; balance: number };
 
 /** Money in or money out, whichever kind of entry wrote it. */
 function isIn(t: LockerTransaction) {
@@ -54,7 +53,7 @@ export function DayBook() {
   // a filtered page still shows the true balance on each of its lines, not a
   // total that starts from nothing.
   let running = locker?.openingBalance || 0;
-  const withBalance = ledger.map(t => {
+  const withBalance: Line[] = ledger.map(t => {
     running += isIn(t) ? t.amountInr : -t.amountInr;
     return { t, balance: Math.round(running * 100) / 100 };
   });
@@ -77,9 +76,7 @@ export function DayBook() {
   const rows = [...matching].reverse();
 
   const filtered = !!(ql || from || to || dir);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setDir(""); setPage(1); };
-  // The last 15 days first, older entries as you scroll; downloads keep every entry.
-  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.t.createdAt, { filtered, resetKey: [lockerId, ql, from, to, dir] });
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setDir(""); };
 
   const totalIn = rows.filter(r => isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
   const totalOut = rows.filter(r => !isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
@@ -123,6 +120,21 @@ export function DayBook() {
     filename: `Day-Book-${locker?.name?.replace(/\s+/g, "-") ?? "account"}`,
   });
 
+  const columns: DataColumn<Line>[] = [
+    { key: "particulars", header: "Particulars", always: true, sortValue: ({ t }) => particulars(t),
+      cell: ({ t }) => <div title={particulars(t)} className="max-w-[340px]"><CellMain title={t.category || t.type} sub={t.note} /></div> },
+    { key: "date", header: "Date", kind: "date", sortValue: ({ t }) => +new Date(t.createdAt), csv: ({ t }) => fmtDate(t.createdAt),
+      cell: ({ t }) => <CellDate>{fmtDate(t.createdAt)}</CellDate> },
+    { key: "voucher", header: "Voucher", sortValue: ({ t }) => t.voucherNo ?? "",
+      cell: ({ t }) => <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">{t.voucherNo ?? "—"}</span> },
+    { key: "in", header: "In", align: "right", kind: "number", sortValue: ({ t }) => (isIn(t) ? t.amountInr : null),
+      cell: ({ t }) => (isIn(t) ? <CellAmount tone="in">{money(t.amountInr)}</CellAmount> : null) },
+    { key: "out", header: "Out", align: "right", kind: "number", sortValue: ({ t }) => (isIn(t) ? null : t.amountInr),
+      cell: ({ t }) => (isIn(t) ? null : <CellAmount tone="out">{money(t.amountInr)}</CellAmount>) },
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => r.balance,
+      cell: r => <span className="font-medium tabular-nums whitespace-nowrap">{money(r.balance)}</span> },
+  ];
+
   if (!lockers.length) {
     return <div className="card-luxe p-8 text-center text-muted-foreground">No accounts yet — add one on the Locker page.</div>;
   }
@@ -143,7 +155,7 @@ export function DayBook() {
           const bal = lockerBalance(l, db.lockerTransactions ?? []);
           const on = l.id === lockerId;
           return (
-            <button key={l.id} onClick={() => { setLockerId(l.id); setPage(1); }}
+            <button key={l.id} onClick={() => setLockerId(l.id)}
               className={`px-3 py-2 rounded-xl border text-left transition-colors ${on ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/60"}`}>
               <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">{l.name}</span>
               <span className={`block text-sm font-semibold ${on ? "text-primary" : "text-brand-dark"}`}>
@@ -155,12 +167,12 @@ export function DayBook() {
       </div>
 
       <LedgerFilters
-        q={q} onQ={v => { setQ(v); setPage(1); }}
+        q={q} onQ={setQ}
         placeholder="Search particulars or voucher…"
         from={from} to={to}
-        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        onFrom={setFrom} onTo={setTo}
         selects={[
-          { label: "Directions", value: dir, onChange: v => { setDir(v); setPage(1); },
+          { label: "Directions", value: dir, onChange: setDir,
             options: [{ value: "in", label: "Money in" }, { value: "out", label: "Money out" }] },
         ]}
         active={filtered} onReset={reset}
@@ -175,37 +187,20 @@ export function DayBook() {
         {(from || to) && <span>· {rangeLabel(from, to)}</span>}
       </div>
 
-      <div className="overflow-x-auto -mx-5">
-        <table className="w-full text-sm min-w-[680px]">
-          <thead className="bg-secondary/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-5 py-2.5">Date</th>
-              <th className="text-left px-3 py-2.5">Voucher</th>
-              <th className="text-left px-3 py-2.5">Particulars</th>
-              <th className="text-right px-3 py-2.5 text-success">In</th>
-              <th className="text-right px-3 py-2.5 text-destructive">Out</th>
-              <th className="text-right px-5 py-2.5">Balance</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.length === 0 ? (
-              <tr><td colSpan={6} className="px-5 py-10 text-center text-muted-foreground">
-                {filtered ? "Nothing matches these filters." : "Nothing on this account yet."}
-              </td></tr>
-            ) : paged.map(({ t, balance }) => (
-              <tr key={t.id} className="border-t border-border/40 hover:bg-secondary/30">
-                <td className="px-5 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(t.createdAt)}</td>
-                <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{t.voucherNo ?? "—"}</td>
-                <td className="px-3 py-2.5 max-w-[340px] truncate" title={particulars(t)}>{particulars(t)}</td>
-                <td className="px-3 py-2.5 text-right font-semibold text-success whitespace-nowrap">{isIn(t) ? money(t.amountInr) : ""}</td>
-                <td className="px-3 py-2.5 text-right font-semibold text-destructive whitespace-nowrap">{isIn(t) ? "" : money(t.amountInr)}</td>
-                <td className="px-5 py-2.5 text-right font-medium whitespace-nowrap">{money(balance)}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <LoadOlder w={w} />
+      {/* The filters, search and downloads live in the bar above, so the table
+          brings no search or Excel of its own. A new account or filter
+          (resetKey) starts it again from the first page. Newest
+          first by default; sorted oldest first, the balance reads downwards. */}
+      <DataTable
+        resetKey={JSON.stringify([lockerId, ql, from, to, dir])}
+        id="day-book"
+        noun="movement"
+        rows={rows}
+        columns={columns}
+        rowKey={r => r.t.id}
+        defaultSort={{ key: "date", dir: "desc" }}
+        emptyText={filtered ? "Nothing matches these filters." : "Nothing on this account yet."}
+      />
     </div>
   );
 }
