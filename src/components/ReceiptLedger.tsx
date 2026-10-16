@@ -8,6 +8,7 @@ import { ccy, fmtCcy, fmtCcyPdf, fmtRate, rateText, roundCcy } from "@/lib/curre
 import { RateInput } from "@/components/CurrencyFields";
 import { editReceipt, deleteReceipt, deleteImpact, listReceipts, receiptApplied } from "@/lib/receipts";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { filled, linkList, recorded, refLink, refNo, when, type Detail } from "@/components/rowDetails";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -193,6 +194,27 @@ export function ReceiptLedger() {
 
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
   const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
+  // An opened receipt: where its money landed — the bills it settled, read live
+  // from the orders, and what is still held as credit — the bill it was sent
+  // for, its deposit's voucher, and who recorded (and last corrected) it.
+  const receiptDetails = (r: ClientReceipt): Detail[] => {
+    const landed = db.orders.flatMap(o => (o.advances ?? []).filter(a => a.receiptId === r.id).map(a => ({ o, a })));
+    const asCredit = Math.round((r.amountUsd - receiptApplied(db, r.id)) * 100) / 100;
+    const inv = r.invoiceId ? (db.invoices ?? []).find(i => i.id === r.invoiceId) : undefined;
+    const deposit = (db.lockerTransactions ?? []).find(t => t.receiptId === r.id);
+    return filled([
+      can("clients") && { label: "Client page", value: refLink(`/clients/${r.clientId}`, clientName(r.clientId) || "Client") },
+      landed.length > 0 && { label: "Applied to", value: linkList(landed.map(({ o, a }) => ({
+        key: a.id, node: <>{refLink(`/orders/${o.id}`, o.orderNumber, can("orders"))} <span className="text-muted-foreground">{fmtMoney(a.amount)}</span></>,
+      }))) },
+      asCredit > 0.009 && { label: "Held as credit", value: fmtMoney(asCredit) },
+      !!inv && { label: "Sent for invoice", value: refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, can("invoices")) },
+      { label: "Voucher", value: refNo(deposit?.voucherNo) },
+      { label: "Recorded", value: recorded(db, r.createdAt, r.recordedBy) },
+      !!r.updatedAt && { label: "Last corrected", value: when(r.updatedAt) },
+    ]);
+  };
+
   const columns: DataColumn<ClientReceipt>[] = [
     { key: "receipt", header: "Receipt", always: true, sortValue: r => r.receiptNo,
       cell: r => <span className="font-mono font-medium whitespace-nowrap">{r.receiptNo}</span> },
@@ -259,6 +281,7 @@ export function ReceiptLedger() {
         rowKey={r => r.id}
         defaultSort={{ key: "date", dir: "desc" }}
         emptyText={filtered ? "Nothing matches these filters." : "No payments recorded yet."}
+        details={receiptDetails}
         rowActions={r => [
           { label: "Edit", icon: Pencil, onSelect: () => open(r.id), show: can("payments", "edit") },
           { label: "Delete", icon: Trash2, danger: true, onSelect: () => remove(r.id), show: can("payments", "delete") },

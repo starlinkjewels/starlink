@@ -64,7 +64,7 @@ function Tick({ state, onClick, label }: { state: "on" | "off" | "some"; onClick
 export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, selected, onSelectedChange,
-  rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow,
+  rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
@@ -103,6 +103,11 @@ export function DataTable<T>({
   resetKey?: string | number;
   /** Which rows onRowClick / rowHref apply to; the rest don't look clickable. */
   canClickRow?: (row: T) => boolean;
+  /** Every row opens to show all of itself under it — each column in full,
+   *  hidden ones too, nothing cut off — plus these extra fields, for what the
+   *  columns don't show (who recorded it, the full note, the time…). On by
+   *  default; `false` turns it off. A table with its own `expand` shows that. */
+  details?: false | ((row: T) => { label: string; value: ReactNode }[]);
   /** What can be done to a row: a ⋯ at its end. */
   rowActions?: (row: T) => MoreAction[];
   /** Tick boxes: the keys ticked, and what to do when they change. */
@@ -210,7 +215,31 @@ export function DataTable<T>({
     onSelectedChange!(next);
   };
   const navigate = useNavigate();
-  const canOpen = (r: T) => !!expand && (expand.can ? expand.can(r) : true);
+  const auto = !expand && details !== false;
+  const opener = !!expand || auto;
+  const canOpen = (r: T) => expand ? (expand.can ? expand.can(r) : true) : auto;
+  // A blank value is left out of the details rather than shown as an empty heading.
+  const blank = (c: DataColumn<T>, r: T) => {
+    if (!c.sortValue && !c.csv) return false;
+    const v = c.csv ? c.csv(r) : c.sortValue!(r);
+    return v === null || v === undefined || v === "";
+  };
+  const autoDetails = (r: T) => {
+    const fields = [
+      ...columns.filter(c => c.header && !blank(c, r)).map(c => ({ label: c.header, value: c.cell(r) })),
+      ...(typeof details === "function" ? details(r) : []),
+    ];
+    return (
+      <div className="dt-details grid gap-x-8 gap-y-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
+        {fields.map((f, i) => (
+          <div key={`${f.label}-${i}`} className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
+            <div className="text-sm text-brand-dark mt-0.5 break-words">{f.value}</div>
+          </div>
+        ))}
+      </div>
+    );
+  };
   const pageable = !!onRowClick || !!rowHref;
   const rowClick = (r: T) => (e: MouseEvent) => {
     if ((e.target as HTMLElement).closest(OWN_CLICK)) return;
@@ -226,7 +255,7 @@ export function DataTable<T>({
   const firstKey = shown[0]?.key;
   const stick = "max-md:sticky max-md:z-[1] max-md:bg-white";
   const stickLeft = ticking ? "max-md:left-10" : "max-md:left-0";
-  const cols = shown.length + (ticking ? 1 : 0) + (rowActions ? 1 : 0) + (expand ? 1 : 0);
+  const cols = shown.length + (ticking ? 1 : 0) + (rowActions ? 1 : 0) + (opener ? 1 : 0);
   const countText = `${filtered.length} ${filtered.length === 1 ? noun : plural ?? (noun.endsWith("s") ? noun : `${noun}s`)}`;
 
   return (
@@ -301,7 +330,7 @@ export function DataTable<T>({
                   </th>
                 );
               })}
-              {expand && <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>}
+              {opener && <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>}
               {rowActions && <th className="w-12 px-2 py-3"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
@@ -320,7 +349,7 @@ export function DataTable<T>({
                   {shown.map(c => (
                     <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${sort?.key === c.key ? "bg-primary/[0.03]" : ""} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
                   ))}
-                  {expand && (
+                  {opener && (
                     <td className={`w-10 px-2 ${PAD[dense]} text-center`}>
                       {opens && (
                         <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Hide details" : "Show details"}
@@ -338,7 +367,7 @@ export function DataTable<T>({
                 </tr>
                 {isOpen && (
                   <tr className="bg-secondary/20">
-                    <td colSpan={cols} className="px-3 sm:px-5 py-3">{expand!.render(r)}</td>
+                    <td colSpan={cols} className="px-3 sm:px-5 py-4">{expand ? expand.render(r) : autoDetails(r)}</td>
                   </tr>
                 )}
                 </Fragment>
@@ -359,7 +388,7 @@ export function DataTable<T>({
                       : i === 0 ? <span className="text-xs uppercase tracking-wider">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</span> : null}
                   </td>
                 ))}
-                {expand && <td />}
+                {opener && <td />}
                 {rowActions && <td />}
               </tr>
             </tfoot>
@@ -393,8 +422,8 @@ export function DataTable<T>({
 export function CellMain({ title, sub, className = "" }: { title: ReactNode; sub?: ReactNode; className?: string }) {
   return (
     <div className={`min-w-0 ${className}`}>
-      <p className="font-medium text-brand-dark leading-snug truncate max-w-[22rem]">{title}</p>
-      {sub && <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[22rem] mt-0.5">{sub}</p>}
+      <p className="font-medium text-brand-dark leading-snug truncate max-w-[22rem]" title={typeof title === "string" ? title : undefined}>{title}</p>
+      {sub && <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[22rem] mt-0.5" title={typeof sub === "string" ? sub : undefined}>{sub}</p>}
     </div>
   );
 }

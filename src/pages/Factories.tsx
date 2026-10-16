@@ -2,7 +2,8 @@ import { factoryFigures } from "@/lib/partyTotals";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { updateDb, uid, fmtDate, type Factory } from "@/lib/db";
+import { updateDb, uid, fmtDate, hasOpeningBalance, type Factory } from "@/lib/db";
+import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { factoryAccount, factoryPoolBuckets, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
@@ -100,6 +101,23 @@ export function FactoriesPage() {
       } },
   ];
 
+  // What an opened row adds: the phone and address, the pool stock the grid
+  // card shows, the diamond flow and the opening balances. From the same
+  // figures as the row — this page never downloads the factory books.
+  const factoryDetails = (fac: Factory): Detail[] => {
+    const a = accountOf(fac);
+    return filled([
+      // The Factory column shows the contact person or the phone, not both.
+      !!fac.contactPerson && !!fac.phone && { label: "Phone", value: <a href={`tel:${fac.phone}`} className="text-primary hover:underline">{fac.phone}</a> },
+      { label: "Address", value: noteText(fac.address) },
+      { label: "Added", value: fmtDate(fac.createdAt) },
+      (a.goldPool > 0 || a.diaPool > 0) && { label: "Pool stock", value: `${grams(a.goldPool)} gold · ${carats(a.diaPool)} diamond` },
+      a.diamondIssued > 0 && { label: "Diamond issued", value: `${carats(a.diamondIssued)} · ${carats(a.diamondUsed)} accounted for` },
+      hasOpeningBalance(fac) && { label: "Opening balance", value: `${fmtMoneyInr(fac.openingBalance || 0)} ${fac.openingDir === "debit" ? "debit (they owed us)" : "credit (charges we owed)"}${fac.openingDate ? ` · as of ${fmtDate(fac.openingDate)}` : ""}` },
+      !!fac.openingFineGold && { label: "Opening fine gold", value: `${grams(fac.openingFineGold)}${fac.openingFineGoldDate ? ` · as of ${fmtDate(fac.openingFineGoldDate)}` : ""}` },
+    ]);
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -154,6 +172,7 @@ export function FactoriesPage() {
             rowKey={fac => fac.id}
             defaultSort={{ key: "balance", dir: "desc" }}
             rowHref={fac => `/factories/${fac.id}`}
+            details={factoryDetails}
             exportName="Factories"
             totals={{
               gold: rows => <span className="text-amber-700">{grams(rows.reduce((t, fac) => t + accountOf(fac).fineGold, 0))}</span>,

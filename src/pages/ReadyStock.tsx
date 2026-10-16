@@ -2,7 +2,8 @@ import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/com
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { updateDb, fmtDate, fmtMoney, stockCostOf, type ReadyStockItem } from "@/lib/db";
+import { updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
+import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -23,8 +24,8 @@ import { companyOf, companyIdOfClient } from "@/lib/companies";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
-import { officeLabel, officeOf, officeRank, officeTabs, readyStockOffices } from "@/lib/offices";
-import { stepQty, whoOf } from "@/lib/readyStockHistory";
+import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
+import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
 
 const PAGE_SIZE = 24;
 /** The office tab for pieces that were never given one. */
@@ -220,6 +221,37 @@ export function ReadyStockPage() {
     ] : []),
     { key: "added", header: "Added", kind: "date", hidden: true, sortValue: i => i.createdAt, cell: i => <CellDate>{fmtDate(i.createdAt)}</CellDate> },
   ];
+
+  // What an opened row adds — the piece page's facts. A client sees the shop
+  // view only (where else it can be had); staff see who added it, where it came
+  // from, what it was sold on and its last change — never a cost, as on the page.
+  const mine = (o: Order) => !!user && (isAdmin || worksOnOrder(db, user, o));
+  const orderRef = (o: Order) => refLink(`/orders/${o.id}`, o.orderNumber, mine(o));
+  const pieceDetails = (item: ReadyStockItem): Detail[] => {
+    const lots = otherLots(db.readyStock, item).filter(l => canManage || l.quantity > 0);
+    const lotLinks = linkList(lots.map(l => ({ key: l.id, node: refLink(`/ready-stock/${l.id}`, `${officeLabel(officeOf(l))} · ${l.quantity > 0 ? `${l.quantity} in stock` : "sold out"}`) })));
+    if (!canManage) return filled([{ label: "Also at", value: lotLinks }]);
+    const fr = item.fromReturn;
+    const retOrder = fr ? db.orders.find(o => o.id === fr.orderId) : undefined;
+    const ret = fr ? retOrder?.returns?.find(r => r.id === fr.returnId) : undefined;
+    const built = fr ? undefined : db.orders.find(o => o.readyStockCreatedId === item.id);
+    const sales = db.orders.filter(o => o.materialSourcing === "readyStock" && o.readyStockItemId === item.id)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    // A cost line is the admin's alone, as on the piece's page.
+    const last = pieceTimeline(db, item).filter(e => isAdmin || e.kind !== "cost").pop();
+    const lastWho = last ? userName(db, last.by) || last.byName : "";
+    const addedBy = userName(db, item.createdBy);
+    return filled([
+      { label: "Added", value: `${when(item.createdAt)}${addedBy ? ` by ${addedBy}` : ""}` },
+      item.quantity > 1 && item.price > 0 && { label: "Stock value", value: `${fmtMoney(item.price * item.quantity)} (${item.quantity} × ${fmtMoney(item.price)})` },
+      !!retOrder && { label: "Came back from", value: <>{orderRef(retOrder)}{ret ? ` · credit note ${ret.creditNoteNo}` : ""}</> },
+      !!built && { label: "Built on", value: orderRef(built) },
+      sales.length > 0 && { label: sales.length > 1 ? `Sold on (${sales.length})` : "Sold on", value: linkList(sales.map(o => ({ key: o.id, node: orderRef(o) }))) },
+      { label: "Other lots", value: lotLinks },
+      !!last && { label: "Last change", value: `${last.text} — ${[lastWho, when(last.at)].filter(Boolean).join(" · ")}` },
+      { label: "Notes", value: noteText(item.notes) },
+    ]);
+  };
 
   /** Office by office, when all are shown: a heading where the office changes. */
   const groupHead = (item: ReadyStockItem, idx: number) => {
@@ -432,6 +464,7 @@ export function ReadyStockPage() {
             columns={listColumns}
             rowKey={i => i.id}
             rowHref={pieceHref}
+            details={pieceDetails}
             defaultSort={{ key: "office", dir: "asc" }}
             selected={canManage ? sel : undefined}
             onSelectedChange={canManage ? setSel : undefined}

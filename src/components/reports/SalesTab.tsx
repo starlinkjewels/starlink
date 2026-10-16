@@ -4,9 +4,11 @@ import { ResponsiveContainer, ComposedChart, Bar as RBar, Line, XAxis, YAxis, Ca
 import { CalendarRange, Gem, Layers, TrendingDown, Users } from "lucide-react";
 import { downloadCsv } from "@/lib/ledgerExport";
 import { monthly, salesBy, soldIn, type MonthRow } from "@/lib/analytics";
-import { profitReport, type ProfitGroup, type ProfitRow } from "@/lib/orderCost";
+import { profitReport, saleDate, type ProfitGroup, type ProfitRow } from "@/lib/orderCost";
 import { DataTable, CellMain, CellAmount, type DataColumn } from "@/components/DataTable";
-import { C, SERIES, Panel, ChartTip, Empty, Bar, ExportButton, usd, pct } from "./ui";
+import { C, SERIES, Panel, ChartTip, Empty, Bar, ExportButton, usd, inr, pct } from "./ui";
+import { filled, type Detail } from "@/components/rowDetails";
+import { fmtDate } from "@/lib/db";
 import type { ReportCtx } from "./context";
 
 export function SalesTab({ ctx }: { ctx: ReportCtx }) {
@@ -82,6 +84,27 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
     { key: "loss", header: "Loss", align: "right", kind: "number", sortFirst: "asc", sortValue: r => r.profitUsd, cell: r => <CellAmount tone="out">{usd(r.profitUsd)}</CellAmount> },
   ];
 
+  // Opened rows: what each table's columns leave out.
+  const monthDetails = (m: MonthRow): Detail[] => filled([
+    m.receivedCount > 0 && { label: "Value of orders in", value: usd(m.receivedUsd) },
+    m.soldCount > 0 && { label: "Average per piece shipped", value: usd(m.salesUsd / m.soldCount) },
+  ]);
+  const groupDetails = (showIncomplete: boolean) => (g: ProfitGroup): Detail[] => filled([
+    { label: "Cost", value: g.costUsd != null ? usd(g.costUsd) : undefined },
+    { label: "Cost in rupees", value: inr(g.costInr) },
+    showIncomplete && g.incomplete > 0 && { label: "Not fully costed", value: <span className="text-amber-600">{g.incomplete} order{g.incomplete !== 1 ? "s" : ""}</span> },
+  ]);
+  const lossDetails = (r: ProfitRow): Detail[] => filled([
+    { label: "Piece", value: [r.order.jewelleryType, r.order.metal, r.order.productKarats, `${r.order.quantity} pc${r.order.quantity !== 1 ? "s" : ""}`].filter(Boolean).join(" · ") },
+    { label: "Sold on", value: fmtDate(saleDate(r.order)) },
+    { label: "Margin", value: pct(r.marginPct) },
+    { label: "Cost in rupees", value: inr(r.costInr) },
+    !!r.fx && { label: "Rate used", value: `₹${r.fx.rate} to the $${r.fx.basis === "dated" ? "" : r.fx.basis === "earliest" ? " (the first rate on file)" : " (the one flat rate)"}` },
+    r.missing.length > 0 && { label: "Cost not known yet", value: (
+      <ul className="space-y-0.5">{r.missing.map((m, i) => <li key={i}>{m.label} — {m.reason}</li>)}</ul>
+    ) },
+  ]);
+
   return (
     <div className="space-y-4">
       <Panel title="Month by month" subtitle="Sales by the month shipped · orders by the month placed · money by the day received" icon={CalendarRange}
@@ -109,6 +132,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
               rows={rows}
               columns={monthColumns}
               rowKey={m => m.month}
+              details={monthDetails}
               defaultSort={{ key: "month", dir: "desc" }}
               totals={{
                 in: ms => totOf(ms).receivedCount,
@@ -192,6 +216,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
                   sub={g.incomplete ? <span className="text-amber-600">{g.incomplete} not fully costed</span> : undefined} />
               ))}
               rowKey={g => g.key}
+              details={groupDetails(false)}
               defaultSort={{ key: "sales", dir: "desc" }}
               searchText={g => g.key}
               searchPlaceholder="Search clients"
@@ -204,6 +229,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
               rows={data.pr.byType}
               columns={groupColumns("Item", g => <CellMain title={g.key} />)}
               rowKey={g => g.key}
+              details={groupDetails(true)}
               defaultSort={{ key: "sales", dir: "desc" }}
               searchText={g => g.key}
               searchPlaceholder="Search items"
@@ -219,6 +245,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
                 columns={lossColumns}
                 rowKey={r => r.order.id}
                 rowHref={r => `/orders/${r.order.id}`}
+                details={lossDetails}
                 defaultSort={{ key: "loss", dir: "asc" }}
                 searchText={r => `${r.order.orderNumber} ${clientName(r.order.clientId)}`}
                 searchPlaceholder="Search orders"

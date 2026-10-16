@@ -22,6 +22,8 @@ import { ccy, ccyOrder, fmtCcy, fmtCcyPdf, type CurrencyCode } from "@/lib/curre
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { useCan } from "@/hooks/useCan";
+import { filled, linkList, lockerLabel, lockerTxnDetails, noteText, recorded, refLink, refNo, userName, when, type Detail } from "@/components/rowDetails";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 type PassbookRowType =
@@ -64,6 +66,7 @@ export function IncomePage() {
   const db = useDb();
   const canEdit = user!.role !== "client";
   const isClient = user!.role === "client";
+  const can = useCan();
 
   /* Filters */
   const [curTab, setCurTab] = useState<CurrencyCode>("USD");
@@ -236,6 +239,52 @@ export function IncomePage() {
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: signed,
       cell: r => <CellAmount tone={r.direction}>{r.direction === "in" ? "+" : "−"}{fmt(r.amount)}</CellAmount> },
   ];
+
+  // An opened row, read from the record behind it. A client sees only when
+  // their payment was taken and whether it came from their credit — who took
+  // it, the receipt and the account it went into are the business's own books.
+  const rowDetails = (r: PassbookRow): Detail[] => {
+    if (r.editable) {
+      const adv = db.orders.find(o => o.id === r.editable!.orderId)?.advances?.find(a => a.id === r.id);
+      if (!adv) return [];
+      if (isClient) return filled([
+        { label: "Recorded", value: when(adv.createdAt) },
+        adv.fromCredit && { label: "Paid from", value: "Credit already on your account" },
+      ]);
+      const rcpt = adv.receiptId ? (db.clientReceipts ?? []).find(x => x.id === adv.receiptId) : undefined;
+      const lockerCcy = ccy(db.lockers.find(l => l.id === adv.lockerId)?.currency);
+      return filled([
+        !!r.clientId && can("clients") && { label: "Client page", value: refLink(`/clients/${r.clientId}`, r.party) },
+        { label: "Receipt", value: refNo(rcpt?.receiptNo) },
+        !!rcpt && { label: "Method", value: rcpt.method },
+        adv.fromCredit && { label: "Paid from", value: "Credit already on account" },
+        { label: "Deposited to", value: lockerLabel(db, adv.lockerId) },
+        !!adv.lockerId && adv.lockerAmount != null && lockerCcy !== "USD" && { label: "Landed as", value: fmtCcy(adv.lockerAmount, lockerCcy) },
+        { label: "Recorded", value: recorded(db, adv.createdAt, adv.recordedBy) },
+      ]);
+    }
+    if (isClient) return [];
+    if (r.type === "Expense") {
+      const e = db.expenses.find(x => x.id === r.id);
+      if (!e) return [];
+      const client = e.clientId ? db.clients.find(c => c.id === e.clientId) : undefined;
+      return filled([
+        { label: "Category", value: e.category },
+        { label: "Note", value: noteText(e.note) },
+        { label: "Paid from", value: lockerLabel(db, e.lockerId) },
+        { label: "Paid to", value: userName(db, e.paidToEmployeeId) },
+        !!client && { label: "Client", value: refLink(`/clients/${client.id}`, client.companyName, can("clients")) },
+        !!e.orderIds?.length && { label: e.orderIds.length > 1 ? "For orders" : "For order", value: linkList(e.orderIds.map(id => ({
+          key: id, node: refLink(`/orders/${id}`, db.orders.find(o => o.id === id)?.orderNumber ?? "Order", can("orders")),
+        }))) },
+        { label: "Recorded", value: recorded(db, e.createdAt, e.employeeId) },
+      ]);
+    }
+    // A locker movement: the description is its category (else its note), the
+    // party its account.
+    const t = (db.lockerTransactions ?? []).find(x => x.id === r.id);
+    return t ? lockerTxnDetails(db, t, m => can(m), { voucher: true, note: !!t.category }) : [];
+  };
 
   const exportCsv = () => {
     downloadCsv(
@@ -422,6 +471,7 @@ export function IncomePage() {
             totals={{ amount: rows => { const n = rows.reduce((s, r) => s + signed(r), 0); return <span className={n >= 0 ? "text-success" : "text-destructive"}>{fmt(n)}</span>; } }}
             onRowClick={canEdit ? openEdit : undefined}
             canClickRow={r => !!r.editable}
+            details={rowDetails}
             rowActions={canEdit ? r => [
               { label: "Edit", icon: Pencil, hint: "Correct the amount or note, or delete it", onSelect: () => openEdit(r), show: !!r.editable },
             ] : undefined}

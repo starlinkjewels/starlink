@@ -1,4 +1,5 @@
 import { DataTable } from "@/components/DataTable";
+import { filled, userName, type Detail } from "@/components/rowDetails";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, Tooltip, Cell } from "recharts";
@@ -50,6 +51,21 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
     { key: "90+ days", value: data.owed.d90, tone: C.rose },
   ];
 
+  // A client, opened: the day of their last order, exact figures where the
+  // columns round, how to reach them — and, for the admin, who handles them.
+  const clientDetails = (r: ClientRow): Detail[] => {
+    const c = db.clients.find(x => x.id === r.id);
+    return filled([
+      !!r.lastOrder && { label: "Last order on", value: fmtDate(r.lastOrder) },
+      // The columns read $12.3k from $10,000 up.
+      Math.abs(r.salesUsd) >= 1e4 && { label: "Sales (exact)", value: usd(r.salesUsd) },
+      Math.abs(r.outstandingUsd) >= 1e4 && { label: "Owed (exact)", value: usd(r.outstandingUsd) },
+      ctx.isAdmin && !!c && { label: "Handled by", value: userName(db, c.accountManagerId) || "Admin" },
+      { label: "Phone", value: c?.phone },
+      { label: "Email", value: c?.email },
+    ]);
+  };
+
   const exportClients = () => downloadCsv(`Clients_${fileTag}.csv`,
     ["Client", "Orders in", "Shipped", "Sales ($)", ...(withProfit ? ["Profit ($)", "Margin %"] : []), "Collected ($)", "Owed now ($)", "Owed 90+ days ($)", "Average order ($)", "Last order", "Days since last order"],
     list.map(r => [r.name, r.received, r.sold, r.salesUsd, ...(withProfit ? [r.profitUsd ?? "", r.marginPct ?? ""] : []), r.collectedUsd, r.outstandingUsd, r.overdue90Usd,
@@ -88,6 +104,7 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
           id="reports-clients"
           rows={list}
           rowKey={r => r.id}
+          details={clientDetails}
           defaultSort={{ key: "sales", dir: "desc" }}
           searchText={r => r.name}
           emptyText="No clients."

@@ -2,7 +2,10 @@ import { useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo } from "@/components/CompanyFields";
-import { companyOf, coField } from "@/lib/companies";
+import { companyOf, coField, companyById } from "@/lib/companies";
+import { useCan } from "@/hooks/useCan";
+import { fmtCcy, rateText } from "@/lib/currency";
+import { filled, noteText, recorded, refLink, type Detail } from "@/components/rowDetails";
 import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -178,6 +181,28 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       cell: m => { const ra = inrRateAmount(m); return ra ? <CellAmount>{fmtMoneyInr(ra.amount)}</CellAmount> : dash; } },
   ];
 
+  // An opened movement: what kind it was, its note, the bill behind a purchase
+  // (and the order it was bought for), the factory an order's issue went to,
+  // the company, and who recorded it when.
+  const can = useCan();
+  const MOVE_KIND: Record<string, string> = { purchase_in: "Into stock", issuance_out: "Issued out", order_direct_use: "Used on an order", adjustment: "Adjustment" };
+  const movementDetails = (m: Movement): Detail[] => {
+    const p = m.refType === "purchase" && m.refId ? db.purchases.find(x => x.id === m.refId) : undefined;
+    const forOrder = p?.orderId ? db.orders.find(o => o.id === p.orderId) : undefined;
+    const mi = m.refType === "materialIssuance" && m.refId ? db.materialIssuances.find(x => x.id === m.refId) : undefined;
+    return filled([
+      { label: "Movement", value: MOVE_KIND[m.type] ?? m.type },
+      !!m.note && !m.link.label.includes(m.note) && { label: "Note", value: noteText(m.note) },
+      { label: "Bill no.", value: m.link.invoiceNumber },
+      !!p?.invoiceDate && { label: "Bill date", value: fmtDate(p.invoiceDate) },
+      !!forOrder && m.type === "purchase_in" && { label: "Bought for order", value: refLink(`/orders/${forOrder.id}`, forOrder.orderNumber, can("orders")) },
+      !!m.link.orderId && !!m.link.factoryId && { label: "Factory", value: refLink(`/factories/${m.link.factoryId}`, db.factories.find(f => f.id === m.link.factoryId)?.name ?? "Factory", can("factories")) },
+      !!mi && { label: "Factory issue", value: mi.status === "closed" ? "Closed — wastage settled" : "Open" },
+      multiCo && { label: "Company", value: companyById(db.settings, m.companyId).name },
+      { label: "Recorded", value: recorded(db, m.createdAt, m.createdBy) },
+    ]);
+  };
+
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
@@ -322,6 +347,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
             defaultSort={{ key: "date", dir: "desc" }}
             searchText={m => [m.purityOrQuality, m.link.label, m.note].filter(Boolean).join(" ")}
             searchPlaceholder="Search movements"
+            details={movementDetails}
             totals={{
               in: list => <span className="text-success">{sumQty(list.filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
               out: list => <span className="text-destructive">{sumQty(list.filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
@@ -505,6 +531,35 @@ function CertifiedSection() {
     { key: "order", header: "Order", sortValue: p => orderNoOf(p.orderId),
       cell: p => (p.orderId ? <Link to={`/orders/${p.orderId}`} className="text-xs text-primary hover:underline whitespace-nowrap">{orderNoOf(p.orderId) ?? "Order"}</Link> : dash) },
   ];
+  // An opened stone: each grade on its own line, its bill (and what a dollar
+  // bill came to), where it went — the factory it was issued to, who bought it
+  // — the company, and who added it when. Each table adds what its columns lack.
+  const can = useCan();
+  const packetDetails = (p: DiamondPacket, table: "stock" | "history"): Detail[] => {
+    const pu = purchaseOf(p.purchaseId);
+    const c = costOf(p);
+    const issue = p.status !== "in_stock" ? (db.materialIssuances ?? []).find(mi => mi.diamondPacketIds?.includes(p.id)) : undefined;
+    const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
+    const buyer = sale?.clientId ? db.clients.find(x => x.id === sale.clientId) : undefined;
+    return filled([
+      { label: "Color", value: p.color },
+      { label: "Clarity", value: p.clarity },
+      { label: "Cut", value: p.cut },
+      { label: "Polish", value: p.polish },
+      { label: "Symmetry", value: p.symmetry },
+      { label: "Fluorescence", value: p.fluorescence },
+      { label: "Quality", value: p.quality },
+      table === "history" && { label: "Measurement", value: p.measurement },
+      table === "stock" && !!p.ratePerCaratInr && { label: "Cost", value: fmtMoneyInr(p.ratePerCaratInr * p.carat) },
+      c.totalUsd != null && { label: "Billed", value: `${fmtCcy(c.totalUsd, "USD")}${c.exchangeRate ? ` at ${rateText("USD", "INR", c.exchangeRate)}` : ""}` },
+      { label: "Bill no.", value: pu?.invoiceNumber },
+      !!issue && { label: "Issued to", value: <>{refLink(`/factories/${issue.factoryId}`, db.factories.find(f => f.id === issue.factoryId)?.name ?? "Factory", can("factories"))} · {fmtDate(issue.issuedAt)}</> },
+      !!sale && { label: "Sold to", value: buyer ? refLink(`/clients/${buyer.id}`, buyer.companyName, can("clients")) : sale.buyerName || "Buyer" },
+      !!sale && { label: "Sold on", value: fmtDate(sale.createdAt) },
+      multiCo && { label: "Company", value: companyById(db.settings, p.companyId).name },
+      { label: "Added", value: recorded(db, p.createdAt, p.createdBy) },
+    ]);
+  };
   const unnumberedCount = (db.diamondPackets ?? []).filter(p => !p.stockNumber).length;
 
   const assignMissingStockNumbers = () => {
@@ -663,6 +718,7 @@ function CertifiedSection() {
           searchPlaceholder="Search stock #, shape, or certificate…"
           exportName="Stock-Certified_Diamonds-In_Stock"
           totals={{ diamond: list => `${sumCarat(list)} ct` }}
+          details={p => packetDetails(p, "stock")}
           rowActions={p => [
             { label: "Edit", icon: Pencil, onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); }, show: user?.role === "admin" },
             { label: "Delete", icon: Trash2, danger: true, onSelect: () => deletePacket(p), show: user?.role === "admin" },
@@ -703,6 +759,7 @@ function CertifiedSection() {
             defaultSort={{ key: "bought", dir: "desc" }}
             searchText={p => [packetSearch(p), STATUS_LABEL[p.status], orderNoOf(p.orderId)].filter(Boolean).join(" ")}
             searchPlaceholder="Search stock #, certificate, supplier…"
+            details={p => packetDetails(p, "history")}
             totals={{
               diamond: list => `${sumCarat(list)} ct`,
               cost: list => fmtMoneyInr(list.reduce((s, p) => s + (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : 0), 0)),

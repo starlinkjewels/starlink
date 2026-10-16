@@ -9,6 +9,7 @@ import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
 import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 
 const STATUS_STYLE: Record<GiftCardStatus, string> = {
   active: "bg-success/10 text-success",
@@ -95,6 +96,23 @@ export function GiftCardsAdminPage() {
     );
   };
 
+  // What an opened card adds: who issued it and when, the order that earned it,
+  // each order it was spent on and how much, anything taken back, the note.
+  const cardDetails = (c: GiftCard): Detail[] => {
+    const earnedOn = c.sourceOrderId ? db.orders.find(o => o.id === c.sourceOrderId) : undefined;
+    const client = db.clients.find(x => x.id === c.clientId);
+    const spent = ordersFor(c.id);
+    return filled([
+      { label: "Issued", value: `${when(c.createdAt)} · ${c.issuedBy === "system" ? "automatically" : `by ${userName(db, c.issuedBy) || "an admin"}`}` },
+      { label: "Expires", value: when(c.expiresAt) },
+      !!client && { label: "Client account", value: refLink(`/clients/${client.id}`, client.companyName) },
+      !!earnedOn && { label: "Earned on", value: refLink(`/orders/${earnedOn.id}`, earnedOn.orderNumber) },
+      spent.length > 0 && { label: "Spent on", value: linkList(spent.map(o => ({ key: o.id, node: <>{refLink(`/orders/${o.id}`, o.orderNumber)} {fmtMoney(o.giftCardRedeemed || 0)}</> }))) },
+      (c.takenBackUsd || 0) > 0 && { label: "Taken back", value: `${fmtMoney(c.takenBackUsd || 0)} of ${fmtMoney(c.amount)} — pieces of the order that earned it came back` },
+      { label: "Note", value: noteText(c.note) },
+    ]);
+  };
+
   const TILES: [string, string, typeof Gift, string][] = [
     ["Issued", fmtMoney(stats.issued), Gift, "text-primary"],
     ["Redeemed", fmtMoney(stats.used), CheckCircle2, "text-success"],
@@ -148,6 +166,7 @@ export function GiftCardsAdminPage() {
             id="gift-cards"
             rows={rows}
             rowKey={c => c.id}
+            details={cardDetails}
             defaultSort={{ key: "issued", dir: "desc" }}
             emptyText={ql || statusFilter !== "all" ? "No gift cards match your filters." : "No gift cards issued yet."}
             columns={[

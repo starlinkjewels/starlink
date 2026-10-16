@@ -5,6 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Search, Download } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { filled, when, type Detail } from "@/components/rowDetails";
 
 export interface StatementRow {
   id: string;
@@ -68,6 +69,7 @@ export function StatementLedger({
   pageSize,
   emptyText = "No entries yet.",
   rowAction,
+  details,
 }: {
   title: string;
   caption?: string;
@@ -82,6 +84,9 @@ export function StatementLedger({
   emptyText?: string;
   /** Optional control at the end of a row — reversing a payment, say. */
   rowAction?: (row: StatementRow) => ReactNode;
+  /** More for an opened row, from the page that knows the record behind it —
+   *  who recorded it, the account it went through, the full note. */
+  details?: (row: StatementRow) => Detail[];
 }) {
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
@@ -217,6 +222,26 @@ export function StatementLedger({
           defaultSort={{ key: "date", dir: "desc" }}
           pageSizes={pageSize ? [pageSize, pageSize * 2, pageSize * 4] : undefined}
           emptyText={active ? "Nothing in that range." : emptyText}
+          // Opened: what the particulars squeeze into one grey line, each on its
+          // own — the type, order, bill and reference, quantity and rate — the
+          // time of day, and whatever the page adds.
+          details={r => {
+            const extra = details?.(r) ?? [];
+            // The time of day, unless the page's own "Recorded" already gives it.
+            const time = extra.some(d => d.label === "Recorded") ? fmtDate(r.date) : when(r.date);
+            return [
+              ...filled([
+                { label: "Type", value: r.kind },
+                { label: "Order", value: r.orderNo },
+                { label: "Bill / invoice", value: r.invoiceNo },
+                !!r.ref && r.ref !== r.orderNo && r.ref !== r.invoiceNo && { label: "Reference", value: r.ref },
+                !!r.qty && { label: "Quantity", value: `${r.qty}${r.unit ?? ""}` },
+                !!r.rate && { label: "Rate", value: `${fmt(r.rate)}${r.unit ? `/${r.unit}` : ""}` },
+                time !== fmtDate(r.date) && { label: "Time", value: time },
+              ]),
+              ...extra,
+            ];
+          }}
           // Totals only for a filtered view — it answers "how much in August?"
           // without exporting first. Unfiltered, the tiles above already say it,
           // and a second, differently-made total beside them would only confuse.

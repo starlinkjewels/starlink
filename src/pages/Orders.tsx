@@ -7,9 +7,10 @@ import { OrderBoard } from "@/components/OrderBoard";
 import { pieceWeights } from "@/lib/weights";
 import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
+import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -65,6 +66,11 @@ function lastTrackingStep(o: Order): string {
   const done = o.timeline.filter(t => t.status === "done");
   if (done.length) return done[done.length - 1].step;
   return o.timeline[0]?.step ?? "";
+}
+
+/** The stage an order is at — the one in progress, else the last one done — with its date and who did it. */
+function stageNow(o: Order) {
+  return o.timeline.find(t => t.status === "in_progress") ?? [...o.timeline].reverse().find(t => t.status === "done") ?? o.timeline[0];
 }
 
 export function OrdersPage() {
@@ -263,6 +269,57 @@ export function OrdersPage() {
         </span>
       ) },
   ];
+
+  // What an opened row adds to its columns: the order page's own facts —
+  // never cost or profit, and for a client only what their order page shows.
+  const orderDetails = (o: Order): Detail[] => {
+    const st = stageNow(o);
+    const by = userName(db, st?.employeeId);
+    const total = orderTotal(o), shown = o.returns?.length ? keptValue(o) : o.amount;
+    const billed = !o.forReadyStock && total > 0;
+    const due = balanceDue(o);
+    const fromStock = o.materialSourcing === "readyStock" && o.readyStockItemId ? db.readyStock.find(i => i.id === o.readyStockItemId) : undefined;
+    const built = isStaff && o.readyStockCreatedId ? db.readyStock.find(i => i.id === o.readyStockCreatedId) : undefined;
+    const weightProblem = isStaff ? pieceWeights(o, issByOrder.get(o.id) ?? []).problem : null;
+    const company = isStaff && multiCo ? companiesOf(db.settings).find(c => c.id === companyOfOrder(db, o))?.name : undefined;
+    return filled([
+      !!st && { label: "Stage", value: [st.step, st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
+      { label: "Placed", value: when(o.createdAt) },
+      o.priority !== "Normal" && { label: "Priority", value: o.priority },
+      { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
+      { label: "Contact person", value: o.contactPerson },
+      { label: "Company", value: company },
+      (o.diamondWeight > 0 || (o.actualDiamondWeight ?? 0) > 0) && !o.noDiamond && { label: "Diamonds", value: `${o.diamondType}${o.actualDiamondPcs ? ` · ${o.actualDiamondPcs} stones` : ""}` },
+      { label: "Size", value: o.productSize },
+      { label: "Colour", value: o.productColor },
+      { label: "Rhodium", value: o.rhodium },
+      { label: "Stamping", value: o.stamping },
+      !!o.otherMetal && { label: "Second metal", value: `${o.otherMetal}${o.otherMetalWeight ? ` · ${o.otherMetalWeight} g` : ""}${o.otherMetalPurity ? ` · ${o.otherMetalPurity}‰` : ""}` },
+      !!o.certificate && { label: "Certificate", value: o.certificateFee ? `Yes · ${fmtMoney(o.certificateFee)}` : "Yes" },
+      { label: "Delivery time", value: o.deliveryTime },
+      !!o.dispatchedAt && { label: "Dispatched", value: fmtDate(o.dispatchedAt) },
+      !!o.deliveredAt && { label: "Delivered", value: fmtDate(o.deliveredAt) },
+      (o.shippingCharge || 0) > 0 && { label: "Shipping", value: fmtMoney(o.shippingCharge) },
+      (o.giftCardRedeemed || 0) > 0 && { label: "Gift card used", value: `−${fmtMoney(o.giftCardRedeemed || 0)}` },
+      billed && Math.abs(total - shown) > 0.005 && { label: "Order total", value: fmtMoney(total) },
+      billed && { label: "Paid", value: fmtMoney(totalAdvance(o)) },
+      billed && { label: "Balance due", value: due > 0 ? <span className="font-semibold text-destructive">{fmtMoney(due)}</span> : <span className="font-semibold text-success">Cleared</span> },
+      !!fromStock && { label: "From Ready Stock", value: refLink(`/ready-stock/${fromStock.id}`, fromStock.name) },
+      !!built && { label: "In Ready Stock", value: refLink(`/ready-stock/${built.id}`, built.name) },
+      isStaff && { label: "Factory bill no.", value: refNo(o.factoryBillNo) },
+      isStaff && { label: "Earlier order no.", value: o.previousOrderNumber },
+      !!weightProblem && { label: "Check weights", value: <span className="text-destructive">{weightProblem}</span> },
+      !!o.returns?.length && { label: "Returns", value: (
+        <ul className="space-y-0.5">
+          {(o.returns ?? []).map(r => (
+            <li key={r.id}>{r.creditNoteNo} · {fmtDate(r.at)} · {r.qty} pc{r.qty !== 1 ? "s" : ""} · −{fmtMoney(r.creditUsd)} · {r.status === "coming" ? "on its way back" : "received"}{r.reason ? ` — ${r.reason}` : ""}</li>
+          ))}
+        </ul>
+      ) },
+      isStaff && !!o.melted && { label: "Melted", value: `${fmtDate(o.melted.at)} by ${o.melted.byName}${o.melted.reason ? ` — ${o.melted.reason}` : ""}` },
+      { label: "Instructions", value: noteText(o.instructions) },
+    ]);
+  };
 
   const exportName = () => {
     if (chosen.length) return `Products-Selected-${chosen.length}`;
@@ -562,6 +619,7 @@ export function OrdersPage() {
             columns={listColumns}
             rowKey={o => o.id}
             rowHref={o => `/orders/${o.id}`}
+            details={orderDetails}
             defaultSort={{ key: "placed", dir: "desc" }}
             selected={isStaff ? sel : undefined}
             onSelectedChange={isStaff ? setSel : undefined}

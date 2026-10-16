@@ -36,6 +36,8 @@ import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 import { invoiceBlocker } from "@/lib/invoiceBatch";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { companyById } from "@/lib/companies";
+import { filled, lockerLabel, recorded, refLink, refNo, when, type Detail } from "@/components/rowDetails";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -280,6 +282,68 @@ export function InvoicesPage() {
   ];
   const ledgerSum = (rows: Order[], f: (o: Order) => number) => rows.reduce((s, o) => s + f(o), 0);
 
+  // An opened ledger row (staff only, as the ledger is): every payment on the
+  // order — amount, when, the receipt, the account it went into, who took it —
+  // the invoice it is billed on, the client's page and any gift card used.
+  const ledgerDetails = (o: Order): Detail[] => {
+    const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
+    const pays = [...(o.advances ?? [])].sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
+    return filled([
+      { label: pays.length > 1 ? `Payments (${pays.length})` : "Payment", value: (
+        <ul className="space-y-0.5">
+          {pays.map(a => {
+            const rcpt = a.receiptId ? (db.clientReceipts ?? []).find(r => r.id === a.receiptId) : undefined;
+            const bits = [when(a.createdAt), rcpt && `Receipt ${rcpt.receiptNo}`, a.fromCredit && "from credit", lockerLabel(db, a.lockerId), a.note, recorded(db, undefined, a.recordedBy)].filter(Boolean);
+            return (
+              <li key={a.id}>
+                <span className="font-medium tabular-nums">{fmtMoney(a.amount)}</span>
+                <span className="text-muted-foreground"> · {bits.join(" · ")}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) },
+      !!inv && { label: "Invoice", value: (
+        <button type="button" onClick={() => { setDetailInvId(inv.id); setPayOrderId(null); }} className="text-primary hover:underline font-medium">{inv.number}</button>
+      ) },
+      can("clients") && { label: "Client page", value: refLink(`/clients/${o.clientId}`, ledgerClient(o) || "Client") },
+      !!o.giftCardRedeemed && { label: "Gift card used", value: fmtMoney(o.giftCardRedeemed) },
+      { label: "Status", value: o.status },
+    ]);
+  };
+
+  // An invoice opened under its row — a quick look; a click on the row still
+  // opens the whole invoice. When it was raised, each order on it with what is
+  // still due, credit notes against it, gift cards used, and (staff) the
+  // receipts sent for it and the company that issued it.
+  const invoiceDetails = (r: (typeof invRows)[number]): Detail[] => {
+    const notes = invoiceCreditNotes(db, r.orders.map(o => o.id));
+    const receipts = isStaff ? (db.clientReceipts ?? []).filter(x => x.invoiceId === r.inv.id) : [];
+    return filled([
+      { label: "Raised", value: when(r.inv.createdAt) },
+      { label: "Previous number", value: r.inv.previousNumber },
+      r.orders.length > 0 && { label: r.orders.length > 1 ? `Orders (${r.orders.length})` : "Order", value: (
+        <ul className="space-y-0.5">
+          {r.orders.map(o => {
+            const due = balanceDue(o);
+            return (
+              <li key={o.id}>
+                {/* A client opens their own orders, as the Orders column lets them. */}
+                {refLink(`/orders/${o.id}`, o.orderNumber, !isStaff || can("orders"))}
+                <span className="text-muted-foreground"> · {fmtMoney(orderTotal(o))} · {due > 0 ? `${fmtMoney(due)} due` : "paid"}</span>
+              </li>
+            );
+          })}
+        </ul>
+      ) },
+      notes.length > 0 && { label: notes.length > 1 ? "Credit notes" : "Credit note", value: notes.map(n => `${n.no} · ${n.qty} pc${n.qty !== 1 ? "s" : ""} · −${fmtMoney(n.creditUsd)}`).join(", ") },
+      r.gift > 0 && { label: "Gift card used", value: fmtMoney(r.gift) },
+      receipts.length > 0 && { label: receipts.length > 1 ? "Receipts" : "Receipt", value: refNo(receipts.map(x => x.receiptNo).join(", ")) },
+      isStaff && can("clients") && !!r.client && { label: "Client page", value: refLink(`/clients/${r.client.id}`, r.client.companyName) },
+      isStaff && multiCo && { label: "Company", value: companyById(db.settings, r.inv.companyId).name },
+    ]);
+  };
+
 
   /**
    * Put the client's held credit against this invoice.
@@ -422,6 +486,7 @@ export function InvoicesPage() {
             rows={invRows}
             rowKey={r => r.inv.id}
             onRowClick={r => { setDetailInvId(r.inv.id); setPayOrderId(null); }}
+            details={invoiceDetails}
             defaultSort={{ key: "date", dir: "desc" }}
             pageSizes={[25, 50, 100]}
             emptyText={ql ? "No invoices match your search." : isStaff ? "No invoices yet — select dispatched orders above to create one." : "No invoices yet."}
@@ -482,6 +547,7 @@ export function InvoicesPage() {
               rowKey={o => o.id}
               pageSizes={[10, 25, 50]}
               emptyText="No orders match your search."
+              details={ledgerDetails}
               totals={{
                 total: rows => fmtMoney(ledgerSum(rows, orderTotal)),
                 advance: rows => <span className="text-success">{fmtMoney(ledgerSum(rows, totalAdvance))}</span>,

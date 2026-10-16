@@ -2,9 +2,12 @@ import { companyOf } from "@/lib/companies";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
 import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue, findInvoiceForOrder } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
+import { can } from "@/lib/permissions";
+import type { ModuleKey } from "@/lib/modules";
+import { filled, when, recorded, userName, refLink, linkList, noteText, refNo, lockerLabel, type Detail } from "@/components/rowDetails";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal } from "@/lib/orderCost";
@@ -355,17 +358,21 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const suppliers = db.suppliers ?? [];
     const factories = db.factories ?? [];
     // id: the payment's own, under the record it was made on — the table's row key.
-    type Row = { id: string; date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number };
+    // payId…orderId: for the row opened — the account, note and who recorded it, and what it paid for.
+    type Row = { id: string; date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number;
+      payId?: string; lockerId?: string; note?: string; by?: string; partyId?: string; orderId?: string; material?: Purchase["material"] };
     const rows: Row[] = [];
     for (const p of db.purchases ?? [])
       (p.payments ?? []).forEach((pay, n) => {
         if (inRange(pay.createdAt))
-          rows.push({ id: `p:${p.id}:${pay.id ?? n}`, date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr });
+          rows.push({ id: `p:${p.id}:${pay.id ?? n}`, date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr,
+            payId: pay.id, lockerId: pay.lockerId, note: pay.note, by: pay.recordedBy, partyId: p.supplierId, orderId: p.orderId, material: p.material });
       });
     for (const i of db.materialIssuances ?? [])
       (i.makingCharges?.payments ?? []).forEach((pay, n) => {
         if (inRange(pay.createdAt))
-          rows.push({ id: `f:${i.id}:${pay.id ?? n}`, date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr });
+          rows.push({ id: `f:${i.id}:${pay.id ?? n}`, date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr,
+            payId: pay.id, lockerId: pay.lockerId, note: pay.note, by: pay.recordedBy, partyId: i.factoryId, orderId: i.orderId });
       });
     const supTotal = rows.filter(r => r.kind === "Supplier").reduce((s, r) => s + r.amount, 0);
     const facTotal = rows.filter(r => r.kind === "Factory").reduce((s, r) => s + r.amount, 0);
@@ -834,6 +841,106 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
 
   /* ── status breakdown for client ── */
   const STATUS_LIST = ["Waiting","Approved","In Production","Ready","Dispatched","Delivered"] as const;
+  /* ── Opened rows: what each table's columns leave out ── */
+  const mayOpen = (m: ModuleKey) => can(user, db.roles ?? [], m, "view");
+  const orderLink = (o: Order) => refLink(`/orders/${o.id}`, o.orderNumber, mayOpen("orders"));
+  const stageOf = (o: Order) => o.timeline.find(t => t.status === "in_progress") ?? [...o.timeline].reverse().find(t => t.status === "done");
+
+  const purchaseDetails = (p: Purchase): Detail[] => {
+    const order = p.orderId ? db.orders.find(o => o.id === p.orderId) : undefined;
+    const pending = purchasePending(p);
+    return filled([
+      { label: "Paid", value: fmtMoneyInr(purchasePaid(p)) },
+      pending > 0 && { label: "Pending", value: <span className="font-semibold text-destructive">{fmtMoneyInr(pending)}</span> },
+      !!order && { label: "For order", value: orderLink(order) },
+      p.currency === "USD" && !!p.totalUsd && { label: "Billed in dollars", value: `${fmtMoney(p.totalUsd)}${p.exchangeRate ? ` at ₹${p.exchangeRate} to the $` : ""}` },
+      !!(p.diamond?.pieces || p.other?.pieces) && { label: "Stones", value: String(p.diamond?.pieces || p.other?.pieces) },
+      // The Detail column shows the shape, or the quality when there is no shape.
+      !!p.diamond?.shape && { label: "Quality", value: p.diamond.quality },
+      !!p.diamond?.certificateNumber && { label: "Certificate", value: [p.diamond.certificateLab, p.diamond.certificateNumber].filter(Boolean).join(" ") },
+      !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Charge added", value: `${Math.abs(p.discountPct)}%` },
+      !!p.roundOffInr && { label: "Rounded off", value: fmtMoneyInr(p.roundOffInr) },
+      { label: "Notes", value: noteText(p.notes) },
+      { label: "Recorded", value: recorded(db, p.createdAt, p.createdBy) },
+    ]);
+  };
+
+  type PaymentRow = NonNullable<typeof paymentsReport>["rows"][number];
+  const paymentDetails = (r: PaymentRow): Detail[] => {
+    const txn = r.payId ? (db.lockerTransactions ?? []).find(t => t.paymentId === r.payId) : undefined;
+    const order = r.orderId ? db.orders.find(o => o.id === r.orderId) : undefined;
+    const partyPage = r.kind === "Supplier" ? "suppliers" : "factories";
+    return filled([
+      !!r.partyId && { label: r.kind, value: refLink(`/${partyPage}/${r.partyId}`, r.party, mayOpen(partyPage)) },
+      { label: "Account", value: lockerLabel(db, r.lockerId) },
+      { label: "Voucher", value: refNo(txn?.voucherNo) },
+      { label: "For", value: r.material ? materialName(db.settings, r.material) : undefined },
+      !!order && { label: "Order", value: orderLink(order) },
+      { label: "Note", value: noteText(r.note) },
+      { label: "Recorded", value: recorded(db, r.date, r.by) },
+    ]);
+  };
+
+  type SalesClientRow = NonNullable<typeof salesReport>["byClient"][number];
+  const salesClientDetails = (c: SalesClientRow): Detail[] => {
+    const placed = (salesReport?.orders ?? []).filter(o => o.clientId === c.id);
+    const gift = placed.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
+    return filled([
+      placed.length > 0 && { label: "Orders placed", value: linkList(placed.map(o => ({ key: o.id, node: orderLink(o) }))) },
+      gift > 0 && { label: "Gift cards used", value: fmtMoney(gift) },
+    ]);
+  };
+
+  // The orders behind one profit line, worked out the way profitReport groups them.
+  const profitGroupDetails = (g: { key: string; costUsd: number | null; costInr: number; incomplete: number }): Detail[] => {
+    if (!profit) return [];
+    const monthKey = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+    const keyOf = (o: Order) => profitBy === "client" ? (clients.find(c => c.id === o.clientId)?.companyName ?? "Unknown")
+      : profitBy === "month" ? monthKey(saleDate(o)) : o.jewelleryType;
+    const unknown = g.incomplete ? profit.rows.filter(r => !r.complete && keyOf(r.order) === g.key) : [];
+    return filled([
+      // The Cost column reads in dollars once every order converted; the rupees behind it.
+      g.costUsd !== null && { label: "Cost in rupees", value: fmtMoneyInr(g.costInr) },
+      unknown.length > 0 && { label: "Cost not fully known on", value: linkList(unknown.map(r => ({ key: r.order.id, node: orderLink(r.order) }))) },
+    ]);
+  };
+
+  type SummaryRow = (typeof byClient)[number];
+  const clientSummaryDetails = (cl: SummaryRow): Detail[] => {
+    const theirs = filtered.filter(o => o.clientId === cl.id);
+    const client = clients.find(c => c.id === cl.id);
+    const open = theirs.filter(o => !["Dispatched", "Delivered", "Rejected"].includes(o.status)).length;
+    const owed = theirs.filter(o => o.status !== "Rejected").reduce((s, o) => s + balanceDue(o), 0);
+    const latest = theirs.reduce<Order | undefined>((m, o) => (!m || o.createdAt > m.createdAt ? o : m), undefined);
+    return filled([
+      !!client && { label: "Account", value: refLink(`/clients/${client.id}`, client.companyName, mayOpen("clients")) },
+      open > 0 && { label: "In progress", value: String(open) },
+      { label: "Outstanding", value: owed > 0 ? <span className="font-semibold text-destructive">{fmtMoney(owed)}</span> : "Cleared" },
+      !!latest && { label: "Latest order", value: <>{orderLink(latest)} · {fmtDate(latest.createdAt)} · {latest.status}</> },
+    ]);
+  };
+
+  const reportOrderDetails = (o: Order): Detail[] => {
+    const st = stageOf(o);
+    const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
+    const total = orderTotal(o);
+    return filled([
+      { label: "Order", value: orderLink(o) },
+      !!st && { label: "Stage", value: [st.step, st.date && when(st.date)].filter(Boolean).join(" · ") },
+      { label: "Placed", value: when(o.createdAt) },
+      { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
+      o.priority !== "Normal" && { label: "Priority", value: o.priority },
+      { label: "Piece", value: [o.productKarats, o.diamondWeight > 0 && o.diamondType, o.productSize && `size ${o.productSize}`].filter(Boolean).join(" · ") },
+      { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
+      !!inv && { label: "Invoice", value: refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, mayOpen("invoices")) },
+      total > 0 && Math.abs(total - (o.amount || 0)) > 0.005 && { label: "Order total", value: fmtMoney(total) },
+      !!o.courierName && { label: "Courier", value: (
+        <>{o.courierName}{o.trackingNumber ? <> · {refNo(o.trackingNumber)}</> : null}{o.trackingLink ? <> · <a href={o.trackingLink} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline font-medium">Track</a></> : null}</>
+      ) },
+      !!o.dispatchedAt && { label: "Dispatched", value: fmtDate(o.dispatchedAt) },
+    ]);
+  };
+
   const statusColors: Record<string, string> = {
     "Waiting": "bg-slate-100 text-slate-600",
     "Approved": "bg-blue-100 text-blue-700",
@@ -1182,6 +1289,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 noun="purchase"
                 rows={materialReport.rows}
                 rowKey={p => p.id}
+                details={purchaseDetails}
                 maxHeight="24rem"
                 defaultSort={{ key: "date", dir: "desc" }}
                 searchText={p => [supplierName(p), labelOf(p), detailOf(p), p.purpose, p.invoiceNumber ?? ""].join(" ")}
@@ -1256,6 +1364,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               noun="payment"
               rows={paymentsReport.rows}
               rowKey={r => r.id}
+              details={paymentDetails}
               maxHeight="20rem"
               defaultSort={{ key: "date", dir: "desc" }}
               searchText={r => `${r.party} ${r.kind} ${r.ref}`}
@@ -1328,6 +1437,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               noun="client"
               rows={salesReport.byClient}
               rowKey={c => c.id}
+              details={salesClientDetails}
               maxHeight="20rem"
               defaultSort={{ key: "billed", dir: "desc" }}
               searchText={c => c.name}
@@ -1463,6 +1573,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 noun={profitBy === "client" ? "client" : profitBy === "month" ? "month" : "item"}
                 rows={profitBy === "client" ? profit.byClient : profitBy === "month" ? profit.byMonth : profit.byType}
                 rowKey={g => g.key}
+                details={profitGroupDetails}
                 maxHeight="24rem"
                 // Months newest first, clients and items biggest sales first — the order they come in.
                 defaultSort={profitBy === "month" ? { key: "group", dir: "desc" } : { key: "sales", dir: "desc" }}
@@ -1639,6 +1750,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             noun="client"
             rows={byClient}
             rowKey={cl => cl.id}
+            details={clientSummaryDetails}
             defaultSort={{ key: "orders", dir: "desc" }}
             searchText={cl => cl.name}
             searchPlaceholder="Search clients"
@@ -1680,6 +1792,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             noun="order"
             rows={filtered}
             rowKey={o => o.id}
+            details={reportOrderDetails}
             maxHeight="32rem"
             defaultSort={{ key: "date", dir: "desc" }}
             searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${o.metal} ${o.status}`}

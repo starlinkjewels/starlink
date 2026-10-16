@@ -2,7 +2,8 @@ import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { updateDb, uid, fmtDate, type Supplier } from "@/lib/db";
+import { updateDb, uid, fmtDate, hasOpeningBalance, type Supplier } from "@/lib/db";
+import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
@@ -95,6 +96,24 @@ export function SuppliersPage() {
       } },
   ];
 
+  // What an opened row adds: the contact details the Contact column leaves out,
+  // and the parts of the balance. From the same figures as the row — this page
+  // never downloads the supplier books, so nothing here reads them either.
+  const supplierDetails = (s: Supplier): Detail[] => {
+    const a = accountOf(s);
+    return filled([
+      // The Contact column shows the phone or the email, not both, when no one is named.
+      !s.contactPerson && !!s.phone && !!s.email && { label: "Email", value: <a href={`mailto:${s.email}`} className="text-primary hover:underline break-all">{s.email}</a> },
+      { label: "Address", value: noteText(s.address) },
+      { label: "Supplier since", value: fmtDate(s.createdAt) },
+      a.balanceOwed > 0 && Math.abs(a.balanceOwed - a.net) > 0.5 && { label: "Unpaid bills", value: fmtMoneyInr(a.balanceOwed) },
+      a.overpaid > 0 && { label: "Overpaid on bills", value: fmtMoneyInr(a.overpaid) },
+      a.advanced > 0 && { label: "Advances / loans paid", value: fmtMoneyInr(a.advanced) },
+      a.received > 0 && { label: "Received back", value: fmtMoneyInr(a.received) },
+      hasOpeningBalance(s) && { label: "Opening balance", value: `${fmtMoneyInr(s.openingBalance || 0)} ${s.openingDir === "debit" ? "debit (they owed us)" : "credit (we owed them)"}${s.openingDate ? ` · as of ${fmtDate(s.openingDate)}` : ""}` },
+    ]);
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -147,6 +166,7 @@ export function SuppliersPage() {
             rowKey={s => s.id}
             defaultSort={{ key: "balance", dir: "desc" }}
             rowHref={s => `/suppliers/${s.id}`}
+            details={supplierDetails}
             exportName="Suppliers"
             totals={{
               purchased: rows => fmtMoneyInr(rows.reduce((t, s) => t + accountOf(s).totalPurchased, 0)),
