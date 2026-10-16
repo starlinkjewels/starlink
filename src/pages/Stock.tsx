@@ -7,7 +7,6 @@ import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances } from "@/lib/manufacturing";
 import { Button } from "@/components/ui/button";
-import { AsyncButton } from "@/components/AsyncButton";
 import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
