@@ -236,9 +236,13 @@ export function DataTable<T>({
     return v === null || v === undefined || v === "";
   };
   const autoDetails = (r: T) => {
+    // A table's own extra field with a column's name is that column told more
+    // fully (a date with its time), so it stands in for the column.
+    const extra = typeof details === "function" ? details(r) : [];
+    const told = new Set(extra.map(f => f.label));
     const fields = [
-      ...columns.filter(c => c.header && !blank(c, r)).map(c => ({ label: c.header, value: c.cell(r) })),
-      ...(typeof details === "function" ? details(r) : []),
+      ...columns.filter(c => c.header && !told.has(c.header) && !blank(c, r)).map(c => ({ label: c.header, value: c.cell(r) })),
+      ...extra,
     ];
     return (
       <div className="dt-details grid gap-x-8 gap-y-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">
