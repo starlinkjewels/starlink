@@ -1,13 +1,12 @@
 import { useCan } from "@/hooks/useCan";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState } from "react";
+import { Lock, Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate } from "@/lib/db";
 import { fmtLockerAmount } from "@/lib/manufacturing";
 import { listEntries, editEntry, deleteEntry, entryImpact, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
+import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -17,8 +16,6 @@ import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
-
-const PAGE = 12;
 
 const TITLES: Record<EntryKind, string> = {
   supplier: "Supplier Payments",
@@ -34,6 +31,14 @@ const PARTY_LABEL: Record<EntryKind, string> = {
   factory: "Factory",
   expense: "Expense",
   locker: "Category",
+};
+
+/** What one row is, for the table's count — "12 payments", "3 expenses". */
+const NOUN: Record<EntryKind, string> = {
+  supplier: "payment",
+  factory: "payment",
+  expense: "expense",
+  locker: "transaction",
 };
 
 /**
@@ -72,8 +77,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       || (e.note ?? "").toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || party || acct || dir);
-  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, e => e.date, { filtered, resetKey: [kind, ql, from, to, party, acct, dir] });
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); setPage(1); };
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); };
 
   const totalOut = rows.filter(r => r.direction === "out").reduce((s, r) => s + r.amount, 0);
   const totalIn = rows.filter(r => r.direction === "in").reduce((s, r) => s + r.amount, 0);
@@ -171,6 +175,26 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
     setEditing(null);
   };
 
+  const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
+  const columns: DataColumn<MoneyEntry>[] = [
+    { key: "party", header: kind === "expense" ? "Expense" : "Party", always: true, sortValue: e => e.party,
+      cell: e => <CellMain title={e.party || "—"} className="max-w-[180px]" /> },
+    { key: "date", header: "Date", kind: "date", sortValue: e => +new Date(e.date), csv: e => fmtDate(e.date),
+      cell: e => <CellDate>{fmtDate(e.date)}</CellDate> },
+    { key: "voucher", header: "Voucher", sortValue: e => e.voucherNo ?? "",
+      cell: e => <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">{e.voucherNo ?? "—"}</span> },
+    { key: "against", header: "Against", sortValue: e => e.against ?? "",
+      cell: e => <span className="block text-xs text-muted-foreground max-w-[150px] truncate" title={e.against ?? ""}>{e.against ?? "—"}</span> },
+    { key: "out", header: "Out", align: "right", kind: "number", sortValue: e => (e.direction === "out" ? e.amount : null),
+      cell: e => (e.direction === "out" ? <CellAmount tone="out">{fmtLockerAmount(e.amount, e.currency)}</CellAmount> : null) },
+    { key: "in", header: "In", align: "right", kind: "number", sortValue: e => (e.direction === "in" ? e.amount : null),
+      cell: e => (e.direction === "in" ? <CellAmount tone="in">{fmtLockerAmount(e.amount, e.currency)}</CellAmount> : null) },
+    { key: "account", header: "Account", sortValue: e => lockerName(e.lockerId),
+      cell: e => <span className="block text-xs text-muted-foreground max-w-[120px] truncate">{lockerName(e.lockerId) || "—"}</span> },
+    { key: "remarks", header: "Remarks", sortValue: e => e.note ?? "",
+      cell: e => <span className="block text-xs text-muted-foreground max-w-[160px] truncate" title={e.note ?? ""}>{e.note ?? "—"}</span> },
+  ];
+
   return (
     <div className="card-luxe p-5">
       <div className="mb-3">
@@ -184,79 +208,42 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       </div>
 
       <LedgerFilters
-        q={q} onQ={v => { setQ(v); setPage(1); }}
+        q={q} onQ={setQ}
         placeholder="Search party, voucher, bill, remark…"
         from={from} to={to}
-        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        onFrom={setFrom} onTo={setTo}
         selects={[
-          { label: PARTY_LABEL[kind], value: party, onChange: v => { setParty(v); setPage(1); },
+          { label: PARTY_LABEL[kind], value: party, onChange: setParty,
             options: parties.map(p => ({ value: p, label: p })) },
-          { label: "Accounts", value: acct, onChange: v => { setAcct(v); setPage(1); },
+          { label: "Accounts", value: acct, onChange: setAcct,
             options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
-          { label: "Directions", value: dir, onChange: v => { setDir(v); setPage(1); },
+          { label: "Directions", value: dir, onChange: setDir,
             options: [{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }] },
         ]}
         active={filtered} onReset={reset}
         onPdf={exportPdf} onCsv={exportCsv}
       />
 
-      <div className="overflow-x-auto -mx-5">
-        <table className="w-full text-sm min-w-[760px]">
-          <thead className="bg-secondary/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-5 py-2.5">Sr</th>
-              <th className="text-left px-3 py-2.5">Date</th>
-              <th className="text-left px-3 py-2.5">Voucher</th>
-              <th className="text-left px-3 py-2.5">{kind === "expense" ? "Expense" : "Party"}</th>
-              <th className="text-left px-3 py-2.5">Against</th>
-              <th className="text-right px-3 py-2.5">Out</th>
-              <th className="text-right px-3 py-2.5">In</th>
-              <th className="text-left px-3 py-2.5">Account</th>
-              <th className="text-left px-3 py-2.5">Remarks</th>
-              <th className="text-right px-5 py-2.5">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.length === 0 ? (
-              <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
-                {filtered ? "Nothing matches these filters." : "No entries yet."}
-              </td></tr>
-            ) : paged.map((e, i) => {
-              const locker = db.lockers.find(l => l.id === e.lockerId);
-              return (
-                <tr key={e.id} className="border-t border-border/40 hover:bg-secondary/30">
-                  <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(e.date)}</td>
-                  <td className="px-3 py-2.5 font-mono text-[11px] text-muted-foreground whitespace-nowrap">{e.voucherNo ?? "—"}</td>
-                  <td className="px-3 py-2.5 font-medium max-w-[180px] truncate">{e.party}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[150px] truncate" title={e.against ?? ""}>{e.against ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-destructive">
-                    {e.direction === "out" ? fmtLockerAmount(e.amount, e.currency) : ""}
-                  </td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-success">
-                    {e.direction === "in" ? fmtLockerAmount(e.amount, e.currency) : ""}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{locker?.name ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={e.note ?? ""}>{e.note ?? "—"}</td>
-                  <td className="px-5 py-2.5 text-right whitespace-nowrap">
-                    {e.locked ? (
-                      <span className="text-[11px] text-muted-foreground" title={e.locked}>
-                        {e.lockedWhere ? `Edit in ${e.lockedWhere}` : "locked"}
-                      </span>
-                    ) : (
-                      <>
-                        {can("payments", "edit") && <button onClick={() => open(e)} className="text-primary hover:underline text-xs mr-3">Edit</button>}
-                        {can("payments", "delete") && <button onClick={() => remove(e)} className="text-destructive hover:underline text-xs">Delete</button>}
-                      </>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <LoadOlder w={w} />
+      {/* The filters, search and downloads live in the bar above, so the table
+          brings no search or Excel of its own. A new filter (resetKey)
+          starts it again from the first page. */}
+      <DataTable
+        resetKey={JSON.stringify([kind, ql, from, to, party, acct, dir])}
+        id={`money-ledger-${kind}`}
+        noun={NOUN[kind]}
+        rows={rows}
+        columns={columns}
+        rowKey={e => e.id}
+        defaultSort={{ key: "date", dir: "desc" }}
+        emptyText={filtered ? "Nothing matches these filters." : "No entries yet."}
+        rowActions={e => e.locked
+          // Owned by another tab: say where it is corrected instead.
+          ? [{ label: e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked", hint: e.locked, icon: Lock, disabled: true, onSelect: () => {} }]
+          : [
+            { label: "Edit", icon: Pencil, onSelect: () => open(e), show: can("payments", "edit") },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => remove(e), show: can("payments", "delete") },
+          ]}
+      />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditing(null); }}>
         <DialogContent className="max-w-xl rounded-2xl">

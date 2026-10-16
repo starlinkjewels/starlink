@@ -1,5 +1,5 @@
 import { companyOf } from "@/lib/companies";
-import { DataTable } from "@/components/DataTable";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
 import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue } from "@/lib/db";
@@ -354,16 +354,19 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const inRange = makeInRange(payFrom, payTo);
     const suppliers = db.suppliers ?? [];
     const factories = db.factories ?? [];
-    type Row = { date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number };
+    // id: the payment's own, under the record it was made on — the table's row key.
+    type Row = { id: string; date: string; party: string; kind: "Supplier" | "Factory"; ref: string; amount: number };
     const rows: Row[] = [];
     for (const p of db.purchases ?? [])
-      for (const pay of p.payments ?? [])
+      (p.payments ?? []).forEach((pay, n) => {
         if (inRange(pay.createdAt))
-          rows.push({ date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr });
+          rows.push({ id: `p:${p.id}:${pay.id ?? n}`, date: pay.createdAt, party: suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier", kind: "Supplier", ref: p.invoiceNumber || "—", amount: pay.amountInr });
+      });
     for (const i of db.materialIssuances ?? [])
-      for (const pay of i.makingCharges?.payments ?? [])
+      (i.makingCharges?.payments ?? []).forEach((pay, n) => {
         if (inRange(pay.createdAt))
-          rows.push({ date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr });
+          rows.push({ id: `f:${i.id}:${pay.id ?? n}`, date: pay.createdAt, party: factories.find(f => f.id === i.factoryId)?.name ?? "Factory", kind: "Factory", ref: "Making charges", amount: pay.amountInr });
+      });
     const supTotal = rows.filter(r => r.kind === "Supplier").reduce((s, r) => s + r.amount, 0);
     const facTotal = rows.filter(r => r.kind === "Factory").reduce((s, r) => s + r.amount, 0);
     rows.sort((a, b) => +new Date(b.date) - +new Date(a.date));
@@ -379,10 +382,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const received = orders.reduce((s, o) => s + totalAdvance(o), 0);
     const outstanding = orders.reduce((s, o) => s + balanceDue(o), 0);
     const giftRedeemed = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
-    const map = new Map<string, { name: string; count: number; billed: number; received: number; outstanding: number }>();
+    const map = new Map<string, { id: string; name: string; count: number; billed: number; received: number; outstanding: number }>();
     for (const o of orders) {
       const name = clients.find(c => c.id === o.clientId)?.companyName ?? "Unknown";
-      const e = map.get(o.clientId) ?? { name, count: 0, billed: 0, received: 0, outstanding: 0 };
+      const e = map.get(o.clientId) ?? { id: o.clientId, name, count: 0, billed: 0, received: 0, outstanding: 0 };
       e.count++; e.billed += orderTotal(o); e.received += totalAdvance(o); e.outstanding += balanceDue(o);
       map.set(o.clientId, e);
     }
@@ -1167,47 +1170,41 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           )}
 
           {/* Detail table */}
-          {materialReport.rows.length > 0 ? (
-            <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-xl border border-border/60">
-              <table className="table-luxe w-full text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-white z-10">
-                  <tr className="border-b border-border/60">
-                    {["Date","Supplier","Category","Purpose","Detail","Qty","Rate","Total"].map(h => (
-                      <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {materialReport.rows.map(p => {
-                    const c = purchaseCategory(p);
-                    const qty = purchaseQty(p);
-                    const unit = materialUnit(db.settings, p.material);
-                    const detail = c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—"));
-                    const label = c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : "Diamond";
-                    const supplier = (db.suppliers ?? []).find(s => s.id === p.supplierId);
-                    return (
-                      <tr key={p.id} className="hover:bg-secondary/30 transition-colors">
-                        <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDate(p.invoiceDate || p.createdAt)}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">{supplier?.name ?? "—"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${c === "gold" ? "bg-amber-500/10 text-amber-700" : c === "cert" ? "bg-primary/10 text-primary" : c === "other" ? "bg-emerald-500/10 text-emerald-700" : "bg-blue-500/10 text-blue-700"}`}>{label}</span>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">
-                          <span className={`inline-flex items-center gap-1 text-[11px] ${p.purpose === "stock" ? "text-muted-foreground" : "text-brand-dark"}`}>
-                            {p.purpose === "stock" ? <Boxes className="h-3 w-3" /> : <ShoppingCart className="h-3 w-3" />}{p.purpose}
-                          </span>
-                        </td>
-                        <td className="px-3 py-2 whitespace-nowrap">{detail}</td>
-                        <td className="px-3 py-2 whitespace-nowrap font-medium">{qty.toLocaleString(undefined, { maximumFractionDigits: 3 })} {unit}</td>
-                        <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{qty > 0 ? `${fmtMoneyInr(p.totalInr / qty)}/${unit}` : "—"}</td>
-                        <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoneyInr(p.totalInr)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ) : (
+          {materialReport.rows.length > 0 ? (() => {
+            const supplierName = (p: Purchase) => (db.suppliers ?? []).find(s => s.id === p.supplierId)?.name ?? "";
+            const labelOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : "Diamond"; };
+            const detailOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—")); };
+            const dateOf = (p: Purchase) => p.invoiceDate || p.createdAt;
+            const TONE = { gold: "amber", cert: "blue", other: "green", diamond: "violet" } as const;
+            return (
+              <DataTable
+                id="reports-material-purchases"
+                noun="purchase"
+                rows={materialReport.rows}
+                rowKey={p => p.id}
+                maxHeight="24rem"
+                defaultSort={{ key: "date", dir: "desc" }}
+                searchText={p => [supplierName(p), labelOf(p), detailOf(p), p.purpose, p.invoiceNumber ?? ""].join(" ")}
+                searchPlaceholder="Search supplier, material, bill"
+                columns={[
+                  { key: "supplier", header: "Supplier", always: true, sortValue: supplierName, cell: p => <CellMain title={supplierName(p) || "—"} sub={p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined} /> },
+                  { key: "date", header: "Date", kind: "date", sortValue: p => +new Date(dateOf(p)), cell: p => <CellDate>{fmtDate(dateOf(p))}</CellDate> },
+                  { key: "category", header: "Category", sortValue: labelOf, cell: p => <CellTag tone={TONE[purchaseCategory(p)]}>{labelOf(p)}</CellTag> },
+                  { key: "purpose", header: "Purpose", sortValue: p => p.purpose, cell: p => (
+                    <span className={`inline-flex items-center gap-1 text-[11px] whitespace-nowrap ${p.purpose === "stock" ? "text-muted-foreground" : "text-brand-dark"}`}>
+                      {p.purpose === "stock" ? <Boxes className="h-3 w-3" /> : <ShoppingCart className="h-3 w-3" />}{p.purpose}
+                    </span>
+                  ) },
+                  { key: "detail", header: "Detail", sortValue: detailOf, cell: p => <span className="whitespace-nowrap">{detailOf(p)}</span> },
+                  { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: p => purchaseQty(p),
+                    cell: p => <span className="font-medium tabular-nums whitespace-nowrap">{purchaseQty(p).toLocaleString(undefined, { maximumFractionDigits: 3 })} {materialUnit(db.settings, p.material)}</span> },
+                  { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: p => { const q = purchaseQty(p); return q > 0 ? p.totalInr / q : null; },
+                    cell: p => { const q = purchaseQty(p); return <span className="text-muted-foreground tabular-nums whitespace-nowrap">{q > 0 ? `${fmtMoneyInr(p.totalInr / q)}/${materialUnit(db.settings, p.material)}` : "—"}</span>; } },
+                  { key: "total", header: "Total", align: "right", kind: "number", sortValue: p => p.totalInr, cell: p => <CellAmount>{fmtMoneyInr(p.totalInr)}</CellAmount> },
+                ]}
+              />
+            );
+          })() : (
             <div className="py-8 text-center text-sm text-muted-foreground">
               <Coins className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />
               No material purchases in this period.
@@ -1254,26 +1251,23 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           </div>
 
           {paymentsReport.rows.length > 0 ? (
-            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-border/60">
-              <table className="table-luxe w-full text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-white z-10">
-                  <tr className="border-b border-border/60">
-                    {["Date","Party","Type","Reference","Amount"].map(h => <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {paymentsReport.rows.map((r, i) => (
-                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-3 py-2 text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">{r.party}</td>
-                      <td className="px-3 py-2 whitespace-nowrap"><span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${r.kind === "Supplier" ? "bg-amber-500/10 text-amber-700" : "bg-orange-500/10 text-orange-700"}`}>{r.kind}</span></td>
-                      <td className="px-3 py-2 whitespace-nowrap text-muted-foreground">{r.ref}</td>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoneyInr(r.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              id="reports-payments-made"
+              noun="payment"
+              rows={paymentsReport.rows}
+              rowKey={r => r.id}
+              maxHeight="20rem"
+              defaultSort={{ key: "date", dir: "desc" }}
+              searchText={r => `${r.party} ${r.kind} ${r.ref}`}
+              searchPlaceholder="Search party or reference"
+              columns={[
+                { key: "party", header: "Party", always: true, sortValue: r => r.party, cell: r => <CellMain title={r.party} /> },
+                { key: "date", header: "Date", kind: "date", sortValue: r => +new Date(r.date), cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+                { key: "type", header: "Type", sortValue: r => r.kind, cell: r => <CellTag tone={r.kind === "Supplier" ? "amber" : "violet"}>{r.kind}</CellTag> },
+                { key: "ref", header: "Reference", sortValue: r => r.ref, cell: r => <span className="text-muted-foreground whitespace-nowrap">{r.ref}</span> },
+                { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amount, cell: r => <CellAmount>{fmtMoneyInr(r.amount)}</CellAmount> },
+              ]}
+            />
           ) : (
             <div className="py-8 text-center text-sm text-muted-foreground"><DollarSign className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No payments in this period.</div>
           )}
@@ -1329,26 +1323,24 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           </div>
 
           {salesReport.byClient.length > 0 ? (
-            <div className="overflow-x-auto max-h-80 overflow-y-auto rounded-xl border border-border/60">
-              <table className="table-luxe w-full text-xs sm:text-sm">
-                <thead className="sticky top-0 bg-white z-10">
-                  <tr className="border-b border-border/60">
-                    {["Client","Orders","Billed","Received","Outstanding"].map(h => <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border/40">
-                  {salesReport.byClient.map((c, i) => (
-                    <tr key={i} className="hover:bg-secondary/30 transition-colors">
-                      <td className="px-3 py-2 font-medium text-brand-dark whitespace-nowrap">{c.name}</td>
-                      <td className="px-3 py-2">{c.count}</td>
-                      <td className="px-3 py-2 whitespace-nowrap font-semibold text-brand-dark">{fmtMoney(c.billed)}</td>
-                      <td className="px-3 py-2 whitespace-nowrap text-success">{fmtMoney(c.received)}</td>
-                      <td className={`px-3 py-2 whitespace-nowrap font-semibold ${c.outstanding > 0 ? "text-destructive" : "text-success"}`}>{c.outstanding > 0 ? fmtMoney(c.outstanding) : "✓"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <DataTable
+              id="reports-sales-by-client"
+              noun="client"
+              rows={salesReport.byClient}
+              rowKey={c => c.id}
+              maxHeight="20rem"
+              defaultSort={{ key: "billed", dir: "desc" }}
+              searchText={c => c.name}
+              searchPlaceholder="Search clients"
+              columns={[
+                { key: "client", header: "Client", always: true, sortValue: c => c.name, cell: c => <CellMain title={c.name} /> },
+                { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => c.count, cell: c => <span className="tabular-nums">{c.count}</span> },
+                { key: "billed", header: "Billed", align: "right", kind: "number", sortValue: c => c.billed, cell: c => <CellAmount>{fmtMoney(c.billed)}</CellAmount> },
+                { key: "received", header: "Received", align: "right", kind: "number", sortValue: c => c.received, cell: c => <CellAmount tone="in">{fmtMoney(c.received)}</CellAmount> },
+                { key: "outstanding", header: "Outstanding", align: "right", kind: "number", sortValue: c => c.outstanding,
+                  cell: c => (c.outstanding > 0 ? <CellAmount tone="out">{fmtMoney(c.outstanding)}</CellAmount> : <span className="font-semibold text-success">✓</span>) },
+              ]}
+            />
           ) : (
             <div className="py-8 text-center text-sm text-muted-foreground"><TrendingUp className="h-9 w-9 text-muted-foreground/20 mx-auto mb-2" />No orders placed in this period.</div>
           )}
@@ -1459,32 +1451,35 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                   </button>
                 ))}
               </div>
-              <div className="overflow-x-auto max-h-96 overflow-y-auto rounded-xl border border-border/60">
-                <table className="table-luxe w-full text-xs sm:text-sm">
-                  <thead className="sticky top-0 bg-white z-10">
-                    <tr className="border-b border-border/60">
-                      {[profitBy === "client" ? "Client" : profitBy === "month" ? "Month" : "Item", "Orders", "Sales", "Cost", "Profit", "Margin"].map(h =>
-                        <th key={h} className="text-left text-[11px] font-semibold text-muted-foreground px-3 py-2 whitespace-nowrap">{h}</th>)}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/40">
-                    {(profitBy === "client" ? profit.byClient : profitBy === "month" ? profit.byMonth : profit.byType).map(g => {
-                      const neg = (g.profitUsd ?? 0) < 0;
-                      const le = g.incomplete ? "≤ " : "";
-                      return (
-                        <tr key={g.key} className="hover:bg-secondary/30 transition-colors">
-                          <td className="px-3 py-2 font-medium text-brand-dark whitespace-nowrap">{profitBy === "month" ? monthLabel(g.key) : g.key}</td>
-                          <td className="px-3 py-2">{g.count}{g.incomplete > 0 && <span className="text-amber-600" title="cost not fully known"> · {g.incomplete}?</span>}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">{fmtMoney(g.sellingUsd)}</td>
-                          <td className="px-3 py-2 whitespace-nowrap">{g.costUsd !== null ? fmtMoney(g.costUsd) : fmtMoneyInr(g.costInr)}</td>
-                          <td className={`px-3 py-2 whitespace-nowrap font-semibold ${neg ? "text-destructive" : "text-success"}`}>{g.profitUsd === null ? "—" : le + fmtMoney(g.profitUsd)}</td>
-                          <td className={`px-3 py-2 whitespace-nowrap ${neg ? "text-destructive" : "text-success"}`}>{g.marginPct === null ? "—" : `${le}${g.marginPct}%`}</td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              {/* One table per grouping — each keeps its own sort and columns,
+                  and the first column is named for what it groups by. */}
+              <DataTable
+                key={profitBy}
+                id={`reports-profit-${profitBy}`}
+                noun={profitBy === "client" ? "client" : profitBy === "month" ? "month" : "item"}
+                rows={profitBy === "client" ? profit.byClient : profitBy === "month" ? profit.byMonth : profit.byType}
+                rowKey={g => g.key}
+                maxHeight="24rem"
+                // Months newest first, clients and items biggest sales first — the order they come in.
+                defaultSort={profitBy === "month" ? { key: "group", dir: "desc" } : { key: "sales", dir: "desc" }}
+                searchText={g => (profitBy === "month" ? monthLabel(g.key) : g.key)}
+                searchPlaceholder={`Search ${profitBy === "client" ? "clients" : profitBy === "month" ? "months" : "items"}`}
+                columns={[
+                  { key: "group", header: profitBy === "client" ? "Client" : profitBy === "month" ? "Month" : "Item", always: true,
+                    kind: profitBy === "month" ? "date" : "text", sortValue: g => g.key,
+                    cell: g => <CellMain title={profitBy === "month" ? monthLabel(g.key) : g.key} /> },
+                  { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: g => g.count,
+                    cell: g => <span className="tabular-nums whitespace-nowrap">{g.count}{g.incomplete > 0 && <span className="text-amber-600" title="cost not fully known"> · {g.incomplete}?</span>}</span> },
+                  { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd, cell: g => <CellAmount>{fmtMoney(g.sellingUsd)}</CellAmount> },
+                  // Dollars when every order converted; rupees otherwise — so it sorts by the dollars.
+                  { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: g => g.costUsd,
+                    cell: g => <span className="tabular-nums whitespace-nowrap">{g.costUsd !== null ? fmtMoney(g.costUsd) : fmtMoneyInr(g.costInr)}</span> },
+                  { key: "profit", header: "Profit", align: "right", kind: "number", sortValue: g => g.profitUsd,
+                    cell: g => <CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{g.profitUsd === null ? "—" : (g.incomplete ? "≤ " : "") + fmtMoney(g.profitUsd)}</CellAmount> },
+                  { key: "margin", header: "Margin", align: "right", kind: "number", sortValue: g => g.marginPct,
+                    cell: g => <span className={`tabular-nums whitespace-nowrap ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{g.marginPct === null ? "—" : `${g.incomplete ? "≤ " : ""}${g.marginPct}%`}</span> },
+                ]}
+              />
 
               {/* Sold for less than they cost — the first thing worth knowing. */}
               {profit.losses.length > 0 && (
@@ -1633,64 +1628,28 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             </h3>
           </div>
 
-          {/* Mobile cards */}
-          <div className="sm:hidden space-y-2.5">
-            {byClient.map(cl => (
-              <div key={cl.id} className="rounded-xl bg-secondary/50 p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="font-semibold text-brand-dark text-sm truncate">{cl.name}</p>
-                  <span className="text-xs text-muted-foreground shrink-0">{cl.total} order{cl.total !== 1 ? "s" : ""}</span>
-                </div>
-                <div className="flex flex-wrap gap-1.5">
-                  <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-[11px] font-medium">{cl.dispatched} dispatched</span>
-                  <span className="px-2 py-0.5 rounded-full bg-success/10 text-success text-[11px] font-medium">{cl.delivered} delivered</span>
-                  {cl.avgDays !== null && (
-                    <span className={`px-2 py-0.5 rounded-full text-[11px] font-medium
-                      ${cl.avgDays <= 7 ? "bg-success/10 text-success" : cl.avgDays <= 20 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-600"}`}>
-                      {cl.avgDays}d avg
-                    </span>
-                  )}
-                  <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">{fmtMoney(cl.revenue)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* Desktop table */}
-          <div className="hidden sm:block overflow-x-auto">
-            <table className="table-luxe w-full text-sm">
-              <thead>
-                <tr className="border-b border-border/60">
-                  {["Client","Orders","Dispatched","Delivered","Revenue","Avg Dispatch"].map(h => (
-                    <th key={h} className="text-left text-xs font-semibold text-muted-foreground pb-2 pr-4 whitespace-nowrap">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {byClient.map(cl => (
-                  <tr key={cl.id} className="hover:bg-secondary/30 transition-colors">
-                    <td className="py-2.5 pr-4 font-medium text-brand-dark whitespace-nowrap">{cl.name}</td>
-                    <td className="py-2.5 pr-4">{cl.total}</td>
-                    <td className="py-2.5 pr-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs font-medium">{cl.dispatched}</span>
-                    </td>
-                    <td className="py-2.5 pr-4">
-                      <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-success/10 text-success text-xs font-medium">{cl.delivered}</span>
-                    </td>
-                    <td className="py-2.5 pr-4 font-semibold text-brand-dark">{fmtMoney(cl.revenue)}</td>
-                    <td className="py-2.5">
-                      {cl.avgDays !== null
-                        ? <span className={`px-2 py-0.5 rounded-full text-xs font-medium
-                            ${cl.avgDays <= 7 ? "bg-success/10 text-success" : cl.avgDays <= 20 ? "bg-amber-100 text-amber-700" : "bg-rose-100 text-rose-600"}`}>
-                            {cl.avgDays} days
-                          </span>
-                        : <span className="text-muted-foreground text-xs">—</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {/* One table at every size — on a phone it scrolls sideways with the
+              client held in view. */}
+          <DataTable
+            id="reports-client-summary"
+            noun="client"
+            rows={byClient}
+            rowKey={cl => cl.id}
+            defaultSort={{ key: "orders", dir: "desc" }}
+            searchText={cl => cl.name}
+            searchPlaceholder="Search clients"
+            columns={[
+              { key: "client", header: "Client", always: true, sortValue: cl => cl.name, cell: cl => <CellMain title={cl.name} /> },
+              { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: cl => cl.total, cell: cl => <span className="tabular-nums">{cl.total}</span> },
+              { key: "dispatched", header: "Dispatched", align: "right", kind: "number", sortValue: cl => cl.dispatched, cell: cl => <CellTag tone="blue">{cl.dispatched}</CellTag> },
+              { key: "delivered", header: "Delivered", align: "right", kind: "number", sortValue: cl => cl.delivered, cell: cl => <CellTag tone="green">{cl.delivered}</CellTag> },
+              { key: "revenue", header: "Revenue", align: "right", kind: "number", sortValue: cl => cl.revenue, cell: cl => <CellAmount>{fmtMoney(cl.revenue)}</CellAmount> },
+              { key: "avg", header: "Avg Dispatch", align: "right", kind: "number", sortValue: cl => cl.avgDays,
+                cell: cl => (cl.avgDays !== null
+                  ? <CellTag tone={cl.avgDays <= 7 ? "green" : cl.avgDays <= 20 ? "amber" : "red"}>{cl.avgDays} days</CellTag>
+                  : <span className="text-muted-foreground text-xs">—</span>) },
+            ]}
+          />
         </div>
       )}
 
@@ -1710,51 +1669,30 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             </IfExport>
           </div>
 
-          {/* Desktop: sortable, searchable, columns to choose */}
-          <div className="hidden sm:block">
-            <DataTable
-              id="reports-all-orders"
-              rows={filtered}
-              rowKey={o => o.id}
-              maxHeight="32rem"
-              defaultSort={{ key: "date", dir: "desc" }}
-              searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${o.metal} ${o.status}`}
-              columns={[
-                { key: "no", header: "Order #", always: true, sortValue: o => o.orderNumber, cell: o => <span className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</span> },
-                { key: "design", header: "Design #", hidden: true, sortValue: o => o.designNumber ?? "", cell: o => o.designNumber || "—" },
-                { key: "client", header: "Client", sortValue: o => clients.find(cl => cl.id === o.clientId)?.companyName ?? "", cell: o => <span className="whitespace-nowrap">{clients.find(cl => cl.id === o.clientId)?.companyName ?? "—"}</span> },
-                { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
-                { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{o.metal}</span> },
-                { key: "status", header: "Status", sortValue: o => o.status, cell: o => <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span> },
-                { key: "qty", header: "Qty", align: "right", sortValue: o => o.quantity, cell: o => o.quantity },
-                { key: "value", header: "Order Value", align: "right", sortValue: o => o.amount || 0, cell: o => <span className="font-semibold text-brand-dark whitespace-nowrap">{fmtMoney(o.amount)}</span> },
-                { key: "adv", header: "Advance", align: "right", sortValue: o => totalAdvance(o), cell: o => <span className="text-success whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</span> },
-                { key: "bal", header: "Balance", align: "right", sortValue: o => balanceDue(o), cell: o => { const bal = balanceDue(o); return <span className={`font-semibold whitespace-nowrap ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</span>; } },
-                { key: "date", header: "Date", align: "right", sortValue: o => o.createdAt, cell: o => <span className="text-muted-foreground text-xs whitespace-nowrap">{fmtDate(o.createdAt)}</span> },
-              ]}
-            />
-          </div>
-
-          {/* Mobile cards */}
-          <div className="sm:hidden space-y-2 max-h-[28rem] overflow-y-auto">
-            {[...filtered].sort((a,b) => +new Date(b.createdAt) - +new Date(a.createdAt)).map(o => {
-              const c = clients.find(cl => cl.id === o.clientId);
-              const bal = balanceDue(o);
-              return (
-                <div key={o.id} className="rounded-xl bg-secondary/50 p-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="font-mono text-xs font-semibold text-brand-dark truncate">{o.orderNumber}</p>
-                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold shrink-0 ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{c?.companyName ?? "—"} · {o.jewelleryType} · {fmtDate(o.createdAt)}</p>
-                  <div className="flex items-center justify-between mt-1.5 text-xs">
-                    <span className="font-semibold text-brand-dark">{fmtMoney(o.amount)}</span>
-                    <span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? `Bal ${fmtMoney(bal)}` : "✓ Cleared"}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+          {/* Sortable, searchable, columns to choose — at every size; on a phone
+              it scrolls sideways with the order number held in view. */}
+          <DataTable
+            id="reports-all-orders"
+            noun="order"
+            rows={filtered}
+            rowKey={o => o.id}
+            maxHeight="32rem"
+            defaultSort={{ key: "date", dir: "desc" }}
+            searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${o.metal} ${o.status}`}
+            columns={[
+              { key: "no", header: "Order #", always: true, sortValue: o => o.orderNumber, cell: o => <span className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</span> },
+              { key: "design", header: "Design #", hidden: true, sortValue: o => o.designNumber ?? "", cell: o => o.designNumber || "—" },
+              { key: "client", header: "Client", sortValue: o => clients.find(cl => cl.id === o.clientId)?.companyName ?? "", cell: o => <span className="whitespace-nowrap">{clients.find(cl => cl.id === o.clientId)?.companyName ?? "—"}</span> },
+              { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
+              { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{o.metal}</span> },
+              { key: "status", header: "Status", sortValue: o => o.status, cell: o => <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span> },
+              { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => o.quantity },
+              { key: "value", header: "Order Value", align: "right", kind: "number", sortValue: o => o.amount || 0, cell: o => <span className="font-semibold text-brand-dark tabular-nums whitespace-nowrap">{fmtMoney(o.amount)}</span> },
+              { key: "adv", header: "Advance", align: "right", kind: "number", sortValue: o => totalAdvance(o), cell: o => <span className="text-success tabular-nums whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</span> },
+              { key: "bal", header: "Balance", align: "right", kind: "number", sortValue: o => balanceDue(o), cell: o => { const bal = balanceDue(o); return <span className={`font-semibold tabular-nums whitespace-nowrap ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</span>; } },
+              { key: "date", header: "Date", align: "right", kind: "date", sortValue: o => +new Date(o.createdAt), cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
+            ]}
+          />
         </div>
       )}
 

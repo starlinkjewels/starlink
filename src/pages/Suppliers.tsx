@@ -12,7 +12,8 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, ChevronRight } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power } from "lucide-react";
+import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -68,6 +69,32 @@ export function SuppliersPage() {
     toast.success("Deleted");
   };
 
+  // ── List view: the shared table ──
+  const accountOf = (s: Supplier) => accounts.get(s.id)!;
+  const columns: DataColumn<Supplier>[] = [
+    { key: "supplier", header: "Supplier", always: true, sortValue: s => s.name, csv: s => s.name,
+      cell: s => <CellMain
+        title={<>{s.name}{s.active === false && <span className="ml-2 align-middle"><CellTag>Inactive</CellTag></span>}</>}
+        sub={s.gstin ? `GSTIN ${s.gstin}` : undefined} /> },
+    { key: "contact", header: "Contact", sortValue: s => s.contactPerson || s.phone || s.email || "",
+      cell: s => s.contactPerson || s.phone || s.email
+        ? <CellMain title={s.contactPerson || s.phone || s.email} sub={s.contactPerson ? [s.phone, s.email].filter(Boolean).join(" · ") || undefined : undefined} />
+        : <span className="text-muted-foreground/50">—</span> },
+    { key: "purchased", header: "Purchased", align: "right", kind: "number", sortValue: s => accountOf(s).totalPurchased,
+      cell: s => <CellAmount>{fmtMoneyInr(accountOf(s).totalPurchased)}</CellAmount> },
+    { key: "paid", header: "Paid", align: "right", kind: "number", sortValue: s => accountOf(s).totalPaid,
+      cell: s => <CellAmount tone="in">{fmtMoneyInr(accountOf(s).totalPaid)}</CellAmount> },
+    // Sorts by the money to settle either way — the page's own order. In Excel
+    // the signed net: plus, we owe them; minus, they owe us.
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: s => Math.abs(netOf(s)), csv: s => netOf(s),
+      cell: s => {
+        const net = netOf(s);
+        if (net > 0) return <div><CellAmount tone="out">{fmtMoneyInr(net)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">you owe</p></div>;
+        if (net < 0) return <div><span className="tabular-nums whitespace-nowrap font-semibold text-blue-600">+{fmtMoneyInr(-net)}</span><p className="text-[10px] text-muted-foreground whitespace-nowrap">owes you</p></div>;
+        return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Settled</span>;
+      } },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -108,50 +135,36 @@ export function SuppliersPage() {
         </div>
       </div>
 
-      {/* ── List view — name + net balance (owed / supplier owes you) ── */}
+      {/* ── List view — the shared table: sort by any heading, Excel, pages.
+          The search above narrows it, as it does the grid. ── */}
       {view === "list" && (
-        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
-          {paged.map(s => {
-            const account = accounts.get(s.id)!;
-            return (
-              <Link key={s.id} to={`/suppliers/${s.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
-                <div className="h-10 w-10 rounded-xl bg-amber-500/15 text-amber-600 grid place-items-center shrink-0"><Truck className="h-4.5 w-4.5" /></div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-brand-dark truncate">{s.name}{s.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
-                  <p className="text-xs text-muted-foreground truncate">{s.contactPerson || s.phone || s.email || "—"}</p>
-                </div>
-                {/* Purchased / Paid / Balance — segmented ledger panel */}
-                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
-                  <div className="px-3.5 py-1.5 min-w-[92px]">
-                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Purchased</p>
-                    <p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.totalPurchased)}</p>
-                  </div>
-                  <div className="px-3.5 py-1.5 min-w-[80px] border-l border-border/50">
-                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p>
-                    <p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.totalPaid)}</p>
-                  </div>
-                  <div className="px-3.5 py-1.5 min-w-[92px] border-l border-border/50">
-                    <p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
-                    {account.net > 0
-                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.net)}</p>
-                      : account.net < 0
-                      ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(-account.net)}</p>
-                      : <p className="text-xs font-semibold text-success">✓ Settled</p>}
-                  </div>
-                </div>
-                {/* Mobile — balance only */}
-                <div className="sm:hidden text-right shrink-0">
-                  {account.net > 0
-                    ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.net)}</p><p className="text-[10px] text-muted-foreground">you owe</p></>
-                    : account.net < 0
-                    ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(-account.net)}</p><p className="text-[10px] text-muted-foreground">owes you</p></>
-                    : <p className="text-sm font-semibold text-success">✓ Settled</p>}
-                </div>
-                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
-              </Link>
-            );
-          })}
-          {total === 0 && <div className="p-12 text-center text-muted-foreground">No suppliers found.</div>}
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="suppliers"
+            noun="supplier"
+            rows={list}
+            columns={columns}
+            rowKey={s => s.id}
+            defaultSort={{ key: "balance", dir: "desc" }}
+            rowHref={s => `/suppliers/${s.id}`}
+            exportName="Suppliers"
+            totals={{
+              purchased: rows => fmtMoneyInr(rows.reduce((t, s) => t + accountOf(s).totalPurchased, 0)),
+              paid: rows => <span className="text-success">{fmtMoneyInr(rows.reduce((t, s) => t + accountOf(s).totalPaid, 0))}</span>,
+              // Each way on its own: what we owe, and what suppliers owe us.
+              balance: rows => {
+                const owe = rows.reduce((t, s) => t + Math.max(0, netOf(s)), 0);
+                const owed = rows.reduce((t, s) => t + Math.max(0, -netOf(s)), 0);
+                return <><span className="text-destructive">{fmtMoneyInr(owe)}</span>{owed > 0 && <span className="text-blue-600"> · +{fmtMoneyInr(owed)}</span>}</>;
+              },
+            }}
+            // The grid card's buttons — admin only, as there.
+            rowActions={isAdmin ? s => [
+              { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s) },
+              { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s.id) },
+            ] : undefined}
+            emptyText="No suppliers found."
+          />
         </div>
       )}
 
@@ -222,7 +235,8 @@ export function SuppliersPage() {
       </div>
       )}
 
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />
+      {/* The list pages itself; these pages are the grid's. */}
+      {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />}
     </div>
   );
 }

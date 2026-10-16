@@ -1,7 +1,8 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { ClientCreateDialog } from "@/components/create/ClientCreateDialog";
 import { MAIN_COMPANY_ID, companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies, worksFor } from "@/lib/companies";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { loadDb, updateDb, fmtMoney, clientAccount, isOnline, timeAgo, currentUserClients, type Client } from "@/lib/db";
@@ -18,7 +19,7 @@ import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, ChevronRight, Building2 } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -128,6 +129,7 @@ export function ClientsPage() {
   const myCompanies = companiesForUser(dbNow.settings, meUser);
   const [coFilter, setCoFilter] = useState("all");
   const can = useCan();
+  const mayExport = useMayExport();
   const db = useDb();
   const addNew = useAddNew();
   const [q, setQ] = useState("");
@@ -270,6 +272,64 @@ export function ClientsPage() {
     toast.success("Deleted");
   };
 
+  // ── List view: the shared table ──
+  // Order counts and each client's login, gathered in one pass — the table
+  // reads them for every row it shows and sorts.
+  const orderStats = new Map<string, { total: number; active: number }>();
+  for (const o of db.orders) {
+    const s = orderStats.get(o.clientId) ?? { total: 0, active: 0 };
+    s.total++;
+    if (!["Delivered", "Rejected"].includes(o.status)) s.active++;
+    orderStats.set(o.clientId, s);
+  }
+  const statsOf = (c: Client) => orderStats.get(c.id) ?? { total: 0, active: 0 };
+  const loginOf = new Map<string, (typeof db.users)[number]>();
+  for (const u of db.users) if (u.clientId && !loginOf.has(u.clientId)) loginOf.set(u.clientId, u);
+  const accountOf = (c: Client) => accounts.get(c.id)!;
+  const staff = user!.role !== "client";
+  const columns: DataColumn<Client>[] = [
+    { key: "client", header: "Client", always: true, sortValue: c => c.companyName, csv: c => c.companyName,
+      cell: c => <CellMain
+        title={<>{c.companyName}{c.status !== "active" && <span className="ml-2 align-middle"><CellTag>Inactive</CellTag></span>}</>}
+        sub={c.ownerName || c.email || c.phone || "—"} /> },
+    ...(multiCo ? [{ key: "company", header: "Company", sortValue: (c: Client) => companyById(dbNow.settings, companyIdOfClient(c)).name,
+      cell: (c: Client) => <CellTag tone="blue">{companyById(dbNow.settings, companyIdOfClient(c)).name}</CellTag> }] : []),
+    ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by", hidden: true,
+      sortValue: (c: Client) => employees.find(e => e.id === c.accountManagerId)?.name ?? "Admin",
+      cell: (c: Client) => <span className="whitespace-nowrap">{employees.find(e => e.id === c.accountManagerId)?.name ?? "Admin"}</span> }] : []),
+    { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => statsOf(c).total,
+      cell: c => {
+        const s = statsOf(c);
+        return <span className="tabular-nums whitespace-nowrap">{s.total}{s.active > 0 && <span className="text-[11px] font-medium text-primary"> · {s.active} active</span>}</span>;
+      } },
+    { key: "billed", header: "Billed", align: "right", kind: "number", sortValue: c => accountOf(c).billed,
+      cell: c => <CellAmount>{fmtMoney(accountOf(c).billed)}</CellAmount> },
+    { key: "received", header: "Received", align: "right", kind: "number", sortValue: c => accountOf(c).received,
+      cell: c => <CellAmount tone="in">{fmtMoney(accountOf(c).received)}</CellAmount> },
+    // Sorts by the money to settle either way — the page's own order. In Excel
+    // one signed figure: plus, they owe us; minus, we hold their credit.
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: weight,
+      csv: c => Math.round((accountOf(c).outstanding - accountOf(c).credit) * 100) / 100,
+      cell: c => {
+        const a = accountOf(c);
+        if (a.outstanding > 0) return (
+          <div>
+            <CellAmount tone="out">{fmtMoney(a.outstanding)}</CellAmount>
+            {a.credit > 0 && <p className="text-[10px] text-success tabular-nums whitespace-nowrap">+{fmtMoney(a.credit)} credit</p>}
+          </div>
+        );
+        if (a.credit > 0) return <div><CellAmount tone="in">{fmtMoney(a.credit)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">credit held</p></div>;
+        return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Clear</span>;
+      } },
+    { key: "seen", header: "Last seen", kind: "date", sortValue: c => loginOf.get(c.id)?.lastActiveAt,
+      csv: c => { const u = loginOf.get(c.id); return !u ? "" : isOnline(u.lastActiveAt) ? "Online" : timeAgo(u.lastActiveAt); },
+      cell: c => {
+        const u = loginOf.get(c.id);
+        if (!u) return <span className="text-muted-foreground/50">—</span>;
+        return isOnline(u.lastActiveAt) ? <CellTag tone="green">Online</CellTag> : <CellDate>{timeAgo(u.lastActiveAt)}</CellDate>;
+      } },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -385,63 +445,43 @@ export function ClientsPage() {
         </div>
       </div>
 
-      {/* ── List view — avatar, company/owner, status + order counts, quick link ── */}
+      {/* ── List view — the shared table: sort by any heading, Excel, pages.
+          The search and company filter above narrow it, as they do the grid. ── */}
       {view === "list" && (
-        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
-          {paged.map(c => {
-            const orderCount = db.orders.filter(o => o.clientId === c.id).length;
-            const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
-            const acc = accounts.get(c.id)!;
-            const clientUser = db.users.find(u => u.clientId === c.id);
-            return (
-              <Link key={c.id} to={`/clients/${c.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
-                <div className="relative shrink-0">
-                  <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display grid place-items-center ring-1 ring-primary/10">
-                    {(c.companyName || "?").charAt(0).toUpperCase()}
-                  </div>
-                  <span
-                    className={`absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ring-2 ring-white ${isOnline(clientUser?.lastActiveAt) ? "bg-success" : "bg-muted-foreground/40"}`}
-                    title={isOnline(clientUser?.lastActiveAt) ? "Online" : `Last seen ${timeAgo(clientUser?.lastActiveAt)}`}
-                  />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-brand-dark truncate">{c.companyName}{c.status !== "active" && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}{multiCo && <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary">{companyById(dbNow.settings, companyIdOfClient(c)).name}</span>}</p>
-                  <p className="text-xs text-muted-foreground truncate">
-                    {c.ownerName || c.email || c.phone || "—"}
-                    {clientUser && (
-                      <span className={isOnline(clientUser.lastActiveAt) ? "text-success" : ""}>
-                        {" · "}{isOnline(clientUser.lastActiveAt) ? "Online" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
-                      </span>
-                    )}
-                  </p>
-                </div>
-                {/* Billed / Received / Balance — segmented ledger panel */}
-                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
-                  <div className="px-3.5 py-1.5 min-w-[84px]"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Billed</p><p className="text-xs font-medium tabular-nums text-brand-dark">{fmtMoney(acc.billed)}</p></div>
-                  <div className="px-3.5 py-1.5 min-w-[84px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Received</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoney(acc.received)}</p></div>
-                  <div className="px-3.5 py-1.5 min-w-[92px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
-                    {acc.outstanding > 0
-                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoney(acc.outstanding)}</p>
-                      : <p className="text-xs font-semibold text-success">✓ Clear</p>}
-                    <p className="text-[9px] text-muted-foreground leading-tight">{orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}</p>
-                  </div>
-                </div>
-                {/* Mobile — billed + balance */}
-                <div className="sm:hidden text-right shrink-0">
-                  <p className="text-sm font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
-                  <p className="text-[10px]">
-                    <span className="text-success font-medium">{fmtMoney(acc.received)} recv</span>
-                    {acc.outstanding > 0 && <span className="text-destructive font-medium"> · {fmtMoney(acc.outstanding)} due</span>}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? ` · ${activeCount} active` : ""}
-                  </p>
-                </div>
-                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
-              </Link>
-            );
-          })}
-          {total === 0 && <div className="p-12 text-center text-muted-foreground">No clients found.</div>}
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="clients"
+            noun="client"
+            rows={list}
+            columns={columns}
+            rowKey={c => c.id}
+            defaultSort={{ key: "balance", dir: "desc" }}
+            rowHref={c => `/clients/${c.id}`}
+            exportName="Clients"
+            totals={{
+              orders: rows => rows.reduce((s, c) => s + statsOf(c).total, 0),
+              billed: rows => fmtMoney(rows.reduce((s, c) => s + accountOf(c).billed, 0)),
+              received: rows => <span className="text-success">{fmtMoney(rows.reduce((s, c) => s + accountOf(c).received, 0))}</span>,
+              balance: rows => {
+                const due = rows.reduce((s, c) => s + accountOf(c).outstanding, 0);
+                const held = rows.reduce((s, c) => s + accountOf(c).credit, 0);
+                return <><span className="text-destructive">{fmtMoney(due)}</span>{held > 0 && <span className="text-success"> · +{fmtMoney(held)}</span>}</>;
+              },
+            }}
+            // The grid card's buttons, same permissions; no ⋯ for someone who
+            // may use none of them.
+            rowActions={mayExport || (staff && (can("clients", "edit") || can("clients", "delete"))) ? c => [
+              { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
+              { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff && can("clients", "edit") },
+              { label: c.productPhotoAccess ? "Revoke photo access" : "Grant photo access", icon: Camera,
+                hint: c.productPhotoAccess ? "Product Photos access is on" : "Product Photos access is off",
+                onSelect: () => togglePhotoAccess(c), show: staff && can("clients", "edit") },
+              { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff && can("clients", "edit") },
+              { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff && can("clients", "edit") },
+              { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff && can("clients", "delete") },
+            ] : undefined}
+            emptyText="No clients found."
+          />
         </div>
       )}
 
@@ -584,12 +624,15 @@ export function ClientsPage() {
       </div>
       )}
 
-      <PaginationBar
-        page={page}
-        totalPages={totalPages}
-        onPageChange={setPage}
-        label={total > 0 ? `Showing ${start + 1}–${end} of ${total} clients` : undefined}
-      />
+      {/* The list pages itself; these pages are the grid's. */}
+      {view === "grid" && (
+        <PaginationBar
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          label={total > 0 ? `Showing ${start + 1}–${end} of ${total} clients` : undefined}
+        />
+      )}
     </div>
   );
 }

@@ -7,8 +7,9 @@ import { useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { DataTable, CellMain, CellTag, CellDate, type DataColumn } from "@/components/DataTable";
 import {
-  History, RefreshCw, Search, Undo2, ChevronDown, Download, Printer, LogIn, Pencil, Plus, Trash2, Lock, Loader2,
+  History, RefreshCw, Search, Undo2, Download, Printer, LogIn, Pencil, Plus, Trash2, Lock, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
@@ -89,7 +90,6 @@ export function ActivityPage() {
   const [mod, setMod] = useState("all");
   const [kind, setKind] = useState("all");
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
   const [blocked, setBlocked] = useState<Record<string, { reason: string; moved?: string[] }>>({});
 
   const range = () => ({
@@ -129,8 +129,8 @@ export function ActivityPage() {
   const tryUndo = async (e: ActivityEntry) => {
     const check = undoCheck(e);
     if (!check.ok) {
+      // Shown under the entry's summary, so the reason is in view at once.
       setBlocked(prev => ({ ...prev, [e.id]: check }));
-      setOpen(e.id);
       return;
     }
     if (!(await confirmBox(`Undo this?\n\n${e.summary}\n\nEvery record it changed goes back exactly as it was before. The undo is recorded too.`))) return;
@@ -142,6 +142,40 @@ export function ActivityPage() {
       toast.error(err instanceof Error ? err.message : "Could not undo");
     }
   };
+
+  const fmtAt = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const cantUndoNote = (e: ActivityEntry) => !e.undoable && !!e.undoBlocker && e.kind === "change";
+  // Only rows with something to show open; the rest have no chevron.
+  const hasDetail = (e: ActivityEntry) => !!(e.changes?.length || e.meta || e.truncated || cantUndoNote(e));
+  // A summary is the whole story of a line, so it wraps rather than being cut off —
+  // narrower on a phone, where this column stays in view.
+  const wrap = "block whitespace-normal max-md:max-w-[14rem]";
+  const columns: DataColumn<ActivityEntry>[] = [
+    { key: "what", header: "What", always: true, sortValue: e => e.summary,
+      cell: e => {
+        const b = blocked[e.id];
+        return (
+          <div className="flex items-start gap-2.5">
+            <div className="mt-0.5 shrink-0"><KindIcon e={e} /></div>
+            <div className="min-w-0">
+              <CellMain
+                title={<span className={`${wrap} ${e.undoneAt ? "line-through text-muted-foreground" : ""}`}>{e.summary}</span>}
+                sub={e.undoneAt ? <span className="text-amber-700">Undone by {e.undoneByName}</span> : undefined} />
+              {b && (
+                <div className={`${wrap} max-w-[22rem] mt-1.5 rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-xs`}>
+                  <p className="font-semibold text-destructive">{b.reason}</p>
+                  {b.moved?.map(m => <p key={m} className="text-muted-foreground">• {m}</p>)}
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      } },
+    { key: "who", header: "Who", sortValue: e => e.actorName,
+      cell: e => <CellMain title={e.actorName} sub={ROLE_LABEL[e.actorRole] ?? e.actorRole} /> },
+    { key: "section", header: "Section", sortValue: e => moduleLabel(e.module), cell: e => <CellTag>{moduleLabel(e.module)}</CellTag> },
+    { key: "when", header: "When", kind: "date", sortValue: e => e.at, cell: e => <CellDate>{fmtAt(e.at)}</CellDate> },
+  ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
@@ -203,62 +237,42 @@ export function ActivityPage() {
           </div>
 
           {/* ── The log ── */}
-          <div className="card-luxe divide-y divide-border/50 overflow-hidden">
-            {shown.length === 0 && !loading && (
-              <div className="p-10 text-center text-sm text-muted-foreground">Nothing recorded for these filters.</div>
-            )}
-            {shown.map(e => {
-              const isOpen = open === e.id;
-              const b = blocked[e.id];
-              return (
-                <div key={e.id} className={e.undoneAt ? "bg-secondary/30" : ""}>
-                  <div className="flex items-start gap-3 px-4 py-3">
-                    <div className="mt-0.5 shrink-0"><KindIcon e={e} /></div>
-                    <button onClick={() => setOpen(isOpen ? null : e.id)} className="flex-1 min-w-0 text-left">
-                      <p className={`text-sm ${e.undoneAt ? "line-through text-muted-foreground" : "text-brand-dark"}`}>{e.summary}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        <span className="font-medium text-foreground/80">{e.actorName}</span>
-                        <span> · {ROLE_LABEL[e.actorRole] ?? e.actorRole}</span>
-                        <span> · {moduleLabel(e.module)}</span>
-                        <span> · {new Date(e.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
-                        {e.undoneAt && <span className="text-amber-700"> · undone by {e.undoneByName}</span>}
-                      </p>
-                    </button>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                      {e.kind !== "undo" && !e.undoneAt && e.undoable && (
-                        <Button size="sm" variant="outline" onClick={() => tryUndo(e)} className="h-8 rounded-lg gap-1.5 text-xs">
-                          <Undo2 className="h-3.5 w-3.5" /> Undo
-                        </Button>
-                      )}
-                      {(e.changes?.length || e.meta) && (
-                        <button onClick={() => setOpen(isOpen ? null : e.id)} className="h-8 w-8 grid place-items-center rounded-lg hover:bg-secondary" aria-label="Details">
-                          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                        </button>
-                      )}
-                    </div>
+          {/* The page's own filters above do the searching. Keyed on them so a
+              new view starts on page 1. A click on a row opens what it changed. */}
+          <div className="card-luxe p-3 sm:p-4 space-y-2">
+            <DataTable
+              resetKey={`${who}|${mod}|${kind}|${q}|${from}|${to}`}
+              id="activity"
+              noun="event"
+              rows={shown}
+              columns={columns}
+              rowKey={e => e.id}
+              defaultSort={{ key: "when", dir: "desc" }}
+              rowClassName={e => (e.undoneAt ? "bg-secondary/30" : "")}
+              expand={{
+                can: hasDetail,
+                render: e => (
+                  <div className="space-y-2">
+                    {cantUndoNote(e) && (
+                      <p className="text-[11px] text-muted-foreground">Can&rsquo;t be undone automatically: {e.undoBlocker}</p>
+                    )}
+                    {e.truncated && <p className="text-[11px] text-amber-700">A very large change — the list of what changed is kept, the full copies are not.</p>}
+                    {e.changes?.map(c => <ChangeDetail key={`${c.col}/${c.id}`} c={c} />)}
+                    {e.meta && !e.changes?.length && (
+                      <p className="text-xs text-muted-foreground">{Object.entries(e.meta).map(([k, v]) => `${fieldLabel(k)}: ${show(v)}`).join(" · ")}</p>
+                    )}
                   </div>
-                  {isOpen && (
-                    <div className="px-4 pb-3 pl-11 space-y-2">
-                      {b && (
-                        <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-2.5 text-xs">
-                          <p className="font-semibold text-destructive">{b.reason}</p>
-                          {b.moved?.map(m => <p key={m} className="text-muted-foreground">• {m}</p>)}
-                        </div>
-                      )}
-                      {!e.undoable && e.undoBlocker && e.kind === "change" && (
-                        <p className="text-[11px] text-muted-foreground">Can&rsquo;t be undone automatically: {e.undoBlocker}</p>
-                      )}
-                      {e.truncated && <p className="text-[11px] text-amber-700">A very large change — the list of what changed is kept, the full copies are not.</p>}
-                      {e.changes?.map(c => <ChangeDetail key={`${c.col}/${c.id}`} c={c} />)}
-                      {e.meta && !e.changes?.length && (
-                        <p className="text-xs text-muted-foreground">{Object.entries(e.meta).map(([k, v]) => `${fieldLabel(k)}: ${show(v)}`).join(" · ")}</p>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-            {loading && <div className="p-6 grid place-items-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
+                ),
+              }}
+              rowActions={e => [
+                { label: "Undo", icon: Undo2, hint: "Every record it changed goes back as it was",
+                  show: e.kind !== "undo" && !e.undoneAt && e.undoable, onSelect: () => tryUndo(e) },
+              ]}
+              emptyText={loading
+                ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto" />
+                : "Nothing recorded for these filters."}
+            />
+            {loading && shown.length > 0 && <div className="p-4 grid place-items-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
           </div>
 
           {cursor && !loading && (

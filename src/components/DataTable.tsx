@@ -1,16 +1,23 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Columns3, Download, Search, ChevronLeft, ChevronRight, Rows3 } from "lucide-react";
+import { Fragment, useMemo, useState, type MouseEvent, type ReactNode } from "react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, Columns3, Download, Search, ChevronLeft, ChevronRight, Minus, Rows3 } from "lucide-react";
+import { useMayExport } from "@/hooks/useCan";
+import { useNavigate } from "react-router-dom";
 import { downloadCsv } from "@/lib/ledgerExport";
 import {
   DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 
 /**
- * A full data table: sort by any column, search, show or hide columns, row
+ * The app's one table: sort by any column, search, show or hide columns, row
  * spacing, Excel export and pages. Choices (sort, hidden columns, spacing,
- * rows per page) are remembered per table on this device.
+ * rows per page) are remembered per table on this device. Every list of
+ * records — expenses, payments, ledgers, people — is one of these, so they all
+ * look and work the same.
  *
- * Read-only by design: it shows rows, the page decides what a row links to.
+ * It shows rows; the page decides what a row opens (onRowClick), what can be
+ * done to it (rowActions, a ⋯ at the end of the row) and whether rows can be
+ * ticked (selected).
  */
 export interface DataColumn<T> {
   key: string;
@@ -40,10 +47,24 @@ const read = (id: string): Prefs => { try { return JSON.parse(localStorage.getIt
 const write = (id: string, p: Prefs) => { try { localStorage.setItem(`dt:${id}`, JSON.stringify(p)); } catch { /* private window */ } };
 
 const PAD = { compact: "py-1.5", normal: "py-2.5", spacious: "py-3.5" } as const;
+/** A click on something inside the row that does its own thing. */
+const OWN_CLICK = "button,a,input,select,textarea,label,[role=menuitem],[role=checkbox],[data-no-row]";
+
+/** The tick box, as the table draws it — also for a "select all" in its header. */
+function Tick({ state, onClick, label }: { state: "on" | "off" | "some"; onClick: () => void; label: string }) {
+  return (
+    <button type="button" role="checkbox" aria-checked={state === "some" ? "mixed" : state === "on"} aria-label={label}
+      onClick={e => { e.stopPropagation(); onClick(); }}
+      className={`h-[18px] w-[18px] grid place-items-center rounded-[5px] border transition-colors ${state !== "off" ? "bg-primary border-primary text-white" : "bg-white border-border hover:border-primary text-transparent"}`}>
+      {state === "some" ? <Minus className="h-3 w-3" /> : <Check className="h-3 w-3" />}
+    </button>
+  );
+}
 
 export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
-  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick,
+  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, selected, onSelectedChange,
+  rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
@@ -55,15 +76,46 @@ export function DataTable<T>({
   searchText?: (row: T) => string;
   /** File name for the Excel download; no download without it. */
   exportName?: string;
-  emptyText?: string;
+  emptyText?: ReactNode;
   pageSizes?: number[];
   /** Scroll inside the table, with the header held at the top. */
   maxHeight?: string;
   /** A totals row, below the rows (shown columns only). */
   footer?: (shown: DataColumn<T>[], rows: T[]) => ReactNode;
+  /** The usual totals row: a figure under each column named here, worked
+   *  out from the rows the search left; the label in the first column. */
+  totals?: Partial<Record<string, (rows: T[]) => ReactNode>>;
+  totalsLabel?: string;
+  /** Rows that open to show more under them: what to show, and which rows have
+   *  anything. Without onRowClick, a click on the row opens it too. */
+  expand?: { render: (row: T) => ReactNode; can?: (row: T) => boolean };
   toolbarExtra?: ReactNode;
   /** Opens a row — the whole row is the button. */
   onRowClick?: (row: T) => void;
+  /** The page a row opens (Ctrl/⌘-click: in a new tab). Instead of onRowClick. */
+  rowHref?: (row: T) => string;
+  /** Rows that are not records to sort or search — an opening balance, say.
+   *  Shown on the last page (or the first, with pinnedAt "top"). */
+  pinnedRows?: T[];
+  pinnedAt?: "top" | "bottom";
+  /** Changes when the page's own filters do: the table goes back to page 1
+   *  (keeping its search, sort and open rows). */
+  resetKey?: string | number;
+  /** Which rows onRowClick / rowHref apply to; the rest don't look clickable. */
+  canClickRow?: (row: T) => boolean;
+  /** What can be done to a row: a ⋯ at its end. */
+  rowActions?: (row: T) => MoreAction[];
+  /** Tick boxes: the keys ticked, and what to do when they change. */
+  selected?: Set<string>;
+  onSelectedChange?: (next: Set<string>) => void;
+  rowClassName?: (row: T) => string;
+  /** "none": just the table — for a short list inside a card or dialog. */
+  controls?: "full" | "none";
+  /** What a row is, for the count: "expense" → "68 expenses". */
+  noun?: string;
+  /** When adding "s" is wrong: "factories", "entries". */
+  plural?: string;
+  searchPlaceholder?: string;
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => read(id));
   const save = (p: Prefs) => { setPrefs(p); write(id, p); };
@@ -73,11 +125,18 @@ export function DataTable<T>({
   const pageSize = prefs.pageSize ?? pageSizes[0];
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [lastReset, setLastReset] = useState(resetKey);
+  if (resetKey !== lastReset) { setLastReset(resetKey); setPage(1); }
+  const full = controls === "full";
+  const mayExport = useMayExport();
+  const [open, setOpen] = useState<Set<string>>(new Set());
+  const toggleOpen = (k: string) => setOpen(prev => { const n = new Set(prev); if (!n.delete(k)) n.add(k); return n; });
+  const ticking = !!selected && !!onSelectedChange;
 
   const shown = columns.filter(c => c.always || !hidden.has(c.key));
 
   const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
+    const t = full ? q.trim().toLowerCase() : "";
     let list = t && searchText ? rows.filter(r => searchText(r).toLowerCase().includes(t)) : rows.slice();
     const col = sort && columns.find(c => c.key === sort.key);
     if (col?.sortValue) {
@@ -95,7 +154,7 @@ export function DataTable<T>({
         .map(x => x.r);
     }
     return list;
-  }, [rows, q, sort?.key, sort?.dir, columns, searchText]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, q, full, sort?.key, sort?.dir, columns, searchText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const cur = Math.min(page, pages);
@@ -138,22 +197,55 @@ export function DataTable<T>({
   };
   const alignCls = (a?: string) => (a === "right" ? "text-right" : a === "center" ? "text-center" : "text-left");
 
+  // Ticking: one row, or every row the search left (not just this page).
+  const keysShown = filtered.map(rowKey);
+  const tickedShown = ticking ? keysShown.filter(k => selected!.has(k)).length : 0;
+  const allState: "on" | "off" | "some" = !tickedShown ? "off" : tickedShown === keysShown.length ? "on" : "some";
+  const toggleRow = (k: string) => {
+    const next = new Set(selected); if (!next.delete(k)) next.add(k); onSelectedChange!(next);
+  };
+  const toggleAll = () => {
+    const next = new Set(selected);
+    if (allState === "on") keysShown.forEach(k => next.delete(k)); else keysShown.forEach(k => next.add(k));
+    onSelectedChange!(next);
+  };
+  const navigate = useNavigate();
+  const canOpen = (r: T) => !!expand && (expand.can ? expand.can(r) : true);
+  const pageable = !!onRowClick || !!rowHref;
+  const rowClick = (r: T) => (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest(OWN_CLICK)) return;
+    if (pageable && canClickRow && !canClickRow(r)) { if (canOpen(r)) toggleOpen(rowKey(r)); return; }
+    if (rowHref) {
+      const href = rowHref(r);
+      if (e.ctrlKey || e.metaKey) window.open(href, "_blank", "noopener");
+      else navigate(href);
+    } else if (onRowClick) onRowClick(r);
+    else if (canOpen(r)) toggleOpen(rowKey(r));
+  };
+  // On a phone the table scrolls sideways; what a row is stays in view.
+  const firstKey = shown[0]?.key;
+  const stick = "max-md:sticky max-md:z-[1] max-md:bg-white";
+  const stickLeft = ticking ? "max-md:left-10" : "max-md:left-0";
+  const cols = shown.length + (ticking ? 1 : 0) + (rowActions ? 1 : 0) + (expand ? 1 : 0);
+  const countText = `${filtered.length} ${filtered.length === 1 ? noun : plural ?? (noun.endsWith("s") ? noun : `${noun}s`)}`;
+
   return (
     <div className="space-y-2">
+      {full && (
       <div className="flex flex-wrap items-center gap-2">
         {searchText && (
           <div className="relative flex-1 min-w-[160px] max-w-xs">
             <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="Search this table"
+            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder={searchPlaceholder} aria-label={searchPlaceholder}
               className="h-8 w-full rounded-lg border border-border bg-white pl-8 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
           </div>
         )}
-        <span className="text-[11px] text-muted-foreground">{filtered.length} row{filtered.length !== 1 ? "s" : ""}{q ? ` of ${rows.length}` : ""}</span>
+        <span className="text-[11px] text-muted-foreground">{countText}{q ? ` of ${rows.length}` : ""}{ticking && selected!.size ? ` · ${selected!.size} ticked` : ""}</span>
         {toolbarExtra}
         <div className="ml-auto flex items-center gap-1.5">
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Rows3 className="h-3.5 w-3.5" />Spacing</button>
+              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Spacing</span></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="rounded-xl">
               {(["compact", "normal", "spacious"] as const).map(d => (
@@ -163,7 +255,7 @@ export function DataTable<T>({
           </DropdownMenu>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Columns3 className="h-3.5 w-3.5" />Columns</button>
+              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Columns3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Columns</span></button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="rounded-xl w-52">
               <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Show columns</DropdownMenuLabel>
@@ -174,23 +266,31 @@ export function DataTable<T>({
               ))}
             </DropdownMenuContent>
           </DropdownMenu>
-          {exportName && (
+          {exportName && mayExport && (
             <button type="button" onClick={exportCsv} className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary">
               <Download className="h-3.5 w-3.5" />Excel
             </button>
           )}
         </div>
       </div>
+      )}
 
-      <div className="overflow-x-auto rounded-xl border border-border/60 bg-white" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
+      {/* relative: the hidden column labels are placed inside this box, so
+          they can't widen the page past a phone's screen. */}
+      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
         <table className="w-full text-sm">
-          <thead className={maxHeight ? "sticky top-0 z-10 bg-white" : undefined}>
-            <tr>
+          <thead className={`bg-secondary/40 ${maxHeight ? "sticky top-0 z-10" : ""}`}>
+            <tr className="border-b border-border/60">
+              {ticking && (
+                <th className={`w-10 px-3 py-3 ${stick} max-md:left-0 max-md:bg-secondary`}>
+                  {keysShown.length > 0 && <Tick state={allState} onClick={toggleAll} label={allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`} />}
+                </th>
+              )}
               {shown.map(c => {
                 const on = sort?.key === c.key;
                 return (
                   <th key={c.key} title={hint(c)}
-                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary bg-primary/[0.06] shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "cursor-pointer select-none hover:text-primary hover:bg-primary/[0.04] transition-colors" : ""}`}
+                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary bg-primary/[0.06] shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "cursor-pointer select-none hover:text-primary hover:bg-primary/[0.04] transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} max-md:bg-secondary` : ""}`}
                     onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}
@@ -201,20 +301,69 @@ export function DataTable<T>({
                   </th>
                 );
               })}
+              {expand && <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>}
+              {rowActions && <th className="w-12 px-2 py-3"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
-            {visible.map(r => (
-              <tr key={rowKey(r)} onClick={onRowClick ? () => onRowClick(r) : undefined}
-                className={`hover:bg-secondary/30 transition-colors ${onRowClick ? "cursor-pointer" : ""}`}>
-                {shown.map(c => <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${sort?.key === c.key ? "bg-primary/[0.03]" : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>)}
-              </tr>
-            ))}
+            {[...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !q ? pinnedRows ?? [] : [])].map(r => {
+              const k = rowKey(r);
+              const pin = !!pinnedRows?.includes(r);
+              const on = !pin && ticking && selected!.has(k);
+              const opens = !pin && canOpen(r), isOpen = opens && open.has(k);
+              const opensPage = !pin && pageable && (canClickRow ? canClickRow(r) : true);
+              return (
+                <Fragment key={k}>
+                <tr onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
+                  className={`group transition-colors ${pin ? "bg-secondary/25 italic" : on ? "bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
+                  {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${stick} max-md:left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
+                  {shown.map(c => (
+                    <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${sort?.key === c.key ? "bg-primary/[0.03]" : ""} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
+                  ))}
+                  {expand && (
+                    <td className={`w-10 px-2 ${PAD[dense]} text-center`}>
+                      {opens && (
+                        <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Hide details" : "Show details"}
+                          className="h-7 w-7 inline-grid place-items-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground">
+                          <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                        </button>
+                      )}
+                    </td>
+                  )}
+                  {rowActions && (
+                    <td className={`w-12 px-2 ${PAD[dense]} text-right`} data-no-row>
+                      {!pin && <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100" />}
+                    </td>
+                  )}
+                </tr>
+                {isOpen && (
+                  <tr className="bg-secondary/20">
+                    <td colSpan={cols} className="px-3 sm:px-5 py-3">{expand!.render(r)}</td>
+                  </tr>
+                )}
+                </Fragment>
+              );
+            })}
             {!visible.length && (
-              <tr><td colSpan={shown.length} className="px-3 py-10 text-center text-xs text-muted-foreground">{q ? "No row matches the search." : emptyText}</td></tr>
+              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">{q ? "No row matches the search." : emptyText}</td></tr>
             )}
           </tbody>
-          {footer && filtered.length > 0 && <tfoot>{footer(shown, filtered)}</tfoot>}
+          {footer && filtered.length > 0 && <tfoot className="border-t-2 border-border/70 bg-secondary/30">{footer(shown, filtered)}</tfoot>}
+          {!footer && totals && filtered.length > 0 && (
+            <tfoot className="border-t-2 border-border/70 bg-secondary/30">
+              <tr>
+                {ticking && <td className={`w-10 ${stick} max-md:left-0 max-md:bg-secondary`} />}
+                {shown.map((c, i) => (
+                  <td key={c.key} className={`px-3 py-2.5 ${alignCls(c.align)} font-bold text-brand-dark ${c.key === firstKey ? `${stick} ${stickLeft} max-md:bg-secondary` : ""}`}>
+                    {totals[c.key] ? <span className="tabular-nums whitespace-nowrap">{totals[c.key]!(filtered)}</span>
+                      : i === 0 ? <span className="text-xs uppercase tracking-wider">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</span> : null}
+                  </td>
+                ))}
+                {expand && <td />}
+                {rowActions && <td />}
+              </tr>
+            </tfoot>
+          )}
         </table>
       </div>
 
@@ -236,4 +385,39 @@ export function DataTable<T>({
       )}
     </div>
   );
+}
+
+/* ── Cells: the same look in every table ─────────────────────────────────── */
+
+/** What a row is: a name in bold, a quieter line under it. */
+export function CellMain({ title, sub, className = "" }: { title: ReactNode; sub?: ReactNode; className?: string }) {
+  return (
+    <div className={`min-w-0 ${className}`}>
+      <p className="font-medium text-brand-dark leading-snug truncate max-w-[22rem]">{title}</p>
+      {sub && <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[22rem] mt-0.5">{sub}</p>}
+    </div>
+  );
+}
+
+/** A small label in a cell: a category, a status, who it was paid to. */
+export function CellTag({ children, tone = "neutral" }: { children: ReactNode; tone?: "neutral" | "green" | "red" | "amber" | "blue" | "violet" }) {
+  const t = {
+    neutral: "bg-secondary text-foreground/75 ring-border/70",
+    green: "bg-success/10 text-success ring-success/25",
+    red: "bg-destructive/10 text-destructive ring-destructive/25",
+    amber: "bg-amber-500/10 text-amber-800 ring-amber-500/25",
+    blue: "bg-primary/10 text-primary ring-primary/25",
+    violet: "bg-violet-500/10 text-violet-700 ring-violet-500/25",
+  }[tone];
+  return <span className={`inline-flex items-center whitespace-nowrap text-[11px] font-medium px-2 py-0.5 rounded-full ring-1 ${t}`}>{children}</span>;
+}
+
+/** An amount: figures lined up; red for money out, green for money in. */
+export function CellAmount({ children, tone }: { children: ReactNode; tone?: "in" | "out" }) {
+  return <span className={`tabular-nums whitespace-nowrap font-semibold ${tone === "out" ? "text-destructive" : tone === "in" ? "text-success" : "text-brand-dark"}`}>{children}</span>;
+}
+
+/** A date, never broken across lines. */
+export function CellDate({ children }: { children: ReactNode }) {
+  return <span className="whitespace-nowrap text-muted-foreground tabular-nums">{children}</span>;
 }

@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
+import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useAuth } from "@/lib/auth";
 import { updateDb, fmtMoney, fmtDate, orderTotal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -46,16 +46,16 @@ function toDateStr(iso: string) {
   return iso.slice(0, 10); // "YYYY-MM-DD"
 }
 
-const TYPE_STYLE: Record<PassbookRowType, string> = {
-  "Advance": "bg-primary/10 text-primary",
-  "Payment": "bg-primary/10 text-primary",
-  "Final Payment": "bg-success/10 text-success",
-  "Expense": "bg-destructive/10 text-destructive",
-  "Supplier Payment": "bg-amber-500/10 text-amber-700",
-  "Factory Charges": "bg-orange-500/10 text-orange-700",
-  "Locker Income": "bg-success/10 text-success",
-  "Locker Expense": "bg-destructive/10 text-destructive",
-  "Transfer": "bg-slate-500/10 text-slate-700",
+const TYPE_TONE: Record<PassbookRowType, "neutral" | "green" | "red" | "amber" | "blue" | "violet"> = {
+  "Advance": "blue",
+  "Payment": "blue",
+  "Final Payment": "green",
+  "Expense": "red",
+  "Supplier Payment": "amber",
+  "Factory Charges": "violet",
+  "Locker Income": "green",
+  "Locker Expense": "red",
+  "Transfer": "neutral",
 };
 
 /* ─── Page ───────────────────────────────────────────────────── */
@@ -201,10 +201,27 @@ export function IncomePage() {
 
   const hasActiveFilter = dateFrom || dateTo || clientFilter !== "all";
 
-  /* Pagination */
-  const PAGE_SIZE = 15;
-  // The last 15 days first, older transactions as you scroll; totals count them all.
-  const { w, paged, setPage, start, end } = useScrollPages(filtered, r => r.date, { filtered: !!(dateFrom || dateTo || clientFilter !== "all"), resetKey: [curTab, dateFrom, dateTo, clientFilter] });
+  /* The table — every filtered row, paged by the table itself; totals count them all. */
+  const signed = (r: PassbookRow) => (r.direction === "in" ? r.amount : -r.amount);
+  const columns: DataColumn<PassbookRow>[] = [
+    { key: "date", header: "Date", always: true, kind: "date", sortValue: r => r.date,
+      cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+    { key: "party", header: "Party", sortValue: r => r.party,
+      cell: r => <span className="font-medium max-w-[160px] truncate block">{r.party}</span> },
+    { key: "reference", header: "Reference", sortValue: r => r.link?.label ?? "",
+      cell: r => (r.link ? <Link to={r.link.to} className="text-primary hover:underline font-mono text-xs font-semibold whitespace-nowrap">{r.link.label}</Link> : null) },
+    { key: "type", header: "Type", sortValue: r => r.type,
+      cell: r => (
+        <CellTag tone={TYPE_TONE[r.type]}>
+          <span className="inline-flex items-center gap-1">{r.direction === "in" ? <CreditCard className="h-3 w-3" /> : <Receipt className="h-3 w-3" />}{r.type}</span>
+        </CellTag>
+      ) },
+    { key: "description", header: "Description", sortValue: r => r.description,
+      cell: r => <span title={r.description} className="text-muted-foreground text-xs max-w-[200px] truncate block">{r.description}</span> },
+    // Signed, so "high to low" puts the biggest money in first and the biggest out last.
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: signed,
+      cell: r => <CellAmount tone={r.direction}>{r.direction === "in" ? "+" : "−"}{fmt(r.amount)}</CellAmount> },
+  ];
 
   const exportCsv = () => {
     downloadCsv(
@@ -271,7 +288,7 @@ export function IncomePage() {
           {(["USD", "INR"] as const).map(c => (
             <button
               key={c}
-              onClick={() => { setCurTab(c); setPage(1); }}
+              onClick={() => setCurTab(c)}
               className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
                 curTab === c ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"
               }`}
@@ -363,149 +380,44 @@ export function IncomePage() {
       <div className="card-luxe overflow-hidden">
         <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-2 flex-wrap">
           <h2 className="font-semibold text-brand-dark">All Transactions</h2>
-          {filtered.length > 0 && (
-            <p className="text-xs text-muted-foreground">
-              Showing {start + 1}–{end} of {filtered.length}
-            </p>
-          )}
         </div>
 
-        {/* Desktop table */}
-        <div className="hidden md:block overflow-x-auto">
-          <table className="table-luxe w-full text-sm">
-            <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="text-left px-5 py-3">Date</th>
-                <th className="text-left px-4 py-3">Party</th>
-                <th className="text-left px-4 py-3">Reference</th>
-                <th className="text-left px-4 py-3">Type</th>
-                <th className="text-left px-4 py-3">Description</th>
-                <th className="text-right px-5 py-3">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paged.map(row => (
-                <tr
-                  key={row.id}
-                  onClick={() => openEdit(row)}
-                  className={`border-t border-border/40 hover:bg-secondary/30 transition-colors ${row.editable && canEdit ? "cursor-pointer" : ""}`}
-                >
-                  <td className="px-5 py-3.5 text-muted-foreground text-xs whitespace-nowrap">
-                    {fmtDate(row.date)}
-                  </td>
-                  <td className="px-4 py-3.5 font-medium max-w-[160px] truncate">
-                    {row.party}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    {row.link && (
-                      <Link
-                        to={row.link.to}
-                        onClick={e => e.stopPropagation()}
-                        className="text-primary hover:underline font-mono text-xs font-semibold"
-                      >
-                        {row.link.label}
-                      </Link>
-                    )}
-                  </td>
-                  <td className="px-4 py-3.5">
-                    <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full whitespace-nowrap ${TYPE_STYLE[row.type]}`}>
-                      {row.direction === "in" ? <CreditCard className="h-3 w-3" /> : <Receipt className="h-3 w-3" />}
-                      {row.type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3.5 text-muted-foreground text-xs max-w-[200px] truncate">
-                    {row.description}
-                  </td>
-                  <td className="px-5 py-3.5 text-right font-semibold whitespace-nowrap">
-                    <span className={`inline-flex items-center gap-1.5 justify-end ${row.direction === "in" ? "text-success" : "text-destructive"}`}>
-                      {row.direction === "in" ? "+" : "−"}{fmt(row.amount)}
-                      {row.editable && canEdit && <Pencil className="h-3 w-3 text-muted-foreground" />}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-12 text-center text-muted-foreground">
-                    No transactions found.
-                    {hasActiveFilter && (
-                      <button
-                        onClick={() => { setDateFrom(""); setDateTo(""); setClientFilter("all"); }}
-                        className="block mx-auto mt-2 text-xs text-primary hover:underline"
-                      >
-                        Clear filters
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-border/40">
-          {paged.map(row => (
-            <div
-              key={row.id}
-              onClick={() => openEdit(row)}
-              className={`p-4 space-y-2 ${row.editable && canEdit ? "active:bg-secondary/40" : ""}`}
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${TYPE_STYLE[row.type]}`}>
-                  {row.direction === "in" ? <CreditCard className="h-3 w-3" /> : <Receipt className="h-3 w-3" />}
-                  {row.type}
-                </span>
-                <span className={`font-display font-bold inline-flex items-center gap-1.5 ${row.direction === "in" ? "text-success" : "text-destructive"}`}>
-                  {row.direction === "in" ? "+" : "−"}{fmt(row.amount)}
-                  {row.editable && canEdit && <Pencil className="h-3 w-3 text-muted-foreground" />}
-                </span>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-sm font-medium truncate">{row.party}</p>
-                <p className="text-xs text-muted-foreground shrink-0">{fmtDate(row.date)}</p>
-              </div>
-              <div className="flex items-center justify-between gap-2">
-                <p className="text-xs text-muted-foreground truncate">{row.description}</p>
-                {row.link && (
-                  <Link
-                    to={row.link.to}
-                    onClick={e => e.stopPropagation()}
-                    className="text-primary hover:underline font-mono text-xs font-semibold shrink-0"
+        {/* Client payments open the edit dialog on a click; the rest are managed
+            on their own pages, so their rows don't look clickable. Keyed on the
+            tab and filters so a new view starts from its newest entry. */}
+        <div className="p-3 sm:p-4">
+          <DataTable
+            resetKey={`${curTab}|${dateFrom}|${dateTo}|${clientFilter}`}
+            id="passbook"
+            noun="transaction"
+            rows={filtered}
+            columns={columns}
+            rowKey={r => r.id}
+            defaultSort={{ key: "date", dir: "desc" }}
+            searchText={r => [r.party, r.link?.label, r.type, r.description].filter(Boolean).join(" ")}
+            searchPlaceholder="Search party, reference, description"
+            totalsLabel="Net"
+            totals={{ amount: rows => { const n = rows.reduce((s, r) => s + signed(r), 0); return <span className={n >= 0 ? "text-success" : "text-destructive"}>{fmt(n)}</span>; } }}
+            onRowClick={canEdit ? openEdit : undefined}
+            canClickRow={r => !!r.editable}
+            rowActions={canEdit ? r => [
+              { label: "Edit", icon: Pencil, hint: "Correct the amount or note, or delete it", onSelect: () => openEdit(r), show: !!r.editable },
+            ] : undefined}
+            emptyText={
+              <span className="inline-flex flex-col items-center gap-2">
+                No transactions found.
+                {hasActiveFilter && (
+                  <button
+                    onClick={() => { setDateFrom(""); setDateTo(""); setClientFilter("all"); }}
+                    className="text-xs text-primary hover:underline"
                   >
-                    {row.link.label}
-                  </Link>
+                    Clear filters
+                  </button>
                 )}
-              </div>
-            </div>
-          ))}
-          {filtered.length === 0 && (
-            <div className="p-12 text-center text-muted-foreground">
-              No transactions found.
-              {hasActiveFilter && (
-                <button
-                  onClick={() => { setDateFrom(""); setDateTo(""); setClientFilter("all"); }}
-                  className="block mx-auto mt-2 text-xs text-primary hover:underline"
-                >
-                  Clear filters
-                </button>
-              )}
-            </div>
-          )}
+              </span>
+            }
+          />
         </div>
-
-        {/* Running total row */}
-        {filtered.length > 0 && (
-          <div className="px-5 py-3 border-t border-border/60 bg-secondary/30 flex items-center justify-between">
-            <span className="text-xs text-muted-foreground">
-              Net for {filtered.length} transaction{filtered.length !== 1 ? "s" : ""}
-              {hasActiveFilter ? " (filtered)" : ""}
-            </span>
-            <span className={`font-display font-bold ${net >= 0 ? "text-success" : "text-destructive"}`}>{fmt(net)}</span>
-          </div>
-        )}
-
-        <LoadOlder w={w} noun="transactions" />
       </div>
 
       {/* ── Edit / delete transaction dialog ── */}

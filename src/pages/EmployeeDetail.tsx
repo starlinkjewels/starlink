@@ -2,14 +2,15 @@ import { useMayExport } from "@/hooks/useCan";
 import { MoreMenu } from "@/components/MoreMenu";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals, keptValue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
+import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Button } from "@/components/ui/button";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
-  ArrowLeft, Mail, Phone, Building2, Users, Package,
-  CheckCircle2, Clock, ListTodo, ExternalLink, History, Wallet, Receipt, FileSpreadsheet, FileText,
+  ArrowLeft, Mail, Phone, Building2, Users,
+  CheckCircle2, Clock, ListTodo, Wallet, Receipt, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -46,6 +47,36 @@ export function EmployeeDetailPage() {
   const tasks = (db.tasks ?? []).filter(t => t.assignedTo === employee.id);
   const pendingTasks = tasks.filter(t => !t.completed).length;
   const doneTasks = tasks.filter(t => t.completed).length;
+
+  // ── Assigned Clients and Order Activity: the shared table ──
+  const orderStats = new Map<string, { total: number; active: number }>();
+  for (const o of orders) {
+    const s = orderStats.get(o.clientId) ?? { total: 0, active: 0 };
+    s.total++;
+    if (!["Delivered", "Rejected"].includes(o.status)) s.active++;
+    orderStats.set(o.clientId, s);
+  }
+  const statsOf = (clientId: string) => orderStats.get(clientId) ?? { total: 0, active: 0 };
+  const clientColumns: DataColumn<Client>[] = [
+    { key: "client", header: "Client", always: true, sortValue: c => c.companyName, csv: c => c.companyName,
+      cell: c => <CellMain title={c.companyName} sub={c.ownerName || undefined} /> },
+    { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => statsOf(c.id).total,
+      cell: c => <span className="tabular-nums">{statsOf(c.id).total}</span> },
+    { key: "active", header: "Active", align: "right", kind: "number", sortValue: c => statsOf(c.id).active,
+      cell: c => { const n = statsOf(c.id).active; return <span className={`tabular-nums ${n > 0 ? "font-medium text-primary" : "text-muted-foreground/60"}`}>{n}</span>; } },
+  ];
+  const clientName = (id: string) => clients.find(c => c.id === id)?.companyName ?? "";
+  const orderColumns: DataColumn<Order>[] = [
+    { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
+      cell: o => <CellMain title={<span className="font-mono text-xs font-semibold">{o.orderNumber}</span>} sub={o.jewelleryType} /> },
+    { key: "client", header: "Client", sortValue: o => clientName(o.clientId),
+      cell: o => <span className="block max-w-[180px] truncate">{clientName(o.clientId) || "—"}</span> },
+    { key: "date", header: "Date", kind: "date", sortValue: o => o.createdAt, cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
+    // Green once it is paid in full.
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: o => o.amount,
+      cell: o => <CellAmount tone={balanceDue(o) === 0 && totalAdvance(o) > 0 ? "in" : undefined}>{fmtMoney(o.amount)}</CellAmount> },
+    { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
+  ];
 
   // Salary / wages / advances paid to this employee (expenses tagged to them).
   const salaryLedger = employeePayments(db.expenses, employee.id);
@@ -274,29 +305,21 @@ export function EmployeeDetailPage() {
             <p className="text-sm">No clients assigned to this employee yet.</p>
           </div>
         ) : (
-          <div className="divide-y divide-border/40">
-            {clients.map(c => {
-              const cOrders = db.orders.filter(o => o.clientId === c.id);
-              const cActive = cOrders.filter(o => !["Delivered", "Rejected"].includes(o.status)).length;
-              return (
-                <div key={c.id} className="flex items-center justify-between gap-3 p-4 hover:bg-secondary/20 transition-colors">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0">
-                      <Building2 className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-semibold text-sm truncate">{c.companyName}</p>
-                      <p className="text-xs text-muted-foreground truncate">{c.ownerName} · {cOrders.length} orders{cActive > 0 ? ` · ${cActive} active` : ""}</p>
-                    </div>
-                  </div>
-                  <Button asChild size="sm" variant="outline" className="rounded-xl gap-1.5 shrink-0">
-                    <Link to={`/clients/${c.id}`}>
-                      <History className="h-3.5 w-3.5" /> History
-                    </Link>
-                  </Button>
-                </div>
-              );
-            })}
+          <div className="p-3 sm:p-4">
+            <DataTable
+              id="employee-clients"
+              noun="client"
+              rows={clients}
+              columns={clientColumns}
+              rowKey={c => c.id}
+              rowHref={c => `/clients/${c.id}`}
+              // Just the table for a handful; search, columns and Excel once it grows.
+              controls={clients.length > 10 ? "full" : "none"}
+              searchText={c => `${c.companyName} ${c.ownerName}`}
+              searchPlaceholder="Search clients"
+              exportName={`Clients-${employee.name.replace(/\s+/g, "_")}`}
+              pageSizes={[10, 25, 50]}
+            />
           </div>
         )}
       </div>
@@ -310,30 +333,17 @@ export function EmployeeDetailPage() {
               <p className="text-xs text-muted-foreground mt-0.5">{deliveredOrders} delivered · {activeOrders} active</p>
             </div>
           </div>
-          <div className="divide-y divide-border/40">
-            {orders.slice(0, 12).map(o => {
-              const client = db.clients.find(c => c.id === o.clientId);
-              const adv = totalAdvance(o);
-              const bal = balanceDue(o);
-              return (
-                <Link key={o.id} to={`/orders/${o.id}`} className="flex items-center justify-between gap-3 p-4 hover:bg-secondary/20 transition-colors group">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0">
-                      <Package className="h-4.5 w-4.5 text-primary" />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-mono text-xs font-semibold text-brand-dark">{o.orderNumber}</p>
-                      <p className="text-xs text-muted-foreground truncate">{client?.companyName} · {o.jewelleryType} · {fmtDate(o.createdAt)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-3 shrink-0">
-                    <span className={`text-xs font-semibold ${bal === 0 && adv > 0 ? "text-success" : ""}`}>{fmtMoney(o.amount)}</span>
-                    <StatusBadge status={o.status} />
-                    <ExternalLink className="h-3.5 w-3.5 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-                  </div>
-                </Link>
-              );
-            })}
+          <div className="p-3 sm:p-4">
+            <DataTable
+              id="employee-orders"
+              noun="order"
+              rows={orders.slice(0, 12)}
+              columns={orderColumns}
+              rowKey={o => o.id}
+              defaultSort={{ key: "date", dir: "desc" }}
+              rowHref={o => `/orders/${o.id}`}
+              controls="none"
+            />
           </div>
         </div>
       )}

@@ -1,9 +1,12 @@
 import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/EmployeeCreateDialog";
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { updateDb, flush, loadDb, type User } from "@/lib/db";
 import { RolesPanel, EmployeeAccessControls } from "@/components/RolesAccess";
+import { AccessSummary } from "@/components/AccessManager";
+import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
+import { hasCompanies } from "@/lib/companies";
 import { useDb } from "@/hooks/useDb";
 import { auth, isAdminEmail, createAuthUser } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -14,7 +17,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TasksPanel } from "@/components/TasksPanel";
-import { Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn } from "lucide-react";
+import { Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn, Rows3, LayoutGrid, Power } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -25,8 +28,13 @@ const PAGE_SIZE = 9;
 
 export function EmployeesPage() {
   const db = useDb();
+  const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [open, setOpen] = useState(false);
+  const [view, setView] = useState<"list" | "grid">(() => {
+    try { return (localStorage.getItem("employees-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+  });
+  const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("employees-view", v); } catch { /* ignore */ } };
 
   // Tasks panel state
   const [tasksPanelUser, setTasksPanelUser] = useState<string | null>(null);
@@ -69,6 +77,38 @@ export function EmployeesPage() {
   const clientCount = (userId: string) =>
     db.clients.filter(c => c.accountManagerId === userId).length;
 
+  // ── List view: the shared table ──
+  const roleLabel = (u: User) => (u.role === "admin" ? (isAdminEmail(u.email) ? "Owner" : "Admin · Partner") : (u.department || ""));
+  const columns: DataColumn<User>[] = [
+    { key: "name", header: "Name", always: true, sortValue: u => u.name, csv: u => u.name,
+      cell: u => <CellMain title={u.name} sub={u.authUid || u.role === "admin" ? u.email : <span className="italic">Salary only — no login</span>} /> },
+    { key: "role", header: "Role / department", sortValue: roleLabel,
+      cell: u => u.role === "admin" ? <CellTag tone="amber">{roleLabel(u)}</CellTag>
+        : u.department ? <CellTag tone="blue">{u.department}</CellTag> : <span className="text-muted-foreground/50">—</span> },
+    // What their access lets them do, at a glance; it is changed from the row's
+    // details (the arrow) or the grid card.
+    { key: "access", header: "Access",
+      cell: u => u.role === "admin" ? <span className="text-[11px] text-amber-700 font-medium whitespace-nowrap">Everything</span>
+        : u.authUid ? <AccessSummary u={u} db={db} />
+        : <span className="text-[11px] text-muted-foreground whitespace-nowrap">No login</span> },
+    { key: "clients", header: "Clients", align: "right", kind: "number", sortValue: u => clientCount(u.id),
+      cell: u => <span className="tabular-nums">{clientCount(u.id)}</span> },
+    { key: "tasks", header: "Pending tasks", align: "right", kind: "number", sortValue: u => pendingCount(u.id),
+      cell: u => {
+        const n = pendingCount(u.id);
+        return n > 0
+          ? <span className="inline-flex items-center justify-center h-[18px] min-w-[18px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold leading-none">{n}</span>
+          : <span className="tabular-nums text-muted-foreground/60">0</span>;
+      } },
+    { key: "status", header: "Status", sortValue: u => u.status,
+      cell: u => <CellTag tone={u.status === "active" ? "green" : "neutral"}>{u.status === "active" ? "Active" : "Inactive"}</CellTag> },
+  ];
+  // The card's role, admin and company controls, as they are, in a row's
+  // details — each opens its own dialog or asks before it changes anything.
+  // Shown where the card shows one of them.
+  const multiCo = hasCompanies(db.settings);
+  const hasControls = (u: User) => isAdminEmail(u.email) || u.role === "admin" || !!u.authUid || (multiCo && u.role === "employee");
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -82,11 +122,60 @@ export function EmployeesPage() {
 
       <RolesPanel />
 
-      <div className="relative">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employees..." className="pl-9 h-11 rounded-xl" />
+      <div className="flex items-center gap-2">
+        <div className="relative flex-1">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employees..." className="pl-9 h-11 rounded-xl" />
+        </div>
+        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
+          <button onClick={() => saveView("list")} aria-label="List view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
+          </button>
+          <button onClick={() => saveView("grid")} aria-label="Grid view"
+            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
+          </button>
+        </div>
       </div>
 
+      {/* ── List view — the shared table: sort by any heading, Excel, pages.
+          The search above narrows it, as it does the grid. Admins stay first
+          until a heading is clicked. ── */}
+      {view === "list" && (
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="employees"
+            noun="employee"
+            rows={emps}
+            columns={columns}
+            rowKey={u => u.id}
+            rowHref={u => `/employees/${u.id}`}
+            exportName="Employees"
+            expand={{
+              can: hasControls,
+              // Card-width, and without the gap the card puts above them.
+              render: u => <div className="max-w-md [&>*:first-child]:mt-0"><EmployeeAccessControls u={u} /><EmployeeCompaniesControl u={u} /></div>,
+            }}
+            // The card's buttons. Owner/Admin: no deactivate / reset / delete
+            // (avoid locking yourself out), as on the card.
+            rowActions={u => {
+              const pending = pendingCount(u.id);
+              return [
+                { label: "View", icon: Eye, onSelect: () => navigate(`/employees/${u.id}`) },
+                { label: "Tasks", icon: ListTodo, hint: pending > 0 ? `${pending} pending` : undefined, onSelect: () => setTasksPanelUser(u.id) },
+                { label: u.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(u), show: u.role !== "admin" },
+                { label: "Give login", icon: LogIn, hint: "Give them an email and password to sign in", onSelect: () => setLoginFor(u), show: u.role !== "admin" && !u.authUid },
+                { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(u), show: u.role !== "admin" && !!u.authUid && !!u.email },
+                { label: "Delete", icon: Trash2, hint: "Removes their access — their login stops working", danger: true, onSelect: () => del(u.id), show: u.role !== "admin" },
+              ];
+            }}
+            emptyText="No employees found."
+          />
+        </div>
+      )}
+
+      {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(u => {
           const pending = pendingCount(u.id);
@@ -175,13 +264,17 @@ export function EmployeesPage() {
           <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">No employees found.</div>
         )}
       </div>
+      )}
 
-      <PaginationBar
-        page={page}
-        totalPages={totalPages}
-        onPageChange={setPage}
-        label={total > 0 ? `Showing ${start + 1}–${end} of ${total} employees` : undefined}
-      />
+      {/* The list pages itself; these pages are the grid's. */}
+      {view === "grid" && (
+        <PaginationBar
+          page={page}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          label={total > 0 ? `Showing ${start + 1}–${end} of ${total} employees` : undefined}
+        />
+      )}
 
       {loginFor && <GiveLoginDialog u={loginFor} onClose={() => setLoginFor(null)} />}
 

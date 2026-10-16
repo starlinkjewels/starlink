@@ -1,4 +1,4 @@
-import { DataTable } from "@/components/DataTable";
+import { DataTable, CellAmount, type DataColumn } from "@/components/DataTable";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
@@ -27,8 +27,6 @@ import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
 import { reserveInvoiceNumber, releaseInvoiceNumber } from "@/lib/counters";
 // The same rule the Orders page bills by, so the two lists can never disagree
@@ -251,11 +249,24 @@ export function InvoicesPage() {
   const totalReceived    = invOrders.reduce((s, o) => s + totalAdvance(o), 0);
   const totalOutstanding = invOrders.reduce((s, o) => s + balanceDue(o), 0);
 
-  const PAGE_SIZE = 10;
   // Each invoice's live figures, worked out once for the table.
   const invRows = list.map(inv => ({ inv, client: db.clients.find(c => c.id === inv.clientId), ...invLive(inv) }));
-  const { paged: pagedInvoices, page: invPage, setPage: setInvPage, totalPages: invTotalPages, start: invStart, end: invEnd } = usePagination(list, PAGE_SIZE, "inv");
-  const { paged: pagedLedger, page: ledPage, setPage: setLedPage, totalPages: ledTotalPages, start: ledStart, end: ledEnd } = usePagination(ordersWithAdvance, PAGE_SIZE, "led");
+
+  // The Advance Payment Ledger, one order a row, live from the order's payments.
+  const ledgerClient = (o: Order) => db.clients.find(c => c.id === o.clientId)?.companyName ?? "";
+  const ledgerColumns: DataColumn<Order>[] = [
+    { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
+      cell: o => <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold whitespace-nowrap">{o.orderNumber}</Link> },
+    { key: "client", header: "Client", sortValue: ledgerClient,
+      cell: o => <span className="text-muted-foreground text-xs max-w-[180px] truncate block">{ledgerClient(o) || "—"}</span> },
+    { key: "total", header: "Order total", align: "right", kind: "number", sortValue: o => orderTotal(o),
+      cell: o => <CellAmount>{fmtMoney(orderTotal(o))}</CellAmount> },
+    { key: "advance", header: "Advance paid", align: "right", kind: "number", sortValue: o => totalAdvance(o),
+      cell: o => <CellAmount tone="in">{fmtMoney(totalAdvance(o))}</CellAmount> },
+    { key: "balance", header: "Balance due", align: "right", kind: "number", sortValue: o => balanceDue(o),
+      cell: o => { const bal = balanceDue(o); return bal > 0 ? <CellAmount tone="out">{fmtMoney(bal)}</CellAmount> : <span className="text-success font-semibold whitespace-nowrap">✓ Cleared</span>; } },
+  ];
+  const ledgerSum = (rows: Order[], f: (o: Order) => number) => rows.reduce((s, o) => s + f(o), 0);
 
 
   /**
@@ -390,16 +401,18 @@ export function InvoicesPage() {
           </div>
         )}
 
-        {/* Desktop: click any heading to sort (amounts and dates high → low first) */}
-        <div className="hidden md:block p-4">
+        {/* One table at every size: click any heading to sort (amounts and dates
+            high → low first); on a phone the invoice number stays in view. */}
+        <div className="p-3 sm:p-4">
           <DataTable
             id="invoices"
+            noun="invoice"
             rows={invRows}
             rowKey={r => r.inv.id}
             onRowClick={r => { setDetailInvId(r.inv.id); setPayOrderId(null); }}
             defaultSort={{ key: "date", dir: "desc" }}
             pageSizes={[25, 50, 100]}
-            emptyText={ql ? "No invoices match your search." : "No invoices yet — select dispatched orders above to create one."}
+            emptyText={ql ? "No invoices match your search." : isStaff ? "No invoices yet — select dispatched orders above to create one." : "No invoices yet."}
             columns={[
               { key: "number", header: "Invoice", always: true, kind: "number", sortFirst: "desc",
                 sortValue: r => { const parts = r.inv.number.split("-"); const n = parseInt(parts[parts.length - 1], 10); return isNaN(n) ? r.inv.number : n; },
@@ -420,55 +433,6 @@ export function InvoicesPage() {
             ]}
           />
         </div>
-
-        {/* Mobile cards */}
-        <div className="md:hidden divide-y divide-border/40">
-          {pagedInvoices.map(inv => {
-            const { orders, amount, adv, bal, paid } = invLive(inv);
-            const client = db.clients.find(c => c.id === inv.clientId);
-            return (
-              <div key={inv.id} onClick={() => { setDetailInvId(inv.id); setPayOrderId(null); }} className="p-4 space-y-3 cursor-pointer active:bg-secondary/30">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-primary shrink-0" />
-                    <span className="font-semibold text-sm">{inv.number}</span>
-                    <span className="text-[11px] text-muted-foreground">· {orders.length} order{orders.length !== 1 ? "s" : ""}</span>
-                  </div>
-                  {paid
-                    ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success bg-success/10 px-2 py-0.5 rounded-full"><CheckCircle2 className="h-3 w-3" />Paid</span>
-                    : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground bg-warning/10 px-2 py-0.5 rounded-full"><Clock className="h-3 w-3" />Pending</span>}
-                </div>
-                <div className="flex items-center justify-between gap-2 text-xs">
-                  <p className="font-medium truncate">{client?.companyName || "—"}</p>
-                  <span className="text-muted-foreground">{fmtDate(inv.createdAt)}</span>
-                </div>
-                <div className="grid grid-cols-3 gap-2">
-                  <div className="bg-secondary rounded-xl p-2.5 text-center">
-                    <p className="text-[10px] text-muted-foreground mb-0.5">Amount</p>
-                    <p className="text-xs font-semibold">{fmtMoney(amount)}</p>
-                  </div>
-                  <div className="bg-secondary rounded-xl p-2.5 text-center">
-                    <p className="text-[10px] text-muted-foreground mb-0.5">Received</p>
-                    <p className={`text-xs font-semibold ${adv > 0 ? "text-success" : "text-muted-foreground"}`}>{adv > 0 ? fmtMoney(adv) : "—"}</p>
-                  </div>
-                  <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}>
-                    <p className="text-[10px] text-muted-foreground mb-0.5">Balance</p>
-                    <p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓"}</p>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          {list.length === 0 && (
-            <div className="p-12 text-center text-muted-foreground">{ql ? "No invoices match your search." : "No invoices yet."}</div>
-          )}
-        </div>
-
-        {invTotalPages > 1 && (
-          <div className="px-5 border-t border-border/60">
-            <div className="md:hidden"><PaginationBar page={invPage} totalPages={invTotalPages} onPageChange={setInvPage} label={`${invStart + 1}–${invEnd} of ${list.length} invoices`} /></div>
-          </div>
-        )}
       </div>
 
       {/* Advance Payment Ledger section — staff only. Clients see ONLY the invoices
@@ -493,70 +457,26 @@ export function InvoicesPage() {
                 </SelectContent>
               </Select>
             )}
-            {ordersWithAdvance.length > 0 && <p className="text-xs text-muted-foreground shrink-0">Showing {ledStart + 1}–{ledEnd} of {ordersWithAdvance.length}</p>}
           </div>
 
-          <div className="hidden md:block">
-            <table className="table-luxe w-full text-sm">
-              <thead className="bg-secondary/50 text-xs uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="text-left px-5 py-3">Order</th>
-                  <th className="text-left px-4 py-3">Client</th>
-                  <th className="text-center px-4 py-3">Order Total</th>
-                  <th className="text-center px-4 py-3">Advance Paid</th>
-                  <th className="text-center px-4 py-3">Balance Due</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pagedLedger.map(o => {
-                  const client = db.clients.find(c => c.id === o.clientId);
-                  const adv = totalAdvance(o);
-                  const bal = balanceDue(o);
-                  return (
-                    <tr key={o.id} className="border-t border-border/40 hover:bg-secondary/30 transition-colors">
-                      <td className="px-5 py-3.5"><Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold">{o.orderNumber}</Link></td>
-                      <td className="px-4 py-3.5 text-muted-foreground text-xs">{client?.companyName || "—"}</td>
-                      <td className="px-4 py-3.5 text-center font-semibold">{fmtMoney(orderTotal(o))}</td>
-                      <td className="px-4 py-3.5 text-center"><span className="text-success font-semibold">{fmtMoney(adv)}</span></td>
-                      <td className="px-4 py-3.5 text-center"><span className={`font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</span></td>
-                    </tr>
-                  );
-                })}
-                {ordersWithAdvance.length === 0 && (
-                  <tr><td colSpan={5} className="p-12 text-center text-muted-foreground">No orders match your search.</td></tr>
-                )}
-              </tbody>
-            </table>
+          {/* Keyed on the search and client filter so a new view starts on page 1. */}
+          <div className="p-3 sm:p-4">
+            <DataTable
+              resetKey={`${ledgerQ}|${ledgerClientFilter}`}
+              id="invoice-advances"
+              noun="order"
+              rows={ordersWithAdvance}
+              columns={ledgerColumns}
+              rowKey={o => o.id}
+              pageSizes={[10, 25, 50]}
+              emptyText="No orders match your search."
+              totals={{
+                total: rows => fmtMoney(ledgerSum(rows, orderTotal)),
+                advance: rows => <span className="text-success">{fmtMoney(ledgerSum(rows, totalAdvance))}</span>,
+                balance: rows => { const due = ledgerSum(rows, balanceDue); return <span className={due > 0 ? "text-destructive" : "text-success"}>{fmtMoney(due)}</span>; },
+              }}
+            />
           </div>
-
-          <div className="md:hidden divide-y divide-border/40">
-            {ordersWithAdvance.length === 0 && <div className="p-12 text-center text-muted-foreground">No orders match your search.</div>}
-            {pagedLedger.map(o => {
-              const client = db.clients.find(c => c.id === o.clientId);
-              const adv = totalAdvance(o);
-              const bal = balanceDue(o);
-              return (
-                <div key={o.id} className="p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono font-semibold text-sm">{o.orderNumber}</Link>
-                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${bal > 0 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>{bal > 0 ? "Outstanding" : "✓ Cleared"}</span>
-                  </div>
-                  {client && <p className="text-xs text-muted-foreground">{client.companyName}</p>}
-                  <div className="grid grid-cols-3 gap-2">
-                    <div className="bg-secondary rounded-xl p-2.5 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Total</p><p className="text-xs font-semibold">{fmtMoney(orderTotal(o))}</p></div>
-                    <div className="bg-success/10 rounded-xl p-2.5 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Advance</p><p className="text-xs font-semibold text-success">{fmtMoney(adv)}</p></div>
-                    <div className={`rounded-xl p-2.5 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-xs font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓"}</p></div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {ledTotalPages > 1 && (
-            <div className="px-5 border-t border-border/60">
-              <PaginationBar page={ledPage} totalPages={ledTotalPages} onPageChange={setLedPage} label={`${ledStart + 1}–${ledEnd} of ${ordersWithAdvance.length} entries`} />
-            </div>
-          )}
         </div>
       )}
 

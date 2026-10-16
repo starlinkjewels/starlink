@@ -336,8 +336,11 @@ export function FactoryOrderLedger({
   const toggle = (id: string) =>
     setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
-  const num = "px-2 py-2 text-right whitespace-nowrap";
-  const head = "px-2 py-2 text-right font-semibold whitespace-nowrap";
+  // The shared DataTable's header and cell classes, so this table reads the
+  // same — kept as its own table for the two-level header and opening rows.
+  const th = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
+  const num = "px-3 py-2.5 text-right whitespace-nowrap tabular-nums";
+  const head = `${th} text-right`;
 
   return (
     <div className="card-luxe overflow-hidden">
@@ -416,24 +419,27 @@ export function FactoryOrderLedger({
         )}
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="px-5 pb-4">
+      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white">
         <table className="w-full text-xs">
-          <thead>
-            <tr className="bg-secondary/60 text-muted-foreground">
-              <th className="px-3 py-2 text-left font-semibold" rowSpan={2}>Order</th>
-              <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Factory bill</th>
-              <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Date</th>
-              <th className="px-2 py-2 text-left font-semibold" rowSpan={2}>Item</th>
-              <th className="px-2 py-2 text-right font-semibold whitespace-nowrap" rowSpan={2}>Net wt (g)</th>
-              {hasGold && <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Gold (g fine)</th>}
-              {hasDia && <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Diamond (ct)</th>}
-              {hasSilver && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Silver g</th>}
-              {hasOther && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Other g</th>}
-              <th className="px-2 py-1.5 text-center font-semibold border-l border-border/60" colSpan={3}>Labour (₹)</th>
-              {hasQuote && <th className="px-2 py-2 text-right font-semibold border-l border-border/60" rowSpan={2}>Quoted $</th>}
-              <th className="px-3 py-2 text-left font-semibold border-l border-border/60" rowSpan={2}>Status</th>
+          {/* The line under the header sits on the whole header, so it runs
+              under the cells that span both header rows as well. */}
+          <thead className="bg-secondary/40 border-b border-border/60">
+            <tr>
+              <th className={`${th} text-left`} rowSpan={2}>Order</th>
+              <th className={`${th} text-left`} rowSpan={2}>Factory bill</th>
+              <th className={`${th} text-left`} rowSpan={2}>Date</th>
+              <th className={`${th} text-left`} rowSpan={2}>Item</th>
+              <th className={head} rowSpan={2}>Net wt (g)</th>
+              {hasGold && <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Gold (g fine)</th>}
+              {hasDia && <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Diamond (ct)</th>}
+              {hasSilver && <th className={`${head} border-l border-border/60`} rowSpan={2}>Silver g</th>}
+              {hasOther && <th className={`${head} border-l border-border/60`} rowSpan={2}>Other g</th>}
+              <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Labour (₹)</th>
+              {hasQuote && <th className={`${head} border-l border-border/60`} rowSpan={2}>Quoted $</th>}
+              <th className={`${th} text-left border-l border-border/60`} rowSpan={2}>Status</th>
             </tr>
-            <tr className="bg-secondary/40 text-muted-foreground text-[11px]">
+            <tr>
               {hasGold && <><th className={`${head} border-l border-border/60`}>Given by us</th><th className={head}>In the piece</th><th className={head}>Balance</th></>}
               {hasDia && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
               <th className={`${head} border-l border-border/60`}>Billed</th>
@@ -443,7 +449,7 @@ export function FactoryOrderLedger({
           </thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={16} className="px-5 py-10 text-center text-muted-foreground">
+              <tr><td colSpan={16} className="px-3 py-12 text-center text-sm text-muted-foreground">
                 {active ? "No order matches that." : "Nothing issued to this factory yet."}
               </td></tr>
             ) : w.visible.map(r => {
@@ -456,13 +462,13 @@ export function FactoryOrderLedger({
               const cols = 5 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
               return (
                 <>
-                <tr key={key} onClick={() => toggle(key)} className="border-t border-border/40 hover:bg-secondary/30 cursor-pointer">
-                  <td className="px-3 py-2 whitespace-nowrap">
+                <tr key={key} onClick={() => toggle(key)} className={`transition-colors hover:bg-secondary/30 cursor-pointer ${isOpen ? "bg-secondary/30" : ""}`}>
+                  <td className="px-3 py-2.5 whitespace-nowrap">
                     {r.orderId
                       ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
                       : <span className="font-medium text-amber-700">{r.orderNo}</span>}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap">
+                  <td className="px-3 py-2.5 whitespace-nowrap">
                     {r.factoryBillNo
                       ? <button type="button" onClick={e => { e.stopPropagation(); setQ(r.factoryBillNo!); }}
                           title="Show every piece on this bill" className="font-mono text-[11px] text-primary hover:underline">
@@ -470,7 +476,7 @@ export function FactoryOrderLedger({
                         </button>
                       : <span className="text-muted-foreground">—</span>}
                   </td>
-                  <td className="px-2 py-2 whitespace-nowrap text-muted-foreground">
+                  <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
                     {fmtDate(r.date)}
                     {r.receivedDate && (
                       <span className="block text-[10px] text-success" title="When the finished piece came back and its actual details were recorded">
@@ -478,11 +484,11 @@ export function FactoryOrderLedger({
                       </span>
                     )}
                   </td>
-                  <td className="px-2 py-2 min-w-[150px]">
+                  <td className="px-3 py-2.5 min-w-[150px]">
                     {r.jewellery || "—"}
                     {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
                   </td>
-                  <td className="px-2 py-2 text-right whitespace-nowrap">
+                  <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
                     <span className={r.netEstimated ? "italic text-muted-foreground" : "font-medium"} title={r.netEstimated ? "Estimate — not yet finally approved" : undefined}>
                       {r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "—"}
                     </span>
@@ -513,7 +519,7 @@ export function FactoryOrderLedger({
                   <td className={`${num} text-success`}>{rs(r.paid)}</td>
                   <td className={`${num} font-semibold ${pending > 0.5 ? "text-destructive" : "text-success"}`}>{pending > 0.5 ? rs(pending) : "—"}</td>
                   {hasQuote && <td className={`${num} border-l border-border/60 text-muted-foreground`}>{r.quotedUsd ? `$${Math.round(r.quotedUsd).toLocaleString()}` : ""}</td>}
-                  <td className="px-3 py-2 whitespace-nowrap border-l border-border/60">
+                  <td className="px-3 py-2.5 whitespace-nowrap border-l border-border/60">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
                       r.open > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
                       {r.open > 0 ? `${r.open} still with factory` : "Done"}
@@ -523,8 +529,8 @@ export function FactoryOrderLedger({
                 {isOpen && r.entries.map(en => (
                   <tr key={en.id} className={`text-[11px] ${en.kind === "pay" ? "bg-success/5" : "bg-secondary/20"}`}>
                     <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(en.date)}</td>
-                    <td className="px-2 py-1.5 text-muted-foreground" colSpan={cols - 3}>{en.text}</td>
-                    <td className="px-2 py-1.5 text-right whitespace-nowrap" colSpan={2}>
+                    <td className="px-3 py-1.5 text-muted-foreground" colSpan={cols - 3}>{en.text}</td>
+                    <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums" colSpan={2}>
                       {en.qty ?? (en.amount != null ? fmtMoneyInr(en.amount) : "")}
                     </td>
                   </tr>
@@ -541,10 +547,10 @@ export function FactoryOrderLedger({
             })}
           </tbody>
           {filtered.length > 0 && (
-            <tfoot>
-              <tr className="bg-secondary/60 font-semibold border-t-2 border-border">
-                <td className="px-3 py-2" colSpan={4}>Totals{active ? " (filtered)" : ""}{w.hasMore ? ` — all ${filtered.length} orders` : ""}</td>
-                <td className="px-2 py-2 text-right whitespace-nowrap" title="Net weight of finally approved pieces; estimates are not counted">
+            <tfoot className="border-t-2 border-border/70 bg-secondary/30">
+              <tr className="font-bold text-brand-dark">
+                <td className="px-3 py-2.5 text-xs uppercase tracking-wider" colSpan={4}>Totals{active ? " (filtered)" : ""}{w.hasMore ? ` — all ${filtered.length} orders` : ""}</td>
+                <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums" title="Net weight of finally approved pieces; estimates are not counted">
                   {(() => { const t = filtered.reduce((s, r) => s + (r.netEstimated ? 0 : r.netWeight), 0); return t ? t.toFixed(3) : "—"; })()}
                 </td>
                 {hasGold && (<>
@@ -568,6 +574,7 @@ export function FactoryOrderLedger({
             </tfoot>
           )}
         </table>
+      </div>
       </div>
       <LoadOlder w={w} noun="orders" />
       <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">

@@ -1,6 +1,5 @@
 import { useCan } from "@/hooks/useCan";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
-import { Fragment, useState } from "react";
+import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
@@ -14,16 +13,13 @@ import { canVoidSale, saleVoidImpact, voidDiamondSale } from "@/lib/diamondSaleV
 import { toast } from "sonner";
 import { fmtDate, type Purchase } from "@/lib/db";
 import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
-import { ChevronRight } from "lucide-react";
+import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import type { MoreAction } from "@/components/MoreMenu";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
-
-const PAGE = 12;
 
 /** One thing this page did, whichever tab did it. */
 interface Row {
@@ -66,7 +62,6 @@ export function StockActivityLedger() {
   const [kind, setKind] = useState("");
   const [material, setMaterial] = useState("");
   const [company, setCompany] = useState("");
-  const [open, setOpen] = useState<string | null>(null);
   const [billFilter, setBillFilter] = useState("");
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
@@ -267,8 +262,7 @@ export function StockActivityLedger() {
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
   const filtered = !!(ql || from || to || kind || material || billFilter || company);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setCompany(""); setPage(1); };
-  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.date, { filtered, resetKey: [ql, from, to, kind, material, billFilter] });
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setCompany(""); };
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
@@ -316,6 +310,71 @@ export function StockActivityLedger() {
     filename: "Stock-Activity",
   });
 
+  type Item = NonNullable<Row["items"]>[number];
+  /** Correcting or removing one purchase — a single-line bill, or one line of a bigger one. */
+  const purchaseActions = (id: string, what: "purchase" | "item"): MoreAction[] => [
+    { label: `Edit ${what}`, hint: `Correct this ${what}`, icon: Pencil, onSelect: () => openEdit(id), show: can("buyAssign", "edit") },
+    { label: `Remove ${what}`, hint: "Reverses the supplier due, stock and factory issue", icon: Trash2, danger: true,
+      disabled: removingId === id, onSelect: () => remove(id), show: can("buyAssign", "delete") },
+  ];
+  const actionsFor = (r: Row): MoreAction[] => {
+    if (r.kind === "Assigned to factory") return [
+      { label: "Cancel assignment", hint: "The material goes back into stock", icon: Trash2, danger: true,
+        disabled: removingId === r.id, onSelect: () => removeAssignment(r.id), show: can("buyAssign", "delete") },
+    ];
+    if (r.kind === "Diamond sold") return [
+      { label: "Cancel sale", hint: "Reverses the stone, the sale and the money", icon: Trash2, danger: true,
+        disabled: removingId === r.id, onSelect: () => removeSale(r.id), show: can("buyAssign", "delete") },
+    ];
+    // An opening balance is a starting figure, not an event; it is corrected on
+    // the Stock page where it was set.
+    if (r.kind !== "Purchase") return [];
+    // A bill of several lines is corrected line by line, since each line is its
+    // own purchase with its own supplier due and factory issue — so its actions
+    // sit on the lines, which open below.
+    if ((r.items?.length ?? 0) > 1) return [
+      { label: "Edit each item", hint: "Open the bill to correct its lines one by one", disabled: true, onSelect: () => {},
+        show: can("buyAssign", "edit") || can("buyAssign", "delete") },
+    ];
+    return purchaseActions(r.items![0].id, "purchase");
+  };
+
+  const TONE: Record<Row["kind"], "blue" | "neutral" | "amber" | "green"> = {
+    "Purchase": "blue", "Opening stock": "neutral", "Assigned to factory": "amber", "Diamond sold": "green",
+  };
+  const columns: DataColumn<Row>[] = [
+    { key: "party", header: "Party", always: true, sortValue: r => r.party,
+      cell: r => <div title={r.party} className="max-w-[160px]"><CellMain title={r.party} sub={r.forOrder ? `for ${r.forOrder}` : undefined} /></div> },
+    { key: "entry", header: "Entry", sortValue: r => r.kind, cell: r => <CellTag tone={TONE[r.kind]}>{r.kind}</CellTag> },
+    { key: "date", header: "Date", kind: "date", sortValue: r => +new Date(r.date), csv: r => fmtDate(r.date),
+      cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+    { key: "bill", header: "Bill no.", sortValue: r => r.billNo ?? "",
+      cell: r => r.billNo
+        ? <button type="button" onClick={() => setQ(r.billNo!)}
+            title="Show everything on this bill" className="font-mono text-[11px] text-primary hover:underline whitespace-nowrap">
+            {r.billNo}
+          </button>
+        : <span className="font-mono text-[11px] text-muted-foreground">—</span> },
+    { key: "material", header: "Material", sortValue: r => r.material,
+      cell: r => <span className="block text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>{r.material}</span> },
+    { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: r => r.qty,
+      cell: r => <span className="font-medium tabular-nums whitespace-nowrap">{r.qty}{r.unit}</span> },
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountInr,
+      cell: r => (r.amountInr != null ? <CellAmount>{fmtMoneyInr(r.amountInr)}</CellAmount> : <span className="text-muted-foreground">—</span>) },
+    { key: "remark", header: "Remark", sortValue: r => r.remark ?? "",
+      cell: r => <span className="block text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</span> },
+  ];
+  // A bill's own lines, so the chitthi can be checked a line at a time as well
+  // as on the total — and each line corrected on its own.
+  const lineColumns: DataColumn<Item>[] = [
+    { key: "material", header: "Item", always: true, sortValue: it => it.material,
+      cell: it => <CellMain title={it.material} sub={it.discountPct ? discountLabel(it.discountPct) : undefined} /> },
+    { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: it => it.qty,
+      cell: it => <span className="tabular-nums whitespace-nowrap">{it.qty}{it.unit}</span> },
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: it => it.amountInr,
+      cell: it => <CellAmount>{fmtMoneyInr(it.amountInr)}</CellAmount> },
+  ];
+
   return (
     <div className="card-luxe p-5">
       <div className="mb-3">
@@ -329,162 +388,52 @@ export function StockActivityLedger() {
       </div>
 
       <LedgerFilters
-        q={q} onQ={v => { setQ(v); setPage(1); }}
+        q={q} onQ={setQ}
         placeholder="Search bill no., party, material, remark…"
         from={from} to={to}
-        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        onFrom={setFrom} onTo={setTo}
         selects={[
-          { label: "Entries", value: kind, onChange: v => { setKind(v); setPage(1); },
+          { label: "Entries", value: kind, onChange: setKind,
             options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
-          { label: "Materials", value: material, onChange: v => { setMaterial(v); setPage(1); },
+          { label: "Materials", value: material, onChange: setMaterial,
             options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
               ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
-          { label: "Bills", value: billFilter, onChange: v => { setBillFilter(v); setPage(1); },
+          { label: "Bills", value: billFilter, onChange: setBillFilter,
             options: [{ value: "none", label: "No bill number" }] },
-          ...(hasCompanies(db.settings) ? [{ label: "Companies", value: company, onChange: (v: string) => { setCompany(v); setPage(1); },
+          ...(hasCompanies(db.settings) ? [{ label: "Companies", value: company, onChange: setCompany,
             options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
         ]}
         active={filtered} onReset={reset}
         onPdf={exportPdf} onCsv={exportCsv}
       />
 
-      <div className="overflow-x-auto -mx-5">
-        <table className="w-full text-sm min-w-[840px]">
-          <thead className="bg-secondary/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-5 py-2.5">Sr</th>
-              <th className="text-left px-3 py-2.5">Date</th>
-              <th className="text-left px-3 py-2.5">Entry</th>
-              <th className="text-left px-3 py-2.5">Bill no.</th>
-              <th className="text-left px-3 py-2.5">Party</th>
-              <th className="text-left px-3 py-2.5">Material</th>
-              <th className="text-right px-3 py-2.5">Quantity</th>
-              <th className="text-right px-3 py-2.5">Amount</th>
-              <th className="text-left px-3 py-2.5">Remark</th>
-              <th className="text-right px-5 py-2.5">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.length === 0 ? (
-              <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">
-                {filtered ? "Nothing matches these filters." : "Nothing bought, assigned or sold yet."}
-              </td></tr>
-            ) : paged.map((r, i) => {
-              // A bill of several sizes opens to show its own lines, so the
-              // chitthi can be checked a line at a time as well as on the total.
-              const multi = (r.items?.length ?? 0) > 1;
-              const isOpen = open === r.id;
-              return (
-                <Fragment key={r.id}>
-                  <tr className={`border-t border-border/40 hover:bg-secondary/30 ${multi ? "cursor-pointer" : ""}`}
-                    onClick={multi ? () => setOpen(isOpen ? null : r.id) : undefined}>
-                    <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
-                    <td className="px-3 py-2.5 text-xs whitespace-nowrap">{r.kind}</td>
-                    <td className="px-3 py-2.5 whitespace-nowrap">
-                      {r.billNo
-                        ? <button type="button" onClick={e => { e.stopPropagation(); setQ(r.billNo!); setPage(1); }}
-                            title="Show everything on this bill" className="font-mono text-[11px] text-primary hover:underline">
-                            {r.billNo}
-                          </button>
-                        : <span className="font-mono text-[11px] text-muted-foreground">—</span>}
-                    </td>
-                    <td className="px-3 py-2.5 font-medium max-w-[160px] truncate" title={r.party}>
-                      {r.party}
-                      {r.forOrder && <span className="block text-[10px] text-muted-foreground">for {r.forOrder}</span>}
-                    </td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>
-                      {multi && <ChevronRight className={`inline h-3 w-3 mr-1 transition-transform ${isOpen ? "rotate-90" : ""}`} />}
-                      {r.material}
-                    </td>
-                    <td className="px-3 py-2.5 text-right font-medium whitespace-nowrap">{r.qty}{r.unit}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold whitespace-nowrap">{r.amountInr != null ? fmtMoneyInr(r.amountInr) : "—"}</td>
-                    <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</td>
-                    {/* A bill of several lines is corrected line by line, since
-                        each line is its own purchase with its own supplier due
-                        and factory issue — so its actions sit on the lines, which
-                        open below. Only the other three kinds of entry have
-                        nothing to offer: a diamond sale, an opening balance and
-                        a factory assignment are each undone where they were
-                        made, not here. */}
-                    <td className="px-5 py-2.5 text-right whitespace-nowrap" onClick={e => e.stopPropagation()}>
-                      {r.kind === "Assigned to factory" ? (
-                        <>{can("buyAssign", "delete") && (
-                          <button onClick={() => removeAssignment(r.id)} disabled={removingId === r.id}
-                            title="Cancel this assignment — the material goes back into stock"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}</>
-                      ) : r.kind === "Diamond sold" ? (
-                        <>{can("buyAssign", "delete") && (
-                          <button onClick={() => removeSale(r.id)} disabled={removingId === r.id}
-                            title="Cancel this sale — reverses the stone, the sale and the money"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                        )}</>
-                      ) : r.kind !== "Purchase" ? (
-                        // An opening balance is a starting figure, not an event;
-                        // it is corrected on the Stock page where it was set.
-                        <span className="text-[11px] text-muted-foreground">—</span>
-                      ) : multi ? (
-                        <span className="text-[11px] text-muted-foreground">{isOpen ? "per item ↓" : "open to edit"}</span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1">
-                          <>{can("buyAssign", "edit") && (
-                            <button onClick={() => openEdit(r.items![0].id)} title="Correct this purchase"
-                              className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                          )}</>
-                          <>{can("buyAssign", "delete") && (
-                            <button onClick={() => remove(r.items![0].id)} disabled={removingId === r.items![0].id}
-                              title="Remove this purchase — reverses the supplier due, stock and factory issue"
-                              className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}</>
-                        </span>
-                      )}
-                    </td>
-                  </tr>
-                  {multi && isOpen && r.items!.map((it, n) => (
-                    <tr key={`${r.id}-${n}`} className="bg-secondary/30 text-xs">
-                      <td className="px-5 py-1.5" />
-                      <td className="px-3 py-1.5" colSpan={5}>
-                        <span className="text-muted-foreground">{it.material}</span>
-                        {it.discountPct ? <span className="text-muted-foreground"> · {discountLabel(it.discountPct)}</span> : null}
-                      </td>
-                      <td className="px-3 py-1.5 text-right">{it.qty}{it.unit}</td>
-                      <td className="px-3 py-1.5 text-right font-medium">{fmtMoneyInr(it.amountInr)}</td>
-                      <td className="px-3 py-1.5" />
-                      <td className="px-5 py-1.5 text-right whitespace-nowrap">
-                        <span className="inline-flex items-center gap-1">
-                          <>{can("buyAssign", "edit") && (
-                            <button onClick={() => openEdit(it.id)} title="Correct this item"
-                              className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10">
-                              <Pencil className="h-3.5 w-3.5" />
-                            </button>
-                          )}</>
-                          <>{can("buyAssign", "delete") && (
-                            <button onClick={() => remove(it.id)} disabled={removingId === it.id}
-                              title="Remove this item — reverses the supplier due, stock and factory issue"
-                              className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50">
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </button>
-                          )}</>
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </Fragment>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <LoadOlder w={w} />
+      {/* The filters, search and downloads live in the bar above, so the table
+          brings no search or Excel of its own. A new filter (resetKey)
+          starts it again from the first page. */}
+      <DataTable
+        resetKey={JSON.stringify([ql, from, to, kind, material, billFilter, company])}
+        id="stock-activity"
+        noun="record"
+        rows={rows}
+        columns={columns}
+        rowKey={r => r.id}
+        defaultSort={{ key: "date", dir: "desc" }}
+        emptyText={filtered ? "Nothing matches these filters." : "Nothing bought, assigned or sold yet."}
+        rowActions={actionsFor}
+        expand={{
+          can: r => (r.items?.length ?? 0) > 1,
+          render: r => (
+            <DataTable
+              id="stock-activity-bill-lines"
+              controls="none"
+              rows={r.items!}
+              columns={lineColumns}
+              rowKey={it => it.id}
+              rowActions={it => purchaseActions(it.id, "item")}
+            />
+          ),
+        }}
+      />
 
       <EditPurchaseDialog
         purchase={editing}

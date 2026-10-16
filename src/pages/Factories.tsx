@@ -12,7 +12,8 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, ChevronRight } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, Power } from "lucide-react";
+import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -68,6 +69,37 @@ export function FactoriesPage() {
     toast.success("Deleted");
   };
 
+  // ── List view: the shared table ──
+  const accountOf = (fac: Factory) => accounts.get(fac.id)!;
+  const grams = (n: number) => `${n.toLocaleString()} g`;
+  const carats = (n: number) => `${n.toLocaleString()} ct`;
+  const columns: DataColumn<Factory>[] = [
+    { key: "factory", header: "Factory", always: true, sortValue: fac => fac.name, csv: fac => fac.name,
+      cell: fac => <CellMain
+        title={<>{fac.name}{fac.active === false && <span className="ml-2 align-middle"><CellTag>Inactive</CellTag></span>}</>}
+        sub={fac.contactPerson || fac.phone || undefined} /> },
+    // Reserved fine gold (24KT, opening included) and diamond — the figures the
+    // factory's own page shows.
+    { key: "gold", header: "Fine gold 24KT", align: "right", kind: "number", sortValue: fac => accountOf(fac).fineGold,
+      cell: fac => { const g = accountOf(fac).fineGold; return <span className={`tabular-nums whitespace-nowrap font-semibold ${g < 0 ? "text-destructive" : "text-amber-700"}`}>{grams(g)}</span>; } },
+    { key: "diamond", header: "Diamond", align: "right", kind: "number", sortValue: fac => accountOf(fac).diamondOutstanding,
+      cell: fac => { const d = accountOf(fac).diamondOutstanding; return <span className={`tabular-nums whitespace-nowrap font-semibold ${d < 0 ? "text-destructive" : "text-brand-dark"}`}>{carats(d)}</span>; } },
+    { key: "charged", header: "Charged", align: "right", kind: "number", sortValue: fac => accountOf(fac).chargesTotal,
+      cell: fac => <CellAmount>{fmtMoneyInr(accountOf(fac).chargesTotal)}</CellAmount> },
+    { key: "paid", header: "Paid", align: "right", kind: "number", sortValue: fac => accountOf(fac).chargesPaid,
+      cell: fac => <CellAmount tone="in">{fmtMoneyInr(accountOf(fac).chargesPaid)}</CellAmount> },
+    // Sorts by the labour bill to settle either way — the page's own order. In
+    // Excel one signed figure: plus, charges due; minus, advance paid.
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: weight,
+      csv: fac => Math.round((accountOf(fac).chargesPending - accountOf(fac).chargesOverpaid) * 100) / 100,
+      cell: fac => {
+        const a = accountOf(fac);
+        if (a.chargesPending > 0) return <div><CellAmount tone="out">{fmtMoneyInr(a.chargesPending)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">charges due</p></div>;
+        if (a.chargesOverpaid > 0) return <div><span className="tabular-nums whitespace-nowrap font-semibold text-blue-600">+{fmtMoneyInr(a.chargesOverpaid)}</span><p className="text-[10px] text-muted-foreground whitespace-nowrap">advance paid</p></div>;
+        return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Cleared</span>;
+      } },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -108,54 +140,40 @@ export function FactoriesPage() {
         </div>
       </div>
 
-      {/* ── List view — name + gold held + charges due ── */}
+      {/* ── List view — the shared table: sort by any heading, Excel, pages.
+          The search above narrows it, as it does the grid. ── */}
       {view === "list" && (
-        <div className="card-luxe divide-y divide-border/50 overflow-hidden">
-          {paged.map(fac => {
-            const account = accounts.get(fac.id)!;
-            const fineGold = account.fineGold;
-            return (
-              <Link key={fac.id} to={`/factories/${fac.id}`} className="group flex items-center gap-3 px-4 py-3.5 hover:bg-secondary/40 transition-colors">
-                <div className="h-10 w-10 rounded-xl bg-orange-500/15 text-orange-600 grid place-items-center shrink-0"><FactoryIcon className="h-4.5 w-4.5" /></div>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium text-brand-dark truncate">{fac.name}{fac.active === false && <span className="ml-2 text-[10px] text-muted-foreground">(inactive)</span>}</p>
-                  {/* Two boxes — reserved Fine Gold (24KT) + Diamond, matching the details page */}
-                  <div className="flex gap-2 mt-1.5">
-                    <div className="px-2.5 py-1 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                      <span className="block text-[8.5px] uppercase tracking-wide text-muted-foreground leading-none">Fine Gold 24KT</span>
-                      <span className="text-xs font-semibold text-amber-700 tabular-nums">{fineGold.toLocaleString()} g</span>
-                    </div>
-                    <div className="px-2.5 py-1 rounded-lg bg-secondary border border-border/60">
-                      <span className="block text-[8.5px] uppercase tracking-wide text-muted-foreground leading-none">Diamond</span>
-                      <span className={`text-xs font-semibold tabular-nums ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding.toLocaleString()} ct</span>
-                    </div>
-                  </div>
-                </div>
-                {/* Charges ledger — Charged / Paid / Balance, segmented panel */}
-                <div className="hidden sm:flex items-stretch rounded-xl border border-border/60 bg-secondary/30 overflow-hidden shrink-0 text-right">
-                  <div className="px-3.5 py-1.5 min-w-[84px]"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Charged</p><p className="text-xs font-medium tabular-nums">{fmtMoneyInr(account.chargesTotal)}</p></div>
-                  <div className="px-3.5 py-1.5 min-w-[72px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Paid</p><p className="text-xs font-medium tabular-nums text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
-                  <div className="px-3.5 py-1.5 min-w-[84px] border-l border-border/50"><p className="text-[9px] uppercase tracking-wide text-muted-foreground">Balance</p>
-                    {account.chargesPending > 0
-                      ? <p className="text-xs font-semibold tabular-nums text-destructive">{fmtMoneyInr(account.chargesPending)}</p>
-                      : account.chargesOverpaid > 0
-                      ? <p className="text-xs font-semibold tabular-nums text-blue-600">+{fmtMoneyInr(account.chargesOverpaid)}</p>
-                      : <p className="text-xs font-semibold text-success">✓ Cleared</p>}
-                  </div>
-                </div>
-                {/* Mobile — balance only */}
-                <div className="sm:hidden text-right shrink-0">
-                  {account.chargesPending > 0
-                    ? <><p className="text-sm font-semibold text-destructive">{fmtMoneyInr(account.chargesPending)}</p><p className="text-[10px] text-muted-foreground">charges due</p></>
-                    : account.chargesOverpaid > 0
-                    ? <><p className="text-sm font-semibold text-blue-600">{fmtMoneyInr(account.chargesOverpaid)}</p><p className="text-[10px] text-muted-foreground">advance paid</p></>
-                    : <p className="text-sm font-semibold text-success">✓ Cleared</p>}
-                </div>
-                <ChevronRight className="hidden sm:block h-4 w-4 text-muted-foreground/30 group-hover:text-muted-foreground/60 transition-colors shrink-0" />
-              </Link>
-            );
-          })}
-          {total === 0 && <div className="p-12 text-center text-muted-foreground">No factories found.</div>}
+        <div className="card-luxe p-3 sm:p-4">
+          <DataTable
+            id="factories"
+            // The table makes a plural by adding "s"; it counts exactly these rows.
+            noun="factory"
+            plural="factories"
+            rows={list}
+            columns={columns}
+            rowKey={fac => fac.id}
+            defaultSort={{ key: "balance", dir: "desc" }}
+            rowHref={fac => `/factories/${fac.id}`}
+            exportName="Factories"
+            totals={{
+              gold: rows => <span className="text-amber-700">{grams(rows.reduce((t, fac) => t + accountOf(fac).fineGold, 0))}</span>,
+              diamond: rows => carats(rows.reduce((t, fac) => t + accountOf(fac).diamondOutstanding, 0)),
+              charged: rows => fmtMoneyInr(rows.reduce((t, fac) => t + accountOf(fac).chargesTotal, 0)),
+              paid: rows => <span className="text-success">{fmtMoneyInr(rows.reduce((t, fac) => t + accountOf(fac).chargesPaid, 0))}</span>,
+              // Each way on its own: charges we owe, and advances factories hold.
+              balance: rows => {
+                const due = rows.reduce((t, fac) => t + accountOf(fac).chargesPending, 0);
+                const advance = rows.reduce((t, fac) => t + accountOf(fac).chargesOverpaid, 0);
+                return <><span className="text-destructive">{fmtMoneyInr(due)}</span>{advance > 0 && <span className="text-blue-600"> · +{fmtMoneyInr(advance)}</span>}</>;
+              },
+            }}
+            // The grid card's buttons — admin only, as there.
+            rowActions={isAdmin ? fac => [
+              { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac) },
+              { label: "Delete factory", icon: Trash2, danger: true, onSelect: () => del(fac.id) },
+            ] : undefined}
+            emptyText="No factories found."
+          />
         </div>
       )}
 
@@ -230,7 +248,8 @@ export function FactoriesPage() {
       </div>
       )}
 
-      <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} factories` : undefined} />
+      {/* The list pages itself; these pages are the grid's. */}
+      {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} factories` : undefined} />}
     </div>
   );
 }

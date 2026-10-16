@@ -1,13 +1,12 @@
 import { useCan } from "@/hooks/useCan";
-import { useScrollPages, LoadOlder } from "@/hooks/useRecentWindow";
 import { useState } from "react";
+import { Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { fmtMoney, fmtDate } from "@/lib/db";
+import { fmtMoney, fmtDate, type ClientReceipt } from "@/lib/db";
 import { fmtLockerAmount } from "@/lib/manufacturing";
 import { editReceipt, deleteReceipt, deleteImpact, listReceipts, receiptApplied } from "@/lib/receipts";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
+import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,6 @@ import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilte
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 
-const PAGE = 12;
 const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
 
 /**
@@ -56,8 +54,7 @@ export function ReceiptLedger() {
       || r.method.toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || clientId || acct || mode);
-  const { w, paged, page, setPage, totalPages, start, end } = useScrollPages(rows, r => r.date, { filtered, resetKey: [ql, from, to, clientId, acct, mode] });
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setClientId(""); setAcct(""); setMode(""); setPage(1); };
+  const reset = () => { setQ(""); setFrom(""); setTo(""); setClientId(""); setAcct(""); setMode(""); };
   const totalReceived = rows.reduce((s, r) => s + r.amountUsd, 0);
   // Only clients who actually have a receipt — a list of every client would be
   // mostly dead options.
@@ -165,6 +162,36 @@ export function ReceiptLedger() {
     setEditId(null);
   };
 
+  const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
+  const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
+  const columns: DataColumn<ClientReceipt>[] = [
+    { key: "receipt", header: "Receipt", always: true, sortValue: r => r.receiptNo,
+      cell: r => <span className="font-mono font-medium whitespace-nowrap">{r.receiptNo}</span> },
+    { key: "date", header: "Date", kind: "date", sortValue: r => +new Date(r.date), csv: r => fmtDate(r.date),
+      cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+    { key: "client", header: "Client", sortValue: r => clientName(r.clientId),
+      cell: r => <span className="block font-medium max-w-[160px] truncate">{clientName(r.clientId) || "—"}</span> },
+    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountUsd,
+      cell: r => <CellAmount tone="in">{fmtMoney(r.amountUsd)}</CellAmount> },
+    { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.exchangeRate,
+      cell: r => <span className="text-xs text-muted-foreground tabular-nums">{r.exchangeRate ?? "—"}</span> },
+    { key: "deposited", header: "Deposited", align: "right", kind: "number", sortValue: r => (r.lockerId ? r.lockerAmount ?? r.amountUsd : null),
+      cell: r => <span className="text-xs tabular-nums whitespace-nowrap">{r.lockerId ? fmtLockerAmount(r.lockerAmount ?? r.amountUsd, r.lockerCurrency) : "—"}</span> },
+    { key: "account", header: "Account", sortValue: r => lockerName(r.lockerId),
+      cell: r => <span className="block text-xs text-muted-foreground max-w-[120px] truncate">{lockerName(r.lockerId) || "—"}</span> },
+    { key: "mode", header: "Mode", sortValue: r => r.method, cell: r => <span className="text-xs whitespace-nowrap">{r.method}</span> },
+    { key: "remarks", header: "Remarks", sortValue: r => r.remarks ?? "",
+      cell: r => {
+        const asCredit = Math.round((r.amountUsd - receiptApplied(db, r.id)) * 100) / 100;
+        return (
+          <span className="block text-xs text-muted-foreground max-w-[170px] truncate">
+            {r.remarks ?? "—"}
+            {asCredit > 0.009 && <span className="ml-1 text-warning">· {fmtMoney(asCredit)} held as credit</span>}
+          </span>
+        );
+      } },
+  ];
+
   return (
     <div className="card-luxe p-5">
       <div className="mb-3">
@@ -176,80 +203,38 @@ export function ReceiptLedger() {
       </div>
 
       <LedgerFilters
-        q={q} onQ={v => { setQ(v); setPage(1); }}
+        q={q} onQ={setQ}
         placeholder="Search receipt #, client, remark…"
         from={from} to={to}
-        onFrom={v => { setFrom(v); setPage(1); }} onTo={v => { setTo(v); setPage(1); }}
+        onFrom={setFrom} onTo={setTo}
         selects={[
-          { label: "Clients", value: clientId, onChange: v => { setClientId(v); setPage(1); }, options: payers },
-          { label: "Accounts", value: acct, onChange: v => { setAcct(v); setPage(1); },
+          { label: "Clients", value: clientId, onChange: setClientId, options: payers },
+          { label: "Accounts", value: acct, onChange: setAcct,
             options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
-          { label: "Modes", value: mode, onChange: v => { setMode(v); setPage(1); },
+          { label: "Modes", value: mode, onChange: setMode,
             options: METHODS.map(m => ({ value: m, label: m })) },
         ]}
         active={filtered} onReset={reset}
         onPdf={exportPdf} onCsv={exportCsv}
       />
 
-      <div className="overflow-x-auto -mx-5">
-        <table className="w-full text-sm min-w-[860px]">
-          <thead className="bg-secondary/50 text-[11px] uppercase tracking-wider text-muted-foreground">
-            <tr>
-              <th className="text-left px-5 py-2.5">Sr</th>
-              <th className="text-left px-3 py-2.5">Receipt</th>
-              <th className="text-left px-3 py-2.5">Date</th>
-              <th className="text-left px-3 py-2.5">Client</th>
-              <th className="text-right px-3 py-2.5">Amount</th>
-              <th className="text-right px-3 py-2.5">Rate</th>
-              <th className="text-right px-3 py-2.5">Deposited</th>
-              <th className="text-left px-3 py-2.5">Account</th>
-              <th className="text-left px-3 py-2.5">Mode</th>
-              <th className="text-left px-3 py-2.5">Remarks</th>
-              <th className="text-right px-5 py-2.5">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paged.length === 0 ? (
-              <tr>
-                <td colSpan={11} className="px-5 py-10 text-center text-muted-foreground">
-                  {filtered ? "Nothing matches these filters." : "No payments recorded yet."}
-                </td>
-              </tr>
-            ) : paged.map((r, i) => {
-              const client = db.clients.find(c => c.id === r.clientId);
-              const locker = db.lockers.find(l => l.id === r.lockerId);
-              const applied = receiptApplied(db, r.id);
-              const asCredit = Math.round((r.amountUsd - applied) * 100) / 100;
-              return (
-                <tr key={r.id} className="border-t border-border/40 hover:bg-secondary/30">
-                  <td className="px-5 py-2.5 text-xs text-muted-foreground">{(page - 1) * PAGE + i + 1}</td>
-                  <td className="px-3 py-2.5 font-mono font-medium">{r.receiptNo}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{fmtDate(r.date)}</td>
-                  <td className="px-3 py-2.5 font-medium max-w-[160px] truncate">{client?.companyName ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-right font-semibold text-success">{fmtMoney(r.amountUsd)}</td>
-                  <td className="px-3 py-2.5 text-right text-xs text-muted-foreground">{r.exchangeRate ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-right text-xs">
-                    {r.lockerId ? fmtLockerAmount(r.lockerAmount ?? r.amountUsd, r.lockerCurrency) : "—"}
-                  </td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[120px] truncate">{locker?.name ?? "—"}</td>
-                  <td className="px-3 py-2.5 text-xs">{r.method}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground max-w-[170px] truncate">
-                    {r.remarks ?? "—"}
-                    {asCredit > 0.009 && (
-                      <span className="ml-1 text-warning">· {fmtMoney(asCredit)} held as credit</span>
-                    )}
-                  </td>
-                  <td className="px-5 py-2.5 text-right whitespace-nowrap">
-                    {can("payments", "edit") && <button onClick={() => open(r.id)} className="text-primary hover:underline text-xs mr-3">Edit</button>}
-                    {can("payments", "delete") && <button onClick={() => remove(r.id)} className="text-destructive hover:underline text-xs">Delete</button>}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <LoadOlder w={w} noun="receipts" />
+      {/* The filters, search and downloads live in the bar above, so the table
+          brings no search or Excel of its own. A new filter (resetKey)
+          starts it again from the first page. */}
+      <DataTable
+        resetKey={JSON.stringify([ql, from, to, clientId, acct, mode])}
+        id="receipt-ledger"
+        noun="receipt"
+        rows={rows}
+        columns={columns}
+        rowKey={r => r.id}
+        defaultSort={{ key: "date", dir: "desc" }}
+        emptyText={filtered ? "Nothing matches these filters." : "No payments recorded yet."}
+        rowActions={r => [
+          { label: "Edit", icon: Pencil, onSelect: () => open(r.id), show: can("payments", "edit") },
+          { label: "Delete", icon: Trash2, danger: true, onSelect: () => remove(r.id), show: can("payments", "delete") },
+        ]}
+      />
 
       <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditId(null); }}>
         <DialogContent className="max-w-xl rounded-2xl">
