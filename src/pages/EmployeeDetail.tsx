@@ -1,3 +1,5 @@
+import { useMayExport } from "@/hooks/useCan";
+import { MoreMenu } from "@/components/MoreMenu";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, employeePayments, employeePaymentTotals, keptValue } from "@/lib/db";
@@ -14,6 +16,7 @@ import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 
 export function EmployeeDetailPage() {
+  const mayExport = useMayExport();
   const { id } = useParams();
   const navigate = useNavigate();
   const db = useDb();
@@ -207,14 +210,12 @@ export function EmployeeDetailPage() {
               <p className="text-[11px] text-muted-foreground">Total paid to date</p>
               <p className="font-display text-lg font-bold text-emerald-600">{fmtExpenseAmount(salaryTotals.total, salaryCur)}</p>
             </div>
-            {(salaryLedger.length > 0 || opening > 0) && (
-              <div className="flex items-center gap-1.5 pl-3 border-l border-border/60">
-                <Button variant="outline" size="sm" onClick={exportSalaryCsv} className="rounded-lg gap-1.5" title="Download Excel/CSV">
-                  <FileSpreadsheet className="h-3.5 w-3.5" /> Excel
-                </Button>
-                <Button variant="outline" size="sm" onClick={exportSalaryPdf} className="rounded-lg gap-1.5" title="Download PDF">
-                  <FileText className="h-3.5 w-3.5" /> PDF
-                </Button>
+            {(salaryLedger.length > 0 || opening > 0) && mayExport && (
+              <div className="pl-3 border-l border-border/60">
+                <MoreMenu size="sm" label="Download salary sheet" title="Salary sheet" actions={[
+                  { label: "Download PDF", icon: FileText, onSelect: exportSalaryPdf },
+                  { label: "Download Excel", icon: FileSpreadsheet, onSelect: exportSalaryCsv },
+                ]} />
               </div>
             )}
           </div>

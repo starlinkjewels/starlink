@@ -1,0 +1,70 @@
+import type { LucideIcon } from "lucide-react";
+import { MoreHorizontal } from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+export type MoreAction = {
+  label: string;
+  icon?: LucideIcon;
+  onSelect: () => unknown;
+  /** A second, quieter line under the label. */
+  hint?: string;
+  /** Cancel, delete, melt: red, and kept at the bottom below a line. */
+  danger?: boolean;
+  disabled?: boolean;
+  /** Left out of the menu when false. */
+  show?: boolean;
+};
+
+/**
+ * The "⋯" at the top right of a page or card: the one main action stays a
+ * button beside it, everything else waits in here. Renders nothing when no
+ * action applies, so a page never shows an empty menu.
+ */
+export function MoreMenu({ actions, label = "More actions", title, className = "", size = "md" }: {
+  actions: MoreAction[];
+  label?: string;
+  /** A heading inside the menu. */
+  title?: string;
+  className?: string;
+  /** "sm" on a card, "md" in a page header. */
+  size?: "sm" | "md";
+}) {
+  const shown = actions.filter(a => a.show !== false);
+  if (!shown.length) return null;
+  const safe = shown.filter(a => !a.danger);
+  const danger = shown.filter(a => a.danger);
+  // Run after the menu has closed, so a dialog it opens takes the focus cleanly.
+  const run = (a: MoreAction) => setTimeout(() => {
+    Promise.resolve().then(a.onSelect).catch(e => toast.error(e instanceof Error ? e.message : "That didn't work"));
+  }, 0);
+  const item = (a: MoreAction) => (
+    <DropdownMenuItem key={a.label} disabled={a.disabled} onSelect={() => run(a)}
+      className={`rounded-lg gap-2.5 py-2 cursor-pointer items-start ${a.danger ? "text-destructive focus:text-destructive focus:bg-destructive/10" : ""}`}>
+      {a.icon && <a.icon className={`h-4 w-4 mt-0.5 shrink-0 ${a.danger ? "" : "text-muted-foreground"}`} />}
+      <span className="min-w-0">
+        <span className="block text-sm font-medium leading-snug">{a.label}</span>
+        {a.hint && <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5">{a.hint}</span>}
+      </span>
+    </DropdownMenuItem>
+  );
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" variant="outline" aria-label={label} title={label}
+          className={`${size === "sm" ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>
+          <MoreHorizontal className={size === "sm" ? "h-4 w-4" : "h-5 w-5"} />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)] rounded-xl p-1.5">
+        {title && <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">{title}</DropdownMenuLabel>}
+        {safe.map(item)}
+        {safe.length > 0 && danger.length > 0 && <DropdownMenuSeparator />}
+        {danger.map(item)}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}

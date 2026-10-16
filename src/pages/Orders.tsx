@@ -8,7 +8,7 @@ import { useCan } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -387,7 +387,7 @@ export function OrdersPage() {
             const client = db.clients.find(c => c.id === o.clientId);
             const done = o.timeline.filter(t => t.status === "done").length;
             const progress = Math.round(done / o.timeline.length * 100);
-            const img = o.cadImage || o.images?.[0];
+            const img = orderImage(o);
             return (
               <Link key={o.id} to={`/orders/${o.id}`}
                 className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
@@ -410,7 +410,7 @@ export function OrdersPage() {
                       className="relative z-10 w-full h-full object-contain p-1 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                     />
                   ) : (
-                    <div className="w-full h-full grid place-items-center"><Package className="h-8 w-8 text-primary/30" /></div>
+                    <div className="w-full h-full grid place-items-center">{isDiamondOnlyOrder(o) ? <Gem className="h-8 w-8 text-sky-500/40" /> : <Package className="h-8 w-8 text-primary/30" />}</div>
                   )}
                 </div>
                 <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-w-0">
@@ -464,7 +464,7 @@ export function OrdersPage() {
           const done   = o.timeline.filter(t => t.status === "done").length;
           const progress = Math.round(done / o.timeline.length * 100);
           const isActive = !["Delivered","Rejected"].includes(o.status);
-          const rowImg = o.cadImage || o.images?.[0];
+          const rowImg = orderImage(o);
           // Manufacturing summary (staff only) — which factory, how much gold/diamond issued.
           const orderIssuances = user!.role !== "client" ? db.materialIssuances.filter(i => i.orderId === o.id) : [];
           const factoryNames = [...new Set(orderIssuances.map(i => db.factories.find(f => f.id === i.factoryId)?.name).filter(Boolean))] as string[];
@@ -489,7 +489,7 @@ export function OrdersPage() {
               <div className="relative w-28 sm:w-36 shrink-0 bg-secondary self-stretch">
                 {rowImg
                   ? <img src={rowImg} alt={o.orderNumber} loading="lazy" className="absolute inset-0 w-full h-full object-cover" />
-                  : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40"><Package className="h-9 w-9" /></div>}
+                  : <div className="absolute inset-0 grid place-items-center text-muted-foreground/40">{isDiamondOnlyOrder(o) ? <Gem className="h-9 w-9" /> : <Package className="h-9 w-9" />}</div>}
               </div>
 
               {/* ── Right: order details ── */}

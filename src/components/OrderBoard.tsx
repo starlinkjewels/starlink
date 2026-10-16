@@ -8,7 +8,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { useCan } from "@/hooks/useCan";
-import { loadDb, updateDbAs, fmtDate, type Order } from "@/lib/db";
+import { loadDb, updateDbAs, fmtDate, orderImage, type Order } from "@/lib/db";
 import { sendMail, orderApprovedEmail } from "@/lib/email";
 import {
   DONE_COLUMN, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission,
@@ -214,7 +214,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                 {shown.map(o => {
                   const locked = blockedFor(o);
                   const client = db.clients.find(c => c.id === o.clientId);
-                  const img = o.cadImage || o.images?.[0];
+                  const img = orderImage(o);
                   const overdue = col !== DONE_COLUMN && !!o.expectedDelivery && o.expectedDelivery.slice(0, 10) < today;
                   // Only moves that would actually go through — a refused one is not offered.
                   const targets = locked ? [] : cols

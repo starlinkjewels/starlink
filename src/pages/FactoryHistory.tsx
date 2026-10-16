@@ -1,3 +1,5 @@
+import { useMayExport } from "@/hooks/useCan";
+import { MoreMenu } from "@/components/MoreMenu";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useOtherMaterials, GradeInput } from "@/components/MaterialFields";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
@@ -63,6 +65,7 @@ export function FactoryHistoryPage() {
 }
 
 function FactoryHistoryPageBody() {
+  const mayExport = useMayExport();
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -882,12 +885,6 @@ function FactoryHistoryPageBody() {
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-48" />
-            {multiCo && user?.role === "admin" && (
-              <Button variant="outline" onClick={() => setMovingPool(true)} className="rounded-xl gap-2"><ArrowRightLeft className="h-4 w-4" /> Move between companies</Button>
-            )}
-            <IfExport>
-            <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-            </IfExport>
             <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
               extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
               options={[
@@ -901,6 +898,10 @@ function FactoryHistoryPageBody() {
                 <Plus className="h-4 w-4" /> Issue Material
               </Button>
             )}
+            <MoreMenu title="Factory account" actions={[
+              { label: "Move between companies", icon: ArrowRightLeft, hint: "One company's gold or diamonds here, to another's", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
+              { label: "Export ledger", icon: Download, hint: "Factory ledger or movement sheet, PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
+            ]} />
           </div>
         </div>
 
