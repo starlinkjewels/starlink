@@ -1,3 +1,4 @@
+import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
 import { materialUnit } from "@/lib/materials";
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
@@ -28,6 +29,7 @@ import { legacyPayments, backfillReceipts } from "@/lib/receipts";
 import { orphanSupplierPayments, repairSupplierPayments } from "@/lib/supplierRepair";
 import { orphanDirectUses, orphanImpact, repairOrphanDirectUses } from "@/lib/stockRepair";
 import { fmtMoneyInr } from "@/lib/manufacturing";
+import { ccy, ccySymbol, fmtCcy } from "@/lib/currency";
 import { uploadDataUrl } from "@/lib/storage";
 import { createAuthUser } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
@@ -1102,6 +1104,10 @@ export function SettingsPage() {
               </div>
             )}
 
+            {/* Every other currency we hold: what transfers, foreign receipts and
+                foreign expenses start from. */}
+            {isAdmin && <CurrencyRatesSettings onSaved={next => setDb(prev => ({ ...prev, settings: { ...prev.settings, currencyRates: next } }))} />}
+
             {/* ── Where the cost figures are kept — admin only ── */}
             {isAdmin && (() => {
               const ready = adminStoreReady();
@@ -1789,7 +1795,7 @@ export function SettingsPage() {
                       <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-white px-3 py-2">
                         <div className="min-w-0">
                           <p className="text-sm font-medium truncate">
-                            {(t.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(t.amountInr).toLocaleString("en-IN")} · {t.category || t.note || "Money in"}
+                            {fmtCcy(t.amountInr, t.currency)} · {t.category || t.note || "Money in"}
                           </p>
                           <p className="text-[11px] text-muted-foreground truncate">
                             {locker?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
@@ -1831,7 +1837,7 @@ export function SettingsPage() {
                     <div key={t.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 bg-white px-3 py-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">
-                          {(t.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(t.amountInr).toLocaleString("en-IN")} · {t.category || t.note || "Money in"}
+                          {fmtCcy(t.amountInr, t.currency)} · {t.category || t.note || "Money in"}
                         </p>
                         <p className="text-[11px] text-muted-foreground truncate">
                           {liveDb.lockers.find(l => l.id === t.lockerId)?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
@@ -1850,7 +1856,7 @@ export function SettingsPage() {
             {fixTxn && (
               <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2.5">
                 <p className="text-xs font-semibold text-brand-dark">
-                  Apply {(fixTxn.currency ?? "INR") === "USD" ? "$" : "₹"}{Math.round(fixTxn.amountInr).toLocaleString("en-IN")} from {new Date(fixTxn.createdAt).toLocaleDateString()}
+                  Apply {fmtCcy(fixTxn.amountInr, fixTxn.currency)} from {new Date(fixTxn.createdAt).toLocaleDateString()}
                 </p>
                 <div>
                   <Label className="text-xs">Received from</Label>
@@ -1880,8 +1886,9 @@ export function SettingsPage() {
                 )}
                 {(fixTxn.currency ?? "INR") !== "USD" && (
                   <div>
-                    <Label className="text-xs">Exchange rate — 1 USD = ₹ <span className="text-destructive">*</span></Label>
-                    <Input type="number" min={0} step="0.01" value={fixRate} onChange={e => setFixRate(e.target.value)} className="rounded-xl h-10 mt-1 bg-white" placeholder="e.g. 83.50" />
+                    {/* In the account's own currency: what one dollar of the bill is worth in it. */}
+                    <Label className="text-xs">Exchange rate — 1 USD = {ccySymbol(fixTxn.currency).trim()} <span className="text-destructive">*</span></Label>
+                    <Input type="number" min={0} step="0.01" value={fixRate} onChange={e => setFixRate(e.target.value)} className="rounded-xl h-10 mt-1 bg-white" placeholder={ccy(fixTxn.currency) === "INR" ? "e.g. 83.50" : undefined} />
                   </div>
                 )}
                 <div className="flex gap-2 pt-1">

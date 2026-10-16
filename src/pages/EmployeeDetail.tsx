@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
+import { ccy, ccyOrder, fmtCcyMix, fmtCcyPdf, sumByCcy } from "@/lib/currency";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 
 export function EmployeeDetailPage() {
@@ -84,36 +85,38 @@ export function EmployeeDetailPage() {
   // Opening amount already paid before the app (migration) — folded into totals
   // and shown as the ledger's first line.
   const opening = employee.openingPaid && employee.openingPaid > 0 ? employee.openingPaid : 0;
-  const openingCur: "INR" | "USD" = employee.openingPaidCurrency ?? "INR";
+  const openingCur = ccy(employee.openingPaidCurrency);
   const openingInThisYear = opening > 0 && employee.openingPaidDate
     ? new Date(employee.openingPaidDate).getFullYear() === new Date().getFullYear()
     : false;
-  const salaryTotals = {
-    total: rawTotals.total + opening,
-    count: rawTotals.count + (opening > 0 ? 1 : 0),
-    thisYear: rawTotals.thisYear + (openingInThisYear ? opening : 0),
-  };
-  // Uniform currency across opening + all payments? else fall back to ₹.
-  const allCurrencies = [
-    ...(opening > 0 ? [openingCur] : []),
-    ...salaryLedger.map(e => e.currency ?? "INR"),
-  ];
-  const salaryCur: "INR" | "USD" = allCurrencies.length > 0 && allCurrencies.every(c => c === "USD") ? "USD" : "INR";
 
   // Downloadable salary ledger (opening row + each payment).
+  const year = new Date().getFullYear();
   const salaryRows = [
-    ...(opening > 0 ? [{ date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur }] : []),
-    ...salaryLedger.map(e => ({ date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: (e.currency ?? "INR") as "INR" | "USD" })),
+    ...(opening > 0 ? [{ date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur, thisYear: openingInThisYear }] : []),
+    ...salaryLedger.map(e => ({ date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: ccy(e.currency), thisYear: new Date(e.createdAt).getFullYear() === year })),
   ];
+  // Paid from several accounts (rupees, dollars, AUD…), each currency is
+  // totalled on its own — never added together. One currency, as nearly
+  // always, reads as the single figure it always did.
+  const salaryTotals = {
+    total: sumByCcy(salaryRows, r => r.amount, r => r.currency),
+    count: rawTotals.count + (opening > 0 ? 1 : 0),
+    thisYear: sumByCcy(salaryRows.filter(r => r.thisYear), r => r.amount, r => r.currency),
+  };
+  const salaryCcys = [...new Set(salaryRows.map(r => r.currency))].sort(ccyOrder);
+  // A nil total reads in the one currency paid in ("$0"), else in rupees.
+  const nilCcy = salaryCcys.length === 1 ? salaryCcys[0] : "INR";
   // Salary rows as a proper statement: oldest first with a running total of
-  // everything paid to this person, opening included.
-  const salaryStatement: StatementRow[] = (() => {
+  // everything paid to this person, opening included — one statement per
+  // currency, since a running total cannot add rupees to dollars.
+  const statementIn = (code: string): StatementRow[] => {
     let running = 0;
     // The running total can only be worked out oldest-first; the list is read
     // newest-first, so it is reversed after the balances are in (see the
     // .reverse() at the end).
     return salaryRows
-      .slice()
+      .filter(r => r.currency === code)
       .sort((a, b) => +new Date(a.date) - +new Date(b.date))
       .map((r, i) => {
         running = Math.round((running + r.amount) * 100) / 100;
@@ -129,11 +132,15 @@ export function EmployeeDetailPage() {
         };
       })
       .reverse();
-  })();
+  };
 
 
-  // jsPDF's built-in font can't render ₹ — use a plain-text prefix in the PDF.
-  const pdfAmt = (a: number, c: "INR" | "USD") => (c === "USD" ? "$" : "Rs. ") + Math.round(a).toLocaleString(c === "USD" ? "en-US" : "en-IN");
+  // jsPDF's built-in font can't render ₹ — fmtCcyPdf writes "Rs." (and the
+  // code for any symbol it may not draw). Totals per currency: "Rs. 84,910 + AUD 1,200".
+  const pdfMix = (m: Map<string, number>) => {
+    const parts = [...m.entries()].filter(([, v]) => Math.abs(v) > 0.0001).sort(([a], [b]) => ccyOrder(a, b));
+    return parts.length ? parts.map(([c, v]) => fmtCcyPdf(v, c)).join(" + ") : fmtCcyPdf(0, nilCcy);
+  };
   const exportSalaryCsv = () => downloadCsv(
     `Salary-${employee.name.replace(/\s+/g, "_")}`,
     ["Date", "Particulars", "Category", "Amount", "Currency"],
@@ -144,14 +151,14 @@ export function EmployeeDetailPage() {
     subjectLines: [
       `Name: ${employee.name}`,
       employee.department ? `Department: ${employee.department}` : "",
-      `Total paid to date: ${pdfAmt(salaryTotals.total, salaryCur)}`,
+      `Total paid to date: ${pdfMix(salaryTotals.total)}`,
       `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
     ].filter(Boolean),
     summary: [],
     columns: [{ header: "Date", x: 20 }, { header: "Particulars", x: 55 }, { header: "Category", x: 120 }, { header: "Amount", x: 175 }],
     align: ["left", "left", "left", "right"],
-    rows: salaryRows.map(r => [fmtDate(r.date), r.particulars.slice(0, 34), r.category, pdfAmt(r.amount, r.currency)]),
-    totalsRow: ["", "", "Total", pdfAmt(salaryTotals.total, salaryCur)],
+    rows: salaryRows.map(r => [fmtDate(r.date), r.particulars.slice(0, 34), r.category, fmtCcyPdf(r.amount, r.currency)]),
+    totalsRow: ["", "", "Total", pdfMix(salaryTotals.total)],
     filename: `Salary-${employee.name.replace(/\s+/g, "_")}`,
   });
 
@@ -235,11 +242,11 @@ export function EmployeeDetailPage() {
           <div className="flex items-center gap-3 flex-wrap">
             <div className="text-right">
               <p className="text-[11px] text-muted-foreground">This year</p>
-              <p className="font-semibold text-sm text-brand-dark">{fmtExpenseAmount(salaryTotals.thisYear, salaryCur)}</p>
+              <p className="font-semibold text-sm text-brand-dark">{fmtCcyMix(salaryTotals.thisYear, nilCcy)}</p>
             </div>
             <div className="text-right pl-3 border-l border-border/60">
               <p className="text-[11px] text-muted-foreground">Total paid to date</p>
-              <p className="font-display text-lg font-bold text-emerald-600">{fmtExpenseAmount(salaryTotals.total, salaryCur)}</p>
+              <p className="font-display text-lg font-bold text-emerald-600">{fmtCcyMix(salaryTotals.total, nilCcy)}</p>
             </div>
             {(salaryLedger.length > 0 || opening > 0) && mayExport && (
               <div className="pl-3 border-l border-border/60">
@@ -259,20 +266,29 @@ export function EmployeeDetailPage() {
           </div>
         ) : (
           /* Same ledger shape as every other account: search, a date range, a
-             type filter and a running total paid. */
-          <StatementLedger
-            title="Salary & Payments"
-            caption={`${salaryTotals.count} payment${salaryTotals.count !== 1 ? "s" : ""}${opening > 0 ? " (incl. opening)" : ""} · running total paid`}
-            rows={salaryStatement}
-            fmt={(n: number) => fmtExpenseAmount(n, salaryCur)}
-            debitLabel="Paid"
-            creditLabel=""
-            summary={[
-              { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear, salaryCur) },
-              { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total, salaryCur), tone: "in" },
-              { label: "Payments", value: String(salaryTotals.count) },
-            ]}
-          />
+             type filter and a running total paid. One ledger per currency paid
+             in — almost always just the one, exactly as before. */
+          salaryCcys.map(code => {
+            const rows = statementIn(code);
+            const n = rows.length;
+            const single = salaryCcys.length === 1;
+            return (
+              <StatementLedger
+                key={code}
+                title={single ? "Salary & Payments" : `Salary & Payments — ${code}`}
+                caption={`${n} payment${n !== 1 ? "s" : ""}${single ? "" : ` in ${code}`}${opening > 0 && openingCur === code ? " (incl. opening)" : ""} · running total paid`}
+                rows={rows}
+                fmt={(v: number) => fmtExpenseAmount(v, code)}
+                debitLabel="Paid"
+                creditLabel=""
+                summary={[
+                  { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear.get(code) ?? 0, code) },
+                  { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total.get(code) ?? 0, code), tone: "in" },
+                  { label: "Payments", value: String(n) },
+                ]}
+              />
+            );
+          })
         )}
       </div>
 

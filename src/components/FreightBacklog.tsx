@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { updateDb, fmtDate, fmtMoney, orderTotal, type Expense } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { ccySymbol, fmtCcy } from "@/lib/currency";
 import { parcelsWithoutFreight, recordShippingCost, recordNoFreight, linkExpenseToShipment, type Parcel } from "@/lib/dispatch";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -39,7 +39,7 @@ export function FreightBacklog() {
   if (!parcels.length) return null;
 
   const me = { id: user!.id };
-  const sym = currency === "USD" ? "$" : "₹";
+  const sym = ccySymbol(currency);
   const ref = (p: Parcel) => `${p.courierName} ${p.trackingNumber}`.trim();
   const field = (p: Parcel) => entry[p.key] ?? { freight: "", insurance: "", link: "" };
   const set = (p: Parcel, patch: Partial<{ freight: string; insurance: string; link: string }>) =>
@@ -81,7 +81,7 @@ export function FreightBacklog() {
     const each = Number(estimate);
     if (!(each > 0)) { toast.error("Enter the estimate per parcel"); return; }
     if (!(await confirmBox(
-      `Record ${sym}${each} of estimated freight against each of the ${parcels.length} shipments listed?\n\n`
+      `Record ${fmtCcy(each, currency)} of estimated freight against each of the ${parcels.length} shipments listed?\n\n`
       + "Each is written as an ESTIMATE in Expenses, dated the day it shipped, and not taken from any account. "
       + "Replace any of them with the real bill whenever you have it.",
     ))) return;
@@ -156,7 +156,7 @@ export function FreightBacklog() {
                         <option value="">or attach a bill already in Expenses…</option>
                         {options.map(e => (
                           <option key={e.id} value={e.id}>
-                            {e.title} · {e.currency === "USD" ? fmtMoney(e.amount) : fmtMoneyInr(e.amount)} · {fmtDate(e.createdAt)}
+                            {e.title} · {fmtCcy(e.amount, e.currency)} · {fmtDate(e.createdAt)}
                           </option>
                         ))}
                       </select>

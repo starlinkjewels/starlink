@@ -15,6 +15,7 @@ import {
   type DB, type LockerTransaction, type Order,
 } from "./db";
 import { receiptForAdvance } from "./receipts";
+import { ccy } from "./currency";
 
 /** Income rows that are not tagged as a client payment — the ones that may be
  *  sitting in a locker without ever having settled anybody's bill. */
@@ -61,6 +62,8 @@ export function invoiceBalance(db: DB, invoiceId: string): number {
  *
  * `exchangeRate` is required when the locker is not in USD, because orders are
  * billed in USD and we need to know how much of the bill this actually settles.
+ * It is the locker's currency for $1 (₹83.5 for a rupee locker, A$1.52 for an
+ * Australian one), so the bill settled is the locker amount ÷ the rate.
  * Returns how much of the client's billing it cleared.
  */
 export async function applyIncomeToClient(args: {
@@ -79,10 +82,13 @@ export async function applyIncomeToClient(args: {
   const client = db.clients.find(c => c.id === args.clientId);
   if (!client) return { ok: false, error: "Choose the client this money came from." };
 
-  const isUsd = (txn.currency ?? "INR") === "USD";
+  // Any currency but USD needs the rate; unset is rupees, as every row made
+  // before lockers held other currencies.
+  const lockerCcy = ccy(txn.currency);
+  const isUsd = lockerCcy === "USD";
   const rate = args.exchangeRate ?? 0;
   if (!isUsd && rate <= 0) {
-    return { ok: false, error: "Enter the exchange rate — clients are billed in USD." };
+    return { ok: false, error: `Enter the USD to ${lockerCcy} exchange rate — clients are billed in USD.` };
   }
   const billed = isUsd ? txn.amountInr : Math.round((txn.amountInr / rate) * 100) / 100;
   if (billed <= 0) return { ok: false, error: "That entry has no amount to apply." };

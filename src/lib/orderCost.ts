@@ -1,4 +1,5 @@
-import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
+import { ccy, ccyOrder, inrPerUnit, roundCcy, sumByCcy, type CurrencyCode } from "@/lib/currency";
+import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/materials";
 import { companyOf } from "@/lib/companies";
@@ -74,6 +75,19 @@ export function rateOn(db: DB, iso: string): FxRate | null {
   }
   const single = fx.flat ?? 0;
   return single > 0 ? { rate: single, basis: "single" } : null;
+}
+
+/**
+ * Rupees for one unit of any currency on a day. Dollars from the admin's own
+ * profit rates (above) when there are any; every other currency — and dollars
+ * when those can't be read — from Settings → Exchange rates. Rupees are 1.
+ * Undefined when nothing is on file: then nothing is converted at a guess.
+ */
+export function inrOn(db: DB, code: string | undefined, iso: string): number | undefined {
+  const c = ccy(code);
+  if (c === "INR") return 1;
+  if (c === "USD") { const r = rateOn(db, iso); if (r) return r.rate; }
+  return inrPerUnit(db.settings.currencyRates, c, iso);
 }
 
 export interface CostLine {
@@ -415,7 +429,8 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   // parcel — freight and insurance, most of all. A shared cost is split by
   // selling value, the usual basis for freight-out: a $3,000 ring carries more
   // of a parcel's insurance than a $300 band in the same box. An expense paid
-  // in dollars is converted at the rate on the day it was paid.
+  // from a dollar (or any other foreign) account is converted at the rate on
+  // the day it was paid.
   let expenseInr = 0;
   for (const e of db.expenses ?? []) {
     if (!e.orderIds?.includes(order.id)) continue;
@@ -425,15 +440,20 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const value = (o: Order) => Math.max(0, orderTotal(o) + returnedCredit(o));
     const pool = peers.reduce((s, o) => s + value(o), 0);
     const share = pool > 0 ? value(order) / pool : 1 / Math.max(peers.length, 1);
-    let inr: number | null = e.amount;
-    if (e.currency === "USD") {
-      const fx = rateOn(db, e.createdAt);
-      inr = fx ? e.amount * fx.rate : null;
-    }
-    if (inr === null) {
-      out.missing.push({ label: e.title, reason: "paid in dollars — set the exchange rate to count it" });
+    // Rupees as they are; any other currency at its rate that day. With no
+    // rate on file it is listed as missing — never counted as if it were ₹.
+    const perUnit = inrOn(db, e.currency, e.createdAt);
+    if (perUnit === undefined) {
+      const code = ccy(e.currency);
+      out.missing.push({
+        label: e.title,
+        reason: code === "USD"
+          ? "paid in dollars — set the exchange rate to count it"
+          : `paid in ${code} — add a ${code} rate in Settings → Exchange rates to count it`,
+      });
       continue;
     }
+    const inr = e.amount * perUnit;
     out.other.push({
       label: peers.length > 1 ? `${e.title} — ${Math.round(share * 100)}% of a ${peers.length}-order parcel` : e.title,
       amountInr: r2(inr * share),
@@ -609,7 +629,12 @@ export function profitReport(db: DB, orders: Order[]) {
  * An expense tied to orders is already inside those orders' cost, so it is
  * left out here; counting it twice would understate the profit by exactly the
  * freight bill. Rupee expenses are converted at the rate on the day they were
- * paid, the same way the sales were.
+ * paid, the same way the sales were; one paid from an account in any other
+ * currency is turned into rupees at that currency's rate first.
+ *
+ * An expense in a currency with no rate on file is left out of both totals
+ * rather than guessed at — and listed in `uncounted`, so the report can say
+ * "2 expenses in AUD not counted — add an AUD rate in Settings".
  */
 export function operatingExpenses(db: DB, inPeriod: (iso: string) => boolean) {
   const rows = (db.expenses ?? []).filter(e => !(e.orderIds && e.orderIds.length) && inPeriod(e.createdAt));
@@ -617,26 +642,42 @@ export function operatingExpenses(db: DB, inPeriod: (iso: string) => boolean) {
   let inr = 0;
   let convertible = true;
   const byCategory = new Map<string, number>();
+  const uncounted = new Map<CurrencyCode, { count: number; amount: number }>();
   for (const e of rows) {
+    const code = ccy(e.currency);
     let asUsd: number | null;
-    if (e.currency === "USD") {
+    if (code === "USD") {
       asUsd = e.amount;
       const fx = rateOn(db, e.createdAt);
       inr += fx ? e.amount * fx.rate : 0;
     } else {
-      inr += e.amount;
+      const perUnit = inrOn(db, code, e.createdAt); // 1 for rupees
+      if (perUnit === undefined) {
+        const u = uncounted.get(code) ?? { count: 0, amount: 0 };
+        u.count++; u.amount += e.amount;
+        uncounted.set(code, u);
+        continue;
+      }
+      const asInr = e.amount * perUnit;
+      inr += asInr;
       const fx = rateOn(db, e.createdAt);
-      asUsd = fx ? e.amount / fx.rate : null;
+      asUsd = fx ? asInr / fx.rate : null;
     }
     if (asUsd === null) { convertible = false; continue; }
     usd += asUsd;
     byCategory.set(e.category, (byCategory.get(e.category) ?? 0) + asUsd);
   }
+  const left = [...uncounted.values()].reduce((s, u) => s + u.count, 0);
   return {
-    count: rows.length,
+    /** Entries inside the totals — those in a currency with no rate are not. */
+    count: rows.length - left,
     totalInr: r2(inr),
     totalUsd: convertible ? r2(usd) : null,
     byCategory: [...byCategory.entries()].map(([k, v]) => ({ category: k, usd: r2(v) })).sort((a, b) => b.usd - a.usd),
+    /** Left out for want of a rate, by currency: what to add in Settings → Exchange rates. */
+    uncounted: [...uncounted.entries()]
+      .sort(([a], [b]) => ccyOrder(a, b))
+      .map(([currency, u]) => ({ currency, count: u.count, amount: roundCcy(u.amount, currency) })),
   };
 }
 
@@ -658,8 +699,9 @@ export interface ExchangeDifference {
   usd: number | null;
   /** Dollars that were converted into rupees, so carry a realised difference. */
   convertedUsd: number;
-  /** Dollars banked in a dollar account — not converted yet, so nothing is
-   *  realised on them until they are. */
+  /** Dollars banked in a foreign account (dollars, or any currency but
+   *  rupees) — not turned into rupees yet, so nothing is realised on them
+   *  until they are. */
   heldUsd: number;
   /** Dollars whose conversion rate is not on record (credit carried across,
    *  or a payment entered before rates were kept), left out either way. */
@@ -671,22 +713,27 @@ export interface ExchangeDifference {
  * payment comes in on a receipt, which carries the rate whenever the money
  * landed in a rupee account; an older payment taken against one order may
  * carry its own rupee amount instead.
+ *
+ * Only rupees received realise a difference. Money that landed in any other
+ * account — dollars, or AUD, EUR… — is still held abroad: its receipt's rate
+ * is that currency per dollar (A$1.5), not rupees, and nothing is realised in
+ * rupees until it is converted.
  */
 function realisedRate(db: DB, a: Order["advances"][number]): number | "held" | null {
   if (a.fromCredit) return null; // the rupees came in on an earlier receipt
   if (a.receiptId) {
     const r = (db.clientReceipts ?? []).find(x => x.id === a.receiptId);
     if (r) {
-      const cur = r.lockerCurrency ?? (r.lockerId ? db.lockers.find(l => l.id === r.lockerId)?.currency : undefined) ?? "INR";
-      if (cur === "USD") return "held";
+      const cur = ccy(r.lockerCurrency ?? (r.lockerId ? db.lockers.find(l => l.id === r.lockerId)?.currency : undefined));
+      if (cur !== "INR") return "held";
       if (r.exchangeRate && r.exchangeRate > 0) return r.exchangeRate;
       if (r.lockerAmount && r.amountUsd > 0) return r.lockerAmount / r.amountUsd;
       return null;
     }
   }
   if (a.lockerId) {
-    const cur = db.lockers.find(l => l.id === a.lockerId)?.currency ?? "INR";
-    if (cur === "USD") return "held";
+    const cur = ccy(db.lockers.find(l => l.id === a.lockerId)?.currency);
+    if (cur !== "INR") return "held";
     if (a.lockerAmount && a.amount > 0) return a.lockerAmount / a.amount;
   }
   return null;
@@ -725,4 +772,25 @@ export function exchangeDifferenceTotal(db: DB, orders: Order[]) {
     convertedUsd += x.convertedUsd; heldUsd += x.heldUsd; unknownUsd += x.unknownUsd;
   }
   return { inr: r2(inr), usd: convertible ? r2(usd) : null, convertedUsd: r2(convertedUsd), heldUsd: r2(heldUsd), unknownUsd: r2(unknownUsd) };
+}
+
+/**
+ * Expenses in dollars, to set against revenue billed in dollars. Dollars as
+ * they are; any other currency through rupees at the rate on the day it was
+ * paid. One with no rate on file is left out and handed back apart, never
+ * converted at a guess.
+ */
+export function expensesInUsd(db: DB, list: Expense[]): { usd: number; converted: boolean; left: Map<CurrencyCode, number> } {
+  let usd = 0, converted = false;
+  const left: Expense[] = [];
+  for (const e of list) {
+    const code = ccy(e.currency);
+    if (code === "USD") { usd += e.amount; continue; }
+    const perUnit = inrOn(db, code, e.createdAt);
+    const perUsd = inrOn(db, "USD", e.createdAt);
+    if (perUnit === undefined || !perUsd) { left.push(e); continue; }
+    usd += (e.amount * perUnit) / perUsd;
+    converted = true;
+  }
+  return { usd, converted, left: sumByCcy(left, e => e.amount, e => e.currency) };
 }

@@ -1,7 +1,13 @@
 import { companyOf } from "@/lib/companies";
 import { updateDb, type DB, type DiamondSale } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
-import { fmtMoneyInr } from "@/lib/manufacturing";
+import { fmtCcy } from "@/lib/currency";
+
+/** What the sale put in its account: dollars for a sale in dollars, else
+ *  rupees — the sale's currency, which is the account's too, since a sale can
+ *  only be paid into an account holding it. */
+const proceeds = (sale: DiamondSale) => sale.totalUsd ?? sale.totalInr;
+const proceedsCcy = (sale: DiamondSale) => (sale.totalUsd != null ? "USD" : "INR");
 
 /**
  * Undoing a diamond sold straight out of stock.
@@ -37,7 +43,7 @@ export function saleVoidImpact(db: DB, sale: DiamondSale): string[] {
   out.push(`• the sale to ${buyer} is removed`);
   if (sale.lockerId) {
     const locker = db.lockers.find(l => l.id === sale.lockerId);
-    out.push(`• ${locker?.name ?? "the account"} goes down by ${fmtMoneyInr(sale.totalInr)}`);
+    out.push(`• ${locker?.name ?? "the account"} goes down by ${fmtCcy(proceeds(sale), proceedsCcy(sale))}`);
   }
   out.push("• nothing else changes");
   return out;
@@ -69,7 +75,7 @@ export async function voidDiamondSale(db: DB, sale: DiamondSale, userId: string)
       const at = +new Date(sale.createdAt);
       const idx = (d.lockerTransactions ?? []).findIndex(t =>
         t.lockerId === sale.lockerId && t.type === "income"
-        && Math.abs(t.amountInr - (sale.totalUsd ?? sale.totalInr)) < 0.01
+        && Math.abs(t.amountInr - proceeds(sale)) < 0.01
         && Math.abs(+new Date(t.createdAt) - at) < 2000);
       if (idx >= 0) d.lockerTransactions.splice(idx, 1);
     }

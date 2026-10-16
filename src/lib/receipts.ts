@@ -14,6 +14,7 @@ import {
   type DB, type ClientReceipt, type Order,
 } from "./db";
 import { reserveReceiptNumber } from "./counters";
+import { ccy, type CurrencyCode } from "./currency";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -86,8 +87,11 @@ export interface ReceiptInput {
   method: string;
   remarks?: string;
   lockerId?: string;
+  /** What landed in the locker, in the locker's own currency. */
   lockerAmount?: number;
-  lockerCurrency?: "INR" | "USD";
+  lockerCurrency?: CurrencyCode;
+  /** The locker's currency for $1 (₹83.5, A$1.52…) when the locker isn't USD:
+   *  lockerAmount = amountUsd × this. */
   exchangeRate?: number;
   invoiceId?: string;
   userId: string;
@@ -102,6 +106,9 @@ export async function createReceipt(input: ReceiptInput): Promise<ClientReceipt>
   const receiptNo = await reserveReceiptNumber(loadDb().clientReceipts ?? []);
   const id = uid("rcpt_");
   const now = new Date().toISOString();
+  // The receipt names the currency its deposit row is written in — the
+  // locker's own — so the two can never disagree.
+  const depositLocker = input.lockerId ? loadDb().lockers.find(l => l.id === input.lockerId) : undefined;
   const receipt: ClientReceipt = {
     id, receiptNo,
     clientId: input.clientId,
@@ -109,7 +116,7 @@ export async function createReceipt(input: ReceiptInput): Promise<ClientReceipt>
     amountUsd: r2(input.amountUsd),
     lockerId: input.lockerId,
     lockerAmount: input.lockerAmount,
-    lockerCurrency: input.lockerCurrency,
+    lockerCurrency: depositLocker ? ccy(depositLocker.currency) : input.lockerCurrency,
     exchangeRate: input.exchangeRate,
     method: input.method,
     remarks: input.remarks,
@@ -131,7 +138,7 @@ export async function createReceipt(input: ReceiptInput): Promise<ClientReceipt>
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: input.lockerId, type: "income",
           amountInr: input.lockerAmount ?? receipt.amountUsd,
-          currency: locker.currency || "INR",
+          currency: ccy(locker.currency),
           category: `Client Payment — ${d.clients.find(c => c.id === input.clientId)?.companyName ?? "Client"}`,
           refType: "clientPayment", refId: input.clientId, receiptId: id,
           note: input.remarks?.trim() || input.method,
@@ -179,7 +186,8 @@ export async function receiptForAdvance(args: {
       amountUsd: r2(args.amountUsd),
       lockerId: txn?.lockerId,
       lockerAmount: txn?.amountInr,
-      lockerCurrency: txn?.currency,
+      // A row with no currency is a rupee row (made before lockers held others).
+      lockerCurrency: txn ? ccy(txn.currency) : undefined,
       exchangeRate: txn?.exchangeRate,
       method: args.method,
       remarks: args.remarks?.trim() || undefined,
@@ -229,10 +237,15 @@ export function editReceipt(receiptId: string, patch: Partial<ReceiptInput> & { 
     if (rec.lockerId) {
       const locker = d.lockers.find(l => l.id === rec.lockerId);
       if (locker) {
+        // The deposit is written in the locker's currency; the receipt says so too.
+        // Dollars into a dollar locker convert nothing, so a rate kept from an
+        // account it was moved off must not ride along.
+        rec.lockerCurrency = ccy(locker.currency);
+        if (rec.lockerCurrency === "USD") rec.exchangeRate = undefined;
         d.lockerTransactions.push({
           id: uid("ltx_"), lockerId: rec.lockerId, type: "income",
           amountInr: rec.lockerAmount ?? rec.amountUsd,
-          currency: locker.currency || "INR",
+          currency: rec.lockerCurrency,
           category: `Client Payment — ${d.clients.find(c => c.id === rec.clientId)?.companyName ?? "Client"}`,
           refType: "clientPayment", refId: rec.clientId, receiptId: rec.id,
           note: rec.remarks || rec.method,
@@ -354,7 +367,7 @@ export async function backfillReceipts(userId: string): Promise<number> {
         amountUsd: g.amount,
         lockerId: txn?.lockerId,
         lockerAmount: txn?.amountInr,
-        lockerCurrency: txn?.currency,
+        lockerCurrency: txn ? ccy(txn.currency) : undefined,
         exchangeRate: txn?.exchangeRate,
         method: g.note || "Payment received",
         remarks: undefined,

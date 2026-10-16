@@ -3,6 +3,7 @@ import {
   orderTotal, balanceDue, cashbackPercentFor, issueGiftCard, fmtMoney, worksOnOrder,
   type DB, type Order, type Worker,
 } from "@/lib/db";
+import { ccy, type CurrencyCode } from "@/lib/currency";
 
 /**
  * Sending finished pieces out.
@@ -316,8 +317,9 @@ export function applyDelivery(
 export interface ShippingCost {
   freight: number;
   insurance: number;
-  /** Currency the amounts are in — the paying account's, when one is chosen. */
-  currency: "INR" | "USD";
+  /** Currency the amounts are in — the paying account's (any currency) when
+   *  one is chosen; otherwise ₹ or $, as the courier bills. */
+  currency: CurrencyCode;
   /** The account it was paid from. Left out when the courier bills later. */
   lockerId?: string;
   /** Nothing to pay: handed over in person, or on the client's own account. */
@@ -341,8 +343,9 @@ export function recordShippingCost(
     return 1;
   }
   const locker = cost.lockerId ? d.lockers.find(l => l.id === cost.lockerId) : undefined;
-  // Paid from an account, the amount is in that account's currency, full stop.
-  const currency: "INR" | "USD" = locker ? ((locker.currency || "INR") === "USD" ? "USD" : "INR") : cost.currency;
+  // Paid from an account, the amount is in that account's currency, full stop —
+  // whichever it is: an AUD account's freight is A$, never read as rupees.
+  const currency = locker ? ccy(locker.currency) : ccy(cost.currency);
   const ref = `${shipment.courierName.trim()} ${shipment.trackingNumber.trim()}`.trim();
   const numbers = orderIds.map(id => d.orders.find(o => o.id === id)?.orderNumber).filter(Boolean).join(", ");
   let written = 0;

@@ -6,8 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { CurrencySelect } from "@/components/CurrencyFields";
+import { ccySymbol, type CurrencyCode } from "@/lib/currency";
 
-type Form = { name: string; type: LockerType; currency: "INR" | "USD"; accountNumberLast4: string; openingBalance: string };
+type Form = { name: string; type: LockerType; currency: CurrencyCode; accountNumberLast4: string; openingBalance: string };
 const EMPTY: Form = { name: "", type: "bank", currency: "INR", accountNumberLast4: "", openingBalance: "0" };
 
 /** The one Add Locker (bank / cash account) form — the Locker page's, also opened from "+ Add new account". */
@@ -60,13 +62,8 @@ export function LockerCreateDialog({ open, onOpenChange, onCreated }: {
             </div>
             <div>
               <Label className="text-xs">Currency</Label>
-              <Select value={f.currency} onValueChange={v => setF({ ...f, currency: v as "INR" | "USD" })}>
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="INR">INR (₹)</SelectItem>
-                  <SelectItem value="USD">USD ($)</SelectItem>
-                </SelectContent>
-              </Select>
+              {/* Any currency the account is actually held in — AUD, EUR, AED… */}
+              <CurrencySelect value={f.currency} onChange={v => setF({ ...f, currency: v })} className="rounded-xl mt-1" />
             </div>
           </div>
           {f.type === "bank" && (
@@ -76,7 +73,7 @@ export function LockerCreateDialog({ open, onOpenChange, onCreated }: {
             </div>
           )}
           <div>
-            <Label className="text-xs">Opening Balance ({f.currency === "USD" ? "$" : "₹"})</Label>
+            <Label className="text-xs">Opening Balance ({ccySymbol(f.currency).trim()})</Label>
             <Input type="number" min={0} value={f.openingBalance} onChange={e => setF({ ...f, openingBalance: e.target.value })} className="rounded-xl mt-1" />
           </div>
         </div>

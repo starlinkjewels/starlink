@@ -1,4 +1,5 @@
 import { loadDb, updateDb, uid, type DB } from "@/lib/db";
+import { ccy } from "@/lib/currency";
 
 const SUPPLIER_PREFIX = "Supplier Payment — ";
 const FACTORY_PREFIX = "Making Charges — ";
@@ -35,6 +36,10 @@ export function orphanSupplierPayments(db: DB): OrphanSupplierPayment[] {
     const isSupplier = !!t.category?.startsWith(SUPPLIER_PREFIX);
     const isFactory = !!t.category?.startsWith(FACTORY_PREFIX);
     if (!isSupplier && !isFactory) continue;
+    // Suppliers and factories are paid in rupees, from rupee accounts only. A
+    // row in any other currency is not one of those payments, and reading its
+    // figure as rupees would post the wrong amount to their books.
+    if (ccy(t.currency) !== "INR" || ccy(db.lockers.find(l => l.id === t.lockerId)?.currency) !== "INR") continue;
     const name = t.category!.slice((isSupplier ? SUPPLIER_PREFIX : FACTORY_PREFIX).length).trim();
     // Renamed since? Then we cannot say whose payment this was — leave it alone
     // rather than post it to the wrong party.

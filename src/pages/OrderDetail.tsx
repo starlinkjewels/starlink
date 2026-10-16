@@ -59,6 +59,7 @@ import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, vo
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance } from "@/lib/receipts";
+import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { confirmBox } from "@/lib/confirm";
@@ -1633,6 +1634,25 @@ function OrderDetailPageBody() {
     } finally { setCancelling(false); }
   };
 
+  // The advance is billed in USD; the locker it lands in can hold any currency.
+  // (The Settings rate as useSuggestedRate gives it — a hook can't sit after
+  // this page's early return.)
+  const advLockerCcy = ccy(db.lockers.find(l => l.id === advLockerId)?.currency);
+  const advRate = advLockerCcy === "USD" ? undefined : tableRate(db.settings.currencyRates, "USD", advLockerCcy);
+  // Picking a locker fills in what the advance comes to there — dollars as they
+  // are, any other currency at the Settings rate — still typed over with what
+  // actually landed. A figure already typed for a locker in the same currency is left alone.
+  const pickAdvLocker = (v: string) => {
+    const db0 = loadDb();
+    const l = db0.lockers.find(x => x.id === v);
+    const lc = ccy(l?.currency);
+    setAdvLockerId(v);
+    if (l && advLockerId && advLockerAmount && lc === advLockerCcy) return;
+    const usd = parseFloat(advAmt) || 0;
+    const rate = !l ? undefined : lc === "USD" ? 1 : tableRate(db0.settings.currencyRates, "USD", lc);
+    setAdvLockerAmount(rate && usd > 0 ? String(roundCcy(usd * rate, lc)) : "");
+  };
+
   const addAdvance = async () => {
     const amt = parseFloat(advAmt);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
@@ -1672,7 +1692,7 @@ function OrderDetailPageBody() {
             if (!d.lockerTransactions) d.lockerTransactions = [];
             d.lockerTransactions.push({
               id: txnId, lockerId: advLockerId, type: "income", amountInr: Number(advLockerAmount),
-              currency: locker.currency || "INR", category: `Client Payment — ${o.orderNumber}`,
+              currency: ccy(locker.currency), category: `Client Payment — ${o.orderNumber}`,
               refType: "clientPayment", refId: o.id, recordedBy: user!.id, createdAt: at,
             });
           }
@@ -3174,17 +3194,22 @@ function OrderDetailPageBody() {
                 <div className="grid md:grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs">Deposited to Locker *</Label>
-                    <Select value={advLockerId} onValueChange={addNew("locker", setAdvLockerId)}>
+                    <Select value={advLockerId} onValueChange={addNew("locker", pickAdvLocker)}>
                       <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose a locker" /></SelectTrigger>
                       <SelectContent>
-                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>)}
+                        {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
                       <AddNewItem kind="locker" /></SelectContent>
                     </Select>
                   </div>
                   {advLockerId && (
                     <div className="space-y-1.5">
-                      <Label className="text-xs">Amount Deposited ({db.lockers.find(l => l.id === advLockerId)?.currency === "USD" ? "$" : "₹"})</Label>
+                      <Label className="text-xs">Amount Deposited ({ccySymbol(advLockerCcy).trim()})</Label>
                       <Input type="number" min={0} step="0.01" value={advLockerAmount} onChange={e => setAdvLockerAmount(e.target.value)} className="rounded-xl h-10" />
+                      {advRate && parseFloat(advAmt) > 0 && (
+                        <p className="text-[11px] text-muted-foreground">
+                          {fmtMoney(parseFloat(advAmt))} at {rateText("USD", advLockerCcy, advRate)} is {fmtCcy(roundCcy(parseFloat(advAmt) * advRate, advLockerCcy), advLockerCcy)} — enter what actually landed.
+                        </p>
+                      )}
                     </div>
                   )}
                 </div>

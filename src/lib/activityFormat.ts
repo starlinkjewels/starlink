@@ -1,4 +1,5 @@
 import type { ModuleKey } from "@/lib/modules";
+import { fmtCcy } from "./currency";
 
 /**
  * Turning a save into an activity-log entry a person can read.
@@ -102,6 +103,8 @@ export function moduleOfCol(col: string, doc?: Record<string, unknown> | null): 
 
 const s = (v: unknown) => (v == null ? "" : String(v));
 const num = (v: unknown) => (typeof v === "number" ? v.toLocaleString("en-IN") : s(v));
+/** An amount in the record's own currency (unset = rupees) — an account can hold any. */
+const money = (v: unknown, code: unknown) => (typeof v === "number" ? fmtCcy(v, s(code) || undefined) : s(v));
 
 /** The name a person would use for this record. */
 export function docLabel(col: string, d: Record<string, unknown> | null | undefined, id: string): string {
@@ -111,9 +114,9 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "clients": return s(d.companyName) || id;
     case "users": return `${s(d.name) || s(d.email) || id}${d.role ? ` (${s(d.role)})` : ""}`;
     case "invoices": return s(d.number) || id;
-    case "expenses": return `${s(d.title)} · ${d.currency === "USD" ? "$" : "₹"}${num(d.amount)}`;
+    case "expenses": return `${s(d.title)} · ${money(d.amount, d.currency)}`;
     case "lockers": case "suppliers": case "factories": return s(d.name) || id;
-    case "lockerTransactions": return `${s(d.type)} ${d.currency === "USD" ? "$" : "₹"}${num(d.amountInr)}${d.category ? ` · ${s(d.category)}` : ""}`;
+    case "lockerTransactions": return `${s(d.type)} ${money(d.amountInr, d.currency)}${d.category ? ` · ${s(d.category)}` : ""}`;
     case "purchases": {
       const g = d.gold as { weightGrams?: number; purity?: string } | undefined;
       const dm = d.diamond as { carat?: number; shape?: string } | undefined;

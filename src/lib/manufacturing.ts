@@ -9,6 +9,7 @@
 // contains pure, side-effect-free summary/allocator functions).
 // The account calculations live in src/lib/pure so the server works every total
 // out with exactly this code. Re-exported: nothing that imports them from here changes.
+import { fmtCcy } from "@/lib/currency";
 import {
   purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow, otherFlow,
   factoryFineGoldBalance, factoryAccount, factoryOtherBalances, supplierAccount, lockerBalance,
@@ -48,9 +49,10 @@ import {
 } from "./db";
 
 
-/** Format a Locker/LockerTransaction amount in its own currency (undefined = INR). */
-export function fmtLockerAmount(n: number, currency?: "INR" | "USD"): string {
-  return currency === "USD" ? fmtMoney(n) : fmtMoneyInr(n);
+/** Format a Locker/LockerTransaction amount in its own currency (undefined = INR) —
+ *  any currency: ₹1,23,456 · $1,234.56 · A$980 · €1,200. */
+export function fmtLockerAmount(n: number, currency?: string): string {
+  return fmtCcy(n, currency);
 }
 
 // This module only tracks gold (by karat purity) and diamond — Platinum/Silver

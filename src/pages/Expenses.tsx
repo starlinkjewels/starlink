@@ -1,3 +1,4 @@
+import { expensesInUsd } from "@/lib/orderCost";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
@@ -6,7 +7,9 @@ import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import type { Expense, ExpenseCategory } from "@/lib/db";
+import type { DB, Expense, ExpenseCategory } from "@/lib/db";
+import { ccy, ccySymbol, fmtCcyMix, sumByCcy, type CurrencyCode } from "@/lib/currency";
+import { inrOn } from "@/lib/orderCost";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -30,6 +33,9 @@ const CATEGORY_STYLE: Record<ExpenseCategory, string> = {
 
 const EMPTY_FORM = { title: "", amount: "", category: "Other" as ExpenseCategory, note: "", clientId: "", paidToEmployeeId: "" };
 
+/** Each currency's total kept apart — rupees, dollars and A$ are never added together. */
+const totalsOf = (list: Expense[]) => sumByCcy(list, e => e.amount, e => e.currency);
+
 export function ExpensesPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(() => loadDb());
@@ -49,8 +55,9 @@ export function ExpensesPage() {
   const [error, setError] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
   const expLocker = db.lockers.find(l => l.id === expLockerId);
-  const expCurrency: "INR" | "USD" = (expLocker?.currency || "INR") === "USD" ? "USD" : "INR";
-  const expSymbol = expCurrency === "USD" ? "$" : "₹";
+  // The account's own currency, whichever it is — an AUD account's expense is A$.
+  const expCurrency = ccy(expLocker?.currency);
+  const expSymbol = ccySymbol(expCurrency).trim();
   // Configured list (Settings) for picking a category on a NEW expense —
   // vs. every category that ever appears on an existing expense, for the
   // filter dropdown, so a since-removed category stays filterable.
@@ -115,9 +122,7 @@ export function ExpensesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [db.expenses, filterEmployee, filterCategory, search, dateFrom, dateTo]);
 
-  const myTotal = myExpenses.reduce((s, e) => s + e.amount, 0);
-  const myCur: "INR" | "USD" = myExpenses.length && myExpenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
-  const passbookTotal = passbookExpenses.reduce((s, e) => s + e.amount, 0);
+  const myTotals = totalsOf(myExpenses);
 
   // Employee profit stats
   const myRevenue = useMemo(() => {
@@ -126,15 +131,22 @@ export function ExpensesPage() {
       .filter(o => o.assignedEmployeeId === user!.id && o.status === "Delivered")
       .reduce((s, o) => s + keptValue(o), 0);
   }, [db.orders, user, isEmployee]);
+  // Revenue is in dollars; expenses are in whatever account paid them. Net
+  // profit sets the two against each other in dollars, marked "≈" when any
+  // expense had to be converted, and says what it could not convert.
+  const myNet = useMemo(() => {
+    if (!isEmployee) return null;
+    const x = expensesInUsd(db, myExpenses);
+    return { ...x, net: myRevenue - x.usd };
+  }, [db, myExpenses, myRevenue, isEmployee]);
 
   // Per-employee summary for admin passbook cards
   const employeeSummary = useMemo(
     () =>
-      staffUsers.map(u => ({
-        user: u,
-        total: db.expenses.filter(e => e.employeeId === u.id).reduce((s, e) => s + e.amount, 0),
-        count: db.expenses.filter(e => e.employeeId === u.id).length,
-      })).filter(s => s.count > 0),
+      staffUsers.map(u => {
+        const theirs = db.expenses.filter(e => e.employeeId === u.id);
+        return { user: u, totals: totalsOf(theirs), count: theirs.length };
+      }).filter(s => s.count > 0),
     [db.expenses, staffUsers]
   );
 
@@ -152,7 +164,8 @@ export function ExpensesPage() {
     const now = new Date().toISOString();
     const fresh = loadDb();
     const locker = fresh.lockers.find(l => l.id === expLockerId);
-    const currency: "INR" | "USD" = (locker?.currency || "INR") === "USD" ? "USD" : "INR";
+    // Whatever the account holds — never folded into rupees because it isn't dollars.
+    const currency = ccy(locker?.currency);
     const expense: Expense = {
       id: uid("exp_"),
       title: form.title.trim(),
@@ -267,7 +280,7 @@ export function ExpensesPage() {
               </div>
               <p className="text-xs text-muted-foreground font-medium">Expenses</p>
             </div>
-            <p className="text-xl font-bold text-destructive">{fmtExpenseAmount(myTotal, myCur)}</p>
+            <p className="text-xl font-bold text-destructive">{fmtCcyMix(myTotals)}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{myExpenses.length} entries</p>
           </motion.div>
 
@@ -276,15 +289,22 @@ export function ExpensesPage() {
             className="card-luxe p-4"
           >
             <div className="flex items-center gap-2 mb-2">
-              <div className={`h-7 w-7 rounded-lg grid place-items-center ${myRevenue - myTotal >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
-                <Wallet className={`h-3.5 w-3.5 ${myRevenue - myTotal >= 0 ? "text-emerald-600" : "text-destructive"}`} />
+              <div className={`h-7 w-7 rounded-lg grid place-items-center ${(myNet?.net ?? 0) >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
+                <Wallet className={`h-3.5 w-3.5 ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`} />
               </div>
               <p className="text-xs text-muted-foreground font-medium">Net Profit</p>
             </div>
-            <p className={`text-xl font-bold ${myRevenue - myTotal >= 0 ? "text-emerald-600" : "text-destructive"}`}>
-              {fmtMoney(myRevenue - myTotal)}
+            <p className={`text-xl font-bold ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+              {myNet?.converted ? "≈ " : ""}{fmtMoney(myNet?.net ?? 0)}
             </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Revenue − Expenses</p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Revenue − Expenses{myNet?.converted ? ", in $ at each day's rate" : ""}
+            </p>
+            {myNet && myNet.left.size > 0 && (
+              <p className="text-[11px] text-amber-700 mt-0.5">
+                {fmtCcyMix(myNet.left)} not counted — no exchange rate on file
+              </p>
+            )}
           </motion.div>
         </div>
       )}
@@ -359,7 +379,6 @@ export function ExpensesPage() {
 
           <ExpenseList
             expenses={myExpenses}
-            total={myTotal}
             showEmployee={isAdmin && mineFilter !== "self"}
             users={db.users}
             clients={db.clients}
@@ -376,7 +395,7 @@ export function ExpensesPage() {
           {/* Employee summary cards */}
           {filterEmployee === "all" && employeeSummary.length > 0 && (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-              {employeeSummary.map(({ user: u, total, count }) => (
+              {employeeSummary.map(({ user: u, totals, count }) => (
                 <motion.button
                   key={u.id}
                   initial={{ opacity: 0, scale: 0.97 }}
@@ -389,7 +408,7 @@ export function ExpensesPage() {
                   </div>
                   <p className="text-xs font-semibold text-foreground truncate">{u.name}</p>
                   <p className="text-[10px] text-muted-foreground capitalize mb-1.5">{u.role}</p>
-                  <p className="text-base font-bold text-destructive">{fmtMoney(total)}</p>
+                  <p className="text-base font-bold text-destructive">{fmtCcyMix(totals)}</p>
                   <p className="text-[11px] text-muted-foreground">{count} {count === 1 ? "entry" : "entries"}</p>
                 </motion.button>
               ))}
@@ -450,7 +469,6 @@ export function ExpensesPage() {
           {/* Passbook list */}
           <ExpenseList
             expenses={passbookExpenses}
-            total={passbookTotal}
             showEmployee={true}
             users={db.users}
             clients={db.clients}
@@ -507,7 +525,8 @@ export function ExpensesPage() {
                       disabled={!expLockerId}
                       min="0"
                       step="0.01"
-                      className="w-full pl-7 pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60"
+                      // Room for a longer symbol — A$, HK$, AED — not only ₹ and $.
+                      className={`w-full ${expSymbol.length > 1 ? "pl-12" : "pl-7"} pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60`}
                     />
                   </div>
                 </div>
@@ -609,7 +628,6 @@ export function ExpensesPage() {
 
 interface ExpenseListProps {
   expenses: Expense[];
-  total: number;
   showEmployee: boolean;
   users: any[];
   clients: any[];
@@ -619,9 +637,10 @@ interface ExpenseListProps {
   mayDelete: boolean;
 }
 
-function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
-  // Format the total in the shared currency; fall back to ₹ when mixed/legacy.
-  const listCurrency: "INR" | "USD" = expenses.length && expenses.every(e => (e.currency ?? "INR") === "USD") ? "USD" : "INR";
+function ExpenseList({ expenses, showEmployee, users, clients, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
+  // A nil total reads in the list's one currency ("$0"), else in rupees.
+  const codes = new Set(expenses.map(e => ccy(e.currency)));
+  const nilCcy = codes.size === 1 ? [...codes][0] : "INR";
   const userName = (id?: string) => (id ? users.find(u => u.id === id)?.name : undefined) ?? "";
   const clientName = (id?: string) => (id ? clients.find(c => c.id === id)?.companyName : undefined) ?? "";
   const columns: DataColumn<Expense>[] = [
@@ -633,6 +652,10 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
     { key: "paidTo", header: "Paid to", sortValue: e => userName(e.paidToEmployeeId), cell: e => e.paidToEmployeeId ? <CellTag tone="green">{userName(e.paidToEmployeeId) || "—"}</CellTag> : <span className="text-muted-foreground/50">—</span> },
     { key: "client", header: "Client", sortValue: e => clientName(e.clientId), cell: e => e.clientId ? <CellTag tone="violet">{clientName(e.clientId) || "—"}</CellTag> : <span className="text-muted-foreground/50">—</span> },
     ...(showEmployee ? [{ key: "by", header: "Added by", sortValue: (e: Expense) => userName(e.employeeId), cell: (e: Expense) => <span className="whitespace-nowrap">{userName(e.employeeId) || "—"}</span> }] : []),
+    // Which currency each amount is in — on screen when the list mixes them, and
+    // in the Excel file, where the amount is a bare number.
+    { key: "currency", header: "Currency", hidden: new Set(expenses.map(e => ccy(e.currency))).size < 2, sortValue: e => ccy(e.currency),
+      cell: e => <span className="font-mono text-xs">{ccy(e.currency)}</span> },
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: e => e.amount, csv: e => e.amount,
       cell: e => <CellAmount tone="out">{fmtExpenseAmount(e.amount, e.currency)}</CellAmount> },
   ];
@@ -648,7 +671,8 @@ function ExpenseList({ expenses, total, showEmployee, users, clients, onDelete, 
         searchText={e => [e.title, e.category, e.note, userName(e.paidToEmployeeId), clientName(e.clientId), userName(e.employeeId)].filter(Boolean).join(" ")}
         searchPlaceholder="Search expenses"
         exportName="Expenses"
-        totals={{ amount: rows => <span className="text-destructive">{fmtExpenseAmount(rows === expenses ? total : rows.reduce((s, e) => s + e.amount, 0), listCurrency)}</span> }}
+        // A total per currency ("₹84,910 + A$1,200") — rupees and dollars never added.
+        totals={{ amount: rows => <span className="text-destructive">{fmtCcyMix(totalsOf(rows), nilCcy)}</span> }}
         rowActions={e => [
           { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), show: mayDelete && e.employeeId === currentUserId },
         ]}

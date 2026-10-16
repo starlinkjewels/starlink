@@ -1419,11 +1419,15 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                   profit.fx.usd === null ? "—" : `${profit.fx.usd < 0 ? "− " : "+ "}${fmtMoney(Math.abs(profit.fx.usd))}`,
                   { indent: true, sub: [
                       `rupees received vs. booked on ${fmtMoney(profit.fx.convertedUsd)} converted · ${fmtMoneyInr(profit.fx.inr)}`,
-                      profit.fx.heldUsd > 0 ? `${fmtMoney(profit.fx.heldUsd)} still in dollar accounts — realised when converted` : "",
+                      profit.fx.heldUsd > 0 ? `${fmtMoney(profit.fx.heldUsd)} still held in foreign accounts — realised when converted` : "",
                       profit.fx.unknownUsd > 0 ? `${fmtMoney(profit.fx.unknownUsd)} with no conversion rate on record` : "",
                     ].filter(Boolean).join(" · ") })}
                 {line(`Operating expenses — ${profit.opex.count} entr${profit.opex.count !== 1 ? "ies" : "y"}`, usd(profit.opex.totalUsd, "− "),
-                  { sub: profit.opex.byCategory.length ? profit.opex.byCategory.slice(0, 4).map(c => `${c.category} ${fmtMoney(c.usd)}`).join(" · ") : "salaries, rent, travel and other running costs", indent: true })}
+                  { sub: [
+                      profit.opex.byCategory.length ? profit.opex.byCategory.slice(0, 4).map(c => `${c.category} ${fmtMoney(c.usd)}`).join(" · ") : "salaries, rent, travel and other running costs",
+                      // Paid in a currency with no rate on file: left out rather than guessed.
+                      ...(profit.opex.uncounted ?? []).map(u => `${u.count} in ${u.currency} not counted — add a ${u.currency} rate in Settings → Exchange rates`),
+                    ].join(" · "), indent: true })}
                 {line("Net profit", profit.netUsd === null ? "—" : le + fmtMoney(profit.netUsd),
                   { strong: true, tone: tone(profit.netUsd),
                     sub: profit.netMargin === null ? undefined : `${le}${profit.netMargin}% net margin` })}

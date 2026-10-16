@@ -9,7 +9,8 @@
 //
 // Client receipts are deliberately NOT here — they allocate across a client's
 // orders and have their own engine (src/lib/receipts.ts).
-import { updateDb, uid, type DB, type Expense, type LockerTransaction } from "./db";
+import { loadDb, updateDb, uid, type DB, type Expense, type LockerTransaction } from "./db";
+import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./currency";
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
@@ -31,7 +32,7 @@ export interface MoneyEntry {
   party: string;          // supplier / factory / expense title / locker category
   against?: string;       // which bill it settles — invoice #, order #, category
   amount: number;         // in `currency`
-  currency: "INR" | "USD";
+  currency: CurrencyCode;
   lockerId?: string;
   note?: string;
   direction: "in" | "out";
@@ -184,7 +185,7 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         id: e.id, kind, date: e.createdAt,
         party: e.title,
         against: paidTo ? `${e.category} · ${paidTo.name}` : e.category,
-        amount: e.amount, currency: (e.currency || "INR") as "INR" | "USD",
+        amount: e.amount, currency: ccy(e.currency),
         lockerId: e.lockerId, note: e.note, direction: "out",
       });
     }
@@ -213,7 +214,7 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         id: t.id, kind, date: t.createdAt,
         party: db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account",
         against: t.category ?? t.type,
-        amount: t.amountInr, currency: (t.currency || "INR") as "INR" | "USD",
+        amount: t.amountInr, currency: ccy(t.currency),
         lockerId: t.lockerId, note: t.note,
         direction: t.type === "income" || t.type === "transfer_in" ? "in" : "out",
         voucherNo: t.voucherNo,
@@ -243,18 +244,42 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
 }
 
 export interface EntryPatch {
+  /** For a transfer: what left the FROM account, in its currency. */
   amount?: number;
   date?: string;
   note?: string;
+  /** For a transfer: the account the money left, whichever of its two rows
+   *  was opened. */
   lockerId?: string;
   userId: string;
   /** Transfers only: the account the money goes TO, and the rate when the two
-   *  accounts are in different currencies. */
+   *  accounts are in different currencies — 1 FROM-currency = `exchangeRate`
+   *  TO-currency. */
   toLockerId?: string;
   exchangeRate?: number;
 }
 
-/** Move the paired account movement along with the entry it belongs to. */
+/** The currency an account holds (unset = rupees, as every account made before
+ *  accounts held anything else). */
+const lockerCcy = (d: DB, id?: string) => ccy(d.lockers.find(l => l.id === id)?.currency);
+
+/**
+ * Moving an entry to an account in another currency, without converting it,
+ * would read the same figure as another currency's money — ₹10,000 becoming
+ * A$10,000. That is never a correction, so it is refused; money that really
+ * changed currency is a transfer. Staying in the same account (or one in the
+ * same currency) is fine.
+ */
+function moveRefusal(d: DB, entry: MoneyEntry, lockerId?: string): string | undefined {
+  if (lockerId === undefined || lockerId === entry.lockerId) return undefined;
+  const held = lockerCcy(d, lockerId), own = ccy(entry.currency);
+  if (held === own) return undefined;
+  return `That account holds ${held} — this entry is in ${own}. Pick an account in ${own}, or record a transfer.`;
+}
+
+/** Move the paired account movement along with the entry it belongs to.
+ *  editEntry() has already refused a move to an account in another currency,
+ *  so the amount means the same in the account it lands in. */
 function syncTxn(d: DB, entry: MoneyEntry, patch: EntryPatch) {
   const txn = pairedTxn(d, entry.id, entry.date, entry.lockerId, entry.amount);
   // Never create one here. An entry with no movement of its own shares a
@@ -264,12 +289,12 @@ function syncTxn(d: DB, entry: MoneyEntry, patch: EntryPatch) {
 
   const live = (d.lockerTransactions ?? []).find(t => t.id === txn.id);
   if (!live) return;
-  if (patch.amount !== undefined) live.amountInr = r2(patch.amount);
+  if (patch.amount !== undefined) live.amountInr = roundCcy(patch.amount, entry.currency);
   if (patch.date !== undefined) live.createdAt = patch.date;
   if (patch.note !== undefined) live.note = patch.note || undefined;
   if (patch.lockerId !== undefined) {
     live.lockerId = patch.lockerId;
-    live.currency = (d.lockers.find(l => l.id === patch.lockerId)?.currency || "INR") as "INR" | "USD";
+    live.currency = lockerCcy(d, patch.lockerId);
   }
   live.paymentId = entry.id; // adopt a legacy row so the next edit matches exactly
 }
@@ -291,13 +316,74 @@ function transferSibling(d: DB, t: LockerTransaction): LockerTransaction | undef
       || (t.type === "transfer_in" && x.type === "transfer_out")));
 }
 
+/** Both rows of a transfer, the money's way round — whichever of them `id` is.
+ *  Undefined for anything that is not a transfer, or one whose other row is gone. */
+export function transferLegs(db: DB, id: string): { out: LockerTransaction; inn: LockerTransaction } | undefined {
+  const t = (db.lockerTransactions ?? []).find(x => x.id === id);
+  const other = t?.pairedLockerId ? transferSibling(db, t) : undefined;
+  if (!t || !other) return undefined;
+  return t.type === "transfer_out" ? { out: t, inn: other } : { out: other, inn: t };
+}
+
 /** Money leaving one account and arriving in another has to stay equal after an
- *  edit. Given the FROM side's amount, work out what lands on the other side. */
-function convertedAmount(d: DB, fromId: string, toId: string, amount: number, rate: number): number {
-  const from = (d.lockers.find(l => l.id === fromId)?.currency || "INR") as "INR" | "USD";
-  const to = (d.lockers.find(l => l.id === toId)?.currency || "INR") as "INR" | "USD";
-  if (from === to || !rate) return r2(amount);
-  return r2(from === "USD" ? amount * rate : amount / rate);
+ *  edit. Given the FROM side's amount and the rate (1 from = rate to), work out
+ *  what lands on the other side. */
+function convertedAmount(amount: number, from: string, to: string, rate: number): number {
+  return ccy(from) === ccy(to) ? roundCcy(amount, to) : roundCcy(amount * rate, to);
+}
+
+interface TransferPlan {
+  fromId: string; toId: string;
+  fromCcy: CurrencyCode; toCcy: CurrencyCode;
+  sent: number; received: number;
+  /** 1 from = rate to (1 when both accounts hold the same currency). */
+  rate: number;
+  /** The row whose recorded rate still stands — copied as it is rather than
+   *  rewritten, so correcting a remark never changes how the rate was stored.
+   *  Unset when the rate is written afresh (or cleared). */
+  keepRateOf?: LockerTransaction;
+}
+
+/**
+ * What a corrected transfer becomes, or why it cannot be saved. Any two
+ * currencies: the FROM account's amount is what left it, and what arrives is
+ * that amount at the rate — the one typed, else the one it was recorded at.
+ */
+function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, patch: EntryPatch): TransferPlan | string {
+  const fromId = patch.lockerId ?? out.lockerId;
+  const toId = patch.toLockerId ?? inn.lockerId;
+  if (fromId === toId) return "A transfer needs two different accounts — choose the one the money went to.";
+  const fromCcy = lockerCcy(d, fromId), toCcy = lockerCcy(d, toId);
+  const sent = patch.amount !== undefined ? roundCcy(patch.amount, fromCcy) : out.amountInr;
+  if (fromCcy === toCcy) return { fromId, toId, fromCcy, toCcy, sent, received: convertedAmount(sent, fromCcy, toCcy, 1), rate: 1 };
+
+  const onOut = rateOf(out, fromCcy, toCcy);
+  const recorded = onOut ?? rateOf(inn, fromCcy, toCcy);
+  const typed = patch.exchangeRate && patch.exchangeRate > 0 ? patch.exchangeRate : undefined;
+  // The dialog shows the recorded rate back (perhaps turned the other way
+  // round), so a typed rate equal to it is the same rate, not a new one.
+  const asRecorded = recorded !== undefined && (typed === undefined || Math.abs(typed - recorded) <= recorded * 1e-9);
+  const rate = asRecorded ? recorded : typed;
+  if (!rate) return `Enter the exchange rate — ${fromCcy} and ${toCcy} are different currencies.`;
+  const sameWayRound = lockerCcy(d, out.lockerId) === fromCcy && lockerCcy(d, inn.lockerId) === toCcy;
+  return {
+    fromId, toId, fromCcy, toCcy, sent, rate,
+    received: convertedAmount(sent, fromCcy, toCcy, rate),
+    keepRateOf: asRecorded && sameWayRound ? (onOut !== undefined ? out : inn) : undefined,
+  };
+}
+
+/** Why this correction cannot be saved, or nothing when it can. Checked before
+ *  anything is written, so a refusal leaves every record exactly as it was. */
+function editRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
+  if (entry.kind === "locker") {
+    const legs = transferLegs(d, entry.id);
+    if (legs) {
+      const plan = planTransfer(d, legs.out, legs.inn, patch);
+      return typeof plan === "string" ? plan : undefined;
+    }
+  }
+  return moveRefusal(d, entry, patch.lockerId);
 }
 
 
@@ -306,8 +392,11 @@ function dropTxn(d: DB, entry: MoneyEntry) {
   if (txn) d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => t.id !== txn.id);
 }
 
-/** Correct one entry — the party's books and the account move together. */
-export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
+/** Correct one entry — the party's books and the account move together.
+ *  Returns why it was refused (nothing is written then), or undefined once saved. */
+export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefined {
+  const refused = editRefusal(loadDb(), entry, patch);
+  if (refused) return refused;
   updateDb(d => {
     if (entry.kind === "supplier") {
       // One payment split across several bills moves as one: the date, the
@@ -386,14 +475,15 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
     if (entry.kind === "expense") {
       const e = (d.expenses ?? []).find(x => x.id === entry.id) as Expense | undefined;
       if (!e) return;
-      if (patch.amount !== undefined) e.amount = r2(patch.amount);
+      if (patch.amount !== undefined) e.amount = roundCcy(patch.amount, entry.currency);
       if (patch.date !== undefined) e.createdAt = patch.date;
       if (patch.note !== undefined) e.note = patch.note || undefined;
       if (patch.lockerId !== undefined) {
         e.lockerId = patch.lockerId;
-        // The amount is always in the account's own currency, so moving an
-        // expense to an account in another currency changes what it means.
-        e.currency = (d.lockers.find(l => l.id === patch.lockerId)?.currency || "INR") as "INR" | "USD";
+        // The amount is always in the account's own currency. A move to an
+        // account in another currency was refused above, so this keeps the
+        // expense in step with its account, as it always has.
+        e.currency = lockerCcy(d, patch.lockerId);
       }
       syncTxn(d, entry, patch);
       return;
@@ -402,7 +492,11 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
     if (entry.kind === "locker") {
       const t = (d.lockerTransactions ?? []).find(x => x.id === entry.id) as LockerTransaction | undefined;
       if (!t) return;
-      const other = t.pairedLockerId ? transferSibling(d, t) : undefined;
+      const legs = transferLegs(d, t.id);
+      const plan = legs ? planTransfer(d, legs.out, legs.inn, patch) : undefined;
+      // Refused before the save started; never write half of it.
+      if (typeof plan === "string") return;
+      const other = legs ? (legs.out.id === t.id ? legs.inn : legs.out) : undefined;
 
       if (patch.date !== undefined) { t.createdAt = patch.date; if (other) other.createdAt = patch.date; }
       if (patch.note !== undefined) {
@@ -410,48 +504,44 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): void {
         if (other) other.note = patch.note || undefined;
       }
 
-      if (other) {
-        // A transfer is one event in two rows. Whichever leg was opened, work
-        // out the FROM and TO sides and rewrite both, so the pair can never be
-        // left saying different things — the reason these used to be read-only.
-        const out = t.type === "transfer_out" ? t : other;
-        const inn = t.type === "transfer_out" ? other : t;
-        const fromId = patch.lockerId !== undefined && t.type === "transfer_out" ? patch.lockerId : out.lockerId;
-        const toId = patch.toLockerId !== undefined ? patch.toLockerId
-          : (patch.lockerId !== undefined && t.type === "transfer_in" ? patch.lockerId : inn.lockerId);
-        const amt = patch.amount !== undefined
-          ? (t.type === "transfer_out" ? r2(patch.amount) : 0)
-          : out.amountInr;
-        const sent = amt || out.amountInr;
-        const rate = patch.exchangeRate ?? t.exchangeRate ?? other.exchangeRate ?? 0;
-        const ccy = (id: string) => (d.lockers.find(l => l.id === id)?.currency || "INR") as "INR" | "USD";
-
-        out.lockerId = fromId; out.currency = ccy(fromId); out.amountInr = sent;
-        out.pairedLockerId = toId; out.refType = "transfer";
-        inn.lockerId = toId; inn.currency = ccy(toId);
-        inn.amountInr = convertedAmount(d, fromId, toId, sent, rate);
-        inn.pairedLockerId = fromId; inn.refType = "transfer";
-        const cross = ccy(fromId) !== ccy(toId);
-        out.exchangeRate = cross ? rate || undefined : undefined;
-        inn.exchangeRate = out.exchangeRate;
+      if (legs && plan && other) {
+        // A transfer is one event in two rows. Whichever leg was opened, the
+        // patch names the FROM and TO sides and both are rewritten, so the pair
+        // can never be left saying different things — the reason these used to
+        // be read-only. Any two currencies: what arrives is what left at the rate.
+        const { out, inn } = legs;
+        out.lockerId = plan.fromId; out.currency = plan.fromCcy; out.amountInr = plan.sent;
+        out.pairedLockerId = plan.toId; out.refType = "transfer";
+        inn.lockerId = plan.toId; inn.currency = plan.toCcy; inn.amountInr = plan.received;
+        inn.pairedLockerId = plan.fromId; inn.refType = "transfer";
+        // The same rate on both legs: kept as recorded, written afresh, or —
+        // now that both accounts hold one currency — cleared.
+        const rf = plan.keepRateOf
+          ? { fx: plan.keepRateOf.fx, exchangeRate: plan.keepRateOf.exchangeRate }
+          : rateFields(plan.fromCcy, plan.toCcy, plan.rate);
+        out.fx = rf.fx ? { ...rf.fx } : undefined; out.exchangeRate = rf.exchangeRate;
+        inn.fx = rf.fx ? { ...rf.fx } : undefined; inn.exchangeRate = rf.exchangeRate;
         // Tie the pair together so the next edit finds it by id, not by guesswork.
         const tid = t.transferId || other.transferId || uid("xfer_");
         t.transferId = tid; other.transferId = tid;
         return;
       }
 
-      if (patch.amount !== undefined) t.amountInr = r2(patch.amount);
+      // A plain deposit or withdrawal. A move to an account in another
+      // currency was refused above, so the amount keeps its meaning.
+      if (patch.amount !== undefined) t.amountInr = roundCcy(patch.amount, entry.currency);
       if (patch.lockerId !== undefined) {
         t.lockerId = patch.lockerId;
-        t.currency = (d.lockers.find(l => l.id === patch.lockerId)?.currency || "INR") as "INR" | "USD";
+        t.currency = lockerCcy(d, patch.lockerId);
       }
     }
   });
+  return undefined;
 }
 
 /** In plain words, what cancelling this entry changes — shown before confirming. */
 export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
-  const money = `${entry.currency === "USD" ? "$" : "₹"}${Math.round(entry.amount).toLocaleString("en-IN")}`;
+  const money = fmtCcy(entry.amount, entry.currency);
   const out: string[] = [];
   if (entry.kind === "supplier") {
     out.push(entry.direction === "out"

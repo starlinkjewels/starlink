@@ -24,8 +24,9 @@ type DbName = "ssdiamdemo" | "diamondflow";
 const SUM = "summaries";
 /** Bumped when what a summary holds changes, so old ones can be told apart.
  *  2: a factory's summary also carries its pool stock (goldPool, diaPool).
- *  3: other materials (Settings → Materials) are kept out of the diamond figures. */
-const VERSION = 3;
+ *  3: other materials (Settings → Materials) are kept out of the diamond figures.
+ *  4: a locker's balance keeps its cents (accounts in any currency). */
+const VERSION = 4;
 const REGION = "us-central1";
 
 /** Owners recognised by email, as each database's rules recognise them. */
@@ -106,8 +107,9 @@ export async function rebuildLocker(fs: Firestore, lockerId: string): Promise<vo
       currency: l.currency || "INR",
       openingBalance: l.openingBalance || 0,
       moneyIn, moneyOut,
-      // Rounded the way lockerBalance() rounds, so the two read the same.
-      balance: Math.round((l.openingBalance || 0) + moneyIn - moneyOut),
+      // To the cent, the way lockerBalance() rounds, so the two read the same
+      // (version 4: before it, whole units — a dollar account lost its cents).
+      balance: Math.round(((l.openingBalance || 0) + moneyIn - moneyOut) * 100) / 100,
       records: (inn.data().n || 0) + (out.data().n || 0),
       computedAt: FieldValue.serverTimestamp(),
     });
