@@ -1,5 +1,5 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import {
@@ -8,21 +8,40 @@ import {
 } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
 import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
+import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
+import { ActionSheet } from "@/components/ActionSheet";
+import { MoreMenu } from "@/components/MoreMenu";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, Gem, BadgeCheck, Plus, X, Layers } from "lucide-react";
+import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, ChevronRight, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
-import { materialDef, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
-import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
+import { materialDef, materialName, materialUnit, type MaterialKey, type MaterialUnit } from "@/lib/materials";
+import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
 import { coField, companyById } from "@/lib/companies";
+import { Field, Group, PanelActions, Stat, UnitInput } from "@/components/BillLayout";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 /** Gold, loose or certified diamonds, or any other material (Settings → Materials). */
 type BuyKind = "gold" | "loose" | "certified" | "other";
+/** Each kind of line: what it is called and its badge. */
+const KIND: Record<BuyKind, { label: string; icon: LucideIcon }> = {
+  gold: { label: "Gold", icon: Coins },
+  loose: { label: "Loose diamond", icon: Gem },
+  certified: { label: "Certified diamond", icon: BadgeCheck },
+  other: { label: "Other material", icon: Layers },
+};
+const KIND_ORDER: BuyKind[] = ["gold", "loose", "certified", "other"];
+
+/*
+ * Every line, whatever it buys, is the same grid: what it is in the first
+ * three columns, then quantity · rate · discount in the last three — so the
+ * figures line up down the bill. Two to a row on a phone.
+ */
+const LINE_GRID = "grid grid-cols-2 gap-2.5 @md:grid-cols-3 @xl:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1.1fr)_minmax(0,0.75fr)]";
 
 /** One line of a supplier's bill — a size, a rate and its own discount. */
 interface Line {
@@ -55,8 +74,16 @@ function lineBase(l: Line): number {
   return applyDiscountPct(gross, l.discountPct);
 }
 
+/** "Starlink Jewels' stock", "Paresh's account". */
+const whose = (name: string) => (/s$/i.test(name) ? `${name}'` : `${name}'s`);
+
+/** What a line measures in: grams, carats, or the other material's own unit. */
+const lineUnit = (l: Line, settings: Parameters<typeof materialUnit>[0]): MaterialUnit =>
+  (l.kind === "gold" ? "g" : l.kind === "other" ? materialUnit(settings, l.materialId) : "ct");
+
 /**
- * Buying material into stock, a whole bill at a time.
+ * Buying material into stock, a whole bill at a time — in a panel over the
+ * page, so the history stays where it was.
  *
  * A supplier's chitthi is one bill with a line per size — seven rounds at seven
  * rates, each less the same 6%, adding to one figure at the bottom. This used
@@ -66,7 +93,7 @@ function lineBase(l: Line): number {
  * is shared — supplier, date, bill number, currency and the rounding — is
  * entered once, and the lines saved together are one bill afterwards.
  */
-export function BuyMaterialForm() {
+export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -85,7 +112,12 @@ export function BuyMaterialForm() {
 
   const suppliers = db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name));
   const set = (i: number, patch: Partial<Line>) => setLines(ls => ls.map((l, n) => (n === i ? { ...l, ...patch } : l)));
-  const addLine = () => setLines(ls => [...ls, { ...emptyLine(), kind: ls[ls.length - 1]?.kind ?? "gold", materialId: ls[ls.length - 1]?.materialId ?? "" }]);
+  // A line is added as one material; another material of the same kind starts
+  // on the material the last such line was.
+  const addLine = (kind: BuyKind) => setLines(ls => [...ls, {
+    ...emptyLine(), kind,
+    materialId: kind === "other" ? ([...ls].reverse().find(l => l.kind === "other")?.materialId ?? "") : "",
+  }]);
   const removeLine = (i: number) => setLines(ls => (ls.length > 1 ? ls.filter((_, n) => n !== i) : ls));
 
   const lineInr = (l: Line) => (currency === "USD"
@@ -94,6 +126,22 @@ export function BuyMaterialForm() {
   const linesTotalInr = lines.reduce((s, l) => s + lineInr(l), 0);
   const roundOffInr = Math.round(Number(roundOff) || 0);
   const billTotalInr = linesTotalInr + roundOffInr;
+
+  // The footer's figures, in the bill's currency. Display only: what is saved
+  // is still each line's lineInr and the bill's billTotalInr.
+  const multiCo = useMultiCo();
+  const roundId = useId();
+  const usd = currency === "USD";
+  const fmtBill = (n: number) => (usd ? fmtCcy(Math.round(n * 100) / 100, "USD") : fmtMoneyInr(n));
+  const gross = (l: Line) => (Number(l.qty) || 0) * (Number(l.rate) || 0);
+  // In rupees each line is rounded as it is saved, so the subtotal is of rounded
+  // lines too — subtotal less discount then comes to exactly the lines' total.
+  const subtotal = lines.reduce((s, l) => s + (usd ? gross(l) : Math.round(gross(l))), 0);
+  const netBill = usd ? lines.reduce((s, l) => s + lineBase(l), 0) : linesTotalInr;
+  const discount = subtotal - netBill;
+  const hasDiscount = Math.abs(discount) >= (usd ? 0.005 : 0.5);
+  const chosenSupplier = db.suppliers.find(s => s.id === supplierId);
+  const certifiedLines = lines.filter(l => l.kind === "certified").length;
 
   const reset = () => {
     setLines([{ ...emptyLine(), kind: "gold" }]);
@@ -181,172 +229,248 @@ export function BuyMaterialForm() {
       });
       toast.success(`${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${companyId !== "main" ? `${companyById(db.settings, companyId).name}'s ` : ""}stock · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
       reset();
+      onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
     } finally { setSaving(false); }
   };
 
-  return (
+  const footer = (
     <div className="space-y-3">
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-        <div className="sm:col-span-2">
-          <Label className="text-xs">Supplier</Label>
-          <Select value={supplierId} onValueChange={addNew("supplier", setSupplierId)}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-            <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
-          </Select>
-        </div>
-        <div>
-          <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
-        </div>
-      </div>
-
-      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-        <div>
-          <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
-          <Input value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="The supplier's bill number" />
-        </div>
-        <div>
-          <Label className="text-xs">Remark</Label>
-          <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
-        </div>
-      </div>
-
-      {lines.map((l, i) => (
-        <div key={i} className="rounded-xl border border-border/60 p-3 space-y-2.5 relative">
-          {lines.length > 1 && (
-            <>
-              <p className="text-xs font-medium text-muted-foreground">Item {i + 1}</p>
-              <button type="button" onClick={() => removeLine(i)}
-                className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            </>
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3">
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3 min-w-0">
+          <Stat label={`Subtotal · ${lines.length} item${lines.length !== 1 ? "s" : ""}`} value={fmtBill(subtotal)} />
+          {hasDiscount && <Stat label={discount > 0 ? "Discount" : "Added"} value={`${discount > 0 ? "−" : "+"}${fmtBill(Math.abs(discount))}`} />}
+          {usd && (
+            <Stat label={Number(xrate) > 0 ? `In ₹ at ${xrate} / $` : "In ₹"}
+              value={Number(xrate) > 0 ? fmtMoneyInr(linesTotalInr) : <span className="text-xs text-amber-700">Enter the rate ₹/$</span>} />
           )}
-
-          <div className="grid grid-cols-4 gap-1 p-1 bg-secondary rounded-xl">
-            {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const).map(([k, lbl, Icon]) => (
-              <button key={k} type="button" onClick={() => set(i, { kind: k })}
-                className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${l.kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-                <Icon className="h-3.5 w-3.5" /> {lbl}
-              </button>
-            ))}
-          </div>
-
-          {l.kind === "other" ? (() => {
-            const unit = materialUnit(db.settings, l.materialId);
-            return (
-              <div className="space-y-2.5">
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                  <div className="col-span-2"><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={l.materialId} onChange={v => set(i, { materialId: v, grade: "" })} /></div></div>
-                  <div className="col-span-2"><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={l.materialId} value={l.grade} onChange={v => set(i, { grade: v })} /></div></div>
-                </div>
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div><Label className="text-xs">Quantity ({unit})</Label><Input type="number" min={0} step={unit === "pcs" ? "1" : "0.001"} value={l.qty} onChange={e => set(i, { qty: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-                  <div><Label className="text-xs">Rate / {unit} ({currency})</Label><Input type="number" min={0} value={l.rate} onChange={e => set(i, { rate: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-                  {unit !== "pcs"
-                    ? <div><Label className="text-xs">Pieces (optional)</Label><Input type="number" min={0} step="1" value={l.pcs} onChange={e => set(i, { pcs: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="How many" /></div>
-                    : <div className="text-[11px] text-muted-foreground self-end pb-2">{l.materialId ? `Counted in pieces — stock of ${materialName(db.settings, l.materialId)} per grade.` : ""}</div>}
-                </div>
-              </div>
-            );
-          })() : l.kind === "gold" ? (
-            <div className="grid grid-cols-3 gap-2.5">
-              <div><Label className="text-xs">Weight (g)</Label><Input type="number" min={0} step="0.001" value={l.qty} onChange={e => set(i, { qty: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-              <div><Label className="text-xs">Purity</Label>
-                <Select value={l.purity} onValueChange={v => set(i, { purity: v })}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                  <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
-              <div><Label className="text-xs">Rate / g ({currency})</Label><Input type="number" min={0} value={l.rate} onChange={e => set(i, { rate: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-            </div>
-          ) : (
-            <div className="space-y-2.5">
-              <div className="grid grid-cols-3 gap-2.5">
-                <div><Label className="text-xs">Shape</Label>
-                  <Select value={l.shape} onValueChange={v => set(i, { shape: v })}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
-                <div><Label className="text-xs">{l.kind === "certified" ? "Size (ct)" : "Carat"}</Label><Input type="number" min={0} step="0.01" value={l.qty} onChange={e => set(i, { qty: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-                <div><Label className="text-xs">Rate / ct ({currency})</Label><Input type="number" min={0} value={l.rate} onChange={e => set(i, { rate: e.target.value })} className="rounded-xl h-10 mt-1" /></div>
-              </div>
-              {l.kind === "loose" ? (
-                <div className="grid grid-cols-2 gap-2.5">
-                  <Input value={l.quality} onChange={e => set(i, { quality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                  <Input type="number" min={0} step="1" value={l.pcs} onChange={e => set(i, { pcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
-                </div>
-              ) : (
-                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                  <Input value={l.color} onChange={e => set(i, { color: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
-                  <Input value={l.clarity} onChange={e => set(i, { clarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
-                  <Input value={l.cut} onChange={e => set(i, { cut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
-                  <Input value={l.polish} onChange={e => set(i, { polish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
-                  <Input value={l.sym} onChange={e => set(i, { sym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
-                  <Input value={l.fluor} onChange={e => set(i, { fluor: e.target.value })} className="rounded-xl h-10" placeholder="Fluorescence" />
-                  <Input value={l.measure} onChange={e => set(i, { measure: e.target.value })} className="rounded-xl h-10 sm:col-span-2" placeholder="Measurement" />
-                  <Input value={l.lab} onChange={e => set(i, { lab: e.target.value })} className="rounded-xl h-10" placeholder="Lab (GIA/IGI)" />
-                  <Input value={l.certNo} onChange={e => set(i, { certNo: e.target.value })} className="rounded-xl h-10 sm:col-span-3" placeholder="Report number *" />
-                </div>
+          <div>
+            <Label htmlFor={roundId} className="block text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Round off ₹</Label>
+            <div className="mt-0.5 flex items-center gap-2">
+              <Input id={roundId} type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)} className="h-8 w-24 rounded-lg text-right tabular-nums" placeholder="e.g. -3" />
+              {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
+                <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
+                  title={`Round ${fmtMoneyInr(linesTotalInr)} down to ${fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}`}
+                  className="text-xs text-primary hover:underline whitespace-nowrap">
+                  Round to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
+                </button>
               )}
             </div>
-          )}
-
-          <div className="flex items-end justify-between gap-2.5 flex-wrap">
-            <div className="w-32">
-              <Label className="text-xs">Discount %</Label>
-              <Input type="number" min={-100} max={100} step="0.01" value={l.discountPct} onChange={e => set(i, { discountPct: e.target.value })} className="rounded-xl h-10 mt-1" placeholder="0 — minus adds" />
-            </div>
-            <p className="text-xs text-muted-foreground pb-2.5">
-              {!!Number(l.discountPct) && <span className="mr-1">{discountLabel(Number(l.discountPct))} ·</span>}
-              Item total: <span className="font-semibold text-foreground">{fmtMoneyInr(lineInr(l))}</span>
-            </p>
           </div>
         </div>
-      ))}
-
-      <Button type="button" variant="outline" onClick={addLine} className="rounded-xl gap-2 w-full">
-        <Plus className="h-4 w-4" /> Add Another Item (different size / quality)
-      </Button>
-
-      <div className="grid grid-cols-3 gap-2.5">
-        <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
-          <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
-        </Select>
-        {currency === "USD" && (
-          <>
-            <div className="rounded-xl h-10 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">
-              Total: <span className="font-semibold text-foreground ml-1">${lines.reduce((s, l) => s + lineBase(l), 0).toFixed(2)}</span>
-            </div>
-            <Input type="number" min={0} step="0.01" value={xrate} onChange={e => setXrate(e.target.value)} className="rounded-xl h-10" placeholder="Rate ₹/$" />
-          </>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
-        <div>
-          <Label className="text-xs">Round off ₹</Label>
-          <Input type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
+        <div className="text-right ml-auto">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{usd ? "Total (USD)" : "Total"}</p>
+          <p className="font-display text-2xl sm:text-3xl font-bold text-brand-dark tabular-nums leading-tight">{usd ? fmtBill(netBill) : fmtMoneyInr(billTotalInr)}</p>
+          {usd && <p className="text-[11px] text-muted-foreground tabular-nums">{fmtMoneyInr(billTotalInr)} payable in ₹</p>}
         </div>
-        {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
-          <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
-            className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
-            Round {fmtMoneyInr(linesTotalInr)} down to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
+      </div>
+      <PanelActions onCancel={() => onOpenChange(false)}
+        note={chosenSupplier
+          ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}stock${certifiedLines ? " — each certified stone as its own packet" : ""}.`
+          : "Choose the supplier the bill is from."}>
+        <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-52">
+          {saving ? "Saving…" : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : "Buy → Stock"}
+        </AsyncButton>
+      </PanelActions>
+    </div>
+  );
+
+  return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={ShoppingCart} title="New purchase"
+      description="A supplier's bill into stock: a line for each size, quality or material, and the total onto the supplier's account."
+      footer={footer}>
+      <div className="@container space-y-5">
+        {/* The bill's head: who it is from, its number and date, the currency, whose stock. */}
+        <Group title="Bill">
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="Supplier" required className="col-span-2 @md:col-span-1">{id => (
+              <Select value={supplierId} onValueChange={addNew("supplier", setSupplierId)}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
+                <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
+              </Select>
+            )}</Field>
+            <Field label="Bill no." required>{id => (
+              <Input id={id} value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10" placeholder="The supplier's bill number" />
+            )}</Field>
+            <Field label="Date">{id => (
+              <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
+            )}</Field>
+            <Field label="Billed in" className="col-span-2 @md:col-span-1">{id => (
+              <div className="flex gap-2">
+                <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
+                  <SelectTrigger id={id} className={`h-10 rounded-xl ${usd ? "w-[6.5rem] shrink-0" : ""}`}><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="INR">INR (₹)</SelectItem><SelectItem value="USD">USD ($)</SelectItem></SelectContent>
+                </Select>
+                {usd && (
+                  <div className="flex-1 min-w-0">
+                    <UnitInput min={0} step="0.01" value={xrate} onChange={e => setXrate(e.target.value)} unit="₹/$" placeholder="Rate" aria-label="Exchange rate, ₹ per $" />
+                  </div>
+                )}
+              </div>
+            )}</Field>
+            {multiCo && (
+              <div className="col-span-2 @md:col-span-1">
+                <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
+              </div>
+            )}
+            <Field label="Remark" className={multiCo ? "col-span-2 @md:col-span-1" : "col-span-2"}>{id => (
+              <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
+            )}</Field>
+          </div>
+        </Group>
+
+        <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>
+          <div className="space-y-2.5">
+            {lines.map((l, i) => (
+              <LineCard key={i} line={l} n={i + 1} currency={currency} removable={lines.length > 1}
+                onChange={patch => set(i, patch)} onRemove={() => removeLine(i)} base={lineBase(l)} inr={lineInr(l)} />
+            ))}
+          </div>
+          {/* Each line is added as its material, so it only ever shows that material's fields. */}
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <span className="text-xs text-muted-foreground mr-1">Add a line:</span>
+            {KIND_ORDER.map(k => {
+              const Icon = KIND[k].icon;
+              return (
+                <Button key={k} type="button" variant="outline" size="sm" onClick={() => addLine(k)} className="h-8 rounded-lg gap-1.5 text-xs px-2.5">
+                  <Plus className="h-3.5 w-3.5" /><Icon className="h-3.5 w-3.5 text-muted-foreground" />{KIND[k].label}
+                </Button>
+              );
+            })}
+          </div>
+        </Group>
+      </div>
+    </ActionSheet>
+  );
+}
+
+/**
+ * One line of the bill: its material as a badge, then only that material's
+ * fields, in the same grid as every other line so the figures line up.
+ */
+function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, inr }: {
+  line: Line; n: number; currency: PurchaseCurrency; removable: boolean;
+  onChange: (patch: Partial<Line>) => void; onRemove: () => void;
+  /** This line in the bill's currency, after its discount — and in rupees, as saved. */
+  base: number; inr: number;
+}) {
+  const db = useDb();
+  // A certified stone's grading is optional, so it waits folded under a one-line summary.
+  const [grading, setGrading] = useState(false);
+  const unit = lineUnit(l, db.settings);
+  const usd = currency === "USD";
+  const disc = Number(l.discountPct) || 0;
+  const Icon = KIND[l.kind].icon;
+  const name = l.kind === "other" && l.materialId ? materialName(db.settings, l.materialId) : KIND[l.kind].label;
+  const qtyLabel = l.kind === "gold" ? "Weight (g)" : l.kind === "loose" ? "Carat" : l.kind === "certified" ? "Size (ct)" : `Quantity (${unit})`;
+  const qtyStep = l.kind === "gold" ? "0.001" : l.kind === "other" ? (unit === "pcs" ? "1" : "0.001") : "0.01";
+  const sub = [disc !== 0 ? discountLabel(disc) : "", usd && inr > 0 ? fmtMoneyInr(inr) : ""].filter(Boolean).join(" · ");
+  const gradingText = [l.color, l.clarity, l.cut, l.polish, l.sym, l.fluor, l.measure].map(s => s.trim()).filter(Boolean).join(" · ");
+  const box = "h-9 rounded-xl bg-card";
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card p-3">
+      <div className="flex items-center gap-2 mb-2.5 min-w-0">
+        <span className="h-7 w-7 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0"><Icon className="h-3.5 w-3.5" /></span>
+        <span className="text-sm font-medium text-foreground truncate">{name}</span>
+        <span className="text-xs text-muted-foreground tabular-nums shrink-0">#{n}</span>
+        <span className="ml-auto text-right shrink-0 pl-2">
+          <span className="block text-sm font-semibold text-brand-dark tabular-nums leading-tight">{usd ? fmtCcy(Math.round(base * 100) / 100, "USD") : fmtMoneyInr(inr)}</span>
+          {sub && <span className="block text-[10px] text-muted-foreground tabular-nums leading-tight">{sub}</span>}
+        </span>
+        <MoreMenu size="sm" label={`Line ${n}: change material`} title="Change this line to"
+          className="border-transparent shadow-none text-muted-foreground"
+          actions={KIND_ORDER.filter(k => k !== l.kind).map(k => ({ label: KIND[k].label, icon: KIND[k].icon, onSelect: () => onChange({ kind: k }) }))} />
+        {removable && (
+          <button type="button" onClick={onRemove} aria-label={`Remove item ${n}`} title="Remove this line"
+            className="h-8 w-8 -mr-1 rounded-lg grid place-items-center shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10">
+            <X className="h-4 w-4" />
           </button>
         )}
       </div>
 
-      <div className="flex items-center justify-between gap-2 p-3 rounded-xl bg-primary/5 border border-primary/20 flex-wrap">
-        <span className="text-sm text-muted-foreground">
-          Bill total ({lines.length} item{lines.length !== 1 ? "s" : ""})
-          {roundOffInr !== 0 && <span className="block text-xs">{fmtMoneyInr(linesTotalInr)} {roundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roundOffInr))} rounding</span>}
-        </span>
-        <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(billTotalInr)}</span>
+      <div className={LINE_GRID}>
+        {/* What it is — the first three columns. */}
+        {l.kind === "gold" ? (
+          <Field label="Purity">{id => (
+            <Select value={l.purity} onValueChange={v => onChange({ purity: v })}>
+              <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          )}</Field>
+        ) : l.kind === "other" ? (
+          <>
+            <Field label="Material"><OtherMaterialSelect value={l.materialId} onChange={v => onChange({ materialId: v, grade: "" })} /></Field>
+            <Field label="Grade"><GradeInput material={l.materialId} value={l.grade} onChange={v => onChange({ grade: v })} /></Field>
+            {unit !== "pcs"
+              ? <Field label="Pcs">{id => <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />}</Field>
+              : <p className="self-end pb-1 text-[11px] leading-snug text-muted-foreground">{l.materialId ? `Counted in pieces — stock of ${materialName(db.settings, l.materialId)} per grade.` : ""}</p>}
+          </>
+        ) : (
+          <>
+            <Field label="Shape">{id => (
+              <Select value={l.shape} onValueChange={v => onChange({ shape: v })}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+              </Select>
+            )}</Field>
+            {l.kind === "loose" ? (
+              <>
+                <Field label="Quality">{id => (
+                  <Input id={id} value={l.quality} onChange={e => onChange({ quality: e.target.value })} className="rounded-xl h-10" placeholder="Optional" />
+                )}</Field>
+                <Field label="Pcs">{id => (
+                  <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />
+                )}</Field>
+              </>
+            ) : (
+              <>
+                <Field label="Report no." required>{id => (
+                  <Input id={id} value={l.certNo} onChange={e => onChange({ certNo: e.target.value })} className="rounded-xl h-10" placeholder="Report number *" />
+                )}</Field>
+                <Field label="Lab">{id => (
+                  <Input id={id} value={l.lab} onChange={e => onChange({ lab: e.target.value })} className="rounded-xl h-10" placeholder="GIA / IGI" />
+                )}</Field>
+              </>
+            )}
+          </>
+        )}
+
+        {/* How much, at what, less what — always the last three columns. */}
+        <Field label={qtyLabel} className="@xl:col-start-4">{id => (
+          <UnitInput id={id} min={0} step={qtyStep} unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
+        )}</Field>
+        <Field label={`Rate / ${unit} (${currency})`}>{id => (
+          <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/${unit}`} value={l.rate} onChange={e => onChange({ rate: e.target.value })} />
+        )}</Field>
+        <Field label="Discount %">{id => (
+          <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
+            placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
+        )}</Field>
       </div>
 
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">
-        {saving ? "Saving…" : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : "Buy → Stock"}
-      </AsyncButton>
+      {l.kind === "certified" && (
+        <div className="mt-2.5 rounded-xl border border-border/50 bg-secondary/40">
+          <button type="button" onClick={() => setGrading(o => !o)} aria-expanded={grading}
+            className="w-full flex items-center gap-2 px-3 h-9 text-left min-w-0">
+            <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${grading ? "rotate-90" : ""}`} />
+            <span className="text-xs font-medium text-foreground shrink-0">Grading</span>
+            <span className="text-xs text-muted-foreground truncate">{gradingText || "colour, clarity, cut, measurement — optional"}</span>
+          </button>
+          {grading && (
+            <div className="grid grid-cols-2 @md:grid-cols-4 gap-2 px-3 pb-3">
+              <Input value={l.color} onChange={e => onChange({ color: e.target.value })} className={box} placeholder="Color" />
+              <Input value={l.clarity} onChange={e => onChange({ clarity: e.target.value })} className={box} placeholder="Clarity" />
+              <Input value={l.cut} onChange={e => onChange({ cut: e.target.value })} className={box} placeholder="Cut" />
+              <Input value={l.polish} onChange={e => onChange({ polish: e.target.value })} className={box} placeholder="Polish" />
+              <Input value={l.sym} onChange={e => onChange({ sym: e.target.value })} className={box} placeholder="Symmetry" />
+              <Input value={l.fluor} onChange={e => onChange({ fluor: e.target.value })} className={box} placeholder="Fluorescence" />
+              <Input value={l.measure} onChange={e => onChange({ measure: e.target.value })} className={`${box} col-span-2`} placeholder="Measurement" />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

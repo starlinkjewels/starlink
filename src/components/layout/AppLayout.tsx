@@ -311,7 +311,8 @@ export function AppLayout() {
      loc.pathname.startsWith("/clients/") ? "Client History" :
      loc.pathname.startsWith("/employees/") ? "Employee Detail" :
      loc.pathname.startsWith("/suppliers/") ? "Supplier Ledger" :
-     loc.pathname.startsWith("/factories/") ? "Factory Ledger" : "");
+     loc.pathname.startsWith("/factories/") ? "Factory Ledger" :
+     loc.pathname.startsWith("/ready-stock/") ? "Ready Stock Piece" : "");
 
   const initials = user?.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 

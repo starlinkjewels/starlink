@@ -1,26 +1,38 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger } from "@/components/StockActivityLedger";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
-import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type Purchase, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { increaseStock, decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
+import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
+import { ActionSheet } from "@/components/ActionSheet";
+import { MoreMenu } from "@/components/MoreMenu";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers } from "lucide-react";
+import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
-import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
-import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
-import { coField, companyOf } from "@/lib/companies";
+import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey, type MaterialUnit } from "@/lib/materials";
+import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
+import { coField, companyById, companyOf } from "@/lib/companies";
+import { Field, Group, PanelActions, Segmented, Stat, Stats, UnitInput } from "@/components/BillLayout";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
 type Mode = "buy" | "assign" | "sell" | "opening";
+/** Open and close one of the page's panels. */
+type PanelProps = { open: boolean; onOpenChange: (open: boolean) => void };
+
+/** "2026-10-16" as "16 Oct 2026", read as the local day it names. */
+function fmtDay(day: string): string {
+  const [y, m, d] = day.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+}
 
 /**
  * A simple staff-facing hub to (1) BUY gold / loose / certified diamond from any
@@ -29,59 +41,147 @@ type Mode = "buy" | "assign" | "sell" | "opening";
  * diamond straight out of stock to a buyer, with no jewellery order involved.
  * Deliberately additive — reuses the same stock transactions + purchase model
  * as the Supplier/Factory pages, just gathered in one easy place.
+ *
+ * The page is this month's figures and the history; each entry opens in a
+ * panel over it, so the list stays where it was while one is made.
  */
 export function BuyAssignPage() {
-  const [mode, setMode] = useState<Mode>("buy");
   const can = useCan();
+  const may = can("buyAssign", "add");
+  const [panel, setPanel] = useState<Mode | null>(null);
+  const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div>
-        <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Buy &amp; Assign</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold or other metal to a factory, or sell a diamond directly</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Buy &amp; Assign</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold or other metal to a factory, or sell a diamond directly</p>
+          {!may && <p className="text-xs text-muted-foreground mt-1">Your role lets you look at these entries but not record new ones.</p>}
+        </div>
+        {may && (
+          <div className="flex items-center gap-2 shrink-0">
+            <Button onClick={() => setPanel("buy")} className="btn-hero h-11 rounded-xl flex-1 sm:flex-none px-3 sm:px-4">
+              <Plus className="h-4 w-4 mr-1.5 hidden sm:block" />New purchase
+            </Button>
+            <Button variant="outline" onClick={() => setPanel("assign")} className="h-11 rounded-xl flex-1 sm:flex-none px-3 sm:px-4">
+              <ArrowRightLeft className="h-4 w-4 mr-1.5 hidden sm:block" />Assign to factory
+            </Button>
+            <MoreMenu className="h-11 w-11" actions={[
+              { label: "Opening stock", icon: Boxes, hint: "Stock owned from before the app — no supplier, no dues", onSelect: () => setPanel("opening") },
+              { label: "Sell diamond", icon: Tag, hint: "Straight out of stock, with no jewellery order", onSelect: () => setPanel("sell") },
+            ]} />
+          </div>
+        )}
       </div>
 
-      <div className="grid grid-cols-4 gap-1.5 sm:gap-2">
-        {([
-          { m: "buy", label: "Buy Material", icon: ShoppingCart },
-          { m: "opening", label: "Opening Stock", icon: Boxes },
-          { m: "assign", label: "Assign to Factory", icon: ArrowRightLeft },
-          { m: "sell", label: "Sell Diamond", icon: Tag },
-        ] as const).map(opt => (
-          <button key={opt.m} onClick={() => setMode(opt.m)}
-            className={`flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 sm:p-3 rounded-xl border transition-colors text-[11px] sm:text-xs font-medium leading-tight text-center
-              ${mode === opt.m ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
-            <opt.icon className="h-4 w-4" />
-            {opt.label}
-          </button>
-        ))}
-      </div>
+      <MonthFigures />
 
-      {can("buyAssign", "add") ? (
-        <div className="card-luxe p-5 sm:p-6">
-          {mode === "buy" ? <BuyMaterialForm /> : mode === "opening" ? <OpeningStock /> : mode === "assign" ? <AssignGold /> : <SellDiamond />}
-        </div>
-      ) : (
-        <div className="card-luxe p-4 text-sm text-muted-foreground">
-          Your role lets you look at these entries but not record new ones.
-        </div>
-      )}
-
-      {/* Everything the four tabs above have done, so a day's entries can be
-          checked afterwards instead of disappearing into four different places. */}
+      {/* Everything the four entries have done, so a day's work can be checked
+          afterwards instead of disappearing into four different places. */}
       <StockActivityLedger />
+
+      {may && (
+        <>
+          <BuyMaterialForm {...panelFor("buy")} />
+          <OpeningStock {...panelFor("opening")} />
+          <AssignGold {...panelFor("assign")} />
+          <SellDiamond {...panelFor("sell")} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * This month at a glance: what was bought, what went to factories, what was
+ * sold — counted the way the history below counts them, so the two agree.
+ */
+function MonthFigures() {
+  const db = useDb();
+  const now = new Date();
+  const month = now.toLocaleDateString("en-IN", { month: "long" });
+  const inMonth = (iso?: string) => {
+    if (!iso) return false;
+    const d = new Date(iso);
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth();
+  };
+  const total = <T,>(xs: T[], f: (x: T) => number) => Math.round(xs.reduce((s, x) => s + (f(x) || 0), 0) * 1000) / 1000;
+
+  // A bill is its lines saved together: one bill number, or one supplier at one moment.
+  const bought = (db.purchases ?? []).filter(p => inMonth(p.createdAt));
+  const bills = new Set(bought.map(p => (p.invoiceNumber?.trim() ? `${p.supplierId}|no:${p.invoiceNumber.trim()}` : `${p.supplierId}|at:${p.createdAt}`))).size;
+  // Handed over from stock on this page — not material issued against an order.
+  const issued = (db.materialIssuances ?? []).filter(i => !i.orderId && i.source === "stock" && inMonth(i.issuedAt));
+  const gold = issued.filter(i => i.material === "gold");
+  const goldG = total(gold, i => i.quantityIssued);
+  const fineG = total(gold, i => toPureGold(i.quantityIssued, i.purityOrQuality));
+  const diamondCt = total(issued.filter(i => i.material === "diamond"), i => i.quantityIssued);
+  const others = issued.filter(i => i.material !== "gold" && i.material !== "diamond").length;
+  const sold = (db.diamondSales ?? []).filter(s => inMonth(s.createdAt));
+
+  const tiles: { key: string; label: string; short: string; value: string; sub: string; icon: typeof Tag; chip: string; bar: string }[] = [
+    {
+      key: "buy", label: `Bought in ${month}`, short: "Bought", value: fmtMoneyInr(total(bought, p => p.totalInr)),
+      sub: `${bills} bill${bills !== 1 ? "s" : ""}`, icon: ShoppingCart, chip: "bg-primary/10 text-primary", bar: "bg-primary",
+    },
+    {
+      key: "fac", label: "Assigned to factories", short: "Assigned",
+      value: goldG > 0 || diamondCt === 0 ? `${fmtQty(goldG, "g")}` : fmtQty(diamondCt, "ct"),
+      sub: [goldG > 0 || diamondCt === 0 ? `gold · ${fmtQty(fineG, "g")} fine` : "diamond",
+        goldG > 0 && diamondCt > 0 ? `${fmtQty(diamondCt, "ct")} diamond` : "",
+        others ? `${others} other` : ""].filter(Boolean).join(" · "),
+      icon: ArrowRightLeft, chip: "bg-amber-500/10 text-amber-700", bar: "bg-amber-500",
+    },
+    {
+      key: "sold", label: "Diamonds sold", short: "Sold", value: fmtQty(total(sold, s => s.carat), "ct"),
+      sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}`,
+      icon: Tag, chip: "bg-success/10 text-success", bar: "bg-success",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
+      {tiles.map(({ icon: Icon, ...t }) => (
+        <div key={t.key} className="relative overflow-hidden rounded-2xl border border-border/60 bg-white shadow-sm transition-shadow hover:shadow-md p-3 pl-4 sm:p-5 sm:pl-6 min-w-0">
+          <span className={`absolute left-0 top-0 h-full w-1 ${t.bar}`} aria-hidden="true" />
+          <div className="flex items-center gap-2">
+            <span className={`hidden sm:grid h-9 w-9 rounded-xl place-items-center shrink-0 ${t.chip}`}><Icon className="h-4 w-4" /></span>
+            <span className="text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.08em] sm:tracking-[0.12em] text-muted-foreground truncate" title={t.label}>
+              <span className="sm:hidden">{t.short}</span><span className="hidden sm:inline">{t.label}</span>
+            </span>
+          </div>
+          <p className="mt-2 sm:mt-3 font-display text-[17px] sm:text-3xl leading-none tabular-nums truncate text-brand-dark" title={t.value}>{t.value}</p>
+          <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1.5 line-clamp-2 leading-snug">{t.sub}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** A panel's footer: its figures over its buttons. */
+function PanelFooter({ figures, onCancel, children }: { figures: ReactNode; onCancel: () => void; children: ReactNode }) {
+  return (
+    <div className="space-y-3">
+      <Stats>{figures}</Stats>
+      <PanelActions onCancel={onCancel}>{children}</PanelActions>
     </div>
   );
 }
 
 /* ── Buy material → Stock + supplier payable ── */
 type BuyKind = "gold" | "loose" | "certified" | "other";
+const KINDS = [["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const;
+/** The certificate boxes of a certified stone. */
+const GRADING = "h-9 rounded-xl bg-card";
+const SAVE = "btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48";
 
 /* ── Opening Stock → seed material already owned (migration). No supplier, no
    payable — it just increases Stock and shows an "Opening Stock" line (with its
    ₹ value) in the stock ledger. ── */
-function OpeningStock() {
+function OpeningStock({ open, onOpenChange }: PanelProps) {
   const { user } = useAuth();
   const db = useDb();
+  const multiCo = useMultiCo();
   const [companyId, setCompanyId] = useState(useDefaultCompany()); // whose stock it is
   const [kind, setKind] = useState<BuyKind>("gold"); // gold | loose | certified | other
   const [materialId, setMaterialId] = useState("");
@@ -131,6 +231,7 @@ function OpeningStock() {
         });
         toast.success(`Opening certified diamond added: ${q}ct ${shape} (${certNo.trim()})`);
         setQty(""); setValue(""); setAsOf(""); setNote(""); resetGrading();
+        onOpenChange(false);
         return;
       }
       // Gold, loose diamond or another material pools into Stock.
@@ -148,103 +249,113 @@ function OpeningStock() {
       });
       toast.success(`Opening stock added: ${fmtQty(q, materialUnit(db.settings, material))} ${bucket}${kind === "other" ? ` ${materialName(db.settings, material)}` : ""}`);
       setQty(""); setValue(""); setAsOf(""); setNote("");
+      onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't add opening stock");
     } finally { setSaving(false); }
   };
 
+  // For the footer's figures only.
+  const unit: MaterialUnit = kind === "gold" ? "g" : kind === "other" ? materialUnit(db.settings, materialId) : "ct";
+  const shown = Number(qty) || 0;
+  const what = kind === "gold" ? `${purity} gold` : kind === "loose" ? `${shape} loose` : kind === "certified" ? `${shape} certified`
+    : `${grade.trim() ? `${grade.trim()} ` : ""}${materialId ? materialName(db.settings, materialId) : "material"}`;
+
   return (
-    <div className="space-y-4">
-      <p className="text-sm text-muted-foreground -mt-1">
-        Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.
-      </p>
-      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Boxes} title="Opening stock"
+      description={<>Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.</>}
+      footer={(
+        <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
+          <Stat label="Adds to stock" value={shown > 0 ? fmtQty(shown, unit) : "—"} sub={`${what}${multiCo ? ` · ${companyById(db.settings, companyId).name}` : ""}`} />
+          <Stat label="Valued at" value={Number(value) > 0 ? fmtMoneyInr(Math.round(Number(value))) : "No value"} />
+          <Stat label="As of" value={asOf ? fmtDay(asOf) : "Today"} />
+        </>}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : "Add Opening Stock"}</AsyncButton>
+        </PanelFooter>
+      )}>
+      <div className="@container space-y-5">
+        <Group>
+          <div className="grid grid-cols-2 gap-3">
+            {multiCo && (
+              <div className="col-span-2">
+                <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
+              </div>
+            )}
+            <Field label="As of date (optional)">{id => (
+              <Input id={id} type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="rounded-xl h-10" />
+            )}</Field>
+            <Field label="Note (optional)">{id => (
+              <Input id={id} value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="e.g. carried forward" />
+            )}</Field>
+          </div>
+        </Group>
 
-      {/* Material kind — gold / loose diamond / certified diamond */}
-      <div className="grid grid-cols-4 gap-1 p-1 bg-secondary rounded-xl">
-        {([["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const).map(([k, lbl, Icon]) => (
-          <button key={k} type="button" onClick={() => setKind(k)}
-            className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-            <Icon className="h-3.5 w-3.5" /> {lbl}
-          </button>
-        ))}
-      </div>
+        <Group title="Material">
+          {/* Material kind — gold / loose diamond / certified diamond / another material */}
+          <Segmented className="mb-3" value={kind} onChange={setKind} options={KINDS} />
+          <div className="grid grid-cols-2 gap-3">
+            {kind === "other" ? (
+              <>
+                <Field label="Material"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></Field>
+                <Field label="Grade"><GradeInput material={materialId} value={grade} onChange={setGrade} /></Field>
+                <Field label={`Opening quantity (${materialUnit(db.settings, materialId)})`} required>{id => (
+                  <UnitInput id={id} min={0} step="0.001" unit={unit} value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+                )}</Field>
+              </>
+            ) : (
+              <>
+                <Field label={kind === "gold" ? "Purity" : "Shape"}>{id => kind === "gold" ? (
+                  <Select value={purity} onValueChange={setPurity}>
+                    <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                  </Select>
+                ) : (
+                  <Select value={shape} onValueChange={setShape}>
+                    <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}</Field>
+                <Field label={`Opening ${kind === "gold" ? "Weight (g)" : "Carats"}`} required>{id => (
+                  <UnitInput id={id} min={0} step="0.001" unit={unit} value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
+                )}</Field>
+              </>
+            )}
+            <Field label="Opening Value (₹, optional)" className={kind === "other" ? "" : "col-span-2"}>{id => (
+              <UnitInput id={id} min={0} value={value} onChange={e => setValue(e.target.value)} placeholder={kind === "certified" ? "Cost basis for this stone" : "Valuation for the ledger"} />
+            )}</Field>
+          </div>
 
-      {/* Another material: which one, its grade, how much */}
-      {kind === "other" ? (
-      <div className="grid sm:grid-cols-3 gap-3">
-        <div><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></div></div>
-        <div><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={materialId} value={grade} onChange={setGrade} /></div></div>
-        <div>
-          <Label className="text-xs">Opening quantity ({materialUnit(db.settings, materialId)}) <span className="text-destructive">*</span></Label>
-          <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
-        </div>
-      </div>
-      ) : (
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs">{kind === "gold" ? "Purity" : "Shape"}</Label>
-          {kind === "gold" ? (
-            <Select value={purity} onValueChange={setPurity}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-            </Select>
-          ) : (
-            <Select value={shape} onValueChange={setShape}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-            </Select>
+          {/* Certified grading */}
+          {kind === "certified" && (
+            <div className="mt-3 rounded-xl border border-border/50 bg-secondary/40 p-2.5">
+              <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+                <BadgeCheck className="h-3.5 w-3.5" /> Certificate &amp; grading
+              </p>
+              <div className="grid grid-cols-2 @md:grid-cols-3 gap-2">
+                <Input value={certNo} onChange={e => setCertNo(e.target.value)} className={`${GRADING} col-span-2`} placeholder="Report number *" />
+                <Input value={lab} onChange={e => setLab(e.target.value)} className={GRADING} placeholder="Lab (GIA/IGI)" />
+                <Input value={color} onChange={e => setColor(e.target.value)} className={GRADING} placeholder="Color" />
+                <Input value={clarity} onChange={e => setClarity(e.target.value)} className={GRADING} placeholder="Clarity" />
+                <Input value={cut} onChange={e => setCut(e.target.value)} className={GRADING} placeholder="Cut" />
+                <Input value={polish} onChange={e => setPolish(e.target.value)} className={GRADING} placeholder="Polish" />
+                <Input value={sym} onChange={e => setSym(e.target.value)} className={GRADING} placeholder="Symmetry" />
+                <Input value={fluor} onChange={e => setFluor(e.target.value)} className={GRADING} placeholder="Fluorescence" />
+                <Input value={measure} onChange={e => setMeasure(e.target.value)} className={`${GRADING} col-span-2 @md:col-span-3`} placeholder="Measurement" />
+              </div>
+            </div>
           )}
-        </div>
-        <div>
-          <Label className="text-xs">Opening {kind === "gold" ? "Weight (g)" : "Carats"} <span className="text-destructive">*</span></Label>
-          <Input type="number" min={0} step="0.001" value={qty} onChange={e => setQty(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
-        </div>
+        </Group>
       </div>
-      )}
-
-      {/* Certified grading */}
-      {kind === "certified" && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-          <Input value={color} onChange={e => setColor(e.target.value)} className="rounded-xl h-10" placeholder="Color" />
-          <Input value={clarity} onChange={e => setClarity(e.target.value)} className="rounded-xl h-10" placeholder="Clarity" />
-          <Input value={cut} onChange={e => setCut(e.target.value)} className="rounded-xl h-10" placeholder="Cut" />
-          <Input value={polish} onChange={e => setPolish(e.target.value)} className="rounded-xl h-10" placeholder="Polish" />
-          <Input value={sym} onChange={e => setSym(e.target.value)} className="rounded-xl h-10" placeholder="Symmetry" />
-          <Input value={fluor} onChange={e => setFluor(e.target.value)} className="rounded-xl h-10" placeholder="Fluorescence" />
-          <Input value={measure} onChange={e => setMeasure(e.target.value)} className="rounded-xl h-10 sm:col-span-2" placeholder="Measurement" />
-          <Input value={lab} onChange={e => setLab(e.target.value)} className="rounded-xl h-10" placeholder="Lab (GIA/IGI)" />
-          <Input value={certNo} onChange={e => setCertNo(e.target.value)} className="rounded-xl h-10 sm:col-span-3" placeholder="Report number *" />
-        </div>
-      )}
-
-      {/* Value */}
-      <div>
-        <Label className="text-xs">Opening Value (₹, optional)</Label>
-        <Input type="number" min={0} value={value} onChange={e => setValue(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={kind === "certified" ? "Cost basis for this stone" : "Valuation for the ledger"} />
-      </div>
-
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <Label className="text-xs">As of date (optional)</Label>
-          <Input type="date" value={asOf} onChange={e => setAsOf(e.target.value)} className="rounded-xl h-10 mt-1" />
-        </div>
-        <div>
-          <Label className="text-xs">Note (optional)</Label>
-          <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. carried forward" />
-        </div>
-      </div>
-
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Add Opening Stock"}</AsyncButton>
-    </div>
+    </ActionSheet>
   );
 }
 
 /* ── Assign (transfer) stock gold — or another material — → a factory's reserve ── */
-function AssignGold() {
+function AssignGold({ open, onOpenChange }: PanelProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
+  const multiCo = useMultiCo();
   const [factoryId, setFactoryId] = useState("");
   // Whose stock it leaves, and whose share of the factory's pool it joins.
   const [companyId, setCompanyId] = useState(useDefaultCompany());
@@ -295,60 +406,86 @@ function AssignGold() {
         ? `${g}g ${purity} (${toPureGold(g, purity)}g fine) assigned to ${factory?.name || "factory"}`
         : `${fmtQty(g, unit)} ${bucket} ${materialName(db.settings, material)} assigned to ${factory?.name || "factory"}`);
       setGrams(""); setNotes("");
+      onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to assign");
     } finally { setSaving(false); }
   };
 
+  const assigning = Number(grams) || 0;
+  const stockText = `${bucket}${what === "other" && materialId ? ` ${materialName(db.settings, material)}` : ""}`;
+
   return (
-    <div className="space-y-3">
-      <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock it leaves" />
-      <div>
-        <Label className="text-xs">Factory</Label>
-        <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-          <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
-        </Select>
-        {factoryId && (
-          <p className="text-xs text-muted-foreground mt-1">Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold, companyId)}g fine (24KT)</span></p>
-        )}
-      </div>
-      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
-        {([["gold", "Gold", Coins], ["other", "Other material", Layers]] as const).map(([k, lbl, Icon]) => (
-          <button key={k} type="button" onClick={() => setWhat(k)}
-            className={`flex items-center justify-center gap-1.5 h-9 rounded-lg text-xs font-medium transition-colors ${what === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-            <Icon className="h-3.5 w-3.5" /> {lbl}
-          </button>
-        ))}
-      </div>
-      <div className="grid grid-cols-2 gap-2.5">
-        {what === "gold" ? (
-          <div><Label className="text-xs">Purity</Label>
-            <Select value={purity} onValueChange={setPurity}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
-        ) : (
-          <div className="grid grid-cols-2 gap-2.5">
-            <div><Label className="text-xs">Material</Label><div className="mt-1"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></div></div>
-            <div><Label className="text-xs">Grade</Label><div className="mt-1"><GradeInput material={materialId} value={grade} onChange={setGrade} /></div></div>
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={ArrowRightLeft} title="Assign to factory"
+      description="Hand stock gold — or another material — to a factory. It leaves stock and joins the factory's pool."
+      footer={(
+        <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
+          <Stat label="Assigning" value={assigning > 0 ? fmtQty(assigning, unit) : "—"} sub={stockText} />
+          {what === "gold" && <Stat label="Fine gold (24K)" value={assigning > 0 ? `${toPureGold(assigning, purity)} g` : "—"} />}
+          <Stat label="Left in stock" value={assigning > inStock ? <span className="text-destructive">Not enough</span> : fmtQty(inStock - assigning, unit)}
+            sub={`of ${fmtQty(inStock, unit)}`} />
+        </>}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : "Assign to Factory"}</AsyncButton>
+        </PanelFooter>
+      )}>
+      <div className="@container space-y-5">
+        {/* Company first, then the factory: the factory's pool is kept per company. */}
+        <Group>
+          <div className="grid grid-cols-2 gap-3">
+            {multiCo && (
+              <div className="col-span-2 @md:col-span-1">
+                <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock it leaves" />
+              </div>
+            )}
+            <Field label="Factory" className={multiCo ? "col-span-2 @md:col-span-1" : "col-span-2"}
+              hint={factoryId && <>Currently holds <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, factoryId, db.factories.find(f => f.id === factoryId)?.openingFineGold, companyId)}g fine (24KT)</span></>}>{id => (
+              <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
+              </Select>
+            )}</Field>
+            <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+            <Field label="Remark">{id => (
+              <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
+            )}</Field>
           </div>
-        )}
-        <div><Label className="text-xs">{what === "gold" ? "Grams to assign" : `Quantity to assign (${unit})`}</Label><Input type="number" min={0} step="0.01" value={grams} onChange={e => setGrams(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
-        <div><Label className="text-xs">Date</Label><Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
-        <div><Label className="text-xs">Remark</Label><Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" /></div>
+        </Group>
+
+        <Group title="Material">
+          <Segmented className="mb-3 max-w-[20rem]" value={what} onChange={setWhat} options={[["gold", "Gold", Coins], ["other", "Other material", Layers]] as const} />
+          <div className="grid grid-cols-2 gap-3">
+            {what === "gold" ? (
+              <Field label="Purity">{id => (
+                <Select value={purity} onValueChange={setPurity}>
+                  <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                </Select>
+              )}</Field>
+            ) : (
+              <>
+                <Field label="Material"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></Field>
+                <Field label="Grade"><GradeInput material={materialId} value={grade} onChange={setGrade} /></Field>
+              </>
+            )}
+            <Field label={what === "gold" ? "Grams to assign" : `Quantity to assign (${unit})`}
+              hint={<>In stock: <span className="font-semibold text-foreground">{fmtQty(inStock, unit)} of {stockText}</span></>}>{id => (
+              <UnitInput id={id} min={0} step="0.01" unit={unit} value={grams} onChange={e => setGrams(e.target.value)} />
+            )}</Field>
+          </div>
+        </Group>
       </div>
-      <p className="text-xs text-muted-foreground">In stock: <span className="font-semibold text-foreground">{fmtQty(inStock, unit)} of {bucket}{what === "other" && materialId ? ` ${materialName(db.settings, material)}` : ""}</span>{what === "gold" && Number(grams) > 0 ? ` · ${toPureGold(Number(grams), purity)}g fine gold` : ""}</p>
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Assign to Factory"}</AsyncButton>
-    </div>
+    </ActionSheet>
   );
 }
 
 /* ── Sell a diamond straight out of stock — no jewellery order involved ── */
 type SellKind = "loose" | "certified";
 type BuyerMode = "client" | "other";
-function SellDiamond() {
+function SellDiamond({ open, onOpenChange }: PanelProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
+  const multiCo = useMultiCo();
   const [companyId, setCompanyId] = useState(useDefaultCompany()); // whose stock it is sold from
   const [kind, setKind] = useState<SellKind>("loose");
   const [shape, setShape] = useState("Round");
@@ -432,118 +569,118 @@ function SellDiamond() {
       });
       toast.success(`Sold ${effectiveCarat}ct ${saleShape} to ${buyerLabel} — ${fmtMoneyInr(totalInr)}`);
       setCarat(""); setRate(""); setXrate(""); setPacketId(""); setBuyerName(""); setClientId(""); setNotes(""); setLockerId("");
+      onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to record sale");
     } finally { setSaving(false); }
   };
 
+  const usd = currency === "USD";
+
   return (
-    <div className="space-y-3">
-      <CompanyPicker value={companyId} onChange={v => { setCompanyId(v); setPacketId(""); }} label="Company — whose stock it is sold from" />
-      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
-        {(["loose", "certified"] as const).map(k => (
-          <button key={k} type="button" onClick={() => { setKind(k); setPacketId(""); }}
-            className={`h-9 rounded-lg text-xs font-medium transition-colors ${kind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-            {k === "loose" ? "Loose" : "Certified"}
-          </button>
-        ))}
-      </div>
-
-      {kind === "loose" ? (
-        <div className="grid grid-cols-2 gap-2.5">
-          <div><Label className="text-xs">Shape</Label>
-            <Select value={shape} onValueChange={setShape}><SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
-          <div><Label className="text-xs">Carat to sell</Label><Input type="number" min={0} step="0.01" value={carat} onChange={e => setCarat(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
-        </div>
-      ) : (
-        <div>
-          <Label className="text-xs">Certified diamond</Label>
-          <Select value={packetId} onValueChange={setPacketId}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose a diamond in stock" /></SelectTrigger>
-            <SelectContent>
-              {inStockPackets.map(p => (
-                <SelectItem key={p.id} value={p.id}>
-                  {p.stockNumber ? `${p.stockNumber} · ` : ""}{p.shape} {p.carat}ct{p.certificateNumber ? ` · Report ${p.certificateNumber}` : ""}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {inStockPackets.length === 0 && <p className="text-xs text-muted-foreground mt-1">No certified diamonds in stock.</p>}
-        </div>
-      )}
-
-      {kind === "loose" && (
-        <p className="text-xs text-muted-foreground">In stock: <span className="font-semibold text-foreground">{looseInStock}ct of {shape}</span></p>
-      )}
-
-      <div className="grid grid-cols-3 gap-2.5">
-        <div className="col-span-2"><Label className="text-xs">Rate / ct ({currency})</Label><Input type="number" min={0} value={rate} onChange={e => setRate(e.target.value)} className="rounded-xl h-10 mt-1" /></div>
-        <div><Label className="text-xs">Currency</Label>
-          <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent><SelectItem value="INR">INR</SelectItem><SelectItem value="USD">USD</SelectItem></SelectContent>
-          </Select>
-        </div>
-      </div>
-      {currency === "USD" && (
-        <div className="grid grid-cols-2 gap-2.5">
-          <div className="rounded-xl h-10 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">
-            Total: <span className="font-semibold text-foreground ml-1">${baseAmount.toFixed(2)}</span>
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Tag} title="Sell a diamond"
+      description="Straight out of stock to a client or a walk-in buyer — no jewellery order involved."
+      footer={(
+        <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
+          <Stat label="Carat" value={effectiveCarat > 0 ? fmtQty(effectiveCarat, "ct") : "—"}
+            sub={kind === "certified" ? (selectedPacket ? `${selectedPacket.stockNumber ? `${selectedPacket.stockNumber} · ` : ""}${selectedPacket.shape}` : "choose the stone") : shape} />
+          <Stat label="Rate" value={Number(rate) > 0 ? `${fmtCcy(Number(rate), currency)} / ct` : "—"} />
+          <Stat big label="Total" value={baseAmount <= 0 ? "—" : usd ? fmtCcy(Math.round(baseAmount * 100) / 100, "USD") : fmtMoneyInr(totalInr)}
+            sub={usd ? (Number(xrate) > 0 ? `${fmtMoneyInr(totalInr)} at ₹${xrate} / $` : "enter the exchange rate") : undefined} />
+        </>}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : "Record Sale"}</AsyncButton>
+        </PanelFooter>
+      )}>
+      <div className="@container space-y-5">
+        <Group>
+          <div className="grid grid-cols-2 gap-3">
+            {multiCo && (
+              <div className="col-span-2 @md:col-span-1">
+                <CompanyPicker value={companyId} onChange={v => { setCompanyId(v); setPacketId(""); }} label="Company — whose stock it is sold from" />
+              </div>
+            )}
+            <Field label="Date" className={multiCo ? "col-span-2 @md:col-span-1" : ""}>{id => (
+              <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
+            )}</Field>
+            <Field label="Remark" className={multiCo ? "col-span-2" : ""}>{id => (
+              <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
+            )}</Field>
           </div>
-          <Input type="number" min={0} step="0.01" value={xrate} onChange={e => setXrate(e.target.value)} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
-        </div>
-      )}
+        </Group>
 
-      <div>
-        <Label className="text-xs">Buyer</Label>
-        <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl mt-1">
-          {(["client", "other"] as const).map(b => (
-            <button key={b} type="button" onClick={() => setBuyerMode(b)}
-              className={`h-9 rounded-lg text-xs font-medium transition-colors ${buyerMode === b ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-              {b === "client" ? "Existing Client" : "Other / Walk-in"}
-            </button>
-          ))}
-        </div>
-        {buyerMode === "client" ? (
-          <Select value={clientId} onValueChange={addNew("client", setClientId)}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose client" /></SelectTrigger>
-            <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}<AddNewItem kind="client" /></SelectContent>
-          </Select>
-        ) : (
-          <Input value={buyerName} onChange={e => setBuyerName(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Buyer's name" />
-        )}
-      </div>
+        <Group title="Diamond">
+          <Segmented className="mb-3 max-w-[20rem]" value={kind} onChange={k => { setKind(k); setPacketId(""); }}
+            options={[["loose", "Loose", Gem], ["certified", "Certified", BadgeCheck]] as const} />
+          <div className="grid grid-cols-2 gap-3">
+            {kind === "loose" ? (
+              <>
+                <Field label="Shape">{id => (
+                  <Select value={shape} onValueChange={setShape}>
+                    <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                  </Select>
+                )}</Field>
+                <Field label="Carat to sell" hint={<>In stock: <span className="font-semibold text-foreground">{looseInStock}ct of {shape}</span></>}>{id => (
+                  <UnitInput id={id} min={0} step="0.01" unit="ct" value={carat} onChange={e => setCarat(e.target.value)} />
+                )}</Field>
+              </>
+            ) : (
+              <Field label="Certified diamond" className="col-span-2" hint={inStockPackets.length === 0 ? "No certified diamonds in stock." : undefined}>{id => (
+                <Select value={packetId} onValueChange={setPacketId}>
+                  <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose a diamond in stock" /></SelectTrigger>
+                  <SelectContent>
+                    {inStockPackets.map(p => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.stockNumber ? `${p.stockNumber} · ` : ""}{p.shape} {p.carat}ct{p.certificateNumber ? ` · Report ${p.certificateNumber}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}</Field>
+            )}
+            <Field label={`Rate / ct (${currency})`}>{id => (
+              <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/ct`} value={rate} onChange={e => setRate(e.target.value)} />
+            )}</Field>
+            <Field label="Currency">{id => (
+              <Select value={currency} onValueChange={v => setCurrency(v as PurchaseCurrency)}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="INR">INR</SelectItem><SelectItem value="USD">USD</SelectItem></SelectContent>
+              </Select>
+            )}</Field>
+            {usd && (
+              <Field label="Exchange rate (₹/$)">{id => (
+                <UnitInput id={id} min={0} step="0.01" unit="₹/$" value={xrate} onChange={e => setXrate(e.target.value)} placeholder="Exchange rate (₹/$)" />
+              )}</Field>
+            )}
+          </div>
+        </Group>
 
-      <div>
-        <Label className="text-xs">Deposit proceeds into (optional)</Label>
-        <Select value={lockerId || "__none"} onValueChange={addNew("locker", v => setLockerId(v === "__none" ? "" : v))}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Don't record a cash movement" /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none">Don't record a cash movement</SelectItem>
-            {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-          <AddNewItem kind="locker" /></SelectContent>
-        </Select>
-        {lockerId === "" && lockers.length === 0 && (
-          <p className="text-xs text-muted-foreground mt-1">No active {currency} lockers — sale will still be recorded, just without a cash entry.</p>
-        )}
+        <Group title="Buyer & payment">
+          <div className="space-y-3">
+            <Field label="Buyer">
+              <Segmented value={buyerMode} onChange={setBuyerMode} options={[["client", "Existing Client"], ["other", "Other / Walk-in"]] as const} />
+            </Field>
+            <Field label={buyerMode === "client" ? "Client" : "Buyer's name"}>{id => buyerMode === "client" ? (
+              <Select value={clientId} onValueChange={addNew("client", setClientId)}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose client" /></SelectTrigger>
+                <SelectContent>{clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}<AddNewItem kind="client" /></SelectContent>
+              </Select>
+            ) : (
+              <Input id={id} value={buyerName} onChange={e => setBuyerName(e.target.value)} className="rounded-xl h-10" placeholder="Buyer's name" />
+            )}</Field>
+            <Field label="Deposit proceeds into (optional)"
+              hint={lockerId === "" && lockers.length === 0 ? `No active ${currency} lockers — sale will still be recorded, just without a cash entry.` : undefined}>{id => (
+              <Select value={lockerId || "__none"} onValueChange={addNew("locker", v => setLockerId(v === "__none" ? "" : v))}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Don't record a cash movement" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none">Don't record a cash movement</SelectItem>
+                  {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
+                <AddNewItem kind="locker" /></SelectContent>
+              </Select>
+            )}</Field>
+          </div>
+        </Group>
       </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-        <div className="sm:col-span-2">
-          <Label className="text-xs">Remark</Label>
-          <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
-        </div>
-        <div>
-          <Label className="text-xs">Date</Label>
-          <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
-        </div>
-      </div>
-
-      <div className="flex items-center justify-between gap-2 pt-1">
-        <span className="text-sm">Total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(totalInr)}</span></span>
-        <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10">{saving ? "Saving…" : "Record Sale"}</AsyncButton>
-      </div>
-    </div>
+    </ActionSheet>
   );
 }

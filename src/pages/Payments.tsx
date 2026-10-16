@@ -1,12 +1,12 @@
 import { materialUnit } from "@/lib/materials";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
-import { useEffect, useState } from "react";
+import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
-  settleClientAccount, invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
-  DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor,
+  invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
+  DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor, dayOf,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
@@ -14,19 +14,25 @@ import { reserveVoucherNumber } from "@/lib/counters";
 import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { MoneyLedger } from "@/components/MoneyLedger";
 import { DayBook } from "@/components/DayBook";
+import { ActionSheet } from "@/components/ActionSheet";
+import { MoreMenu } from "@/components/MoreMenu";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
   fmtMoneyInr, lockerBalance,
 } from "@/lib/manufacturing";
-import { ccy, ccySymbol, fmtCcy, rateFields, roundCcy } from "@/lib/currency";
+import { lockerFigure } from "@/lib/partyTotals";
+import { ccy, ccySymbol, fmtCcy, fmtCcyMix, rateFields, roundCcy, sumByCcy } from "@/lib/currency";
 import { RateInput } from "@/components/CurrencyFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen } from "lucide-react";
+import {
+  CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen, Wallet,
+  ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered,
+} from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 
@@ -35,7 +41,22 @@ import { confirmBox } from "@/lib/confirm";
 // todayLocal / stampFor now live in src/lib/db.ts, shared with Buy & Assign.
 
 
-type Mode = "daybook" | "client" | "supplier" | "factory" | "expense" | "locker";
+/** The ledgers the page reads — one at a time, under the tab bar. */
+type Book = "daybook" | "received" | "supplier" | "factory" | "expense" | "locker";
+/** The forms that slide in over it. */
+type Task = "client" | "supplier" | "factory" | "expense" | "locker";
+
+const BOOKS = [
+  { key: "daybook", label: "Day book", icon: BookOpen },
+  { key: "received", label: "Received", icon: CreditCard },
+  { key: "supplier", label: "Supplier payments", icon: Truck },
+  { key: "factory", label: "Factory payments", icon: FactoryIcon },
+  { key: "expense", label: "Expenses", icon: Receipt },
+  { key: "locker", label: "Account entries", icon: ListOrdered },
+] as const;
+
+/** What a form's panel is given: whether it is open, and how to close it. */
+type SheetProps = { open: boolean; onOpenChange: (open: boolean) => void };
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
 // The fallback list is the one in db.ts, shared with Settings → Categories.
@@ -65,37 +86,64 @@ async function confirmOverdraw(lockers: Locker[], transactions: LockerTransactio
  */
 export function PaymentsPage() {
   const db = useDb();
-  const addNew = useAddNew();
   const can = useCan();
+  const mayAdd = can("payments", "add");
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
-  const [mode, setMode] = useState<Mode>("daybook");
+  const [book, setBook] = useState<Book>("daybook");
+  // Every payment is a panel over the page, so the ledger being read stays put
+  // underneath it and shows the new entry the moment it is saved.
+  const [task, setTask] = useState<Task | null>(null);
+  const [lockerAction, setLockerAction] = useState<LockerAction>("transfer_out");
+  // The day book's account, chosen from the balances strip. Resolved on every
+  // render, the way the day book itself does, so it never sits on "no account"
+  // when the accounts arrive a moment after the page.
+  const [bookPick, setBookPick] = useState("");
 
   const activeLockers = db.lockers.filter(l => l.active !== false);
+  const bookLockerId = activeLockers.some(l => l.id === bookPick) ? bookPick : (activeLockers[0]?.id ?? "");
+
+  // Today's money in and out across the accounts, each currency kept apart.
+  // Transfers are left out: money moved between two of our own accounts
+  // neither came in nor went out.
+  const today = todayLocal();
+  const activeIds = new Set(activeLockers.map(l => l.id));
+  const todays = (db.lockerTransactions ?? []).filter(t => activeIds.has(t.lockerId) && dayOf(t.createdAt) === today);
+  const todayIn = sumByCcy(todays.filter(t => t.type === "income"), t => t.amountInr, t => t.currency ?? db.lockers.find(l => l.id === t.lockerId)?.currency);
+  const todayOut = sumByCcy(todays.filter(t => t.type === "expense"), t => t.amountInr, t => t.currency ?? db.lockers.find(l => l.id === t.lockerId)?.currency);
+
+  const sheet = (t: Task): SheetProps => ({ open: task === t, onOpenChange: o => { if (!o) setTask(null); } });
+  const openLocker = (a: LockerAction) => { setLockerAction(a); setTask("locker"); };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div>
-        <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Payments</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">The day book, and every payment in or out — all in one place</p>
-      </div>
-
-      <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-        {([
-          { m: "daybook", label: "Day Book", icon: BookOpen },
-          { m: "client", label: "Receive from Client", icon: CreditCard },
-          { m: "supplier", label: "Supplier", icon: Truck },
-          { m: "factory", label: "Pay Factory", icon: FactoryIcon },
-          { m: "expense", label: "Pay Expense", icon: Receipt },
-          { m: "locker", label: "Locker", icon: Landmark },
-        ] as const).map(opt => (
-          <button key={opt.m} onClick={() => setMode(opt.m)}
-            className={`flex flex-col items-center justify-center gap-1.5 px-1.5 py-2.5 sm:p-3 rounded-xl border transition-colors text-[11px] sm:text-xs font-medium leading-tight text-center
-              ${mode === opt.m ? "border-primary bg-primary/5 text-primary" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
-            <opt.icon className="h-4 w-4" />
-            {opt.label}
-          </button>
-        ))}
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Payments</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">The day book, and every payment in or out — all in one place</p>
+          {!mayAdd && <p className="text-xs text-muted-foreground mt-1">Your role lets you look at these entries but not record new ones.</p>}
+        </div>
+        {mayAdd && (
+          // On a phone the main button sits on top at full width, the three
+          // payments share the row under it — the header never runs off the side.
+          // From a tablet up it is one row that wraps (main button last), so a
+          // narrow window between the breakpoints never pushes it off the side.
+          <div className="w-full sm:w-auto sm:ml-auto flex flex-col-reverse sm:flex-row sm:flex-wrap sm:justify-end sm:items-center gap-2">
+            <div className="grid grid-cols-3 sm:flex sm:flex-wrap sm:items-center gap-2">
+              <Button variant="outline" onClick={() => setTask("supplier")} className="rounded-xl h-10 px-2 sm:px-4"><Truck className="max-sm:hidden" />Pay supplier</Button>
+              <Button variant="outline" onClick={() => setTask("factory")} className="rounded-xl h-10 px-2 sm:px-4"><FactoryIcon className="max-sm:hidden" />Pay factory</Button>
+              <Button variant="outline" onClick={() => setTask("expense")} className="rounded-xl h-10 px-2 sm:px-4"><Receipt className="max-sm:hidden" />Pay expense</Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <Button onClick={() => setTask("client")} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none"><CreditCard />Receive from Client</Button>
+              <MoreMenu title="Accounts" actions={[
+                { label: "Transfer between accounts", icon: ArrowLeftRight, hint: "From one locker to another, in any two currencies", onSelect: () => openLocker("transfer_out") },
+                { label: "Deposit to an account", icon: ArrowDownCircle, hint: "Money in that isn’t a client’s receipt", onSelect: () => openLocker("income") },
+                { label: "Withdraw from an account", icon: ArrowUpCircle, hint: "Money out that isn’t a bill or an expense", onSelect: () => openLocker("expense") },
+              ]} />
+            </div>
+          </div>
+        )}
       </div>
 
       {activeLockers.length === 0 && (
@@ -104,36 +152,112 @@ export function PaymentsPage() {
         </div>
       )}
 
-      {/* Form first, then the table underneath at full width — the entries are
-          what people come back to read, so they get the whole page. */}
-      {mode !== "daybook" && !can("payments", "add") && (
-        <div className="card-luxe p-4 text-sm text-muted-foreground">
-          Your role lets you look at these entries but not record new ones.
+      {/* Balances, one tile per account in its own currency. A tile opens that
+          account's day book. On a phone the row scrolls sideways inside itself. */}
+      {activeLockers.length > 0 && (
+        <div className="flex gap-2 overflow-x-auto no-scrollbar p-0.5 sm:p-0 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:overflow-visible">
+          <div className="card-luxe shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3">
+            <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Today</p>
+            <p className="mt-1 text-sm font-semibold text-success tabular-nums break-words"><span className="text-[11px] font-medium text-muted-foreground">In </span>{fmtCcyMix(todayIn)}</p>
+            <p className="text-sm font-semibold text-destructive tabular-nums break-words"><span className="text-[11px] font-medium text-muted-foreground">Out </span>{fmtCcyMix(todayOut)}</p>
+            <p className="text-[10px] text-muted-foreground mt-0.5">Transfers left out</p>
+          </div>
+          {activeLockers.map(l => {
+            const bal = lockerFigure(db, l);
+            const on = book === "daybook" && l.id === bookLockerId;
+            const Icon = l.type === "bank" ? Landmark : Wallet;
+            return (
+              <button key={l.id} type="button" aria-pressed={on} title={`${l.name} — open its day book`}
+                onClick={() => { setBookPick(l.id); setBook("daybook"); }}
+                className={`card-luxe shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3 text-left transition-shadow ${on ? "ring-2 ring-primary" : "hover:shadow-md"}`}>
+                <span className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-snug">
+                  <Icon className="h-3.5 w-3.5 mt-px shrink-0" /><span className="line-clamp-2 break-words">{l.name}</span>
+                </span>
+                <span className={`block mt-1 font-display text-xl font-bold tabular-nums leading-tight ${bal < 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtCcy(bal, l.currency)}</span>
+                <span className="block text-[11px] text-muted-foreground mt-0.5">{ccy(l.currency)}{l.type === "bank" && l.accountNumberLast4 ? ` · ····${l.accountNumberLast4}` : ""}</span>
+              </button>
+            );
+          })}
         </div>
       )}
-      {mode !== "daybook" && can("payments", "add") && (
-      <div className="card-luxe p-6">
-        {mode === "client" && <ReceiveFromClient />}
-        {mode === "supplier" && <PaySupplier />}
-        {mode === "factory" && <PayFactory />}
-        {mode === "expense" && <PayExpense />}
-        {mode === "locker" && <LockerActions />}
+
+      <div className="space-y-3">
+        <div role="tablist" aria-label="Ledgers" className="card-luxe p-1.5 flex gap-1 overflow-x-auto no-scrollbar">
+          {BOOKS.map(b => (
+            <button key={b.key} type="button" role="tab" aria-selected={book === b.key} onClick={() => setBook(b.key)}
+              className={`shrink-0 inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors ${book === b.key ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
+              <b.icon className="h-4 w-4" />{b.label}
+            </button>
+          ))}
+        </div>
+        <div role="tabpanel">
+          {book === "daybook" && <DayBook lockerId={bookLockerId} />}
+          {book === "received" && <ReceiptLedger />}
+          {book === "supplier" && <MoneyLedger kind="supplier" />}
+          {book === "factory" && <MoneyLedger kind="factory" />}
+          {book === "expense" && <MoneyLedger kind="expense" />}
+          {book === "locker" && <MoneyLedger kind="locker" />}
+        </div>
       </div>
+
+      {/* Mounted for as long as the page is, so a panel closed by mistake opens
+          again with what was typed. Saving clears the form and closes it. */}
+      {mayAdd && (
+        <>
+          <ReceiveFromClient {...sheet("client")} />
+          <PaySupplier {...sheet("supplier")} />
+          <PayFactory {...sheet("factory")} />
+          <PayExpense {...sheet("expense")} />
+          <LockerActions {...sheet("locker")} preset={lockerAction} />
+        </>
       )}
-
-      {mode === "daybook" && <DayBook />}
-      {mode === "client" && <ReceiptLedger />}
-      {mode === "supplier" && <MoneyLedger kind="supplier" />}
-      {mode === "factory" && <MoneyLedger kind="factory" />}
-      {mode === "expense" && <MoneyLedger kind="expense" />}
-      {mode === "locker" && <MoneyLedger kind="locker" />}
-
     </div>
   );
 }
 
+/** The bottom of every payment panel: what it adds up to, then Cancel and the
+ *  button that saves it. */
+function PanelFooter({ summary, onCancel, children }: { summary?: ReactNode; onCancel: () => void; children: ReactNode }) {
+  return (
+    <div className="space-y-3">
+      {summary}
+      <div className="flex items-center justify-end gap-2">
+        <Button variant="outline" onClick={onCancel} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** The amount being moved, and what the account holds once it is saved — the
+ *  overdraw question answered before the button rather than after it. */
+function MoveSummary({ label, value, tone, lockerId, change }: {
+  label: string; value: string; tone: "in" | "out"; lockerId: string; change: number;
+}) {
+  const db = useDb();
+  const l = db.lockers.find(x => x.id === lockerId);
+  const bal = l ? lockerBalance(l, db.lockerTransactions) : 0;
+  const after = bal + change;
+  return (
+    <div className="flex items-end justify-between gap-3 flex-wrap">
+      <div className="min-w-0">
+        <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className={`font-display text-xl font-bold tabular-nums leading-tight ${tone === "in" ? "text-success" : "text-destructive"}`}>{value}</p>
+      </div>
+      {l && (
+        <p className="text-xs text-muted-foreground text-right">
+          {l.name}: {fmtCcy(bal, l.currency)} → <span className={`font-semibold ${after < 0 ? "text-destructive" : "text-foreground"}`}>{fmtCcy(after, l.currency)}</span>
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** The main button's look in a panel footer — full width beside Cancel on a phone. */
+const SAVE_BTN = "btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8";
+
 /* ── Receive from Client — mirrors ClientHistory.tsx's recordPayment ── */
-function ReceiveFromClient() {
+function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -219,6 +343,7 @@ function ReceiveFromClient() {
       });
       toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
       setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId(""); setDate(todayLocal());
+      onOpenChange(false);
     } finally { setSaving(false); }
   };
 
@@ -226,10 +351,35 @@ function ReceiveFromClient() {
   const depositPreview = !amount ? null : needsRate ? (rate > 0 ? roundCcy(Number(amount) * rate, lockerCurrency) : null) : Number(amount);
 
   return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={CreditCard}
+      title="Receive payment"
+      description="From a client — saved as a numbered receipt that settles their bill and lands in the account you pick."
+      footer={
+        <PanelFooter onCancel={() => onOpenChange(false)} summary={amount && lockerId ? (
+          <div className="grid grid-cols-3 gap-3">
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Received</p>
+              <p className="font-medium text-foreground tabular-nums break-words">{fmtMoney(Number(amount))}</p>
+            </div>
+            <div className="min-w-0">
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Applied to their bills</p>
+              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(Number(amount))}</p>
+            </div>
+            {depositPreview != null && locker && (
+              <div className="min-w-0">
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground break-words">Deposited to {locker.name}</p>
+                <p className="font-semibold text-foreground tabular-nums break-words">{fmtCcy(depositPreview, lockerCurrency)}</p>
+              </div>
+            )}
+          </div>
+        ) : undefined}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
+        </PanelFooter>
+      }>
     <div className="space-y-3">
-      {/* Fields spread across the width instead of one long column — the card is
-          full-page now that the receipts table sits underneath it. */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-auto-cards gap-3">
+      {/* Two columns from a small tablet up; one on a phone, where the panel is
+          the whole screen. */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <div>
           <Label className="text-xs">Client</Label>
           <Select value={clientId} onValueChange={addNew("client", setClientId)}>
@@ -292,9 +442,9 @@ function ReceiveFromClient() {
         </div>
 
         {needsRate && (
-          <div className="sm:col-span-2 lg:col-span-3 p-3 rounded-xl bg-secondary">
+          <div className="sm:col-span-2 p-3 rounded-xl bg-secondary">
             <RateInput id="rcv-rate" from="USD" to={lockerCurrency} value={exchangeRate} onChange={setExchangeRate}
-              amount={Number(amount) || undefined} at={date} className="max-w-md" />
+              amount={Number(amount) || undefined} at={date} />
             <p className="text-xs text-muted-foreground mt-1">This locker holds {lockerCurrency}, not USD — enter the rate to convert what lands in it.</p>
           </div>
         )}
@@ -307,33 +457,13 @@ function ReceiveFromClient() {
             : "Oldest bills first — pick an invoice if the client sent this for one in particular."}
         </p>
       )}
-
-      {amount && lockerId && (
-        <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Received</p>
-            <p className="font-medium text-foreground">{fmtMoney(Number(amount))}</p>
-          </div>
-          <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Applied to their bills</p>
-            <p className="font-semibold text-primary">{fmtMoney(Number(amount))}</p>
-          </div>
-          {depositPreview != null && locker && (
-            <div>
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Deposited to {locker.name}</p>
-              <p className="font-semibold text-foreground">{fmtCcy(depositPreview, lockerCurrency)}</p>
-            </div>
-          )}
-        </div>
-      )}
-
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full sm:w-auto sm:px-10">{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
     </div>
+    </ActionSheet>
   );
 }
 
 /* ── Pay Supplier — mirrors SupplierHistory.tsx's recordPayment ── */
-function PaySupplier() {
+function PaySupplier({ open, onOpenChange }: SheetProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -384,6 +514,7 @@ function PaySupplier() {
         });
         toast.success(`${fmtMoneyInr(amt)} received from ${s.name}`);
         setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
+        onOpenChange(false);
       } finally { setSaving(false); }
       return;
     }
@@ -436,10 +567,23 @@ function PaySupplier() {
       });
       toast.success(`${fmtMoneyInr(amt)} paid to ${s.name}`);
       setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
+      onOpenChange(false);
     } finally { setSaving(false); }
   };
 
+  const typed = Number(amount) || 0;
   return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Truck}
+      title="Supplier payment"
+      description="Pay a supplier's bills from a rupee account — or record money they sent back."
+      footer={
+        <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
+          <MoveSummary label={dir === "pay" ? "Paying" : "Receiving"} value={fmtMoneyInr(typed)} tone={dir === "pay" ? "out" : "in"}
+            lockerId={lockerId} change={dir === "pay" ? -typed : typed} />
+        ) : undefined}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
+        </PanelFooter>
+      }>
     <div className="space-y-3">
       {/* Direction — pay the supplier, or receive money back (refund/return). */}
       <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
@@ -475,7 +619,8 @@ function PaySupplier() {
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
         {dir === "pay" && (
-          <div>
+          // Full width: "Advance / loan — not against any bill" has to be readable.
+          <div className="col-span-2">
             <Label className="text-xs">Against</Label>
             <Select value={target} onValueChange={setTarget}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
@@ -496,13 +641,13 @@ function PaySupplier() {
           <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
       </div>
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
     </div>
+    </ActionSheet>
   );
 }
 
 /* ── Pay Factory — mirrors FactoryHistory.tsx's payCharge / FIFO ── */
-function PayFactory() {
+function PayFactory({ open, onOpenChange }: SheetProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -580,10 +725,22 @@ function PayFactory() {
       });
       toast.success(`${fmtMoneyInr(amt)} paid to ${f.name}`);
       setFactoryId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
+      onOpenChange(false);
     } finally { setSaving(false); }
   };
 
+  const typed = Number(amount) || 0;
   return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={FactoryIcon}
+      title="Factory payment"
+      description="Making charges, paid in rupees from a rupee account."
+      footer={
+        <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
+          <MoveSummary label="Paying" value={fmtMoneyInr(typed)} tone="out" lockerId={lockerId} change={-typed} />
+        ) : undefined}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Factory Payment"}</AsyncButton>
+        </PanelFooter>
+      }>
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Factory</Label>
@@ -604,7 +761,8 @@ function PayFactory() {
           <Label className="text-xs">Amount (₹)</Label>
           <Input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10 mt-1" />
         </div>
-        <div>
+        {/* Full width: a job reads "12g 18K — pending ₹4,500". */}
+        <div className="col-span-2">
           <Label className="text-xs">Against</Label>
           <Select value={target} onValueChange={setTarget}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
@@ -624,13 +782,13 @@ function PayFactory() {
           <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
         </Select>
       </div>
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Factory Payment"}</AsyncButton>
     </div>
+    </ActionSheet>
   );
 }
 
 /* ── Pay Expense — mirrors Expenses.tsx's handleAdd ── */
-function PayExpense() {
+function PayExpense({ open, onOpenChange }: SheetProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -684,12 +842,24 @@ function PayExpense() {
       });
       toast.success("Expense recorded");
       setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(""); setDate(todayLocal());
+      onOpenChange(false);
     } finally { setSaving(false); }
   };
 
   // Make sure "Salary" is always pickable even if an admin customised categories.
   const catList = categories.includes("Salary") ? categories : ["Salary", ...categories];
+  const typed = Number(amount) || 0;
   return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Receipt}
+      title="Pay expense"
+      description="Paid from any account, in that account's own currency."
+      footer={
+        <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && lockerId ? (
+          <MoveSummary label={category === "Salary" ? "Salary" : "Expense"} value={fmtCcy(typed, curr)} tone="out" lockerId={lockerId} change={-typed} />
+        ) : undefined}>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Expense"}</AsyncButton>
+        </PanelFooter>
+      }>
     <div className="space-y-3">
       {/* 1. Pay from account — first; it sets the currency (same flow as the Expenses page) */}
       <div>
@@ -739,8 +909,8 @@ function PayExpense() {
         <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. August salary, Office rent" />
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
-      <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-10 w-full">{saving ? "Saving…" : "Record Expense"}</AsyncButton>
     </div>
+    </ActionSheet>
   );
 }
 
@@ -748,11 +918,11 @@ function PayExpense() {
    Mirrors Locker.tsx's recordTxn exactly (overdraw warning + cross-currency
    transfer rate) so the two entry points behave identically. ── */
 type LockerAction = "income" | "expense" | "transfer_out";
-function LockerActions() {
+function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: LockerAction }) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
-  const [action, setAction] = useState<LockerAction>("income");
+  const [action, setAction] = useState<LockerAction>(preset);
   const [lockerId, setLockerId] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
@@ -768,6 +938,15 @@ function LockerActions() {
   // Entries are often written up a day or two later, so the date is chosen
   // rather than assumed to be today.
   const [date, setDate] = useState(todayLocal());
+
+  // The ⋯ item it was opened from decides what it is — a transfer, a deposit
+  // or a withdrawal; the Action select inside can still change it. Switching
+  // clears the rate, exactly as picking another action in the select does.
+  // Before paint, so the panel never opens showing the previous title.
+  useLayoutEffect(() => {
+    if (open && action !== preset) { setAction(preset); setExchangeRate(""); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, preset]);
 
   const lockers = db.lockers.filter(l => l.active !== false);
   const selected = lockers.find(l => l.id === lockerId) ?? null;
@@ -843,10 +1022,37 @@ function LockerActions() {
           : `${fmtCcy(amt, cur)} transferred to ${target?.name}`,
       );
       setAmount(""); setCategory(""); setNote(""); setTargetLocker(""); setExchangeRate(""); setDate(todayLocal());
+      onOpenChange(false);
     } finally { setSaving(false); }
   };
 
+  const typed = Number(amount) || 0;
+  const xferRate = Number(exchangeRate);
   return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md"
+      icon={action === "transfer_out" ? ArrowLeftRight : action === "income" ? ArrowDownCircle : ArrowUpCircle}
+      title={action === "transfer_out" ? "Transfer between accounts" : action === "income" ? "Deposit to an account" : "Withdraw from an account"}
+      description={action === "transfer_out"
+        ? "Out of one locker and into another, in any two currencies."
+        : "A plain entry on one locker, filed under a category."}
+      footer={
+        <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && selected ? (
+          <div className="space-y-1">
+            <MoveSummary label={action === "income" ? "Deposit" : action === "expense" ? "Withdrawal" : "Transfer"} value={fmtCcy(typed, cur)}
+              tone={action === "income" ? "in" : "out"} lockerId={selected.id} change={action === "income" ? typed : -typed} />
+            {/* What lands on the other side: the same amount, or amount × rate once there is one. */}
+            {target && (!crossCurrency || xferRate > 0) && (
+              <p className="text-xs text-muted-foreground text-right">
+                {target.name} receives <span className="font-semibold text-foreground">{fmtCcy(crossCurrency ? roundCcy(typed * xferRate, targetCcy) : typed, targetCcy)}</span>
+              </p>
+            )}
+          </div>
+        ) : undefined}>
+          <AsyncButton onClick={submit} disabled={saving || lockers.length === 0} className={SAVE_BTN}>
+            {saving ? "Saving…" : action === "income" ? "Record Deposit" : action === "expense" ? "Record Withdrawal" : "Record Transfer"}
+          </AsyncButton>
+        </PanelFooter>
+      }>
     <div className="space-y-3">
       {/* Current balances — so staff pick the right locker at a glance */}
       {lockers.length > 0 && (
@@ -924,10 +1130,7 @@ function LockerActions() {
       )}
 
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
-
-      <AsyncButton onClick={submit} disabled={saving || lockers.length === 0} className="btn-hero rounded-xl h-10 w-full">
-        {saving ? "Saving…" : action === "income" ? "Record Deposit" : action === "expense" ? "Record Withdrawal" : "Record Transfer"}
-      </AsyncButton>
     </div>
+    </ActionSheet>
   );
 }

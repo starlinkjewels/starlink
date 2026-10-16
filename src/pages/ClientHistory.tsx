@@ -10,6 +10,7 @@ import { useDb } from "@/hooks/useDb";
 import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
+import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -593,7 +594,7 @@ function ClientHistoryPageBody() {
               { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
             ]} />
             {can("payments", "add") && (
-              <Button onClick={() => setShowPayForm(v => !v)} className="btn-hero rounded-xl gap-2">
+              <Button onClick={() => setShowPayForm(true)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Payment
               </Button>
             )}
@@ -626,106 +627,6 @@ function ClientHistoryPageBody() {
           </div>
         </div>
 
-        {showPayForm && (() => {
-          // No rate yet → nothing to show, rather than the dollar figure in another currency.
-          const payDepositPreview = !payAmount ? null : !payNeedsRate ? Number(payAmount) : payRate > 0 ? Number(payAmount) * payRate : null;
-          return (
-          <div className="pt-2 border-t border-border/60 space-y-2.5">
-            <p className="text-sm font-medium text-brand-dark">Record Client Payment</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {/* Amount */}
-              <div className="relative">
-                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="number" min="1" step="0.01" autoFocus
-                  value={payAmount} onChange={e => setPayAmount(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && recordPayment()}
-                  className="pl-9 rounded-xl h-10" placeholder="Amount received ($)" />
-              </div>
-              {/* Which bill this is for — blank holds it as credit */}
-              {openInvoicesForPay.length > 0 && (
-                <Select value={payInvoiceId || "credit"} onValueChange={v => setPayInvoiceId(v === "credit" ? "" : v)}>
-                  <SelectTrigger className="h-10 rounded-xl">
-                    <FileText className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="credit">No invoice — hold as credit</SelectItem>
-                    {openInvoicesForPay.map(({ inv, bal }) => (
-                      <SelectItem key={inv.id} value={inv.id}>
-                        Invoice {inv.number} — {fmtMoney(bal)} pending
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-              {/* Method */}
-              <Select value={payMethod} onValueChange={setPayMethod}>
-                <SelectTrigger className="h-10 rounded-xl">
-                  <CreditCard className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m =>
-                    <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {/* Remark */}
-            <Input
-              value={payRemark} onChange={e => setPayRemark(e.target.value)}
-              onKeyDown={e => e.key === "Enter" && recordPayment()}
-              className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
-
-            {db.lockers.filter(l => l.active !== false).length === 0 && (
-              <p className="text-xs text-amber-600">
-                No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
-              </p>
-            )}
-            <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
-              <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
-              <SelectContent>
-                {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
-              <AddNewItem kind="locker" /></SelectContent>
-            </Select>
-
-            {payNeedsRate && (
-              <div className="p-3 rounded-xl bg-secondary space-y-2">
-                <RateInput id="client-pay-rate" from="USD" to={payLockerCurrency} value={payExchangeRate}
-                  onChange={setPayExchangeRate} amount={Number(payAmount) || undefined} />
-                <p className="text-xs text-muted-foreground">This locker holds {payLockerCurrency}, not USD — the rate converts what lands in it.</p>
-              </div>
-            )}
-
-            {payAmount && payLockerId && (
-              <div className="p-4 rounded-xl border border-border/60 bg-secondary/30 space-y-1.5">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Received</span>
-                  <span className="font-medium text-foreground">{fmtMoney(Number(payAmount))}</span>
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">Applied to order</span>
-                  <span className="font-semibold text-primary">{fmtMoney(Number(payAmount))}</span>
-                </div>
-                {payDepositPreview != null && payLocker && (
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Deposited to {payLocker.name}</span>
-                    <span className="font-semibold text-foreground">{fmtCcy(roundCcy(payDepositPreview, payLockerCurrency), payLockerCurrency)}</span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <div className="flex gap-2.5">
-              <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
-              <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); setPayRemark(""); }} className="rounded-xl h-10">Cancel</Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {account.credit > 0 && <>Includes {fmtMoney(account.credit)} existing credit. </>}
-              Clears the oldest pending bills first; any extra is kept as credit for future orders.
-            </p>
-          </div>
-          );
-        })()}
       </div>
       <ClientInvoiceLedger
         blocks={invoiceBlocks}
@@ -787,6 +688,115 @@ function ClientHistoryPageBody() {
           />
         </div>
       </div>
+
+      {/* Recording a payment is a panel, so the ledger and the order history
+          behind stay where they were. Closing it keeps what was typed; Cancel
+          clears the amount and remark, as the inline form did. */}
+      {(() => {
+        // No rate yet → nothing to show, rather than the dollar figure in another currency.
+        const payDepositPreview = !payAmount ? null : !payNeedsRate ? Number(payAmount) : payRate > 0 ? Number(payAmount) * payRate : null;
+        return (
+          <ActionSheet
+            open={showPayForm}
+            onOpenChange={setShowPayForm}
+            title="Record Client Payment"
+            description={<>From {client.companyName}. {account.credit > 0 && <>Includes {fmtMoney(account.credit)} existing credit. </>}Clears the oldest pending bills first; any extra is kept as credit for future orders.</>}
+            icon={Wallet}
+            footer={
+              <div className="flex items-end justify-between gap-3 flex-wrap">
+                {payAmount && payLockerId && (
+                  <div className="min-w-0 flex-1 basis-56 space-y-1">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">Received</span>
+                      <span className="font-medium text-foreground">{fmtMoney(Number(payAmount))}</span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-sm">
+                      <span className="text-muted-foreground">Applied to order</span>
+                      <span className="font-semibold text-primary">{fmtMoney(Number(payAmount))}</span>
+                    </div>
+                    {payDepositPreview != null && payLocker && (
+                      <div className="flex items-center justify-between gap-3 text-sm">
+                        <span className="text-muted-foreground min-w-0 truncate">Deposited to {payLocker.name}</span>
+                        <span className="font-semibold text-foreground shrink-0">{fmtCcy(roundCcy(payDepositPreview, payLockerCurrency), payLockerCurrency)}</span>
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex gap-2.5 ml-auto">
+                  <Button variant="outline" onClick={() => { setShowPayForm(false); setPayAmount(""); setPayRemark(""); }} className="rounded-xl h-10">Cancel</Button>
+                  <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save &amp; Allocate</AsyncButton>
+                </div>
+              </div>
+            }
+          >
+            <div className="space-y-3">
+              {/* Amount */}
+              <div className="relative">
+                <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  type="number" min="1" step="0.01" autoFocus
+                  value={payAmount} onChange={e => setPayAmount(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && recordPayment()}
+                  className="pl-9 rounded-xl h-10" placeholder="Amount received ($)" />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {/* Which bill this is for — blank holds it as credit */}
+                {openInvoicesForPay.length > 0 && (
+                  <Select value={payInvoiceId || "credit"} onValueChange={v => setPayInvoiceId(v === "credit" ? "" : v)}>
+                    <SelectTrigger className="h-10 rounded-xl">
+                      <FileText className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="credit">No invoice — hold as credit</SelectItem>
+                      {openInvoicesForPay.map(({ inv, bal }) => (
+                        <SelectItem key={inv.id} value={inv.id}>
+                          Invoice {inv.number} — {fmtMoney(bal)} pending
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+                {/* Method */}
+                <Select value={payMethod} onValueChange={setPayMethod}>
+                  <SelectTrigger className="h-10 rounded-xl">
+                    <CreditCard className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m =>
+                      <SelectItem key={m} value={m}>{m}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              {/* Remark */}
+              <Input
+                value={payRemark} onChange={e => setPayRemark(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && recordPayment()}
+                className="rounded-xl h-10" placeholder="Remark / ref (optional)" />
+
+              {db.lockers.filter(l => l.active !== false).length === 0 && (
+                <p className="text-xs text-amber-600">
+                  No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
+                </p>
+              )}
+              <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Deposited to locker *" /></SelectTrigger>
+                <SelectContent>
+                  {db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
+                <AddNewItem kind="locker" /></SelectContent>
+              </Select>
+
+              {payNeedsRate && (
+                <div className="p-3 rounded-xl bg-secondary space-y-2">
+                  <RateInput id="client-pay-rate" from="USD" to={payLockerCurrency} value={payExchangeRate}
+                    onChange={setPayExchangeRate} amount={Number(payAmount) || undefined} />
+                  <p className="text-xs text-muted-foreground">This locker holds {payLockerCurrency}, not USD — the rate converts what lands in it.</p>
+                </div>
+              )}
+            </div>
+          </ActionSheet>
+        );
+      })()}
     </div>
   );
 }

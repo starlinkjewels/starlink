@@ -86,17 +86,21 @@ const rowAll = (m: PermMatrix, mod: ModuleKey, turnOn: boolean): PermMatrix =>
  * from: plain = from the role, green + = added for this person, red − = taken
  * away. Without one it is a plain picker (temporary access).
  */
-export function PermGrid({ value, onChange, role, timed }: {
+export function PermGrid({ value, onChange, role, timed, scroll = false }: {
   value: PermMatrix;
   onChange: (m: PermMatrix) => void;
   role?: PermMatrix;
   /** Cells given by temporary access running now — marked with a clock. */
   timed?: PermMatrix;
+  /** Scrolls in its own box with the heading row held in view — for a long
+   *  grid in a dialog. Off: the grid is as tall as its rows (as before). */
+  scroll?: boolean;
 }) {
   return (
-    <div className="overflow-x-auto rounded-xl border border-border/60">
+    <div className={`overflow-x-auto rounded-xl border border-border/60 ${scroll ? "overflow-y-auto max-h-[min(22rem,55dvh)]" : ""}`}>
       <table className="w-full text-sm tbl-plain">
-        <thead className="bg-secondary/50">
+        {/* Held at the top it needs a solid colour, or the rows show through it. */}
+        <thead className={scroll ? "sticky top-0 z-10 bg-[color-mix(in_oklab,var(--color-secondary)_50%,var(--color-card))] shadow-[0_1px_0_var(--color-border)]" : "bg-secondary/50"}>
           <tr>
             <th className="text-left px-3 py-2 text-xs font-semibold text-muted-foreground">Section</th>
             {PERM_ACTIONS.map(a => <th key={a} className="px-1.5 py-2 text-xs font-semibold text-muted-foreground text-center">{ACTION_LABEL[a]}</th>)}
@@ -217,7 +221,11 @@ function TempList({ temp, onEnd }: { temp: TempAccess[]; onEnd: (id: string) => 
   );
 }
 
-function AddTemp({ onAdd, by }: { onAdd: (t: TempAccess) => void; by: { id: string; name: string } }) {
+function AddTemp({ onAdd, by, stacked = false }: {
+  onAdd: (t: TempAccess) => void; by: { id: string; name: string };
+  /** Under a section that is already headed "Temporary access": no second heading. */
+  stacked?: boolean;
+}) {
   const [open, setOpen] = useState(false);
   const [perms, setPerms] = useState<PermMatrix>({});
   const [reachAll, setReachAll] = useState(false);
@@ -244,8 +252,8 @@ function AddTemp({ onAdd, by }: { onAdd: (t: TempAccess) => void; by: { id: stri
   };
   return (
     <div className="rounded-xl border border-amber-500/40 bg-amber-500/5 p-3 space-y-3">
-      <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-4 w-4 text-amber-600" /> Temporary access</p>
-      <PermGrid value={perms} onChange={setPerms} />
+      {!stacked && <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-4 w-4 text-amber-600" /> Temporary access</p>}
+      <PermGrid value={perms} onChange={setPerms} scroll={stacked} />
       <label className="flex items-center gap-2 text-xs"><input type="checkbox" checked={reachAll} onChange={e => setReachAll(e.target.checked)} className="h-4 w-4 accent-primary" /> Also every order &amp; client for the time</label>
       <div className="space-y-1.5">
         <p className="text-xs text-muted-foreground">For how long</p>
@@ -285,9 +293,15 @@ export function accessTemplates(docs: AccessDoc[]): AccessTemplate[] {
   ];
 }
 
-export function AccessFields({ draft, onChange, docs, by }: {
+export function AccessFields({ draft, onChange, docs, by, layout = "side" }: {
   draft: AccessDraft; onChange: (d: AccessDraft) => void; docs: AccessDoc[]; by: { id: string; name: string };
+  /** "side" (Manage access): temporary access in a column beside the grid on
+   *  wide screens. "stacked" (Create employee): one under another, the grid full
+   *  width in its own scroll box and temporary access below it — a side column
+   *  in a narrower dialog squeezed its own grid until it was cut off. */
+  layout?: "side" | "stacked";
 }) {
+  const stacked = layout === "stacked";
   const templates = accessTemplates(docs);
   const timed = useMemo(() => {
     const now = Date.now();
@@ -307,8 +321,8 @@ export function AccessFields({ draft, onChange, docs, by }: {
     toast.success(`Template "${t.name}" deleted`);
   };
   return (
-    <div className="grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-x-6 gap-y-4 items-start">
-    <div className="space-y-4 min-w-0">
+    <div className={stacked ? "space-y-6" : "grid xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] gap-x-6 gap-y-4 items-start"}>
+    <div className={stacked ? "space-y-6 min-w-0" : "space-y-4 min-w-0"}>
       <div className="space-y-1.5">
         <Label className="text-xs">Fill in from a template</Label>
         <div className="flex flex-wrap gap-1.5">
@@ -345,17 +359,30 @@ export function AccessFields({ draft, onChange, docs, by }: {
       <div className="space-y-2">
         <p className="text-sm font-semibold text-brand-dark">What they may do</p>
         <p className="text-[11px] text-muted-foreground -mt-1">View lets them open a section and look. Add, Edit and Delete are the changes they may make there; Export, the downloads and prints. Nothing else is offered to them.</p>
-        <PermGrid value={draft.perms} onChange={p => onChange({ ...draft, perms: p })} timed={timed} />
+        <PermGrid value={draft.perms} onChange={p => onChange({ ...draft, perms: p })} timed={timed} scroll={stacked} />
         <p className="text-[11px] text-muted-foreground">Employees, Settings and Activity belong to admins only. The dashboard is open to everyone. A dash means the section has no such action. <span className="inline-flex items-center gap-1"><span className="h-3 w-3 rounded bg-amber-500/20 ring-1 ring-amber-500/40" /> temporary access running now</span></p>
       </div>
 
     </div>
+      {stacked ? (
+        // Below the grid, never beside it: a heading, and "Give temporary
+        // access" opens the form (its Cancel folds it away again).
+        <div className="space-y-3 min-w-0 border-t border-border/60 pt-5">
+          <div>
+            <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-4 w-4 text-amber-600" /> Temporary access <span className="text-[11px] font-normal text-muted-foreground">— optional</span></p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">Extra access for a while — covering for someone, a month-end, a project. It ends by itself and stays in the history.</p>
+          </div>
+          {draft.temp.length > 0 && <TempList temp={draft.temp} onEnd={id => onChange({ ...draft, temp: draft.temp.map(t => t.id === id ? { ...t, endedAt: new Date().toISOString(), endedByName: by.name } : t) })} />}
+          <AddTemp stacked by={by} onAdd={t => onChange({ ...draft, temp: [...draft.temp, t] })} />
+        </div>
+      ) : (
       <div className="space-y-2 min-w-0 xl:sticky xl:top-0 xl:rounded-2xl xl:border xl:border-border/60 xl:p-4">
         <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Clock className="h-4 w-4 text-amber-600" /> Temporary access</p>
         <p className="text-[11px] text-muted-foreground -mt-1">Extra access for a while — covering for someone, a month-end, a project. It ends by itself and stays in the history.</p>
         <TempList temp={draft.temp} onEnd={id => onChange({ ...draft, temp: draft.temp.map(t => t.id === id ? { ...t, endedAt: new Date().toISOString(), endedByName: by.name } : t) })} />
         <AddTemp by={by} onAdd={t => onChange({ ...draft, temp: [...draft.temp, t] })} />
       </div>
+      )}
     </div>
   );
 }

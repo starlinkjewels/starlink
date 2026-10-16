@@ -20,6 +20,7 @@ import {
   purchaseLabel, voidImpact, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
+import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -350,6 +351,8 @@ function SupplierHistoryPageBody() {
   const [payLockerId, setPayLockerId] = useState("");
   const [payTargetPurchase, setPayTargetPurchase] = useState<string>("__fifo");
   const [payNote, setPayNote] = useState("");
+  // Shown in the panel's footer only; the save looks the locker up afresh.
+  const payFromLocker = db.lockers.find(l => l.id === payLockerId);
 
   const recordPayment = async () => {
     const amt = Number(payAmount);
@@ -731,17 +734,17 @@ function SupplierHistoryPageBody() {
               { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
             ]} />
             {user?.role === "admin" && (
-              <Button onClick={() => { setShowPayForm(v => !v); setShowReceiveForm(false); }} variant="outline" className="rounded-xl gap-2">
+              <Button onClick={() => setShowPayForm(true)} variant="outline" className="rounded-xl gap-2">
                 <CreditCard className="h-4 w-4" /> Pay
               </Button>
             )}
             {user?.role === "admin" && (
-              <Button onClick={() => setShowPurchaseForm(v => !v)} className="btn-hero rounded-xl gap-2">
+              <Button onClick={() => setShowPurchaseForm(true)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Purchase
               </Button>
             )}
             <MoreMenu title="Supplier account" actions={[
-              { label: "Receive money", icon: ArrowDownCircle, hint: "A refund or money back from this supplier", onSelect: () => { setShowReceiveForm(v => !v); setShowPayForm(false); }, show: user?.role === "admin" },
+              { label: "Receive money", icon: ArrowDownCircle, hint: "A refund or money back from this supplier", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
               { label: "Export statement", icon: Download, hint: "Purchases, payments and receipts — PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
             ]} />
           </div>
@@ -756,203 +759,6 @@ function SupplierHistoryPageBody() {
             <p className={`font-semibold text-sm ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>{account.net > 0 ? fmtMoneyInr(account.net) : account.net < 0 ? fmtMoneyInr(-account.net) : "✓ Settled"}</p>
           </div>
         </div>
-
-        {showPurchaseForm && (
-          <div className="pt-2 border-t border-border/60 space-y-3">
-            <p className="text-sm font-medium text-brand-dark">Record Purchase</p>
-
-            <CompanyPicker value={billCompany} onChange={setBillCompany} label="Company — whose stock this is" hint="A line bought for a particular order goes to that order's company." />
-            <div>
-              <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
-              <Input value={billNo} onChange={e => setBillNo(e.target.value)}
-                className="rounded-xl h-10 mt-1" placeholder="The supplier's bill number — the whole bill, not each item" />
-            </div>
-
-            {purchaseLines.map((line, idx) => (
-              <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
-                {purchaseLines.length > 1 && (
-                  <button type="button" onClick={() => removePurchaseLine(idx)} className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                    <X className="h-3.5 w-3.5" />
-                  </button>
-                )}
-                <p className="text-xs font-medium text-muted-foreground">Item {idx + 1}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <Select value={line.material} onValueChange={v => updatePurchaseLine(idx, { material: v as PurchaseMaterial })}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
-                      {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                  <Select value={line.purpose} onValueChange={v => updatePurchaseLine(idx, { purpose: v as "order" | "stock" })}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="stock">For General Stock</SelectItem><SelectItem value="order">For a Specific Order</SelectItem></SelectContent>
-                  </Select>
-                </div>
-
-                {line.purpose === "order" && (
-                  <Input value={line.orderNumber} onChange={e => updatePurchaseLine(idx, { orderNumber: e.target.value })} className="rounded-xl h-10" placeholder="Order number, e.g. SLJ-2026-1020" />
-                )}
-
-                {isOtherMaterial(line.material) ? (
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <GradeInput material={line.material} value={line.otherGrade} onChange={v => updatePurchaseLine(idx, { otherGrade: v })} />
-                    <Input type="number" min={0} step="0.001" value={line.otherQty} onChange={e => updatePurchaseLine(idx, { otherQty: e.target.value })} className="rounded-xl h-10" placeholder={`Quantity (${materialUnit(db.settings, line.material)})`} />
-                    <Input type="number" min={0} value={line.otherRate} onChange={e => updatePurchaseLine(idx, { otherRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/${materialUnit(db.settings, line.material)} (${line.currency})`} />
-                  </div>
-                ) : line.material === "gold" ? (
-                  <div className="grid grid-cols-3 gap-2.5">
-                    <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
-                    <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
-                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                      <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                    </Select>
-                    <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
-                  </div>
-                ) : (
-                  <div className="space-y-2.5">
-                    <div className="grid grid-cols-2 gap-2.5">
-                      <Select value={line.diaKind} onValueChange={v => updatePurchaseLine(idx, { diaKind: v as "loose" | "certified" })}>
-                        <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="loose">Loose (by shape)</SelectItem>
-                          <SelectItem value="certified">Certified (own packet)</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <Select value={line.diaShape} onValueChange={v => updatePurchaseLine(idx, { diaShape: v })}>
-                        <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                        <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                      <div className="grid grid-cols-2 gap-2.5">
-                        <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
-                        <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
-                      </div>
-                      <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
-                    </div>
-                    {line.diaKind === "certified" && (
-                      <>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Report / Certificate #" />
-                          <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                          <Input value={line.diaColor} onChange={e => updatePurchaseLine(idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
-                          <Input value={line.diaClarity} onChange={e => updatePurchaseLine(idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
-                          <Input value={line.diaCut} onChange={e => updatePurchaseLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
-                          <Input value={line.diaFluor} onChange={e => updatePurchaseLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="FL (fluor.)" />
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                          <Input value={line.diaPolish} onChange={e => updatePurchaseLine(idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
-                          <Input value={line.diaSym} onChange={e => updatePurchaseLine(idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
-                          <Input value={line.diaMeasure} onChange={e => updatePurchaseLine(idx, { diaMeasure: e.target.value })} className="rounded-xl h-10" placeholder="Measurement (mm)" />
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one packet. Add another line for another stone.</p>
-                      </>
-                    )}
-                  </div>
-                )}
-
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <Select value={line.currency} onValueChange={v => updatePurchaseLine(idx, { currency: v as PurchaseCurrency })}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
-                  </Select>
-                  {line.currency === "USD" && (
-                    <>
-                      <Input type="number" min={0} value={line.totalUsd} onChange={e => updatePurchaseLine(idx, { totalUsd: e.target.value })} className="rounded-xl h-10" placeholder="Total ($)" />
-                      <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updatePurchaseLine(idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
-                    </>
-                  )}
-                </div>
-
-                <Input value={line.notes} onChange={e => updatePurchaseLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
-
-                <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(purchaseLineTotalInr(line))}</span></p>
-              </div>
-            ))}
-
-            <Button type="button" variant="outline" onClick={addPurchaseLine} className="rounded-xl gap-2 w-full">
-              <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
-            </Button>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
-              <div>
-                <Label className="text-xs">Round off ₹</Label>
-                <Input type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)}
-                  className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
-              </div>
-              {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
-                <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
-                  className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
-                  Round {fmtMoneyInr(linesTotalInr)} down to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
-                </button>
-              )}
-            </div>
-
-            <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-              <span className="text-sm text-muted-foreground">
-                Grand Total (INR)
-                {roundOffInr !== 0 && <span className="block text-xs">{fmtMoneyInr(linesTotalInr)} {roundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roundOffInr))} rounding</span>}
-              </span>
-              <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(grandTotalInr)}</span>
-            </div>
-
-            <div className="flex gap-2.5">
-              <AsyncButton onClick={recordPurchase} disabled={recordingPurchase} className="btn-hero rounded-xl h-10">{recordingPurchase ? "Saving…" : purchaseLines.length > 1 ? `Save ${purchaseLines.length} Purchases` : "Save Purchase"}</AsyncButton>
-              <Button variant="outline" onClick={() => { setShowPurchaseForm(false); resetPurchaseForm(); }} className="rounded-xl h-10">Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {showPayForm && (
-          <div className="pt-2 border-t border-border/60 space-y-2.5">
-            <p className="text-sm font-medium text-brand-dark">Record Payment</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-              <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount (₹)" />
-              <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-              </Select>
-              <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__fifo">Oldest pending first (unspecified)</SelectItem>
-                  <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
-                  {pendingPurchases.map(p => (
-                    <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
-            <div className="flex gap-2.5">
-              <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save Payment</AsyncButton>
-              <Button variant="outline" onClick={() => setShowPayForm(false)} className="rounded-xl h-10">Cancel</Button>
-            </div>
-          </div>
-        )}
-
-        {showReceiveForm && (
-          <div className="pt-2 border-t border-border/60 space-y-2.5">
-            <p className="text-sm font-medium text-brand-dark">Receive from {supplier.name}</p>
-            <p className="text-xs text-muted-foreground -mt-1.5">Money the supplier gave back (refund / return credit). It goes into a locker and reduces what you owe them.</p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <Input type="number" min={1} value={rcvAmount} onChange={e => setRcvAmount(e.target.value)} className="rounded-xl h-10" placeholder="Amount received (₹)" />
-              <Select value={rcvLockerId} onValueChange={addNew("locker", setRcvLockerId)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Into which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-              </Select>
-            </div>
-            <Input value={rcvNote} onChange={e => setRcvNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (e.g. refund for returned goods)" />
-            <div className="flex gap-2.5">
-              <AsyncButton onClick={recordReceipt} className="btn-hero rounded-xl h-10">Save Receipt</AsyncButton>
-              <Button variant="outline" onClick={() => setShowReceiveForm(false)} className="rounded-xl h-10">Cancel</Button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Opening balance (migration) — admin only */}
@@ -1051,6 +857,235 @@ function SupplierHistoryPageBody() {
         onSave={saveEditPurchase}
       />
 
+      {/* The three money actions slide in from the right, so the ledger and the
+          statement behind stay where they were. Closing a panel keeps what was
+          typed (a long bill isn't lost to a stray click); Cancel clears it,
+          exactly as the inline forms did. */}
+      <ActionSheet
+        open={showPurchaseForm}
+        onOpenChange={setShowPurchaseForm}
+        title="Record Purchase"
+        description={<>From {supplier.name} — one bill, with a line for each size or quality on it.</>}
+        icon={Truck}
+        size="lg"
+        footer={
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Grand Total (INR)</p>
+              <p className="font-display text-lg font-bold text-brand-dark leading-tight">{fmtMoneyInr(grandTotalInr)}</p>
+              {roundOffInr !== 0 && <p className="text-[11px] text-muted-foreground">{fmtMoneyInr(linesTotalInr)} {roundOffInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roundOffInr))} rounding</p>}
+            </div>
+            <div className="flex gap-2.5 ml-auto">
+              <Button variant="outline" onClick={() => { setShowPurchaseForm(false); resetPurchaseForm(); }} className="rounded-xl h-10">Cancel</Button>
+              <AsyncButton onClick={recordPurchase} disabled={recordingPurchase} className="btn-hero rounded-xl h-10">{recordingPurchase ? "Saving…" : purchaseLines.length > 1 ? `Save ${purchaseLines.length} Purchases` : "Save Purchase"}</AsyncButton>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <CompanyPicker value={billCompany} onChange={setBillCompany} label="Company — whose stock this is" hint="A line bought for a particular order goes to that order's company." />
+          <div>
+            <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
+            <Input value={billNo} onChange={e => setBillNo(e.target.value)} autoFocus
+              className="rounded-xl h-10 mt-1" placeholder="The supplier's bill number — the whole bill, not each item" />
+          </div>
+
+          {purchaseLines.map((line, idx) => (
+            <div key={idx} className="p-3 rounded-xl border border-border/60 space-y-2.5 relative">
+              {purchaseLines.length > 1 && (
+                <button type="button" onClick={() => removePurchaseLine(idx)} className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+              <p className="text-xs font-medium text-muted-foreground">Item {idx + 1}</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Select value={line.material} onValueChange={v => updatePurchaseLine(idx, { material: v as PurchaseMaterial })}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
+                    {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={line.purpose} onValueChange={v => updatePurchaseLine(idx, { purpose: v as "order" | "stock" })}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="stock">For General Stock</SelectItem><SelectItem value="order">For a Specific Order</SelectItem></SelectContent>
+                </Select>
+              </div>
+
+              {line.purpose === "order" && (
+                <Input value={line.orderNumber} onChange={e => updatePurchaseLine(idx, { orderNumber: e.target.value })} className="rounded-xl h-10" placeholder="Order number, e.g. SLJ-2026-1020" />
+              )}
+
+              {isOtherMaterial(line.material) ? (
+                <div className="grid grid-cols-3 gap-2.5">
+                  <GradeInput material={line.material} value={line.otherGrade} onChange={v => updatePurchaseLine(idx, { otherGrade: v })} />
+                  <Input type="number" min={0} step="0.001" value={line.otherQty} onChange={e => updatePurchaseLine(idx, { otherQty: e.target.value })} className="rounded-xl h-10" placeholder={`Quantity (${materialUnit(db.settings, line.material)})`} />
+                  <Input type="number" min={0} value={line.otherRate} onChange={e => updatePurchaseLine(idx, { otherRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/${materialUnit(db.settings, line.material)} (${line.currency})`} />
+                </div>
+              ) : line.material === "gold" ? (
+                <div className="grid grid-cols-3 gap-2.5">
+                  <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
+                  <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                </div>
+              ) : (
+                <div className="space-y-2.5">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <Select value={line.diaKind} onValueChange={v => updatePurchaseLine(idx, { diaKind: v as "loose" | "certified" })}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="loose">Loose (by shape)</SelectItem>
+                        <SelectItem value="certified">Certified (own packet)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={line.diaShape} onValueChange={v => updatePurchaseLine(idx, { diaShape: v })}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+                      <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  {/* Four across on a laptop, two by two on a phone — the old
+                      three-column row squeezed quality and pieces into one cell. */}
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
+                    <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                    <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
+                    <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
+                  </div>
+                  {line.diaKind === "certified" && (
+                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Report / Certificate #" />
+                        <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                        <Input value={line.diaColor} onChange={e => updatePurchaseLine(idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
+                        <Input value={line.diaClarity} onChange={e => updatePurchaseLine(idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
+                        <Input value={line.diaCut} onChange={e => updatePurchaseLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
+                        <Input value={line.diaFluor} onChange={e => updatePurchaseLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="FL (fluor.)" />
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        <Input value={line.diaPolish} onChange={e => updatePurchaseLine(idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
+                        <Input value={line.diaSym} onChange={e => updatePurchaseLine(idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
+                        <Input value={line.diaMeasure} onChange={e => updatePurchaseLine(idx, { diaMeasure: e.target.value })} className="rounded-xl h-10" placeholder="Measurement (mm)" />
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one packet. Add another line for another stone.</p>
+                    </>
+                  )}
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <Select value={line.currency} onValueChange={v => updatePurchaseLine(idx, { currency: v as PurchaseCurrency })}>
+                  <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
+                </Select>
+                {line.currency === "USD" && (
+                  <>
+                    <Input type="number" min={0} value={line.totalUsd} onChange={e => updatePurchaseLine(idx, { totalUsd: e.target.value })} className="rounded-xl h-10" placeholder="Total ($)" />
+                    <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updatePurchaseLine(idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
+                  </>
+                )}
+              </div>
+
+              <Input value={line.notes} onChange={e => updatePurchaseLine(idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
+
+              <p className="text-xs text-muted-foreground text-right">Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(purchaseLineTotalInr(line))}</span></p>
+            </div>
+          ))}
+
+          <Button type="button" variant="outline" onClick={addPurchaseLine} className="rounded-xl gap-2 w-full">
+            <Plus className="h-4 w-4" /> Add Another Item (different size/quality)
+          </Button>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
+            <div>
+              <Label className="text-xs">Round off ₹</Label>
+              <Input type="number" step="1" value={roundOff} onChange={e => setRoundOff(e.target.value)}
+                className="rounded-xl h-10 mt-1" placeholder="e.g. -3" />
+            </div>
+            {linesTotalInr > 0 && roundOffInr === 0 && linesTotalInr % 10 !== 0 && (
+              <button type="button" onClick={() => setRoundOff(String(-(linesTotalInr % 10)))}
+                className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
+                Round {fmtMoneyInr(linesTotalInr)} down to {fmtMoneyInr(linesTotalInr - (linesTotalInr % 10))}
+              </button>
+            )}
+          </div>
+        </div>
+      </ActionSheet>
+
+      <ActionSheet
+        open={showPayForm}
+        onOpenChange={setShowPayForm}
+        title="Record Payment"
+        description={<>To {supplier.name}{account.net > 0 ? <> — {fmtMoneyInr(account.net)} owed</> : null}. Against their oldest bills, one bill, or as an advance.</>}
+        icon={CreditCard}
+        footer={
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Paying</p>
+              <p className="font-display text-lg font-bold text-brand-dark leading-tight">{fmtMoneyInr(Number(payAmount) || 0)}</p>
+              {/* The locker's balance before the money leaves it — the save still
+                  asks before letting it go negative. */}
+              {payFromLocker && <p className="text-[11px] text-muted-foreground truncate">{payFromLocker.name} holds {fmtLockerAmount(lockerBalance(payFromLocker, db.lockerTransactions), payFromLocker.currency)}</p>}
+            </div>
+            <div className="flex gap-2.5 ml-auto">
+              <Button variant="outline" onClick={() => setShowPayForm(false)} className="rounded-xl h-10">Cancel</Button>
+              <AsyncButton onClick={recordPayment} className="btn-hero rounded-xl h-10">Save Payment</AsyncButton>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
+          <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+            <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+          </Select>
+          <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
+            <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__fifo">Oldest pending first (unspecified)</SelectItem>
+              <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
+              {pendingPurchases.map(p => (
+                <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+        </div>
+      </ActionSheet>
+
+      <ActionSheet
+        open={showReceiveForm}
+        onOpenChange={setShowReceiveForm}
+        title={`Receive from ${supplier.name}`}
+        description="Money the supplier gave back (refund / return credit). It goes into a locker and reduces what you owe them."
+        icon={ArrowDownCircle}
+        footer={
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Receiving</p>
+              <p className="font-display text-lg font-bold text-brand-dark leading-tight">{fmtMoneyInr(Number(rcvAmount) || 0)}</p>
+            </div>
+            <div className="flex gap-2.5 ml-auto">
+              <Button variant="outline" onClick={() => setShowReceiveForm(false)} className="rounded-xl h-10">Cancel</Button>
+              <AsyncButton onClick={recordReceipt} className="btn-hero rounded-xl h-10">Save Receipt</AsyncButton>
+            </div>
+          </div>
+        }
+      >
+        <div className="space-y-3">
+          <Input type="number" min={1} value={rcvAmount} onChange={e => setRcvAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount received (₹)" />
+          <Select value={rcvLockerId} onValueChange={addNew("locker", setRcvLockerId)}>
+            <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Into which locker?" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+          </Select>
+          <Input value={rcvNote} onChange={e => setRcvNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (e.g. refund for returned goods)" />
+        </div>
+      </ActionSheet>
     </div>
   );
 }

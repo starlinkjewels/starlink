@@ -19,7 +19,8 @@
  * Everything lives on the order (`returns`), the client, the gift card and the
  * Ready Stock item — no new collection, so no rules change.
  */
-import { moveReadyStock, officeOf } from "@/lib/offices";
+import { moveReadyStock, officeLabel, officeOf } from "@/lib/offices";
+import { logItem } from "@/lib/readyStockHistory";
 import { coField, companyOfOrder } from "./companies";
 import {
   type DB, type Order, type OrderReturn, type GiftCard, type Invoice, type ReadyStockItem,
@@ -197,7 +198,7 @@ export function applyReturn(d: DB, input: ReturnInput[], opt: ReturnOptions, met
       const card = (d.giftCards ?? []).find(c => c.id === l.cashbackCard!.id);
       if (card) card.takenBackUsd = r2((card.takenBackUsd || 0) + l.cashbackBackUsd);
     }
-    if (opt.received) receiveReturn(d, o.id, ret.id, { by: meta.by, at: meta.at, location: opt.location, costUsd: meta.costUsd?.[o.id] });
+    if (opt.received) receiveReturn(d, o.id, ret.id, { by: meta.by, byName: meta.byName, at: meta.at, location: opt.location, costUsd: meta.costUsd?.[o.id] });
   }
   return plan;
 }
@@ -207,7 +208,7 @@ export function applyReturn(d: DB, input: ReturnInput[], opt: ReturnOptions, met
  * of Ready Stock goes back onto that same item; anything else becomes a new
  * item carrying the order's photos, weights per piece and price.
  */
-export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by: string; at: string; location?: string; priceUsd?: number; costUsd?: number }): ReadyStockItem | undefined {
+export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by: string; byName?: string; at: string; location?: string; priceUsd?: number; costUsd?: number }): ReadyStockItem | undefined {
   const o = d.orders.find(x => x.id === orderId);
   const r = o?.returns?.find(x => x.id === returnId);
   if (!o || !r || r.status === "received") return undefined;
@@ -216,14 +217,21 @@ export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by:
   if (w.priceUsd != null) r.priceUsd = w.priceUsd;
   if (!d.readyStock) d.readyStock = [];
   const original = o.materialSourcing === "readyStock" && o.readyStockItemId ? d.readyStock.find(i => i.id === o.readyStockItemId) : undefined;
+  // The piece's history names the order and credit note — never the client (every client can read Ready Stock).
+  const who = { by: w.by, ...(w.byName ? { byName: w.byName } : {}) };
   if (original) {
     if (original.quantity === 0 && r.location) original.location = r.location;
+    const had = original.quantity;
     original.quantity += r.qty;
     r.readyStockId = original.id;
+    logItem(original, {
+      ...who, at: w.at, kind: "returned", ref: { orderId: o.id, returnId: r.id },
+      text: `${r.qty} came back — credit note ${r.creditNoteNo}, order ${o.orderNumber}${r.location ? ` · at the ${officeLabel(r.location)}` : ""} · ${had} → ${original.quantity}`,
+    });
     // Back at another office than the rest of that piece: counted where it is.
     if (r.location && officeOf(original) && officeOf(original) !== r.location) {
       const canCost = (d.adminRecords ?? []).some(x => x.kind === "stockCost" && x.itemId === original.id);
-      const there = moveReadyStock(d, original.id, r.qty, r.location, canCost);
+      const there = moveReadyStock(d, original.id, r.qty, r.location, canCost, who);
       if (typeof there !== "string") { r.readyStockId = there.id; return there; }
     }
     return original;
@@ -248,6 +256,10 @@ export function receiveReturn(d: DB, orderId: string, returnId: string, w: { by:
     ...coField(companyOfOrder(d, o)),
   };
   for (const k of Object.keys(item) as (keyof ReadyStockItem)[]) if (item[k] === undefined) delete item[k];
+  logItem(item, {
+    ...who, at: w.at, kind: "returned", ref: { orderId: o.id, returnId: r.id },
+    text: `Came back from order ${o.orderNumber} — credit note ${r.creditNoteNo}${r.reason ? ` (${r.reason})` : ""} · ${r.qty} piece${r.qty !== 1 ? "s" : ""} at the ${officeLabel(item.location)}`,
+  });
   d.readyStock.push(item);
   r.readyStockId = item.id;
   // What it cost per piece, so the Ready Stock card shows it (an admin's figure).
@@ -281,9 +293,11 @@ export function cancelReturn(d: DB, orderId: string, returnId: string, w: { by: 
     const item = d.readyStock.find(i => i.id === r.readyStockId)!;
     if (item.fromReturn?.returnId === r.id && item.quantity === r.qty) d.readyStock = d.readyStock.filter(i => i.id !== item.id);
     else {
+      const had = item.quantity;
       item.quantity -= r.qty;
       // A lot made only to hold the returned pieces at their office goes with them.
       if (item.quantity <= 0 && item.splitFrom && !d.orders.some(x => x.readyStockItemId === item.id)) d.readyStock = d.readyStock.filter(i => i.id !== item.id);
+      else logItem(item, { by: w.by, at: w.at, kind: "returnCancelled", ref: { orderId: o.id, returnId: r.id }, text: `Return ${r.creditNoteNo} cancelled (order ${o.orderNumber}) — ${r.qty} taken back out · ${had} → ${item.quantity}` });
     }
   }
   if ((r.toCreditUsd || 0) > 0) {

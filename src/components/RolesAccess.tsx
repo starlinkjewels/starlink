@@ -58,6 +58,24 @@ export function RolesPanel() {
 }
 
 /**
+ * Make someone an admin, or an employee again — asked first. Shared by the
+ * controls below and the Employees page's ⋯ menus, so both ask and write the
+ * same. Never offered for an owner.
+ */
+export async function setAdminRole(u: User, on: boolean): Promise<void> {
+  if (!(await confirmBox(on
+    ? `Make ${u.name} an admin?\n\nThey will be able to do everything — including managing employees, roles, settings and other admins. Owners stay owners.`
+    : `Remove ${u.name} as an admin?\n\nThey become an employee with Standard staff access, which you can then narrow with a role.`))) return;
+  updateDb(d => {
+    const x = d.users.find(y => y.id === u.id);
+    if (!x) return;
+    x.role = on ? "admin" : "employee";
+    if (on) delete x.roleId;
+  });
+  toast.success(on ? `${u.name} is now an admin` : `${u.name} is no longer an admin`);
+}
+
+/**
  * On an employee's card: which role they hold, and whether they are an admin.
  * An owner (one of the founding admin emails) has neither control — nothing in
  * the app can demote them, so the business can never be locked out.
@@ -76,18 +94,7 @@ export function EmployeeAccessControls({ u }: { u: User }) {
     );
   }
 
-  const setAdmin = async (on: boolean) => {
-    if (!(await confirmBox(on
-      ? `Make ${u.name} an admin?\n\nThey will be able to do everything — including managing employees, roles, settings and other admins. Owners stay owners.`
-      : `Remove ${u.name} as an admin?\n\nThey become an employee with Standard staff access, which you can then narrow with a role.`))) return;
-    updateDb(d => {
-      const x = d.users.find(y => y.id === u.id);
-      if (!x) return;
-      x.role = on ? "admin" : "employee";
-      if (on) delete x.roleId;
-    });
-    toast.success(on ? `${u.name} is now an admin` : `${u.name} is no longer an admin`);
-  };
+  const setAdmin = (on: boolean) => setAdminRole(u, on);
 
   if (u.role === "admin") {
     return (

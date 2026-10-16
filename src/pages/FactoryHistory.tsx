@@ -7,7 +7,7 @@ import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
 import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
 import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
 import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
@@ -19,13 +19,14 @@ import {
   groupPaymentsAsMade, diamondFlow,
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
+import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
-  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft,
+  Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -40,7 +41,23 @@ import { confirmBox } from "@/lib/confirm";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
-type IssuanceAction = "piece" | "charge" | "pay" | "return" | null;
+type IssuanceAction = "piece" | "charge" | "pay" | "return" | "close" | null;
+
+/** A panel's footer: what it comes to on the left, Cancel and the save on the right. */
+function PanelFooter({ label, value, sub, children }: { label?: string; value?: ReactNode; sub?: ReactNode; children: ReactNode }) {
+  return (
+    <div className="flex items-center justify-between gap-3 flex-wrap">
+      {label != null && (
+        <div className="min-w-0">
+          <p className="text-xs text-muted-foreground">{label}</p>
+          <p className="font-display text-lg font-bold text-brand-dark leading-tight break-words">{value}</p>
+          {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
+        </div>
+      )}
+      <div className="flex gap-2.5 ml-auto">{children}</div>
+    </div>
+  );
+}
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -260,7 +277,9 @@ function FactoryHistoryPageBody() {
   };
 
   // ── Per-issuance actions ──
-  const [activeIssuance, setActiveIssuance] = useState<{ id: string; action: IssuanceAction }>({ id: "", action: null });
+  // "open" is kept apart from which issuance and action, so the panel still
+  // shows its form while it slides away instead of emptying first.
+  const [activeIssuance, setActiveIssuance] = useState<{ id: string; action: IssuanceAction; open: boolean }>({ id: "", action: null, open: false });
   const [pieceQty, setPieceQty] = useState("");
   const [pieceCount, setPieceCount] = useState("1");
   const [chargeAmount, setChargeAmount] = useState("");
@@ -269,9 +288,12 @@ function FactoryHistoryPageBody() {
   const [returnQty, setReturnQty] = useState("");
   const [returnNote, setReturnNote] = useState("");
   const [returning, setReturning] = useState(false);
+  const closeAction = () => setActiveIssuance(a => ({ ...a, open: false }));
+  // Shown in the Pay panel's footer only; the save looks the locker up afresh.
+  const payFromLocker = db.lockers.find(l => l.id === payLockerId);
 
   const openAction = (issuanceId: string, action: IssuanceAction) => {
-    setActiveIssuance({ id: issuanceId, action });
+    setActiveIssuance({ id: issuanceId, action, open: true });
     setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayLockerId("");
     setReturnQty(""); setReturnNote("");
   };
@@ -302,7 +324,7 @@ function FactoryHistoryPageBody() {
       }
     });
     toast.success("Finished piece recorded");
-    setActiveIssuance({ id: "", action: null });
+    closeAction();
   };
 
   const setCharge = (issuance: MaterialIssuance) => {
@@ -320,7 +342,7 @@ function FactoryHistoryPageBody() {
       }
     });
     toast.success("Making charge set");
-    setActiveIssuance({ id: "", action: null });
+    closeAction();
   };
 
   const payCharge = async (issuance: MaterialIssuance) => {
@@ -344,7 +366,7 @@ function FactoryHistoryPageBody() {
       });
     });
     toast.success("Payment recorded");
-    setActiveIssuance({ id: "", action: null });
+    closeAction();
   };
 
   // Diamond replaced / gold under- or over-used — return the unused portion
@@ -373,7 +395,7 @@ function FactoryHistoryPageBody() {
           }
         });
         toast.success("Certified packets returned to stock");
-        setActiveIssuance({ id: "", action: null });
+        closeAction();
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Failed to return packets");
       } finally { setReturning(false); }
@@ -418,7 +440,7 @@ function FactoryHistoryPageBody() {
         }
       });
       toast.success(issuance.source === "stock" || issuance.source === "melt" ? `${qty}${unit} returned to stock` : `${qty}${unit} returned (was bought for this order — not added to stock)`);
-      setActiveIssuance({ id: "", action: null });
+      closeAction();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to return material");
     } finally { setReturning(false); }
@@ -426,8 +448,9 @@ function FactoryHistoryPageBody() {
 
   // Any unused material still sitting against an issuance being closed goes
   // back to Stock automatically — nothing is silently lost to "wastage" that
-  // was actually just never consumed.
-  const closeIssuance = async (issuance: MaterialIssuance) => {
+  // was actually just never consumed. Worked out in one place so the Close
+  // panel, which says what will happen, and the close itself cannot disagree.
+  const closePlan = (issuance: MaterialIssuance) => {
     // A bulk delivery (no orderId) never gets its own finishedPieces — orders
     // draw against it as separate factoryPool-sourced records instead, so
     // issuanceWastage(issuance) here is always the FULL original delivery,
@@ -438,16 +461,21 @@ function FactoryHistoryPageBody() {
     const leftover = !issuance.orderId
       ? factoryPoolBalance(db.materialIssuances, issuance.factoryId, issuance.material, issuance.purityOrQuality, companyOf(issuance))
       : Math.round(issuanceWastage(issuance) * 100) / 100;
+    // Only stock-sourced, non-certified leftovers return to shared Stock.
+    // Certified packets are discrete; purchase-sourced material was never
+    // in stock. A factoryPool draw has nothing to return to Stock either —
+    // shrinking its quantityIssued below (releasesToPool) gives the leftover
+    // straight back to the factory's own pool instead.
+    const returnsToStock = leftover > 0 && issuance.diamondKind !== "certified" && issuance.source === "stock";
+    const releasesToPool = leftover > 0 && issuance.source === "factoryPool";
+    return { leftover, returnsToStock, releasesToPool };
+  };
+
+  const closeIssuance = async (issuance: MaterialIssuance) => {
+    const { leftover, returnsToStock, releasesToPool } = closePlan(issuance);
     const unit = materialUnit(db.settings, issuance.material);
     const now = new Date().toISOString();
     try {
-      // Only stock-sourced, non-certified leftovers return to shared Stock.
-      // Certified packets are discrete; purchase-sourced material was never
-      // in stock. A factoryPool draw has nothing to return to Stock either —
-      // shrinking its quantityIssued below (releasesToPool) gives the leftover
-      // straight back to the factory's own pool instead.
-      const returnsToStock = leftover > 0 && issuance.diamondKind !== "certified" && issuance.source === "stock";
-      const releasesToPool = leftover > 0 && issuance.source === "factoryPool";
       if (returnsToStock) {
         await increaseStock({
           material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: leftover,
@@ -487,6 +515,7 @@ function FactoryHistoryPageBody() {
         : releasesToPool ? `Issuance closed — ${leftover}${unit} released back to the factory's pool`
         : "Issuance closed",
       );
+      closeAction();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to close issuance");
     }
@@ -893,7 +922,7 @@ function FactoryHistoryPageBody() {
                 { label: "Movement Sheet — Excel", sublabel: "Every issue and return line by line, if a figure needs checking", kind: "excel", run: exportCombinedCsv },
               ]} />
             {user?.role === "admin" && (
-              <Button onClick={() => setShowIssueForm(v => !v)} className="btn-hero rounded-xl gap-2">
+              <Button onClick={() => setShowIssueForm(true)} className="btn-hero rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Issue Material
               </Button>
             )}
@@ -973,94 +1002,6 @@ function FactoryHistoryPageBody() {
             )}
           </div>
         )}
-
-        {showIssueForm && (
-          <div className="pt-2 border-t border-border/60 space-y-2.5">
-            <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
-              {(["orderConsumption", "bulkDelivery"] as const).map(m => (
-                <button key={m} type="button" onClick={() => setIssueMode(m)}
-                  className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${issueMode === m ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"}`}>
-                  {m === "orderConsumption" ? "Issue Against an Order" : "Bulk Delivery to Pool"}
-                </button>
-              ))}
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {issueMode === "bulkDelivery"
-                ? "Hand this factory raw material not tied to any order yet — builds up its pool for later orders to draw from."
-                : "How much this factory used for one order, and their making charge — where it physically came from is figured out automatically."}
-            </p>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              {issueMode === "orderConsumption" && (
-                <Input value={issueOrderNumber} onChange={e => setIssueOrderNumber(e.target.value)} className="rounded-xl h-10" placeholder="Order number" />
-              )}
-              <Select value={issueMaterial} onValueChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }}>
-                <SelectTrigger className="h-10 rounded-xl" aria-label="Material"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
-                  {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {isOtherMaterial(issueMaterial) ? (
-              <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
-            ) : issueMaterial === "gold" ? (
-              <Select value={issuePurity} onValueChange={setIssuePurity}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-              </Select>
-            ) : (
-              <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-              </Select>
-            )}
-
-            <Input
-              type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
-              className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? (issueMode === "bulkDelivery" ? "Weight (g)" : "Weight used (g)") : issueMaterial === "diamond" ? (issueMode === "bulkDelivery" ? "Carat" : "Carat used") : `${issueMode === "bulkDelivery" ? "Quantity" : "Quantity used"} (${issueUnit})`}
-            />
-
-            {issueMode === "orderConsumption" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Input
-                  type="number" min={0} value={issueChargeAmount} onChange={e => setIssueChargeAmount(e.target.value)}
-                  className="rounded-xl h-10" placeholder="Making charge (₹, optional)"
-                />
-                <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
-              </div>
-            )}
-            {issueMode === "bulkDelivery" && (
-              <>
-                <CompanyPicker value={issueCompany} onChange={setIssueCompany} label="Company — whose stock it leaves, whose share of the pool it joins" />
-                <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
-              </>
-            )}
-            {issueMode === "orderConsumption" && multiCo && matchedOrder && (
-              <p className="text-[11px] text-muted-foreground">For {companyById(db.settings, workCompanyOf(db, matchedOrder)).name} — {matchedOrder.orderNumber}&rsquo;s company: its share of the pool, then its stock.</p>
-            )}
-
-            {issueMode === "orderConsumption" && issueMaterial === "gold" && matchedOrder && orderMaterialRequirements(matchedOrder).needsGold && (() => {
-              const balance = factoryPoolBalance(db.materialIssuances, id!, "gold", issuePurity, workCompanyOf(db, matchedOrder));
-              const estimate = estimatedPureGoldNeeded(matchedOrder);
-              if (estimate <= 0 || balance >= estimate) return null;
-              return (
-                <div className="flex items-start gap-2 p-2.5 rounded-xl bg-destructive/5 text-destructive text-xs">
-                  <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-                  <span>This factory's pool only has {balance}g of {issuePurity} — {matchedOrder.orderNumber} ({matchedOrder.productKarats || "?"}) is estimated to need ~{estimate}g of pure gold. The rest will come from company stock.</span>
-                </div>
-              );
-            })()}
-
-            <div className="flex gap-2.5">
-              <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10">
-                {issuing ? "Saving…" : issueMode === "bulkDelivery" ? "Record Delivery" : "Save Usage & Charge"}
-              </AsyncButton>
-              <Button variant="outline" onClick={() => { setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
-            </div>
-          </div>
-        )}
       </div>
       {movingPool && <FactoryPoolTransferDialog factoryId={id!} onClose={() => setMovingPool(false)} />}
       {/* ONE ledger for this factory: gold given and used, diamond given and
@@ -1084,7 +1025,6 @@ function FactoryHistoryPageBody() {
           const used = issuanceUsed(mi);
           const wastage = issuanceWastage(mi);
           const pending = issuancePending(mi);
-          const isActive = activeIssuance.id === mi.id;
           const unit = materialUnit(db.settings, mi.material);
 
           return (
@@ -1140,77 +1080,261 @@ function FactoryHistoryPageBody() {
                   <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "return")} className="rounded-lg gap-1.5"><Undo2 className="h-3.5 w-3.5" />Return</Button>
                 )}
                 {mi.status === "open" && (
-                  <AsyncButton size="sm" variant="outline" onClick={() => closeIssuance(mi)} className="rounded-lg">Close Issuance</AsyncButton>
+                  <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "close")} className="rounded-lg gap-1.5"><Archive className="h-3.5 w-3.5" />Close Issuance</Button>
                 )}
               </div>
-              )}
-
-              {isActive && activeIssuance.action === "piece" && (
-                <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <Input type="number" min={0} value={pieceQty} onChange={e => setPieceQty(e.target.value)} className="rounded-xl h-9" placeholder={`${materialName(db.settings, mi.material)} used (${unit})`} />
-                  <Input type="number" min={1} value={pieceCount} onChange={e => setPieceCount(e.target.value)} className="rounded-xl h-9" placeholder="Pieces count" />
-                  <div className="flex gap-2">
-                    <AsyncButton onClick={() => recordPiece(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>
-                    <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                  </div>
-                </div>
-              )}
-              {isActive && activeIssuance.action === "charge" && (
-                <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <Input type="number" min={0} value={chargeAmount} onChange={e => setChargeAmount(e.target.value)} className="rounded-xl h-9" placeholder="Making charge (₹)" />
-                  <div className="flex gap-2">
-                    <AsyncButton onClick={() => setCharge(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>
-                    <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                  </div>
-                </div>
-              )}
-              {isActive && activeIssuance.action === "pay" && (
-                <div className="mt-3 pt-3 border-t border-border/60 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                  <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} className="rounded-xl h-9" placeholder="Amount (₹)" />
-                  <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-                    <SelectTrigger className="h-9 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                    <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-                  </Select>
-                  <div className="flex gap-2">
-                    <AsyncButton onClick={() => payCharge(mi)} className="btn-hero rounded-xl h-9 flex-1">Save</AsyncButton>
-                    <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                  </div>
-                </div>
-              )}
-              {isActive && activeIssuance.action === "return" && (
-                <div className="mt-3 pt-3 border-t border-border/60 space-y-2.5">
-                  {mi.diamondKind === "certified" ? (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        Puts these {(mi.diamondPacketIds || []).length} certified packet{(mi.diamondPacketIds || []).length !== 1 ? "s" : ""} back into stock.
-                      </p>
-                      <div className="flex gap-2">
-                        <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9">{returning ? "Saving…" : "Return packets to stock"}</AsyncButton>
-                        <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-xs text-muted-foreground">
-                        Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {Math.round((mi.quantityIssued - used) * 100) / 100}{unit}
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} className="rounded-xl h-9" placeholder={`Return qty (${unit})`} />
-                        <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-9" placeholder="Reason (e.g. diamond replaced)" />
-                        <div className="flex gap-2">
-                          <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-9 flex-1">{returning ? "Saving…" : "Save"}</AsyncButton>
-                          <Button variant="outline" onClick={() => setActiveIssuance({ id: "", action: null })} className="rounded-xl h-9">Cancel</Button>
-                        </div>
-                      </div>
-                    </>
-                  )}
-                </div>
               )}
             </div>
           );
         })}
         {issuances.length === 0 && <div className="card-luxe p-12 text-center text-muted-foreground">No material issuances yet.</div>}
       </div>
+
+      {/* Issuing material is a panel, so the account and the ledger behind stay
+          where they were. Closing it keeps what was typed; Cancel clears it,
+          exactly as the inline form did. */}
+      <ActionSheet
+        open={showIssueForm}
+        onOpenChange={setShowIssueForm}
+        title="Issue Material"
+        description={<>To {factory.name} — what it used for one order, or a bulk delivery into its pool.</>}
+        icon={ArrowUpCircle}
+        size="lg"
+        footer={
+          <PanelFooter
+            label={issueMode === "bulkDelivery" ? "Delivering to the pool"
+              : matchedOrder ? `Used for ${matchedOrder.orderNumber}`
+              : issueOrderNumber.trim() ? "No order with that number yet" : "Used for an order"}
+            value={Number(issueQuantity) > 0
+              ? [`${Number(issueQuantity)}${issueUnit}`, issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? issueGrade.trim() : (issueQuality || "Round"), matWord(issueMaterial)].filter(Boolean).join(" ")
+              : "—"}
+            sub={issueMode === "orderConsumption" && Number(issueChargeAmount) > 0 ? `Making charge ${fmtMoneyInr(Number(issueChargeAmount))}` : undefined}
+          >
+            <Button variant="outline" onClick={() => { setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
+            <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10">
+              {issuing ? "Saving…" : issueMode === "bulkDelivery" ? "Record Delivery" : "Save Usage & Charge"}
+            </AsyncButton>
+          </PanelFooter>
+        }
+      >
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+            {(["orderConsumption", "bulkDelivery"] as const).map(m => (
+              <button key={m} type="button" onClick={() => setIssueMode(m)}
+                className={`px-3 py-2 rounded-lg text-xs font-medium transition-all ${issueMode === m ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"}`}>
+                {m === "orderConsumption" ? "Issue Against an Order" : "Bulk Delivery to Pool"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {issueMode === "bulkDelivery"
+              ? "Hand this factory raw material not tied to any order yet — builds up its pool for later orders to draw from."
+              : "How much this factory used for one order, and their making charge — where it physically came from is figured out automatically."}
+          </p>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {issueMode === "orderConsumption" && (
+              <Input value={issueOrderNumber} onChange={e => setIssueOrderNumber(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Order number" />
+            )}
+            <Select value={issueMaterial} onValueChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }}>
+              <SelectTrigger className="h-10 rounded-xl" aria-label="Material"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="gold">Gold</SelectItem><SelectItem value="diamond">Diamond</SelectItem>
+                {otherMaterials.map(m => <SelectItem key={m.id} value={m.id}>{m.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {isOtherMaterial(issueMaterial) ? (
+            <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
+          ) : issueMaterial === "gold" ? (
+            <Select value={issuePurity} onValueChange={setIssuePurity}>
+              <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+            </Select>
+          ) : (
+            <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
+              <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
+              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+            </Select>
+          )}
+
+          <Input
+            type="number" min={0} value={issueQuantity} onChange={e => setIssueQuantity(e.target.value)}
+            className="rounded-xl h-10" placeholder={issueMaterial === "gold" ? (issueMode === "bulkDelivery" ? "Weight (g)" : "Weight used (g)") : issueMaterial === "diamond" ? (issueMode === "bulkDelivery" ? "Carat" : "Carat used") : `${issueMode === "bulkDelivery" ? "Quantity" : "Quantity used"} (${issueUnit})`}
+          />
+
+          {issueMode === "orderConsumption" && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Input
+                type="number" min={0} value={issueChargeAmount} onChange={e => setIssueChargeAmount(e.target.value)}
+                className="rounded-xl h-10" placeholder="Making charge (₹, optional)"
+              />
+              <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+            </div>
+          )}
+          {issueMode === "bulkDelivery" && (
+            <>
+              <CompanyPicker value={issueCompany} onChange={setIssueCompany} label="Company — whose stock it leaves, whose share of the pool it joins" />
+              <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
+            </>
+          )}
+          {issueMode === "orderConsumption" && multiCo && matchedOrder && (
+            <p className="text-[11px] text-muted-foreground">For {companyById(db.settings, workCompanyOf(db, matchedOrder)).name} — {matchedOrder.orderNumber}&rsquo;s company: its share of the pool, then its stock.</p>
+          )}
+
+          {issueMode === "orderConsumption" && issueMaterial === "gold" && matchedOrder && orderMaterialRequirements(matchedOrder).needsGold && (() => {
+            const balance = factoryPoolBalance(db.materialIssuances, id!, "gold", issuePurity, workCompanyOf(db, matchedOrder));
+            const estimate = estimatedPureGoldNeeded(matchedOrder);
+            if (estimate <= 0 || balance >= estimate) return null;
+            return (
+              <div className="flex items-start gap-2 p-2.5 rounded-xl bg-destructive/5 text-destructive text-xs">
+                <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+                <span>This factory's pool only has {balance}g of {issuePurity} — {matchedOrder.orderNumber} ({matchedOrder.productKarats || "?"}) is estimated to need ~{estimate}g of pure gold. The rest will come from company stock.</span>
+              </div>
+            );
+          })()}
+        </div>
+      </ActionSheet>
+
+      {(() => {
+        // One panel for the actions on an issuance card — finished piece, charge,
+        // pay, return, close — titled for the job it belongs to. It reads the
+        // issuance afresh, so it always works on what is saved now.
+        const mi = db.materialIssuances.find(x => x.id === activeIssuance.id);
+        const action = activeIssuance.action;
+        if (!mi || !action) return null;
+        const order = db.orders.find(o => o.id === mi.orderId);
+        const unit = materialUnit(db.settings, mi.material);
+        const used = issuanceUsed(mi);
+        const pending = issuancePending(mi);
+        const remainder = Math.round((mi.quantityIssued - used) * 100) / 100;
+        const ref = mi.orderId ? (order?.orderNumber ?? "Unknown order")
+          : mi.source === "melt" ? `Melted ${db.orders.find(o => o.id === mi.meltOf)?.orderNumber ?? "piece"}`
+          : "Bulk delivery";
+        const summary = `${mi.quantityIssued}${unit} ${mi.purityOrQuality}${isOtherMaterial(mi.material) ? ` ${materialName(db.settings, mi.material)}` : ""} issued ${fmtDate(mi.issuedAt)} · ${used}${unit} used`;
+        const packets = (mi.diamondPacketIds || []).length;
+        const head = {
+          piece: { title: `Finished piece — ${ref}`, icon: CheckCircle2 },
+          charge: { title: `Set making charge — ${ref}`, icon: Coins },
+          pay: { title: `Pay making charge — ${ref}`, icon: CreditCard },
+          return: { title: `Return material — ${ref}`, icon: Undo2 },
+          close: { title: `Close issuance — ${ref}`, icon: Archive },
+        }[action];
+        const cancel = <Button variant="outline" onClick={closeAction} className="rounded-xl h-10">Cancel</Button>;
+
+        let footer: ReactNode;
+        let body: ReactNode;
+        if (action === "piece") {
+          footer = (
+            <PanelFooter label="Still unused" value={`${remainder}${unit}`}>
+              {cancel}
+              <AsyncButton onClick={() => recordPiece(mi)} className="btn-hero rounded-xl h-10">Save</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <Input type="number" min={0} value={pieceQty} onChange={e => setPieceQty(e.target.value)} autoFocus className="rounded-xl h-10" placeholder={`${materialName(db.settings, mi.material)} used (${unit})`} />
+              <Input type="number" min={1} value={pieceCount} onChange={e => setPieceCount(e.target.value)} className="rounded-xl h-10" placeholder="Pieces count" />
+            </div>
+          );
+        } else if (action === "charge") {
+          footer = (
+            <PanelFooter label="Making charge" value={fmtMoneyInr(Number(chargeAmount) || 0)}
+              sub={mi.makingCharges.amountInr > 0 ? `Replaces ${fmtMoneyInr(mi.makingCharges.amountInr)}` : undefined}>
+              {cancel}
+              <AsyncButton onClick={() => setCharge(mi)} className="btn-hero rounded-xl h-10">Save</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <div className="space-y-2">
+              <Input type="number" min={0} value={chargeAmount} onChange={e => setChargeAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Making charge (₹)" />
+              <p className="text-xs text-muted-foreground">The whole charge for this job — saving replaces any charge already set.</p>
+            </div>
+          );
+        } else if (action === "pay") {
+          footer = (
+            <PanelFooter label="Paying" value={fmtMoneyInr(Number(payAmount) || 0)}
+              sub={payFromLocker ? `${payFromLocker.name} holds ${fmtLockerAmount(lockerBalance(payFromLocker, db.lockerTransactions), payFromLocker.currency)}` : undefined}>
+              {cancel}
+              <AsyncButton onClick={() => payCharge(mi)} className="btn-hero rounded-xl h-10">Save</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-2">
+                <div className="p-2.5 rounded-xl bg-secondary text-center min-w-0"><p className="text-[11px] text-muted-foreground">Charge</p><p className="text-sm font-semibold break-words">{fmtMoneyInr(mi.makingCharges.amountInr)}</p></div>
+                <div className="p-2.5 rounded-xl bg-success/8 border border-success/20 text-center min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className="text-sm font-semibold text-success break-words">{fmtMoneyInr(issuancePaid(mi))}</p></div>
+                <div className="p-2.5 rounded-xl bg-destructive/5 border border-destructive/20 text-center min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className="text-sm font-semibold text-destructive break-words">{fmtMoneyInr(pending)}</p></div>
+              </div>
+              <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
+              <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
+                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+              </Select>
+            </div>
+          );
+        } else if (action === "return" && mi.diamondKind === "certified") {
+          footer = (
+            <PanelFooter label="Returning" value={`${packets} packet${packets !== 1 ? "s" : ""}`}>
+              {cancel}
+              <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-10">{returning ? "Saving…" : "Return packets to stock"}</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <p className="text-sm text-muted-foreground">
+              Puts these {packets} certified packet{packets !== 1 ? "s" : ""} back into stock.
+            </p>
+          );
+        } else if (action === "return") {
+          footer = (
+            <PanelFooter label="Returning" value={`${Number(returnQty) || 0}${unit}`}>
+              {cancel}
+              <AsyncButton onClick={() => returnMaterial(mi)} disabled={returning} className="btn-hero rounded-xl h-10">{returning ? "Saving…" : "Save"}</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <div className="space-y-3">
+              <p className="text-xs text-muted-foreground">
+                Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {remainder}{unit}
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} autoFocus className="rounded-xl h-10" placeholder={`Return qty (${unit})`} />
+                <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-10" placeholder="Reason (e.g. diamond replaced)" />
+              </div>
+            </div>
+          );
+        } else {
+          // Close: says what happens to what is left before anything moves.
+          const plan = closePlan(mi);
+          const certified = mi.diamondKind === "certified";
+          const lines = [
+            plan.returnsToStock ? `${plan.leftover}${unit} not used goes back to stock.` : "",
+            plan.releasesToPool ? `${plan.leftover}${unit} not used is released back to ${factory.name}'s pool.` : "",
+            certified && mi.diamondPacketIds ? `The ${packets} certified stone${packets !== 1 ? "s are" : " is"} marked as used in the finished piece.` : "",
+            !certified && !plan.returnsToStock && !plan.releasesToPool && plan.leftover > 0 ? `${plan.leftover}${unit} not used is kept on this issuance as wastage — nothing goes back to stock.` : "",
+            mi.orderId && plan.leftover < 0 ? `${Math.abs(plan.leftover)}${unit} more was used than issued — it shows as over-used.` : "",
+          ].filter(Boolean);
+          footer = (
+            <PanelFooter>
+              {cancel}
+              <AsyncButton onClick={() => closeIssuance(mi)} className="btn-hero rounded-xl h-10">Close Issuance</AsyncButton>
+            </PanelFooter>
+          );
+          body = (
+            <div className="p-3 rounded-xl bg-secondary space-y-1.5 text-sm">
+              {(lines.length ? lines : ["Everything issued is accounted for — nothing to return."]).map(l => <p key={l}>{l}</p>)}
+            </div>
+          );
+        }
+
+        return (
+          <ActionSheet open={activeIssuance.open} onOpenChange={o => { if (!o) closeAction(); }}
+            title={head.title} description={summary} icon={head.icon} footer={footer}>
+            {body}
+          </ActionSheet>
+        );
+      })()}
     </div>
   );
 }

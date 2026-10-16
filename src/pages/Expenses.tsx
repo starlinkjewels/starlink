@@ -1,21 +1,18 @@
 import { expensesInUsd } from "@/lib/orderCost";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { ActionSheet } from "@/components/ActionSheet";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
-import type { DB, Expense, ExpenseCategory } from "@/lib/db";
-import { ccy, ccySymbol, fmtCcyMix, sumByCcy, type CurrencyCode } from "@/lib/currency";
-import { inrOn } from "@/lib/orderCost";
+import type { Expense, ExpenseCategory } from "@/lib/db";
+import { ccy, ccySymbol, fmtCcyMix, sumByCcy } from "@/lib/currency";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, Minus, CalendarDays, Trash2,
+  TrendingUp, TrendingDown, CalendarDays, Trash2,
 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 
@@ -214,6 +211,14 @@ export function ExpensesPage() {
     toast.success("Expense deleted");
   }
 
+  // Closing the form (Cancel, ✕, Esc or a click outside) clears what was typed —
+  // the account stays chosen, as it always did.
+  const closeAdd = () => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); };
+  // The footer's preview of the amount; the save still reads the field itself.
+  const previewAmount = Number(form.amount) > 0 ? Number(form.amount) : 0;
+  // The admin's open tab — for the count and total beside the switch.
+  const tabList = tab === "mine" ? myExpenses : passbookExpenses;
+
   // Reusable date-range control (from → to) used on both the My Expenses and
   // Passbook filter bars.
   const dateFilter = (
@@ -232,9 +237,9 @@ export function ExpensesPage() {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* ── Page header ── */}
+      {/* ── Page header: what the page is, and its one action ── */}
       <div className="flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h1 className="font-display text-2xl md:text-3xl text-brand-dark leading-tight">Expenses</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             {isAdmin
@@ -253,48 +258,49 @@ export function ExpensesPage() {
         )}
       </div>
 
-      {/* ── Employee profit summary ── */}
+      {/* ── Employee profit summary — two across on a phone (net profit under them), three on a laptop ── */}
       {isEmployee && (
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <motion.div
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}
-            className="card-luxe p-4"
+            className="card-luxe p-4 min-w-0"
           >
             <div className="flex items-center gap-2 mb-2">
-              <div className="h-7 w-7 rounded-lg bg-emerald-500/10 grid place-items-center">
+              <div className="h-7 w-7 rounded-lg bg-emerald-500/10 grid place-items-center shrink-0">
                 <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
               </div>
               <p className="text-xs text-muted-foreground font-medium">Revenue</p>
             </div>
-            <p className="text-xl font-bold text-brand-dark">{fmtMoney(myRevenue)}</p>
+            <p className="text-lg sm:text-xl font-bold text-brand-dark tabular-nums break-words">{fmtMoney(myRevenue)}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">From delivered orders</p>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-            className="card-luxe p-4"
+            className="card-luxe p-4 min-w-0"
           >
             <div className="flex items-center gap-2 mb-2">
-              <div className="h-7 w-7 rounded-lg bg-destructive/10 grid place-items-center">
+              <div className="h-7 w-7 rounded-lg bg-destructive/10 grid place-items-center shrink-0">
                 <TrendingDown className="h-3.5 w-3.5 text-destructive" />
               </div>
               <p className="text-xs text-muted-foreground font-medium">Expenses</p>
             </div>
-            <p className="text-xl font-bold text-destructive">{fmtCcyMix(myTotals)}</p>
+            {/* Can read "₹84,910 + A$1,200" — allowed to wrap rather than push the page sideways. */}
+            <p className="text-lg sm:text-xl font-bold text-destructive tabular-nums break-words">{fmtCcyMix(myTotals)}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">{myExpenses.length} entries</p>
           </motion.div>
 
           <motion.div
             initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="card-luxe p-4"
+            className="card-luxe p-4 min-w-0 col-span-2 sm:col-span-1"
           >
             <div className="flex items-center gap-2 mb-2">
-              <div className={`h-7 w-7 rounded-lg grid place-items-center ${(myNet?.net ?? 0) >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
+              <div className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${(myNet?.net ?? 0) >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
                 <Wallet className={`h-3.5 w-3.5 ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`} />
               </div>
               <p className="text-xs text-muted-foreground font-medium">Net Profit</p>
             </div>
-            <p className={`text-xl font-bold ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`}>
+            <p className={`text-lg sm:text-xl font-bold tabular-nums break-words ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`}>
               {myNet?.converted ? "≈ " : ""}{fmtMoney(myNet?.net ?? 0)}
             </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
@@ -309,22 +315,31 @@ export function ExpensesPage() {
         </div>
       )}
 
-      {/* ── Admin tab switcher ── */}
+      {/* ── Admin tab switcher, with what the list below adds up to ── */}
       {isAdmin && (
-        <div className="flex gap-1 p-1 bg-secondary rounded-xl w-fit">
-          {(["mine", "passbook"] as const).map(t => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
-                tab === t
-                  ? "bg-white shadow-soft text-brand-dark"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t === "mine" ? "My Expenses" : "All Passbook"}
-            </button>
-          ))}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          {/* Full width on a phone (two equal halves), its own size on a laptop. */}
+          <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl sm:inline-grid sm:w-fit">
+            {(["mine", "passbook"] as const).map(t => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                aria-pressed={tab === t}
+                className={`px-5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
+                  tab === t
+                    ? "bg-white shadow-soft text-brand-dark"
+                    : "text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                {t === "mine" ? "My Expenses" : "All Passbook"}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            {tabList.length} {tabList.length === 1 ? "entry" : "entries"}
+            {" · "}
+            <span className="font-semibold text-destructive tabular-nums">{fmtCcyMix(totalsOf(tabList))}</span>
+          </p>
         </div>
       )}
 
@@ -479,147 +494,159 @@ export function ExpensesPage() {
         </div>
       )}
 
-      {/* ── Add Expense ── */}
-      <Dialog open={showAdd} onOpenChange={v => { if (!v) { setShowAdd(false); setError(""); setForm(EMPTY_FORM); } }}>
-        <DialogContent className="max-w-3xl rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-xl text-brand-dark">Add Expense</DialogTitle>
-            <DialogDescription className="text-xs">Recording as {user?.name}</DialogDescription>
-          </DialogHeader>
-              <div className="dlg-cols">
-                {error && (
-                  <div className="flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-xl px-3 py-2.5">
-                    <X className="h-4 w-4 shrink-0" />
-                    {error}
-                  </div>
-                )}
-
-                {/* 1. Pay from account — first; it sets the currency */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">Pay from Account <span className="text-destructive">*</span></label>
-                  {activeLockers.length === 0 && (
-                    <p className="text-xs text-amber-600 mb-1.5">
-                      No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
-                    </p>
-                  )}
-                  <Select value={expLockerId} onValueChange={setExpLockerId}>
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose account" /></SelectTrigger>
-                    <SelectContent>
-                      {activeLockers.map(l => (
-                        <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* 2. Amount — in the selected account's currency */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">Amount ({expCurrency}) <span className="text-destructive">*</span></label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">{expSymbol}</span>
-                    <input
-                      type="number"
-                      value={form.amount}
-                      onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
-                      placeholder={expLockerId ? "0.00" : "Choose an account first"}
-                      disabled={!expLockerId}
-                      min="0"
-                      step="0.01"
-                      // Room for a longer symbol — A$, HK$, AED — not only ₹ and $.
-                      className={`w-full ${expSymbol.length > 1 ? "pl-12" : "pl-7"} pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60`}
-                    />
-                  </div>
-                </div>
-
-                {/* 3. Category */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
-                  <Select
-                    value={form.category}
-                    onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory, paidToEmployeeId: v === "Salary" ? f.paidToEmployeeId : "" }))}
-                  >
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                    <SelectContent>{(configuredCategories.includes("Salary") ? configuredCategories : ["Salary", ...configuredCategories]).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                  </Select>
-                </div>
-
-                {/* 4. Salary → team member — shown & COMPULSORY only for a Salary expense */}
-                {form.category === "Salary" && (
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-1.5 block">Paid to Team Member <span className="text-destructive">*</span></label>
-                    <Select value={form.paidToEmployeeId || ""} onValueChange={v => setForm(f => ({ ...f, paidToEmployeeId: v }))}>
-                      <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose team member" /></SelectTrigger>
-                      <SelectContent>
-                        {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
-                  </div>
-                )}
-
-                {/* Title */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Title <span className="text-destructive">*</span>
-                  </label>
-                  <input
-                    value={form.title}
-                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
-                    placeholder="e.g. August salary, Office rent, Travel…"
-                    className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
-                  />
-                </div>
-
-                {/* 6. Related Client (optional) */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Related Client <span className="text-muted-foreground font-normal">(optional)</span>
-                  </label>
-                  <Select value={form.clientId || "__none"} onValueChange={v => setForm(f => ({ ...f, clientId: v === "__none" ? "" : v }))}>
-                    <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__none">No client</SelectItem>
-                      {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Note */}
-                <div>
-                  <label className="text-sm font-medium text-foreground mb-1.5 block">
-                    Note <span className="text-muted-foreground font-normal">(optional)</span>
-                  </label>
-                  <textarea
-                    value={form.note}
-                    onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
-                    placeholder="Any additional details…"
-                    rows={2}
-                    className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition resize-none"
-                  />
-                </div>
-
-                {/* Category preview pill */}
-                <div className="flex items-center gap-2">
-                  <span className={`text-xs font-medium px-2.5 py-1 rounded-full ${CATEGORY_STYLE[form.category] ?? FALLBACK_CATEGORY_STYLE}`}>
-                    {form.category}
-                  </span>
-                  <span className="text-xs text-muted-foreground">will be tagged as this category</span>
-                </div>
-
+      {/* ── Add Expense — a panel from the right, so the list behind stays where it was ── */}
+      <ActionSheet
+        open={showAdd}
+        onOpenChange={v => { if (!v) closeAdd(); }}
+        title="Add Expense"
+        description={`Recording as ${user?.name ?? ""}`}
+        icon={Receipt}
+        size="md"
+        footer={
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            {/* What will be recorded — in the paying account's own currency. */}
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Expense</p>
+              <p className="font-display text-2xl font-bold text-destructive tabular-nums leading-tight truncate">
+                {expLocker ? fmtExpenseAmount(previewAmount, expCurrency) : "—"}
+              </p>
+              <div className="flex items-center gap-1.5 mt-0.5 min-w-0">
+                <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full shrink-0 ${CATEGORY_STYLE[form.category] ?? FALLBACK_CATEGORY_STYLE}`}>
+                  {form.category}
+                </span>
+                <span className="text-[11px] text-muted-foreground truncate">
+                  {expLocker ? `from ${expLocker.name}` : "Choose the account it is paid from"}
+                </span>
               </div>
-          <DialogFooter>
-            <button onClick={() => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); }}
-              className="h-10 px-4 rounded-xl border border-border bg-card text-sm font-medium hover:bg-secondary">Cancel</button>
-            <button
-              onClick={handleAdd}
-              disabled={saving}
-              className="btn-hero h-10 px-5 rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+            </div>
+            <div className="flex gap-2 sm:shrink-0">
+              <button onClick={closeAdd}
+                className="flex-1 sm:flex-none h-10 px-4 rounded-xl border border-border bg-card text-sm font-medium hover:bg-secondary">Cancel</button>
+              <button
+                onClick={handleAdd}
+                disabled={saving}
+                className="btn-hero flex-1 sm:flex-none h-10 px-5 rounded-xl text-sm font-semibold disabled:opacity-60 disabled:cursor-not-allowed"
+              >
+                {saving ? "Saving…" : "Record Expense"}
+              </button>
+            </div>
+          </div>
+        }
+      >
+        {/* One column on a phone; two on a laptop for the short pairs (amount + category). */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-4">
+          {error && (
+            <div className="sm:col-span-2 flex items-center gap-2 bg-destructive/10 text-destructive text-sm rounded-xl px-3 py-2.5">
+              <X className="h-4 w-4 shrink-0" />
+              {error}
+            </div>
+          )}
+
+          {/* 1. Pay from account — first; it sets the currency */}
+          <div className="sm:col-span-2">
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Pay from Account <span className="text-destructive">*</span></label>
+            {activeLockers.length === 0 && (
+              <p className="text-xs text-amber-600 mb-1.5">
+                No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
+              </p>
+            )}
+            <Select value={expLockerId} onValueChange={setExpLockerId}>
+              <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose account" /></SelectTrigger>
+              <SelectContent>
+                {activeLockers.map(l => (
+                  <SelectItem key={l.id} value={l.id}>{l.name} ({l.currency || "INR"})</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* 2. Amount — in the selected account's currency */}
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Amount ({expCurrency}) <span className="text-destructive">*</span></label>
+            <div className="relative">
+              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm font-medium">{expSymbol}</span>
+              <input
+                type="number"
+                value={form.amount}
+                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                placeholder={expLockerId ? "0.00" : "Choose an account first"}
+                disabled={!expLockerId}
+                min="0"
+                step="0.01"
+                // Room for a longer symbol — A$, HK$, AED — not only ₹ and $.
+                className={`w-full ${expSymbol.length > 1 ? "pl-12" : "pl-7"} pr-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition disabled:opacity-60`}
+              />
+            </div>
+          </div>
+
+          {/* 3. Category */}
+          <div>
+            <label className="text-sm font-medium text-foreground mb-1.5 block">Category</label>
+            <Select
+              value={form.category}
+              onValueChange={v => setForm(f => ({ ...f, category: v as ExpenseCategory, paidToEmployeeId: v === "Salary" ? f.paidToEmployeeId : "" }))}
             >
-              {saving ? "Saving…" : "Record Expense"}
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+              <SelectContent>{(configuredCategories.includes("Salary") ? configuredCategories : ["Salary", ...configuredCategories]).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+
+          {/* 4. Salary → team member — shown & COMPULSORY only for a Salary expense */}
+          {form.category === "Salary" && (
+            <div className="sm:col-span-2">
+              <label className="text-sm font-medium text-foreground mb-1.5 block">Paid to Team Member <span className="text-destructive">*</span></label>
+              <Select value={form.paidToEmployeeId || ""} onValueChange={v => setForm(f => ({ ...f, paidToEmployeeId: v }))}>
+                <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue placeholder="Choose team member" /></SelectTrigger>
+                <SelectContent>
+                  {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
+            </div>
+          )}
+
+          {/* Title */}
+          <div className="sm:col-span-2">
+            <label className="text-sm font-medium text-foreground mb-1.5 block">
+              Title <span className="text-destructive">*</span>
+            </label>
+            <input
+              value={form.title}
+              onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+              placeholder="e.g. August salary, Office rent, Travel…"
+              className="w-full px-3 h-10 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition"
+            />
+          </div>
+
+          {/* 6. Related Client (optional) */}
+          <div className="sm:col-span-2">
+            <label className="text-sm font-medium text-foreground mb-1.5 block">
+              Related Client <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <Select value={form.clientId || "__none"} onValueChange={v => setForm(f => ({ ...f, clientId: v === "__none" ? "" : v }))}>
+              <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">No client</SelectItem>
+                {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Note */}
+          <div className="sm:col-span-2">
+            <label className="text-sm font-medium text-foreground mb-1.5 block">
+              Note <span className="text-muted-foreground font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={form.note}
+              onChange={e => setForm(f => ({ ...f, note: e.target.value }))}
+              placeholder="Any additional details…"
+              rows={3}
+              className="w-full px-3 py-2.5 rounded-xl border border-border bg-secondary/40 text-sm outline-none focus:border-primary focus:ring-2 focus:ring-primary/15 transition resize-none"
+            />
+          </div>
+        </div>
+      </ActionSheet>
     </div>
   );
 }

@@ -3,6 +3,7 @@
 // they change it. A piece keeps the office as text in `location`, so an office
 // taken off the list still shows for the pieces that are there.
 import { READY_STOCK_LOCATIONS, stockCostOf, writeStockCost, uid, type DB, type ReadyStockItem, type Settings } from "@/lib/db";
+import { logItem, whoNow, type Who } from "@/lib/readyStockHistory";
 
 /** The offices to choose from, in the admin's order. */
 export function readyStockOffices(settings?: Pick<Settings, "readyStockOffices"> | null): string[] {
@@ -47,15 +48,23 @@ export function officeRank(settings: Settings | undefined, office: string): numb
 /** The family a lot belongs to — pieces of one item split across offices. */
 const rootOf = (i: ReadyStockItem) => i.splitFrom ?? i.id;
 
+/** The same piece's other lots — split off to (or from) other offices. */
+export function otherLots(items: ReadyStockItem[], item: ReadyStockItem): ReadyStockItem[] {
+  return items.filter(x => x.id !== item.id && rootOf(x) === rootOf(item));
+}
+
+const pcs = (n: number) => `${n} piece${n !== 1 ? "s" : ""}`;
+
 /**
  * Send `qty` pieces of an item to another office. Call inside updateDb.
  *  - all of them: the item itself moves;
  *  - some: they join the same piece already waiting there (split off earlier),
  *    or become their own item there — a copy of this one, its cost included
  *    when `canCost` (only an admin can read and write a piece's cost).
+ * Each lot it touches gets a history line; `who` defaults to whoever is signed in.
  * Returns the item the pieces are now on, or a reason it can't be done.
  */
-export function moveReadyStock(d: DB, itemId: string, qty: number, to: string, canCost: boolean): ReadyStockItem | string {
+export function moveReadyStock(d: DB, itemId: string, qty: number, to: string, canCost: boolean, who?: Who): ReadyStockItem | string {
   const it = (d.readyStock ?? []).find(i => i.id === itemId);
   if (!it) return "That piece is not in Ready Stock any more.";
   const dest = to.trim();
@@ -65,14 +74,31 @@ export function moveReadyStock(d: DB, itemId: string, qty: number, to: string, c
   if (!(n > 0)) return "Enter how many pieces.";
   if (it.quantity <= 0) return "None of this piece is in stock to move.";
   if (n > it.quantity) return `Only ${it.quantity} of this piece ${it.quantity === 1 ? "is" : "are"} in stock.`;
-  if (n === it.quantity) { it.location = dest; return it; }
+  const w = { ...(who ?? whoNow(d)), at: new Date().toISOString() };
+  // "the India office"; a piece that never had one comes from "no office".
+  const from = officeOf(it) ? `the ${officeLabel(officeOf(it))}` : "no office", there = officeLabel(dest);
+  if (n === it.quantity) {
+    it.location = dest;
+    logItem(it, { ...w, kind: "moved", text: `Moved from ${from} to the ${there} — ${pcs(n)}` });
+    return it;
+  }
   const sibling = d.readyStock.find(x => x.id !== it.id && rootOf(x) === rootOf(it) && officeOf(x) === dest);
+  const had = it.quantity;
   it.quantity -= n;
-  if (sibling) { sibling.quantity += n; return sibling; }
+  if (sibling) {
+    sibling.quantity += n;
+    logItem(it, { ...w, kind: "moved", text: `${n} of ${had} sent to the ${there}, joining the lot there · ${had} → ${it.quantity} here`, ref: { itemId: sibling.id } });
+    logItem(sibling, { ...w, kind: "moved", text: `${pcs(n)} came from ${from} · ${sibling.quantity - n} → ${sibling.quantity} here`, ref: { itemId: it.id } });
+    return sibling;
+  }
   const copy: ReadyStockItem = { ...it, id: uid("rs_"), quantity: n, location: dest, splitFrom: rootOf(it) };
   // A client's return stays on the item it came back as; the copy is just stock.
   delete copy.fromReturn;
   delete copy.cost;
+  // The new lot's own story starts here — the lot it came from keeps the past.
+  delete copy.history;
+  logItem(copy, { ...w, kind: "split", text: `${pcs(n)} split off from the lot at ${from}`, ref: { itemId: it.id } });
+  logItem(it, { ...w, kind: "moved", text: `${n} of ${had} sent to the ${there} as their own lot · ${had} → ${it.quantity} here`, ref: { itemId: copy.id } });
   d.readyStock.unshift(copy);
   if (canCost) {
     const c = stockCostOf(d, it);
