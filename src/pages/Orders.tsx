@@ -190,7 +190,7 @@ export function OrdersPage() {
             </div>
             <div className="min-w-0">
               <p className="font-semibold text-brand-dark leading-snug whitespace-nowrap">{o.orderNumber}</p>
-              <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[16rem]">
+              <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[13rem]">
                 {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
               </p>
               {(o.melted || jobFinished(o) || !!o.returns?.length) && (
@@ -211,7 +211,7 @@ export function OrdersPage() {
       cell: o => {
         const pct = progressOf(o), active = !["Delivered", "Rejected"].includes(o.status);
         return (
-          <div className="min-w-[8rem]">
+          <div className="min-w-[7rem]">
             <div className="flex items-center gap-2">
               <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${pct}%` }} /></div>
               <span className="text-[11px] tabular-nums text-muted-foreground w-8 text-right">{pct}%</span>
@@ -227,7 +227,7 @@ export function OrdersPage() {
         if (!pw.gross && !pw.net && !pw.diamondCt) return <span className="text-muted-foreground/50">—</span>;
         return (
           <span className="whitespace-nowrap text-xs tabular-nums">
-            {pw.gross ? `G ${pw.gross}g` : ""}{pw.net ? ` · N ${pw.net}g` : ""}{pw.diamondCt ? ` · ${pw.diamondCt}ct` : ""}
+            {[pw.gross ? `G ${pw.gross}g` : "", pw.net ? `N ${pw.net}g` : "", pw.diamondCt ? `${pw.diamondCt}ct` : ""].filter(Boolean).join(" · ")}
             {pw.problem && isStaff && <span title={pw.problem} className="ml-1 text-destructive font-semibold">⚠</span>}
           </span>
         );
@@ -242,7 +242,7 @@ export function OrdersPage() {
           return g || d ? <span className="whitespace-nowrap text-xs tabular-nums">{g ? `${g.toLocaleString()} g gold` : ""}{g && d ? " · " : ""}{d ? `${d.toLocaleString()} ct` : ""}</span> : <span className="text-muted-foreground/50">—</span>;
         } },
     ] : []),
-    { key: "courier", header: "Courier", sortValue: o => o.courierName ?? null,
+    { key: "courier", header: "Courier", hidden: true, sortValue: o => o.courierName ?? null,
       cell: o => o.courierName ? (
         <div className="flex items-center gap-2 whitespace-nowrap">
           <span className="text-xs"><span className="font-medium capitalize">{o.courierName}</span>{o.trackingNumber && <span className="font-mono text-muted-foreground"> {o.trackingNumber}</span>}</span>
