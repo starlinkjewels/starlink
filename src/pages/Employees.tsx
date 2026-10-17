@@ -17,13 +17,14 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
-  Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn, Rows3, LayoutGrid, Power, ShieldCheck, ShieldOff, Crown, Building2, ArrowRight,
+  Plus, Trash2, Search, ListTodo, Eye, Users, KeyRound, LogIn, Rows3, LayoutGrid, Power, ShieldCheck, ShieldOff, Crown, Building2, ArrowRight, Pencil,
 } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { confirmBox } from "@/lib/confirm";
+import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
+import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
 
 const PAGE_SIZE = 12;
 
@@ -88,11 +89,10 @@ export function EmployeesPage() {
     catch (e) { toast.error(authErrorMessage(e)); }
   };
 
-  const del = async (id: string) => {
-    if (!(await confirmBox("Remove this employee's access? Their login will stop working."))) return;
-    updateDb(d => { d.users = d.users.filter(u => u.id !== id); });
-    toast.success("Access removed");
-  };
+  // Asks with what it changes; refused (and the menu item greyed, saying why)
+  // for an owner, an admin, or anyone the books still point at.
+  const del = (u: User) => confirmDeleteEmployee(db, u);
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   /** Count pending tasks for an employee */
   const pendingCount = (userId: string) =>
@@ -106,14 +106,18 @@ export function EmployeesPage() {
    * Everything that can be done to one person — the same in a card's ⋯ and a
    * row's ⋯, with the conditions the old card buttons had. Owner/Admin: no
    * deactivate / reset / delete (avoid locking yourself out); an owner cannot
-   * be demoted. Access and admin are for someone who signs in.
+   * be demoted. Access and admin are for someone who signs in. Deactivate and
+   * Delete stay in the menu greyed, saying why, rather than vanishing.
    */
   const actionsFor = (u: User, withView: boolean): MoreAction[] => {
     const pending = pendingCount(u.id);
     const owner = isAdminEmail(u.email);
     const signsIn = u.role === "employee" && !!u.authUid && !owner;
+    const delBlock = employeeDeleteBlock(db, u);
+    const offBlock = owner ? "An owner can't be deactivated" : u.role === "admin" ? "Remove admin first" : undefined;
     return [
       { label: "View", icon: Eye, onSelect: () => navigate(`/employees/${u.id}`), show: withView },
+      { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingId(u.id) },
       { label: "Tasks", icon: ListTodo, hint: pending > 0 ? `${pending} pending` : undefined, onSelect: () => setTasksPanelUser(u.id) },
       { label: "Manage access", icon: ShieldCheck, hint: rolesLive ? "What they may see and do" : "Switches on once the security update is deployed",
         disabled: !rolesLive, onSelect: () => setManaging(u), show: signsIn },
@@ -121,9 +125,9 @@ export function EmployeesPage() {
       { label: "Companies they sell for", icon: Building2, hint: u.companyIds?.length ? `${u.companyIds.length} ticked` : "Every company", onSelect: () => setCompaniesFor(u.id), show: multiCo && u.role === "employee" },
       { label: "Give login", icon: LogIn, hint: "Give them an email and password to sign in", onSelect: () => setLoginFor(u), show: u.role !== "admin" && !u.authUid },
       { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(u), show: u.role !== "admin" && !!u.authUid && !!u.email },
-      { label: u.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(u), show: u.role !== "admin" },
+      { label: u.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(u), disabled: !!offBlock, hint: offBlock },
       { label: "Remove admin", icon: ShieldOff, hint: "They become an employee with Standard staff access", danger: true, onSelect: () => setAdminRole(u, false), show: rolesLive && u.role === "admin" && !owner },
-      { label: "Delete", icon: Trash2, hint: "Removes their access — their login stops working", danger: true, onSelect: () => del(u.id), show: u.role !== "admin" },
+      { label: "Delete", icon: Trash2, hint: delBlock ?? "Removes them and their login — asks first", danger: true, onSelect: () => del(u), disabled: !!delBlock },
     ];
   };
 
@@ -334,6 +338,7 @@ export function EmployeesPage() {
       {loginFor && <GiveLoginDialog u={loginFor} onClose={() => setLoginFor(null)} />}
       {managing && <ManageAccessDialog u={managing} onClose={() => setManaging(null)} />}
       {companiesUser && <CompaniesDialog u={companiesUser} onClose={() => setCompaniesFor(null)} />}
+      <EmployeeEditDialog userId={editingId} onClose={() => setEditingId(null)} />
 
       {/* Tasks panel (admin assigning tasks to an employee) */}
       <TasksPanel

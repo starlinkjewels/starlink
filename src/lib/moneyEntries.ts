@@ -9,8 +9,9 @@
 //
 // Client receipts are deliberately NOT here — they allocate across a client's
 // orders and have their own engine (src/lib/receipts.ts).
-import { loadDb, updateDb, uid, type DB, type Expense, type LockerTransaction } from "./db";
+import { loadDb, updateDb, uid, collectionsLoaded, ensureCollections, fmtDate, dayOf, type DB, type Expense, type LockerTransaction } from "./db";
 import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./currency";
+import type { LazyCol } from "./pageData";
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
@@ -23,6 +24,27 @@ const RECORDED_IN: Record<string, string> = {
   materialIssuance: "Factory Payments",
   expense: "Expenses",
   clientPayment: "Payments Received",
+  diamondSale: "Buy & Assign",
+};
+
+/** The tab each kind of party entry is corrected in. */
+const TAB: Record<Exclude<EntryKind, "locker">, string> = {
+  supplier: "Supplier Payments",
+  factory: "Factory Payments",
+  expense: "Expenses",
+};
+
+/**
+ * The on-demand records listEntries() reads for each kind. A page must have
+ * them before it lists — read before they arrive, a supplier's payment would
+ * look like nobody's, and its account row would be offered for editing on its
+ * own. See src/hooks/useLoaded.ts.
+ */
+export const ENTRY_COLS: Record<EntryKind, LazyCol[]> = {
+  supplier: ["lockerTransactions", "purchases", "supplierReceipts", "supplierPayments"],
+  factory: ["lockerTransactions", "materialIssuances", "factoryPayments"],
+  expense: ["lockerTransactions"],
+  locker: ["lockerTransactions", "purchases", "supplierReceipts", "supplierPayments", "materialIssuances", "factoryPayments", "diamondSales"],
 };
 
 export interface MoneyEntry {
@@ -40,6 +62,23 @@ export interface MoneyEntry {
   locked?: string;
   /** The tab that DOES own this row, when another one does. */
   lockedWhere?: string;
+  /** What the menu says for a locked row, when "Edit in …" is not what is
+   *  done there — a diamond sale is cancelled, not edited. */
+  lockedLabel?: string;
+  /** The supplier or factory, for a link to their page. */
+  partyId?: string;
+  /** The account movement(s) this entry was matched to when it was listed —
+   *  corrected and cancelled together with it. Empty: none was found. */
+  txnIds?: string[];
+  /** What those movements add up to, when it is not `amount` — the bills and
+   *  the account disagree, and both sides are shown before anything changes. */
+  txnAmount?: number;
+  /** Paid from an account, but no movement for it was found there. Corrected
+   *  here it changes the party's books only; the account is left as it is. */
+  noTxn?: boolean;
+  /** An account row whose entry is gone (or no longer matches it): why it is
+   *  corrected here, on its own, rather than from the tab that made it. */
+  orphan?: string;
   /** Voucher number, for a cash entry that has one. */
   voucherNo?: string;
   /** True for a locker-to-locker transfer: editing it moves both legs. */
@@ -61,16 +100,17 @@ export interface MoneyEntry {
  * account, for the same party are that one payment; the split stays inside the
  * bills, where the allocation belongs, and is named in Against.
  */
-function groupLegs<T>(
-  legs: { key: string; at: string; lockerId?: string; note?: string; amount: number; id: string; label?: string; party: string }[],
-): { ids: string[]; labels: string[]; at: string; lockerId?: string; note?: string; amount: number; party: string }[] {
-  const byKey = new Map<string, { ids: string[]; labels: string[]; at: string; lockerId?: string; note?: string; amount: number; party: string }>();
+type Leg = { key: string; at: string; lockerId?: string; note?: string; amount: number; id: string; label?: string; party: string; partyId: string };
+type LegGroup = { ids: string[]; labels: string[]; at: string; lockerId?: string; note?: string; amount: number; party: string; partyId: string };
+
+function groupLegs(legs: Leg[]): LegGroup[] {
+  const byKey = new Map<string, LegGroup>();
   for (const l of legs) {
     const g = byKey.get(l.key);
     if (!g) {
       byKey.set(l.key, {
         ids: [l.id], labels: l.label ? [l.label] : [], at: l.at,
-        lockerId: l.lockerId, note: l.note, amount: l.amount, party: l.party,
+        lockerId: l.lockerId, note: l.note, amount: l.amount, party: l.party, partyId: l.partyId,
       });
     } else {
       g.ids.push(l.id);
@@ -85,35 +125,154 @@ function groupLegs<T>(
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
-/** The account movement that belongs to one entry. Newer rows carry `paymentId`;
- *  older ones are matched on account + amount + the second they were written. */
+/** The same moment moved to another day (as the person reads days — dayOf,
+ *  their own clock, not UTC: slicing the stored timestamp gave the day before
+ *  for anything entered in the small hours in India), time of day kept.
+ *  Unchanged when the day is — so a row matched to its payment by the moment
+ *  never drifts. */
+export function moveToDay(iso: string, day: string): string {
+  if (!day || day === dayOf(iso)) return iso;
+  const [y, m, dd] = day.split("-").map(Number);
+  const d = new Date(iso);
+  if (isNaN(+d)) return new Date(y, (m || 1) - 1, dd || 1).toISOString();
+  d.setFullYear(y, (m || 1) - 1, dd || 1);
+  return d.toISOString();
+}
+
+/** Written in the same save: a payment and its account movement share the moment. */
+const SAME_SAVE_MS = 1500;
+const near = (a: string, b: string, ms = SAME_SAVE_MS) => Math.abs(+new Date(a) - +new Date(b)) < ms;
+
+/** The account movement that belongs to one entry. Newer rows carry `paymentId`
+ *  (an expense's, its `refId`); older ones are matched on account + amount +
+ *  the second they were written. Used for an entry that was not listed. */
 function pairedTxn(db: DB, entryId: string, at: string, lockerId?: string, amount?: number) {
   const txns = db.lockerTransactions ?? [];
   return txns.find(t => t.paymentId === entryId)
+    ?? txns.find(t => t.refType === "expense" && t.refId === entryId)
     ?? txns.find(t =>
       !t.paymentId && t.lockerId === lockerId && Math.abs(t.amountInr - (amount ?? 0)) < 0.01
-      && Math.abs(+new Date(t.createdAt) - +new Date(at)) < 1500);
+      && near(t.createdAt, at));
 }
 
-export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
+/** The account rows, looked up three ways, built once per listing. */
+interface TxnIndex {
+  byPayment: Map<string, LockerTransaction[]>;
+  byExpense: Map<string, LockerTransaction[]>;
+  byLocker: Map<string, LockerTransaction[]>;
+}
+function indexTxns(db: DB): TxnIndex {
+  const idx: TxnIndex = { byPayment: new Map(), byExpense: new Map(), byLocker: new Map() };
+  const add = (m: Map<string, LockerTransaction[]>, k: string, t: LockerTransaction) => {
+    const l = m.get(k);
+    if (l) l.push(t); else m.set(k, [t]);
+  };
+  for (const t of db.lockerTransactions ?? []) {
+    if (t.paymentId) add(idx.byPayment, t.paymentId, t);
+    if (t.refType === "expense" && t.refId) add(idx.byExpense, t.refId, t);
+    add(idx.byLocker, t.lockerId, t);
+  }
+  return idx;
+}
+
+/** The kinds of account row each party's money is written as, so a match
+ *  never borrows a row that belongs to another kind of entry. */
+function rowTypesOf(e: MoneyEntry): (string | undefined)[] {
+  if (e.kind === "supplier") return e.direction === "in" ? ["supplierReceipt", "manual", undefined] : ["purchase"];
+  if (e.kind === "factory") return ["materialIssuance"];
+  return ["expense"];
+}
+
+/**
+ * Find each party entry's movement(s) in its account, and record what was
+ * found on the entry itself (txnIds / txnAmount / noTxn), so correcting or
+ * cancelling it moves exactly those rows and nothing else.
+ *
+ * First the sure matches: rows tagged with the entry's id, then — older rows —
+ * the same account, amount and second. Then, for a supplier's or factory's
+ * payment that still has none, the row of the right kind written in the same
+ * save from the same account, even when the amounts no longer agree (a bill
+ * part changed or removed elsewhere). That last step is what used to be
+ * missing: the payment said "correct it from the account ledger", the account
+ * ledger said "recorded in Supplier Payments", and nobody could touch either.
+ * Now the payment owns its row — the amounts shown side by side — and stays
+ * correctable; an account row that no payment claims is corrected on its own.
+ * `claimed` collects every row matched, for the account ledger to read.
+ */
+function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>) {
+  const found = new Map<MoneyEntry, LockerTransaction[]>();
+  const take = (e: MoneyEntry, ts: LockerTransaction[]) => { found.set(e, ts); for (const t of ts) claimed.add(t.id); };
+
+  // 1 · Tagged with the payment's (or the expense's) own id.
+  for (const e of entries) {
+    const ids = e.legIds ?? [e.id];
+    const tagged = [
+      ...ids.flatMap(id => idx.byPayment.get(id) ?? []),
+      ...(e.kind === "expense" ? idx.byExpense.get(e.id) ?? [] : []),
+    ].filter((t, i, a) => a.indexOf(t) === i && !claimed.has(t.id));
+    if (tagged.length) take(e, tagged);
+  }
+  // 2 · Older rows: the same account, amount and second.
+  for (const e of entries) {
+    if (!e.lockerId || found.has(e)) continue;
+    // Never a transfer leg, a client's receipt or a sale's money — those are
+    // other people's rows, whatever their amount.
+    // A row typed for another kind of entry (a purchase's, an expense's) is
+    // never borrowed either; an untyped or hand-typed one may be, as before.
+    const types = rowTypesOf(e);
+    const same = (idx.byLocker.get(e.lockerId) ?? []).filter(t =>
+      !t.paymentId && !claimed.has(t.id) && !t.pairedLockerId
+      && (types.includes(t.refType) || !t.refType || t.refType === "manual")
+      && Math.abs(t.amountInr - e.amount) < 0.01 && near(t.createdAt, e.date));
+    const t = same.find(x => types.includes(x.refType)) ?? same[0];
+    if (t) take(e, [t]);
+  }
+  // 3 · A supplier's or factory's payment whose bills no longer add up to its
+  //     movement: the movement of its kind from the same save. Never a
+  //     hand-typed row on timing alone, and never a guess between two.
+  for (const e of entries) {
+    if (!e.lockerId || found.has(e) || e.kind === "expense") continue;
+    const types = rowTypesOf(e).filter(x => x && x !== "manual");
+    let cands = (idx.byLocker.get(e.lockerId) ?? []).filter(t =>
+      !t.paymentId && !claimed.has(t.id) && types.includes(t.refType) && near(t.createdAt, e.date));
+    if (cands.length > 1) {
+      const named = cands.filter(t => !!e.party && (t.category ?? "").includes(e.party));
+      if (named.length) cands = named;
+    }
+    const sum = r2(cands.reduce((s, t) => s + t.amountInr, 0));
+    const pick = cands.length === 1 || (cands.length > 1 && Math.abs(sum - e.amount) < 0.01) ? cands : [];
+    if (pick.length) take(e, pick);
+  }
+
+  for (const e of entries) {
+    const ts = found.get(e) ?? [];
+    e.txnIds = ts.map(t => t.id);
+    if (!ts.length) { if (e.lockerId) e.noTxn = true; continue; }
+    const sum = r2(ts.reduce((s, t) => s + t.amountInr, 0));
+    if (Math.abs(sum - e.amount) >= 0.01) e.txnAmount = sum;
+  }
+}
+
+/** Every entry of one party kind, as recorded — before any account matching. */
+function partyEntries(db: DB, kind: Exclude<EntryKind, "locker">): MoneyEntry[] {
   const out: MoneyEntry[] = [];
 
   if (kind === "supplier") {
-    const legs = [];
+    const legs: Leg[] = [];
     for (const p of db.purchases ?? []) {
       const supplier = db.suppliers.find(s => s.id === p.supplierId);
       for (const pay of p.payments ?? []) {
         legs.push({
           key: `${p.supplierId}|${pay.lockerId ?? ""}|${pay.createdAt}`,
           id: pay.id, at: pay.createdAt, lockerId: pay.lockerId, note: pay.note,
-          amount: pay.amountInr, party: supplier?.name ?? "Supplier",
+          amount: pay.amountInr, party: supplier?.name ?? "Supplier", partyId: p.supplierId,
           label: p.invoiceNumber || `Purchase ${p.id.slice(-6)}`,
         });
       }
     }
     for (const g of groupLegs(legs)) {
       out.push({
-        id: g.ids[0], kind, date: g.at, party: g.party,
+        id: g.ids[0], kind, date: g.at, party: g.party, partyId: g.partyId,
         against: g.labels.length > 1 ? `Invoices ${g.labels.join(", ")}` : `Invoice ${g.labels[0] ?? ""}`.trim(),
         amount: g.amount, currency: "INR",
         lockerId: g.lockerId, note: g.note, direction: "out",
@@ -125,7 +284,7 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
       const supplier = db.suppliers.find(s => s.id === r.supplierId);
       out.push({
         id: r.id, kind, date: r.createdAt,
-        party: supplier?.name ?? "Supplier", against: "Refund / return",
+        party: supplier?.name ?? "Supplier", partyId: r.supplierId, against: "Refund / return",
         amount: r.amountInr, currency: "INR",
         lockerId: r.lockerId, note: r.note, direction: "in",
       });
@@ -135,7 +294,7 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
       const supplier = db.suppliers.find(s => s.id === a.supplierId);
       out.push({
         id: a.id, kind, date: a.createdAt,
-        party: supplier?.name ?? "Supplier", against: "Advance / loan",
+        party: supplier?.name ?? "Supplier", partyId: a.supplierId, against: "Advance / loan",
         amount: a.amountInr, currency: "INR",
         lockerId: a.lockerId, note: a.note, direction: "out",
       });
@@ -148,12 +307,12 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
       const factory = db.factories.find(f => f.id === a.factoryId);
       out.push({
         id: a.id, kind, date: a.createdAt,
-        party: factory?.name ?? "Factory", against: "Advance / loan",
+        party: factory?.name ?? "Factory", partyId: a.factoryId, against: "Advance / loan",
         amount: a.amountInr, currency: "INR",
         lockerId: a.lockerId, note: a.note, direction: "out",
       });
     }
-    const legs = [];
+    const legs: Leg[] = [];
     for (const mi of db.materialIssuances ?? []) {
       const factory = db.factories.find(f => f.id === mi.factoryId);
       const order = db.orders.find(o => o.id === mi.orderId);
@@ -161,14 +320,14 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
         legs.push({
           key: `${mi.factoryId}|${pay.lockerId ?? ""}|${pay.createdAt}`,
           id: pay.id, at: pay.createdAt, lockerId: pay.lockerId, note: pay.note,
-          amount: pay.amountInr, party: factory?.name ?? "Factory",
+          amount: pay.amountInr, party: factory?.name ?? "Factory", partyId: mi.factoryId,
           label: order?.orderNumber,
         });
       }
     }
     for (const g of groupLegs(legs)) {
       out.push({
-        id: g.ids[0], kind, date: g.at, party: g.party,
+        id: g.ids[0], kind, date: g.at, party: g.party, partyId: g.partyId,
         against: g.labels.length ? `Order${g.labels.length > 1 ? "s" : ""} ${g.labels.join(", ")}` : "Making charges",
         amount: g.amount, currency: "INR",
         lockerId: g.lockerId, note: g.note, direction: "out",
@@ -190,56 +349,96 @@ export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
       });
     }
   }
+  return out;
+}
 
-  if (kind === "locker") {
-    // Money received from a supplier only started tagging its account movement
-    // recently. Older ones were written as plain manual entries, so this finds
-    // them the same way pairedTxn does — otherwise they stay editable here,
-    // and editing here would change the account without changing the supplier.
-    const receiptTxnIds = new Set<string>();
-    for (const r of db.supplierReceipts ?? []) {
-      const t = pairedTxn(db, r.id, r.createdAt, r.lockerId, r.amountInr);
-      if (t) receiptTxnIds.add(t.id);
-    }
-    for (const t of db.lockerTransactions ?? []) {
-      // An entry created BY another record (a supplier payment, an expense) is
-      // corrected where it was recorded — editing the movement alone would leave
-      // the bill it paid untouched. A transfer is different: both legs are ours,
-      // so it is edited here and both move together.
-      const isLegacyReceipt = receiptTxnIds.has(t.id);
-      const fromElsewhere = isLegacyReceipt
-        || (t.refType && t.refType !== "manual" && t.refType !== "transfer");
-      const where = isLegacyReceipt ? RECORDED_IN.supplierReceipt : (t.refType ? RECORDED_IN[t.refType] : undefined);
-      out.push({
-        id: t.id, kind, date: t.createdAt,
-        party: db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account",
-        against: t.category ?? t.type,
-        amount: t.amountInr, currency: ccy(t.currency),
-        lockerId: t.lockerId, note: t.note,
-        direction: t.type === "income" || t.type === "transfer_in" ? "in" : "out",
-        voucherNo: t.voucherNo,
-        transfer: !!t.pairedLockerId,
-        locked: fromElsewhere
-          ? `This is the account side of an entry recorded in ${where ?? "another tab"}. Correcting it there moves both; correcting it here would leave the two disagreeing.`
-          : undefined,
-        lockedWhere: fromElsewhere ? where : undefined,
-      });
-    }
+/** Why an account row whose entry is gone is corrected here, by what made it. */
+const ORPHAN_OF: Record<string, string> = {
+  purchase: "No supplier payment matches this movement any more",
+  supplierReceipt: "No money received from a supplier matches this movement any more",
+  materialIssuance: "No factory payment matches this movement any more",
+  expense: "Its expense is no longer on file",
+  diamondSale: "Its diamond sale is no longer on file",
+};
+
+/**
+ * The account ledger. A row made BY another record (a supplier payment, an
+ * expense, a diamond sale, a client's receipt) is corrected where it was
+ * recorded — editing the movement alone would leave the bill it paid
+ * untouched. A transfer is different: both legs are ours, so it is edited here
+ * and both move together. And a row whose record is gone belongs to nobody
+ * else any more, so it is corrected here — on its own, and saying so.
+ */
+function lockerEntries(db: DB): MoneyEntry[] {
+  const idx = indexTxns(db);
+  // Which tab owns each row: the same matching the party ledgers use, so a
+  // row is editable on exactly one side.
+  const owner = new Map<string, string>();
+  for (const k of ["supplier", "factory", "expense"] as const) {
+    const claimed = new Set<string>();
+    pairEntries(partyEntries(db, k), idx, claimed);
+    for (const id of claimed) if (!owner.has(id)) owner.set(id, TAB[k]);
   }
 
-  // A payment made "oldest bill first" can be split across several bills while
-  // the account shows ONE movement for the lot. There is no way to correct one
-  // of those halves without either leaving the account wrong or removing a
-  // movement that belongs to the others, so those rows are read-only and say so.
-  for (const e of out) {
-    // A locker row IS the movement, so it never has a separate one to find.
-    if (e.kind === "locker" || e.locked || !e.lockerId) continue;
-    if (!pairedTxn(db, e.id, e.date, e.lockerId, e.amount)) {
-      e.locked = "Paid across several bills in one go — correct it from the account ledger";
-    }
+  // The money a diamond sale brought in. New rows say so (refType
+  // "diamondSale", refId = the sale); older ones were written as plain manual
+  // income and are found the way cancelling the sale finds them — the account,
+  // the amount and the moment (src/lib/diamondSaleVoid.ts).
+  const sales = db.diamondSales ?? [];
+  const saleIds = new Set(sales.map(s => s.id));
+  const saleRows = new Set<string>();
+  const taggedSales = new Set<string>();
+  for (const t of db.lockerTransactions ?? []) {
+    if (t.refType === "diamondSale" && t.refId && saleIds.has(t.refId)) { saleRows.add(t.id); taggedSales.add(t.refId); }
+  }
+  for (const s of sales) {
+    if (!s.lockerId || taggedSales.has(s.id)) continue;
+    const money = s.totalUsd ?? s.totalInr;
+    const t = (idx.byLocker.get(s.lockerId) ?? []).find(x =>
+      x.type === "income" && !saleRows.has(x.id) && !owner.has(x.id) && (!x.refType || x.refType === "manual")
+      && Math.abs(x.amountInr - money) < 0.01 && near(x.createdAt, s.createdAt, 2000));
+    if (t) saleRows.add(t.id);
   }
 
+  const out: MoneyEntry[] = [];
+  for (const t of db.lockerTransactions ?? []) {
+    const ref: string | undefined = t.refType;
+    const where = owner.get(t.id);
+    let locked: string | undefined, lockedWhere: string | undefined, lockedLabel: string | undefined, orphan: string | undefined;
+    if (saleRows.has(t.id)) {
+      lockedWhere = RECORDED_IN.diamondSale;
+      lockedLabel = "Cancel the sale in Buy & Assign";
+      locked = "This is the money from a diamond sale. Cancelling the sale in Buy & Assign puts the stone back in stock and takes this out of the account together; changing it here would leave the two disagreeing.";
+    } else if (ref === "clientPayment" || where) {
+      lockedWhere = where ?? RECORDED_IN.clientPayment;
+      locked = `This is the account side of an entry recorded in ${lockedWhere}. Correcting it there moves both; correcting it here would leave the two disagreeing.`;
+    } else if (ref && ref !== "manual" && ref !== "transfer" && !t.pairedLockerId) {
+      orphan = `${ORPHAN_OF[ref] ?? "Nothing else is linked to this movement any more"}, so it is corrected here — that changes the account only.`;
+    }
+    out.push({
+      id: t.id, kind: "locker", date: t.createdAt,
+      party: db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account",
+      against: t.category ?? t.type,
+      amount: t.amountInr, currency: ccy(t.currency),
+      lockerId: t.lockerId, note: t.note,
+      direction: t.type === "income" || t.type === "transfer_in" ? "in" : "out",
+      voucherNo: t.voucherNo,
+      transfer: !!t.pairedLockerId,
+      locked, lockedWhere, lockedLabel, orphan,
+    });
+  }
+  return out;
+}
 
+/** Every entry of one kind, newest first, each matched to its account
+ *  movement. Read only once ENTRY_COLS[kind] have loaded. */
+export function listEntries(db: DB, kind: EntryKind): MoneyEntry[] {
+  let out: MoneyEntry[];
+  if (kind === "locker") out = lockerEntries(db);
+  else {
+    out = partyEntries(db, kind);
+    pairEntries(out, indexTxns(db), new Set());
+  }
   return out.sort((a, b) => +new Date(b.date) - +new Date(a.date));
 }
 
@@ -281,22 +480,32 @@ function moveRefusal(d: DB, entry: MoneyEntry, lockerId?: string): string | unde
  *  editEntry() has already refused a move to an account in another currency,
  *  so the amount means the same in the account it lands in. */
 function syncTxn(d: DB, entry: MoneyEntry, patch: EntryPatch) {
-  const txn = pairedTxn(d, entry.id, entry.date, entry.lockerId, entry.amount);
-  // Never create one here. An entry with no movement of its own shares a
-  // combined one, and adding a second would count the same money twice —
-  // listEntries() locks those rows so this cannot be reached for them.
-  if (!txn) return;
-
-  const live = (d.lockerTransactions ?? []).find(t => t.id === txn.id);
-  if (!live) return;
-  if (patch.amount !== undefined) live.amountInr = roundCcy(patch.amount, entry.currency);
-  if (patch.date !== undefined) live.createdAt = patch.date;
-  if (patch.note !== undefined) live.note = patch.note || undefined;
-  if (patch.lockerId !== undefined) {
-    live.lockerId = patch.lockerId;
-    live.currency = lockerCcy(d, patch.lockerId);
+  // Never create one here. An entry with no movement of its own (noTxn) has
+  // nothing in the account to move, and adding one could count the same money
+  // twice — the dialog says the account is left as it is.
+  const rows = liveTxns(d, entry);
+  for (const live of rows) {
+    // One movement takes the new amount; several (an old payment written one
+    // row per bill) cannot be split, and editRefusal() refuses that change.
+    if (patch.amount !== undefined && rows.length === 1) live.amountInr = roundCcy(patch.amount, entry.currency);
+    if (patch.date !== undefined) live.createdAt = patch.date;
+    if (patch.note !== undefined) live.note = patch.note || undefined;
+    if (patch.lockerId !== undefined) {
+      live.lockerId = patch.lockerId;
+      live.currency = lockerCcy(d, patch.lockerId);
+    }
+    live.paymentId = entry.id; // adopt a legacy row so the next edit matches exactly
   }
-  live.paymentId = entry.id; // adopt a legacy row so the next edit matches exactly
+}
+
+/** The live account rows an entry moves with: those it was matched to when it
+ *  was listed, else (an entry built elsewhere) the one pairedTxn finds. */
+function liveTxns(d: DB, entry: MoneyEntry): LockerTransaction[] {
+  const all = d.lockerTransactions ?? [];
+  if (entry.txnIds) return entry.txnIds.map(id => all.find(t => t.id === id)).filter((t): t is LockerTransaction => !!t);
+  const t = pairedTxn(d, entry.id, entry.date, entry.lockerId, entry.amount);
+  const live = t ? all.find(x => x.id === t.id) : undefined;
+  return live ? [live] : [];
 }
 
 /**
@@ -376,6 +585,7 @@ function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, pat
 /** Why this correction cannot be saved, or nothing when it can. Checked before
  *  anything is written, so a refusal leaves every record exactly as it was. */
 function editRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
+  if (entry.locked) return entry.locked;
   if (entry.kind === "locker") {
     const legs = transferLegs(d, entry.id);
     if (legs) {
@@ -383,18 +593,31 @@ function editRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | unde
       return typeof plan === "string" ? plan : undefined;
     }
   }
+  // An old payment written as one account row per bill: the rows cannot be
+  // told which of them took the difference.
+  if (patch.amount !== undefined && Math.abs(patch.amount - entry.amount) >= 0.01 && (entry.txnIds?.length ?? 0) > 1) {
+    return `This payment left the account as ${entry.txnIds!.length} movements, so its total cannot be changed here — cancel it and enter it again.`;
+  }
   return moveRefusal(d, entry, patch.lockerId);
 }
 
 
 function dropTxn(d: DB, entry: MoneyEntry) {
-  const txn = pairedTxn(d, entry.id, entry.date, entry.lockerId, entry.amount);
-  if (txn) d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => t.id !== txn.id);
+  const drop = new Set(liveTxns(d, entry).map(t => t.id));
+  if (drop.size) d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !drop.has(t.id));
 }
 
 /** Correct one entry — the party's books and the account move together.
  *  Returns why it was refused (nothing is written then), or undefined once saved. */
 export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefined {
+  // The account rows are what move with it: not loaded, they would be missed.
+  if (!collectionsLoaded(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
+  // A payment whose account row shows a different amount: the amount moves
+  // only when it was actually changed. Correcting a remark or a date must
+  // never quietly rewrite what the account says.
+  if (entry.txnAmount !== undefined && patch.amount !== undefined && Math.abs(patch.amount - entry.amount) < 0.005) {
+    patch = { ...patch, amount: undefined };
+  }
   const refused = editRefusal(loadDb(), entry, patch);
   if (refused) return refused;
   updateDb(d => {
@@ -558,17 +781,28 @@ export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
       ? "• both sides of the transfer are removed — the money goes back to the account it left"
       : "• the entry is removed from the account ledger");
   }
-  if (lockerName) {
+  // What the account gives back is what the account shows for it — which is
+  // not always what the bills add up to, and both are said when they differ.
+  const acct = fmtCcy(entry.txnAmount ?? entry.amount, entry.currency);
+  if (entry.noTxn) {
+    out.push(`• no movement for it was found in ${lockerName ?? "its account"}, so no account balance changes`);
+  } else if (lockerName) {
     out.push(entry.direction === "out"
-      ? `• ${lockerName} goes back up by ${money}`
-      : `• ${lockerName} goes down by ${money}`);
+      ? `• ${lockerName} goes back up by ${acct}`
+      : `• ${lockerName} goes down by ${acct}`);
+  }
+  if (entry.txnAmount !== undefined) {
+    out.push(`• the account showed ${acct} for this payment while it adds up to ${money} here — both come off`);
   }
   out.push("• nothing else changes — every other payment stays exactly as it is");
   return out;
 }
 
-/** Cancel one entry: the party's books and the account both come back. */
-export function deleteEntry(entry: MoneyEntry): void {
+/** Cancel one entry: the party's books and the account both come back.
+ *  Returns why it was refused (nothing is written then). */
+export function deleteEntry(entry: MoneyEntry): string | undefined {
+  if (entry.locked) return entry.locked;
+  if (!collectionsLoaded(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
   updateDb(d => {
     if (entry.kind === "supplier") {
       const ids = new Set(entry.legIds ?? [entry.id]);
@@ -621,5 +855,137 @@ export function deleteEntry(entry: MoneyEntry): void {
       const drop = new Set([entry.id, ...(other ? [other.id] : [])]);
       d.lockerTransactions = (d.lockerTransactions ?? []).filter(x => !drop.has(x.id));
     }
+  });
+  return undefined;
+}
+
+/* ── Expenses: the whole record, with its account row in step ──────────────── */
+
+/** Everything an expense says, as the edit panel sends it back. */
+export interface ExpensePatch {
+  title: string;
+  category: string;
+  /** In the expense's own currency — its account's. */
+  amount: number;
+  /** The full timestamp (the panel keeps the time of day when only the day changes). */
+  date: string;
+  note?: string;
+  /** The team member it paid (salary, wages, an advance) — drives their salary ledger. */
+  paidToEmployeeId?: string;
+  clientId?: string;
+  /** The orders it is a direct cost of (freight, insurance, a lab fee). */
+  orderIds?: string[];
+  shipmentRef?: string;
+  /** The account it was paid from. One paid from an account stays paid from
+   *  one; one that was not cannot gain one here (see expenseRefusal). */
+  lockerId?: string;
+}
+
+/** An expense's own account rows: tagged with it (refType "expense", refId),
+ *  else — an older one — the movement written with it. */
+function expenseRows(d: DB, e: Expense): LockerTransaction[] {
+  const all = d.lockerTransactions ?? [];
+  const tagged = all.filter(t => t.refType === "expense" && t.refId === e.id);
+  if (tagged.length || !e.lockerId) return tagged;
+  const legacy = all.find(t => !t.paymentId && !t.refId && t.type === "expense" && t.lockerId === e.lockerId
+    && Math.abs(t.amountInr - e.amount) < 0.01 && near(t.createdAt, e.createdAt));
+  return legacy ? [legacy] : [];
+}
+
+/** Why this expense cannot be saved like this, or nothing when it can.
+ *  Checked before anything is written. */
+export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | undefined {
+  if (!p.title.trim()) return "Enter a title.";
+  if (!(p.amount >= 0) || (p.lockerId && !(p.amount > 0))) return "Enter a valid amount.";
+  if (p.category === "Salary" && !p.paidToEmployeeId) return "Choose which team member this salary is for.";
+  if (isNaN(+new Date(p.date))) return "Enter a valid date.";
+  if (e.lockerId && !p.lockerId) return "This was paid from an account — choose the account it came out of.";
+  // Adding an account would conjure a movement nobody recorded, or count one
+  // twice if it was entered there by hand.
+  if (!e.lockerId && p.lockerId) return "This expense was not paid from an account. If it was, delete it and record it again from that account.";
+  if (p.lockerId && p.lockerId !== e.lockerId) {
+    if (!d.lockers.some(l => l.id === p.lockerId)) return "That account is no longer on file.";
+    const held = lockerCcy(d, p.lockerId), own = ccy(e.currency);
+    if (held !== own) return `That account holds ${held} — this expense is in ${own}. Pick an account in ${own}, or record a transfer.`;
+  }
+  return undefined;
+}
+
+/**
+ * Correct an expense — every field the Add Expense form has, plus the orders
+ * and shipment it is a cost of — and its account row in the same save: the
+ * amount, the date, the account and the words the account ledger shows.
+ * Returns why it was refused (nothing is written then).
+ */
+export function editExpense(id: string, p: ExpensePatch): string | undefined {
+  if (!collectionsLoaded(["lockerTransactions"])) return "Still loading the account entries — try again in a moment.";
+  const db = loadDb();
+  const e = (db.expenses ?? []).find(x => x.id === id);
+  if (!e) return "That expense is no longer on file.";
+  const refused = expenseRefusal(db, e, p);
+  if (refused) return refused;
+  updateDb(d => {
+    const x = (d.expenses ?? []).find(y => y.id === id);
+    if (!x) return;
+    // Found BEFORE anything changes: an older row is matched on the old
+    // amount and moment.
+    const rows = expenseRows(d, x);
+    const currency = p.lockerId ? lockerCcy(d, p.lockerId) : ccy(x.currency);
+    x.title = p.title.trim();
+    x.category = p.category;
+    x.amount = roundCcy(p.amount, currency);
+    x.createdAt = p.date;
+    x.note = p.note?.trim() || undefined;
+    x.paidToEmployeeId = p.paidToEmployeeId || undefined;
+    x.clientId = p.clientId || undefined;
+    x.orderIds = p.orderIds?.length ? [...new Set(p.orderIds)] : undefined;
+    x.shipmentRef = p.shipmentRef?.trim() || undefined;
+    if (p.lockerId) { x.lockerId = p.lockerId; x.currency = currency; }
+    for (const t of rows) {
+      t.amountInr = x.amount;
+      t.createdAt = x.createdAt;
+      if (x.lockerId) { t.lockerId = x.lockerId; t.currency = currency; }
+      // The words the account ledger shows for it, as every new one is written.
+      t.category = `Expense — ${x.title}`;
+      if (t.note) t.note = x.note;
+      t.refType = "expense"; t.refId = x.id; // adopt an older row so the next edit finds it by id
+    }
+  });
+  return undefined;
+}
+
+/** In plain words, what deleting this expense changes — shown before confirming. */
+export function expenseImpact(db: DB, e: Expense): string[] {
+  const out = ["• the expense is removed from the books and every expense report"];
+  const locker = e.lockerId ? db.lockers.find(l => l.id === e.lockerId) : undefined;
+  const money = fmtCcy(e.amount, e.currency);
+  if (e.lockerId) {
+    const rows = collectionsLoaded(["lockerTransactions"]) ? expenseRows(db, e) : [];
+    out.push(rows.length
+      ? `• ${locker?.name ?? "its account"} goes back up by ${money} — its entry there goes too`
+      : `• no entry for it was found in ${locker?.name ?? "its account"}, so no account balance changes`);
+  }
+  if (e.paidToEmployeeId) {
+    const who = db.users.find(u => u.id === e.paidToEmployeeId)?.name ?? "the team member";
+    out.push(`• it comes off ${who}'s salary ledger`);
+  }
+  if (e.orderIds?.length) {
+    const nos = e.orderIds.map(id => db.orders.find(o => o.id === id)?.orderNumber).filter(Boolean);
+    out.push(`• it no longer counts in the cost of ${nos.length ? nos.join(", ") : `${e.orderIds.length} order${e.orderIds.length !== 1 ? "s" : ""}`}`);
+  }
+  out.push(`• recorded ${fmtDate(e.createdAt)} — nothing else changes`);
+  return out;
+}
+
+/** Delete an expense and its account row together. The account rows are
+ *  loaded first: deleted without them, the account would keep the money out. */
+export async function deleteExpense(id: string): Promise<void> {
+  await ensureCollections(["lockerTransactions"]);
+  updateDb(d => {
+    const e = (d.expenses ?? []).find(x => x.id === id);
+    if (!e) return;
+    const rows = new Set(expenseRows(d, e).map(t => t.id));
+    d.expenses = d.expenses.filter(x => x.id !== id);
+    if (rows.size) d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !rows.has(t.id));
   });
 }

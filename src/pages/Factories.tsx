@@ -1,8 +1,11 @@
 import { factoryFigures } from "@/lib/partyTotals";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { updateDb, uid, fmtDate, hasOpeningBalance, type Factory } from "@/lib/db";
+import { Link, useNavigate } from "react-router-dom";
+import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDebitAmt, type Factory } from "@/lib/db";
+import { factoryDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
+import { FactoryEditDialog } from "@/components/FactoryEditDialog";
+import type { MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -13,7 +16,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, Power } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, Power, Pencil } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -32,6 +35,8 @@ export function FactoriesPage() {
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Factory | null>(null);
+  const navigate = useNavigate();
 
   // Every factory's figures, worked out once — rows, sort and totals share it.
   // From the records when they are loaded, else the server's totals (this list
@@ -64,10 +69,40 @@ export function FactoriesPage() {
     toast.success("Status updated");
   };
 
-  const del = async (id: string) => {
-    if (!(await confirmBox("Delete factory? This does not delete its gold issuance history."))) return;
-    updateDb(d => { d.factories = d.factories.filter(f => f.id !== id); });
+  // Only a factory nothing hangs off may be deleted — one with material
+  // issued, payments or an order assigned is deactivated instead. The menu
+  // greys Delete out with the reason (from the totals on this light page);
+  // the delete itself loads the books and counts before it asks.
+  const guardOf = (fac: Factory) => factoryDeleteGuard(db, fac, accounts.get(fac.id));
+  const del = async (fac: Factory) => {
+    const refused = await deleteRefusal("factory", fac);
+    if (refused) { toast.error(refused); return; }
+    const opening = hasOpeningBalance(fac) ? openingCreditAmt(fac) || openingDebitAmt(fac) : 0;
+    if (!(await confirmBox([
+      `Delete ${fac.name}?`,
+      "",
+      "• it has no material issued, no payments and no order assigned, so no other record changes",
+      ...(opening ? [`• its opening balance of ${fmtMoneyInr(opening)} goes with it`] : []),
+      ...(fac.openingFineGold ? [`• its opening fine gold of ${fac.openingFineGold} g goes with it`] : []),
+      "",
+      "This cannot be undone.",
+    ].join("\n")))) return;
+    updateDb(d => { d.factories = d.factories.filter(f => f.id !== fac.id); });
     toast.success("Deleted");
+  };
+
+  // View first, then the changes — each greyed out with the reason when it
+  // can't be done, never left out. Changing a factory is an admin's job.
+  const ADMIN_ONLY = "Only an admin can change factories";
+  const actionsFor = (fac: Factory): MoreAction[] => {
+    const guard = guardOf(fac);
+    return [
+      { label: "View ledger", icon: History, hint: "Material issued, labour and payments", onSelect: () => navigate(`/factories/${fac.id}`) },
+      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(fac), disabled: !isAdmin, hint: isAdmin ? "Name, contact, phone, address" : ADMIN_ONLY },
+      { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
+      { label: "Delete factory", icon: Trash2, danger: true, onSelect: () => del(fac),
+        disabled: !isAdmin || !guard.ok, hint: !isAdmin ? ADMIN_ONLY : guard.reason },
+    ];
   };
 
   // ── List view: the shared table ──
@@ -186,11 +221,7 @@ export function FactoriesPage() {
                 return <><span className="text-destructive">{fmtMoneyInr(due)}</span>{advance > 0 && <span className="text-blue-600"> · +{fmtMoneyInr(advance)}</span>}</>;
               },
             }}
-            // The grid card's buttons — admin only, as there.
-            rowActions={isAdmin ? fac => [
-              { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac) },
-              { label: "Delete factory", icon: Trash2, danger: true, onSelect: () => del(fac.id) },
-            ] : undefined}
+            rowActions={actionsFor}
             emptyText="No factories found."
           />
         </div>
@@ -249,16 +280,28 @@ export function FactoriesPage() {
                 <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
                   <Link to={`/factories/${fac.id}`}><History className="h-4 w-4 text-primary" />View Ledger</Link>
                 </Button>
-                {isAdmin && (
-                <div className="flex gap-2">
-                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(fac)} className="rounded-lg flex-1">
-                    {fac.active === false ? "Activate" : "Deactivate"}
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(fac.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                </div>
-                )}
+                {isAdmin && (() => {
+                  const guard = guardOf(fac);
+                  return (
+                    <>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setEditing(fac)} aria-label="Edit factory" title="Edit details" className="rounded-lg w-9 px-0">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <AsyncButton size="sm" variant="outline" onClick={() => toggle(fac)} className="rounded-lg flex-1">
+                          {fac.active === false ? "Activate" : "Deactivate"}
+                        </AsyncButton>
+                        <AsyncButton size="sm" variant="outline" onClick={() => del(fac)} disabled={!guard.ok} aria-label="Delete factory"
+                          title={guard.reason ?? "Delete factory"}
+                          className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </AsyncButton>
+                      </div>
+                      {/* Why Delete is greyed, said on the card rather than only on hover. */}
+                      {!guard.ok && <p className="text-[11px] text-muted-foreground leading-snug">Delete: {guard.reason}</p>}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           );
@@ -269,6 +312,8 @@ export function FactoriesPage() {
 
       {/* The list pages itself; these pages are the grid's. */}
       {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} factories` : undefined} />}
+
+      <FactoryEditDialog factory={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

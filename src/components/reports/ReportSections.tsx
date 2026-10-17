@@ -1364,6 +1364,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               noun="payment"
               rows={paymentsReport.rows}
               rowKey={r => r.id}
+              // A payment opens the supplier's or factory's page it was made to.
+              rowHref={r => `/${r.kind === "Supplier" ? "suppliers" : "factories"}/${r.partyId}`}
+              canClickRow={r => !!r.partyId && mayOpen(r.kind === "Supplier" ? "suppliers" : "factories")}
               details={paymentDetails}
               maxHeight="20rem"
               defaultSort={{ key: "date", dir: "desc" }}
@@ -1437,6 +1440,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               noun="client"
               rows={salesReport.byClient}
               rowKey={c => c.id}
+              rowHref={mayOpen("clients") ? c => `/clients/${c.id}` : undefined}
+              canClickRow={c => clients.some(x => x.id === c.id)}
               details={salesClientDetails}
               maxHeight="20rem"
               defaultSort={{ key: "billed", dir: "desc" }}
@@ -1750,6 +1755,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             noun="client"
             rows={byClient}
             rowKey={cl => cl.id}
+            rowHref={mayOpen("clients") ? cl => `/clients/${cl.id}` : undefined}
+            canClickRow={cl => clients.some(x => x.id === cl.id)}
             details={clientSummaryDetails}
             defaultSort={{ key: "orders", dir: "desc" }}
             searchText={cl => cl.name}
@@ -1792,6 +1799,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             noun="order"
             rows={filtered}
             rowKey={o => o.id}
+            // Every row is one of this person's own orders: it opens the order.
+            rowHref={mayOpen("orders") ? o => `/orders/${o.id}` : undefined}
             details={reportOrderDetails}
             maxHeight="32rem"
             defaultSort={{ key: "date", dir: "desc" }}

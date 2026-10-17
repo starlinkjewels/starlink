@@ -46,14 +46,20 @@ export function MessagesPage() {
   // Staff (admin/employee) may delete any message; a client only ones they sent.
   const canDeleteMsg = (m: { fromUserId: string }) => user!.role !== "client" || m.fromUserId === user!.id;
 
-  const deleteMessage = (id: string) => {
-    updateDb(d => { d.messages = d.messages.filter(m => m.id !== id); });
+  // Deleted for both people in the conversation, so it asks first.
+  const deleteMessage = async (id: string) => {
+    const m = db.messages.find(x => x.id === id);
+    if (!m) return;
+    const quote = m.text.length > 80 ? `${m.text.slice(0, 77)}…` : m.text;
+    if (!(await confirmBox(`Delete this message?\n\n"${quote}" — it disappears for both of you. This cannot be undone.`))) return;
+    updateDb(d => { d.messages = d.messages.filter(x => x.id !== id); });
     setMenuMsg(null);
   };
 
   const clearChat = async () => {
     if (!selected) return;
-    if (!(await confirmBox("Delete this conversation? This cannot be undone."))) return;
+    const mine = thread.filter(canDeleteMsg).length;
+    if (!(await confirmBox(`Delete this conversation?\n\n${mine} message${mine !== 1 ? "s" : ""} with ${contacts.find(c => c.id === selected)?.name ?? "them"} disappear for both of you${mine < thread.length ? ` (the ${thread.length - mine} they sent stay — only they can delete those)` : ""}. This cannot be undone.`))) return;
     updateDb(d => {
       d.messages = d.messages.filter(m => {
         const inThread = (m.fromUserId === user!.id && m.toUserId === selected) || (m.fromUserId === selected && m.toUserId === user!.id);

@@ -1,5 +1,10 @@
-import { useMayExport } from "@/hooks/useCan";
-import { MoreMenu } from "@/components/MoreMenu";
+import { useCan, useMayExport } from "@/hooks/useCan";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { IssuanceEditSheet } from "@/components/IssuanceEditSheet";
+import { FactoryEditDialog } from "@/components/FactoryEditDialog";
+import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact, isPoolDraw } from "@/lib/issuanceEdit";
+import { factoryDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
+import { needsAccess } from "@/lib/actionHints";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useOtherMaterials, GradeInput } from "@/components/MaterialFields";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
@@ -9,7 +14,7 @@ import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@
 import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -27,6 +32,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
   Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
+  Pencil, Trash2, ExternalLink, Lock, RotateCcw,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -87,6 +93,11 @@ function FactoryHistoryPageBody() {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
+  const can = useCan();
+  const isAdmin = user?.role === "admin";
+  // Correcting the profile or one issue: each opens in a panel over the page.
+  const [editingFactory, setEditingFactory] = useState<Factory | null>(null);
+  const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
 
   const factory = db.factories.find(f => f.id === id);
   if (!factory) {
@@ -521,6 +532,73 @@ function FactoryHistoryPageBody() {
     }
   };
 
+  // ── Correcting or cancelling one issue ──
+  // Everything that can be done to an issue is in its ⋯ menu; what can't be
+  // done is greyed out with the reason — the purchase it came from, the payment
+  // to cancel first — instead of hidden.
+  const cancelIssuance = async (mi: MaterialIssuance) => {
+    const unit = materialUnit(db.settings, mi.material);
+    if (!(await confirmBox([
+      `Cancel this issue of ${mi.quantityIssued}${unit} ${mi.purityOrQuality}?`,
+      "",
+      ...issuanceVoidImpact(db, mi),
+      "",
+      "This cannot be undone.",
+    ].join("\n")))) return;
+    try {
+      await deleteIssuance(db, mi, user!.id);
+      toast.success(isPoolDraw(mi) ? "Issue cancelled — back in the factory's pool" : "Issue cancelled — material returned to stock");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't cancel this.");
+    }
+  };
+
+  const ADMIN_ONLY = "Only an admin can change what was issued to a factory";
+  const issuanceActions = (mi: MaterialIssuance): MoreAction[] => {
+    const order = db.orders.find(o => o.id === (mi.orderId ?? mi.meltOf));
+    const purchase = mi.source === "purchase" ? db.purchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
+    const supplierName = purchase ? db.suppliers.find(s => s.id === purchase.supplierId)?.name : undefined;
+    const edit = canEditIssuance(db, mi);
+    const cancel = canCancelIssuance(db, mi);
+    const certified = mi.diamondKind === "certified";
+    return [
+      { label: "View order", icon: ExternalLink, show: !!order, disabled: !can("orders"),
+        hint: can("orders") ? `${mi.source === "melt" ? "The melted piece" : "Order"} ${order?.orderNumber ?? ""}`.trim() : needsAccess("orders", "view"),
+        onSelect: () => navigate(`/orders/${order!.id}`) },
+      { label: "View purchase", icon: ExternalLink, show: !!purchase, disabled: !can("suppliers"),
+        hint: can("suppliers") ? `On ${supplierName ?? "the supplier"}'s page${purchase?.invoiceNumber ? ` · bill ${purchase.invoiceNumber}` : ""}` : needsAccess("suppliers", "view"),
+        onSelect: () => navigate(`/suppliers/${purchase!.supplierId}`) },
+      { label: "Edit issuance", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !isAdmin || !edit.ok,
+        hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason
+          : certified ? "Charge and note — the stones keep their own weight" : "Quantity, purity or shape, charge, note" },
+      // Not offered as working actions, and said why: none of these left a
+      // record that can be reversed exactly, so doing it here would guess.
+      { label: "Edit finished pieces", icon: Lock, show: !!mi.orderId, disabled: true, onSelect: () => {},
+        hint: mi.status === "closed"
+          ? "Closed — what was used was settled when it was closed"
+          : "Not changed one by one — Edit issuance corrects what was used, or cancel it and record it again" },
+      { label: "Re-open issuance", icon: RotateCcw, show: mi.status === "closed", disabled: true, onSelect: () => {},
+        hint: "Closing sent the unused material back without a record tied to this issue, so it can't be taken back exactly — issue the material again instead" },
+      { label: "Undo a return", icon: Undo2, show: !(mi.source === "melt" && mi.quantityIssued === 0), disabled: true, onSelect: () => {},
+        hint: "A return isn't recorded against this issue, so it can't be undone exactly — issue the material again instead" },
+      { label: "Cancel issuance", icon: Trash2, danger: true, onSelect: () => cancelIssuance(mi), disabled: !isAdmin || !cancel.ok,
+        hint: !isAdmin ? ADMIN_ONLY : !cancel.ok ? cancel.reason
+          : isPoolDraw(mi) ? "It goes back into the factory's pool"
+          : certified ? "The stones go back into stock" : "The material goes back into stock" },
+    ];
+  };
+
+  // ── The factory itself ──
+  const deleteGuard = factoryDeleteGuard(db, factory);
+  const deleteFactory = async () => {
+    const refused = await deleteRefusal("factory", factory);
+    if (refused) { toast.error(refused); return; }
+    if (!(await confirmBox(`Delete ${factory.name}?\n\nIt has no material issued, no payments and no order assigned, so no other record changes. This cannot be undone.`))) return;
+    updateDb(d => { d.factories = d.factories.filter(x => x.id !== factory.id); });
+    toast.success("Factory deleted");
+    navigate("/factories");
+  };
+
   const orderRows = buildFactoryOrderRows(issuances, db.orders, db.settings);
 
   /** Trim only when the text genuinely cannot fit (8.5pt Helvetica is about
@@ -891,10 +969,17 @@ function FactoryHistoryPageBody() {
           <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-500/15 to-orange-400/15 grid place-items-center shrink-0">
             <FactoryIcon className="h-7 w-7 text-orange-600" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{factory.name}</h1>
             <p className="text-muted-foreground mt-1 break-words">{factory.contactPerson}</p>
           </div>
+          {/* Its own label, apart from the account's "More actions" below. */}
+          <MoreMenu label="Factory actions" title="Factory" actions={[
+            { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
+              hint: isAdmin ? "Name, contact, phone, address" : "Only an admin can change factories" },
+            { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !isAdmin || !deleteGuard.ok,
+              hint: !isAdmin ? "Only an admin can change factories" : deleteGuard.reason },
+          ]} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-6 text-sm">
           <div className="flex items-start gap-2"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{factory.phone || "—"}</p></div></div>
@@ -1004,6 +1089,8 @@ function FactoryHistoryPageBody() {
         )}
       </div>
       {movingPool && <FactoryPoolTransferDialog factoryId={id!} onClose={() => setMovingPool(false)} />}
+      <FactoryEditDialog factory={editingFactory} onClose={() => setEditingFactory(null)} />
+      <IssuanceEditSheet issuance={editingIssuance} onClose={() => setEditingIssuance(null)} />
       {/* ONE ledger for this factory: gold given and used, diamond given and
           used, the other metals, and the labour billed, paid and pending — all
           on the same row as the order they belong to. It replaced a separate
@@ -1055,11 +1142,14 @@ function FactoryHistoryPageBody() {
                   </p>
                   )}
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold">{mi.makingCharges.amountInr > 0 ? fmtMoneyInr(mi.makingCharges.amountInr) : "No charge set"}</p>
-                  {mi.makingCharges.amountInr > 0 && (
-                    <p className={`text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}</p>
-                  )}
+                <div className="flex items-start gap-2 shrink-0">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold">{mi.makingCharges.amountInr > 0 ? fmtMoneyInr(mi.makingCharges.amountInr) : "No charge set"}</p>
+                    {mi.makingCharges.amountInr > 0 && (
+                      <p className={`text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}</p>
+                    )}
+                  </div>
+                  <MoreMenu size="sm" label="Issuance actions" title="This issue" actions={issuanceActions(mi)} />
                 </div>
               </div>
 

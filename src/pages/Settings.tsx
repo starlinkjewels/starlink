@@ -11,7 +11,7 @@ import { MaterialsSettings } from "@/components/MaterialsSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
 import { ListOrdered } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { loadDb, saveDb, updateDb, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
+import { loadDb, saveDb, updateDb, updateDbAs, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, collectionLoaded, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { releaseInvoiceNumber, resetSequence } from "@/lib/counters";
 import { useDbVersion } from "@/hooks/useDb";
@@ -65,6 +65,8 @@ import {
   Banknote,
   ReceiptText,
   Trash2,
+  Pencil,
+  Check,
 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 
@@ -107,6 +109,10 @@ export function SettingsPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(loadDb());
   const [lp, setLp] = useState({ name: "", style: "tag" as "tag" | "label", w: "", h: "" });
+  // A label preset being changed in place (staged until the section's Save).
+  const [lpEdit, setLpEdit] = useState<{ id: string; name: string; style: "tag" | "label"; w: string; h: string } | null>(null);
+  // A dated ₹-per-$ profit rate being corrected in place.
+  const [fxEdit, setFxEdit] = useState<{ from: string; rate: string } | null>(null);
   const [active, setActive] = useState("company");
 
   const qr1Ref = useRef<HTMLInputElement>(null);
@@ -178,7 +184,9 @@ export function SettingsPage() {
     setCategories([...expenseCategories, name]);
     setNewCategory("");
   };
-  const removeCategory = (name: string) => {
+  const removeCategory = async (name: string) => {
+    const n = (loadDb().expenses ?? []).filter(e => e.category === name).length;
+    if (!(await confirmBox(`Remove the expense category "${name}"?\n\nIt stops being offered for new expenses.${n ? ` The ${n} expense${n !== 1 ? "s" : ""} already filed under it keep it, exactly as they are.` : " No expense uses it."}`))) return;
     setCategories(expenseCategories.filter(c => c !== name));
   };
 
@@ -200,7 +208,78 @@ export function SettingsPage() {
     setLockerCategories([...lockerCategories, name]);
     setNewLockerCategory("");
   };
-  const removeLockerCategory = (name: string) => setLockerCategories(lockerCategories.filter(c => c !== name));
+  const removeLockerCategory = async (name: string) => {
+    const n = (loadDb().lockerTransactions ?? []).filter(t => t.category === name).length;
+    if (!(await confirmBox(`Remove the account category "${name}"?\n\nIt stops being offered for new entries.${n ? ` The ${n} account entr${n !== 1 ? "ies" : "y"} already filed under it keep it, exactly as they are.` : " No entry uses it."}`))) return;
+    setLockerCategories(lockerCategories.filter(c => c !== name));
+  };
+
+  // Renaming a category renames it everywhere: the list, and every record
+  // filed under it — so a report never splits one category in two under its
+  // old and new names. Names the app itself files records under can't change.
+  const RESERVED: Record<"expense" | "account", Record<string, string>> = {
+    expense: { Salary: "Built in — salaries are filed under this name", Shipping: "Built in — shipping costs are filed under this name" },
+    account: { Transfer: "Built in — transfers between accounts are filed under this name" },
+  };
+  const [catEdit, setCatEdit] = useState<{ kind: "expense" | "account"; from: string; to: string } | null>(null);
+  const renameCategory = async () => {
+    if (!catEdit) return;
+    const { kind, from } = catEdit;
+    const to = catEdit.to.trim().replace(/\s+/g, " ");
+    const list = kind === "expense" ? expenseCategories : lockerCategories;
+    if (!to) { toast.error("Enter the new name"); return; }
+    if (to === from) { setCatEdit(null); return; }
+    if (list.some(c => c !== from && c.toLowerCase() === to.toLowerCase())) { toast.error(`"${to}" is already on the list`); return; }
+    const col = kind === "expense" ? "expenses" : "lockerTransactions";
+    if (!collectionLoaded(col)) { toast.error("Still loading the records filed under it — try again in a moment"); return; }
+    const d0 = loadDb();
+    const n = kind === "expense"
+      ? (d0.expenses ?? []).filter(e => e.category === from).length
+      : (d0.lockerTransactions ?? []).filter(t => t.category === from).length;
+    const what = kind === "expense" ? `expense${n !== 1 ? "s" : ""}` : `account entr${n !== 1 ? "ies" : "y"}`;
+    if (!(await confirmBox(`Rename "${from}" to "${to}"?\n\n${n ? `${n} ${what} filed under "${from}" change to "${to}" too, so reports keep them together.` : `No ${kind === "expense" ? "expense" : "entry"} is filed under it yet.`} New ${kind === "expense" ? "expenses" : "entries"} are offered "${to}".`, { confirmText: "Rename" }))) return;
+    const next = list.map(c => (c === from ? to : c));
+    updateDbAs({ summary: `Renamed the ${kind === "expense" ? "expense" : "account"} category "${from}" to "${to}" (${n} record${n !== 1 ? "s" : ""})` }, d => {
+      if (kind === "expense") {
+        d.settings.expenseCategories = next;
+        for (const e of d.expenses ?? []) if (e.category === from) e.category = to;
+      } else {
+        d.settings.lockerCategories = next;
+        for (const t of d.lockerTransactions ?? []) if (t.category === from) t.category = to;
+      }
+    });
+    setDb(prev => ({ ...prev, settings: { ...prev.settings, ...(kind === "expense" ? { expenseCategories: next } : { lockerCategories: next }) } }));
+    setCatEdit(null);
+    toast.success(`Renamed to "${to}"${n ? ` — ${n} ${what} updated` : ""}`);
+  };
+  /** One category, as a chip: rename and remove — or the reason it can't be renamed. */
+  const catChip = (kind: "expense" | "account", c: string, remove: (c: string) => unknown) => {
+    const reserved = RESERVED[kind][c];
+    if (catEdit && catEdit.kind === kind && catEdit.from === c) {
+      return (
+        <span key={c} className="inline-flex items-center gap-1 rounded-full bg-white ring-2 ring-primary/30 pl-1 pr-1 py-0.5">
+          <Input value={catEdit.to} autoFocus onChange={e => setCatEdit({ ...catEdit, to: e.target.value })}
+            onKeyDown={e => { if (e.key === "Enter") void renameCategory(); if (e.key === "Escape") setCatEdit(null); }}
+            aria-label={`New name for ${c}`} className="h-7 w-40 rounded-full text-xs" />
+          <button type="button" onClick={() => void renameCategory()} aria-label="Save the new name" className="h-6 w-6 rounded-full grid place-items-center text-success hover:bg-success/10"><Check className="h-3.5 w-3.5" /></button>
+          <button type="button" onClick={() => setCatEdit(null)} aria-label="Keep the old name" className="h-6 w-6 rounded-full grid place-items-center text-muted-foreground hover:bg-secondary"><X className="h-3 w-3" /></button>
+        </span>
+      );
+    }
+    return (
+      <span key={c} className="inline-flex items-center gap-1 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-foreground">
+        {c}
+        <button type="button" onClick={() => (reserved ? toast.error(reserved) : setCatEdit({ kind, from: c, to: c }))} title={reserved ?? `Rename ${c}`}
+          aria-label={`Rename ${c}`} aria-disabled={!!reserved}
+          className={`h-4 w-4 rounded-full grid place-items-center text-muted-foreground transition-colors ${reserved ? "opacity-40 cursor-not-allowed" : "hover:text-primary hover:bg-primary/10"}`}>
+          <Pencil className="h-2.5 w-2.5" />
+        </button>
+        <button type="button" onClick={() => void remove(c)} title={`Remove ${c}`} aria-label={`Remove ${c}`} className="h-4 w-4 rounded-full grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
+          <X className="h-3 w-3" />
+        </button>
+      </span>
+    );
+  };
 
 
   const exp = () => {
@@ -1008,7 +1087,31 @@ export function SettingsPage() {
                                 {i === 0 && <span className="ml-1.5 text-[10px] font-semibold text-success">current</span>}
                               </span>
                               <span className="flex items-center gap-3">
+                                {fxEdit?.from === r.from ? (
+                                  <>
+                                    <Input type="number" min={0} step={0.01} value={fxEdit.rate} autoFocus aria-label={`Rate from ${r.from}`}
+                                      onChange={e => setFxEdit({ ...fxEdit, rate: e.target.value })}
+                                      onKeyDown={e => { if (e.key === "Escape") setFxEdit(null); }}
+                                      className="h-7 w-24 rounded-lg text-xs" />
+                                    <button
+                                      onClick={async () => {
+                                        const rate = Number(fxEdit.rate);
+                                        if (!(rate > 0)) { toast.error("Enter the rate"); return; }
+                                        if (rate === r.rate) { setFxEdit(null); return; }
+                                        if (!(await confirmBox(`Change the rate from ${fmtDate(r.from)} to ₹${rate}?\n\nIt was ₹${r.rate}. Profit on every sale dispatched from that day until the next rate is worked out again at ₹${rate}.`, { confirmText: "Change" }))) return;
+                                        commit(table.rates.map(x => (x.from === r.from ? { ...x, rate } : x)));
+                                        setFxEdit(null);
+                                        toast.success(`₹${rate} from ${fmtDate(r.from)} saved`);
+                                      }}
+                                      className="text-success" aria-label="Save the rate"><Check className="h-3.5 w-3.5" /></button>
+                                    <button onClick={() => setFxEdit(null)} className="text-muted-foreground" aria-label="Keep the rate"><X className="h-3.5 w-3.5" /></button>
+                                  </>
+                                ) : (
+                                  <>
                                 <span className="font-semibold tabular-nums">₹{r.rate}</span>
+                                <button onClick={() => setFxEdit({ from: r.from, rate: String(r.rate) })} className="text-muted-foreground hover:text-primary" aria-label="Edit rate" title="Edit rate">
+                                  <Pencil className="h-3.5 w-3.5" />
+                                </button>
                                 <button
                                   onClick={async () => {
                                     if (!(await confirmBox(`Remove the rate of ₹${r.rate} from ${fmtDate(r.from)}? Sales in that period will be converted at the rate before it.`))) return;
@@ -1018,6 +1121,8 @@ export function SettingsPage() {
                                   className="text-muted-foreground hover:text-destructive" aria-label="Remove rate">
                                   <Trash2 className="h-3.5 w-3.5" />
                                 </button>
+                                  </>
+                                )}
                               </span>
                             </div>
                           ))}
@@ -1278,7 +1383,21 @@ export function SettingsPage() {
           {/* Label printers & bands — define a size per label printer / roll */}
           {(() => {
             const rows = db.settings.labelPresets ?? DEFAULT_LABEL_PRESETS;
-            const remove = (id: string) => setDb({ ...db, settings: { ...db.settings, labelPresets: rows.filter(p => p.id !== id) } });
+            // Staged with the rest of this section — kept when "Save" below is pressed.
+            const remove = async (id: string) => {
+              const p = rows.find(x => x.id === id);
+              if (!p) return;
+              if (!(await confirmBox(`Remove the "${p.name}" label (${p.widthMm}×${p.heightMm}mm)?\n\nIt stops being offered when a band is printed. Bands already printed are not affected. Press Save below to keep the change.`))) return;
+              setDb(prev => ({ ...prev, settings: { ...prev.settings, labelPresets: (prev.settings.labelPresets ?? DEFAULT_LABEL_PRESETS).filter(x => x.id !== id) } }));
+            };
+            const saveEdit = () => {
+              if (!lpEdit) return;
+              const w = Number(lpEdit.w), h = Number(lpEdit.h);
+              if (!lpEdit.name.trim() || !(w >= 5) || !(h >= 5)) { toast.error("Enter a name, and a width and height of at least 5 mm"); return; }
+              setDb(prev => ({ ...prev, settings: { ...prev.settings, labelPresets: (prev.settings.labelPresets ?? DEFAULT_LABEL_PRESETS).map(x => (x.id === lpEdit.id ? { ...x, name: lpEdit.name.trim(), style: lpEdit.style, widthMm: w, heightMm: h } : x)) } }));
+              setLpEdit(null);
+              toast.message("Changed — press Save below to keep it");
+            };
             const add = () => {
               const w = Number(lp.w), h = Number(lp.h);
               if (!lp.name.trim() || !w || !h) { toast.error("Enter a name, width and height"); return; }
@@ -1297,13 +1416,32 @@ export function SettingsPage() {
                 </div>
 
                 <div className="mt-3 space-y-1.5">
-                  {rows.map(p => (
+                  {rows.map(p => lpEdit?.id === p.id ? (
+                    <div key={p.id} className="grid grid-cols-2 sm:grid-cols-6 gap-2 items-end rounded-lg border border-primary/40 bg-primary/[0.03] px-3 py-2">
+                      <div className="col-span-2"><Label className="text-[11px]">Name</Label><Input value={lpEdit.name} autoFocus onChange={e => setLpEdit({ ...lpEdit, name: e.target.value })} className="rounded-lg h-9 mt-1" /></div>
+                      <div><Label className="text-[11px]">Style</Label>
+                        <Select value={lpEdit.style} onValueChange={v => setLpEdit({ ...lpEdit, style: v as "tag" | "label" })}>
+                          <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue /></SelectTrigger>
+                          <SelectContent><SelectItem value="tag">Tag</SelectItem><SelectItem value="label">Label</SelectItem></SelectContent>
+                        </Select>
+                      </div>
+                      <div><Label className="text-[11px]">W (mm)</Label><Input type="number" min={5} value={lpEdit.w} onChange={e => setLpEdit({ ...lpEdit, w: e.target.value })} className="rounded-lg h-9 mt-1" /></div>
+                      <div><Label className="text-[11px]">H (mm)</Label><Input type="number" min={5} value={lpEdit.h} onChange={e => setLpEdit({ ...lpEdit, h: e.target.value })} className="rounded-lg h-9 mt-1" /></div>
+                      <div className="flex gap-1.5">
+                        <Button onClick={saveEdit} className="btn-hero rounded-lg h-9 flex-1">Done</Button>
+                        <Button variant="outline" onClick={() => setLpEdit(null)} className="rounded-lg h-9 w-9 p-0" aria-label="Keep it as it was"><X className="h-3.5 w-3.5" /></Button>
+                      </div>
+                    </div>
+                  ) : (
                     <div key={p.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2">
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">{p.name}</p>
                         <p className="text-[11px] text-muted-foreground">{p.style === "tag" ? "Jewellery tag" : "Spec label"} · {p.widthMm}×{p.heightMm}mm</p>
                       </div>
-                      <button onClick={() => remove(p.id)} className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 shrink-0" title="Remove"><X className="h-3.5 w-3.5" /></button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={() => setLpEdit({ id: p.id, name: p.name, style: p.style, w: String(p.widthMm), h: String(p.heightMm) })} className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10" title="Edit" aria-label={`Edit ${p.name}`}><Pencil className="h-3.5 w-3.5" /></button>
+                        <button onClick={() => void remove(p.id)} className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10" title="Remove" aria-label={`Remove ${p.name}`}><X className="h-3.5 w-3.5" /></button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1357,14 +1495,7 @@ export function SettingsPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {expenseCategories.map(c => (
-              <span key={c} className="inline-flex items-center gap-1.5 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-foreground">
-                {c}
-                <button onClick={() => removeCategory(c)} className="h-4 w-4 rounded-full grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
+            {expenseCategories.map(c => catChip("expense", c, removeCategory))}
           </div>
           <div className="flex gap-2">
             <Input
@@ -1390,14 +1521,7 @@ export function SettingsPage() {
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
-            {lockerCategories.map(c => (
-              <span key={c} className="inline-flex items-center gap-1.5 text-xs font-medium pl-3 pr-1.5 py-1.5 rounded-full bg-secondary text-foreground">
-                {c}
-                <button onClick={() => removeLockerCategory(c)} className="h-4 w-4 rounded-full grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                  <X className="h-3 w-3" />
-                </button>
-              </span>
-            ))}
+            {lockerCategories.map(c => catChip("account", c, removeLockerCategory))}
           </div>
           <div className="flex gap-2">
             <Input
@@ -1409,6 +1533,7 @@ export function SettingsPage() {
           </div>
           <p className="text-[11px] text-muted-foreground">
             Removing one here does not change entries already filed under it — it only stops appearing for new ones.
+            Renaming one (the pencil) renames it on those entries too.
           </p>
         </div>
       )}

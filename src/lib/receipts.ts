@@ -10,7 +10,7 @@
 //
 // Money is only ever moved, never invented — see settleClientAccount().
 import {
-  loadDb, updateDb, uid, settleClientAccount,
+  loadDb, updateDb, updateDbAs, uid, settleClientAccount,
   type DB, type ClientReceipt, type Order,
 } from "./db";
 import { reserveReceiptNumber } from "./counters";
@@ -212,7 +212,7 @@ export async function receiptForAdvance(args: {
  * NUMBER never changes; a receipt that has been issued keeps its identity.
  */
 export function editReceipt(receiptId: string, patch: Partial<ReceiptInput> & { userId: string }): void {
-  updateDb(d => {
+  updateDbAs({ summary: `Corrected receipt ${receiptLabel(receiptId)}` }, d => {
     const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
     if (!rec) return;
     unapply(d, rec);
@@ -257,6 +257,15 @@ export function editReceipt(receiptId: string, patch: Partial<ReceiptInput> & { 
   });
 }
 
+/** "0871 — Acme Jewels, $1,200": how a receipt reads in the activity log. */
+function receiptLabel(receiptId: string): string {
+  const db = loadDb();
+  const rec = (db.clientReceipts ?? []).find(r => r.id === receiptId);
+  if (!rec) return "";
+  const client = db.clients.find(c => c.id === rec.clientId)?.companyName ?? "client";
+  return `${rec.receiptNo} — ${client}, $${rec.amountUsd.toLocaleString()}`;
+}
+
 /** What cancelling a receipt will change, in plain words, for the confirmation. */
 export function deleteImpact(db: DB, receiptId: string): string[] {
   const rec = (db.clientReceipts ?? []).find(r => r.id === receiptId);
@@ -283,7 +292,7 @@ export function deleteImpact(db: DB, receiptId: string): string[] {
  * recorded that never actually happened (wrong client, entered twice).
  */
 export function deleteReceipt(receiptId: string, userId: string): void {
-  updateDb(d => {
+  updateDbAs({ summary: `Cancelled receipt ${receiptLabel(receiptId)}` }, d => {
     const rec = (d.clientReceipts ?? []).find(r => r.id === receiptId);
     if (!rec) return;
     unapply(d, rec);

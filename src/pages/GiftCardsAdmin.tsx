@@ -7,8 +7,14 @@ import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
-import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download } from "lucide-react";
+import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download, Eye, Pencil, Ban, Trash2 } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import { useNavigate } from "react-router-dom";
+import { useAuth } from "@/lib/auth";
+import { useCan } from "@/hooks/useCan";
+import type { MoreAction } from "@/components/MoreMenu";
+import { GIFT_CARD_NO_DELETE, GIFT_CARD_NO_EDIT, cancelGiftCardFlow, giftCardCancelBlocker } from "@/lib/giftCardActions";
+import { needsAccess } from "@/lib/actionHints";
 import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 
 const STATUS_STYLE: Record<GiftCardStatus, string> = {
@@ -20,6 +26,9 @@ const STATUS_STYLE: Record<GiftCardStatus, string> = {
 
 export function GiftCardsAdminPage() {
   const db = useDb();
+  const { user } = useAuth();
+  const can = useCan();
+  const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | GiftCardStatus>("all");
   const [showExport, setShowExport] = useState(false);
@@ -113,6 +122,21 @@ export function GiftCardsAdminPage() {
     ]);
   };
 
+  // A card is only ever cancelled (an admin's call — it is money promised to a
+  // client); never edited, never deleted. Each is shown, greyed with why.
+  const cardActions = (c: GiftCard): MoreAction[] => {
+    const dead = giftCardCancelBlocker(c, db.orders);
+    const admin = user?.role === "admin";
+    return [
+      { label: "View client", icon: Eye, onSelect: () => navigate(`/clients/${c.clientId}`),
+        disabled: !can("clients"), hint: can("clients") ? clientName(c.clientId) : needsAccess("clients", "view") },
+      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_EDIT },
+      { label: "Cancel card", icon: Ban, danger: true, onSelect: () => cancelGiftCardFlow(c.id), disabled: !!dead || !admin,
+        hint: dead ?? (admin ? `Stops the ${fmtMoney(giftCardRemaining(c, db.orders))} left on it being spent` : "Only an admin can cancel a gift card") },
+      { label: "Delete", icon: Trash2, danger: true, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_DELETE },
+    ];
+  };
+
   const TILES: [string, string, typeof Gift, string][] = [
     ["Issued", fmtMoney(stats.issued), Gift, "text-primary"],
     ["Redeemed", fmtMoney(stats.used), CheckCircle2, "text-success"],
@@ -167,6 +191,7 @@ export function GiftCardsAdminPage() {
             rows={rows}
             rowKey={c => c.id}
             details={cardDetails}
+            rowActions={cardActions}
             defaultSort={{ key: "issued", dir: "desc" }}
             emptyText={ql || statusFilter !== "all" ? "No gift cards match your filters." : "No gift cards issued yet."}
             columns={[

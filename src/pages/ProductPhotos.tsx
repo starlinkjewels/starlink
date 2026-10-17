@@ -10,8 +10,17 @@ import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRO
 import { downloadAsZip } from "@/lib/zipDownload";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
-import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package } from "lucide-react";
+import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package, FolderInput } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { ActionSheet } from "@/components/ActionSheet";
+import { AsyncButton } from "@/components/AsyncButton";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { needsAccess } from "@/lib/actionHints";
+import { folderPath } from "@/lib/catalogItemEdit";
 
 const MAX_VIDEO_MB = 60;
 
@@ -77,7 +86,7 @@ function FolderCard({ label, sub, cover, onClick, onRename, onDelete }: {
   );
 }
 
-function ItemCard({ item, onOpen, onDownload, onDelete }: { item: GalleryItem; onOpen(): void; onDownload(): void; onDelete?(): void }) {
+function ItemCard({ item, onOpen, onDownload, onDelete, menu }: { item: GalleryItem; onOpen(): void; onDownload(): void; onDelete?(): void; menu?: MoreAction[] }) {
   return (
     <motion.div whileTap={{ scale: 0.97 }} className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col group">
       <button onClick={onOpen} className="block w-full aspect-square bg-secondary/30 overflow-hidden relative">
@@ -89,8 +98,60 @@ function ItemCard({ item, onOpen, onDownload, onDelete }: { item: GalleryItem; o
         <button onClick={e => { e.stopPropagation(); onDownload(); }} className="absolute top-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-muted-foreground hover:text-primary shadow-sm" aria-label="Download"><Download className="h-3.5 w-3.5" /></button>
         {onDelete && <button onClick={e => { e.stopPropagation(); onDelete(); }} className="absolute bottom-2 right-2 h-8 w-8 rounded-lg bg-white/90 border border-border/60 grid place-items-center text-destructive hover:bg-destructive/10 shadow-sm opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity" aria-label="Delete"><Trash2 className="h-3.5 w-3.5" /></button>}
       </button>
-      <div className="px-2.5 pt-2 pb-1.5"><p className="text-[11px] text-foreground font-medium truncate">{item.label}</p></div>
+      <div className="px-2.5 pt-2 pb-1.5 flex items-center gap-1">
+        <p className="flex-1 min-w-0 text-[11px] text-foreground font-medium truncate">{item.label}</p>
+        {menu && <MoreMenu size="sm" label={`Actions for ${item.label}`} title={item.label} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
+      </div>
     </motion.div>
+  );
+}
+
+/**
+ * Rename a library item, or move it to another folder — one field on the
+ * item, in the side panel. The file itself stays where it is in storage.
+ */
+function PhotoItemSheet({ item, mode, folders, onClose }: {
+  item: ProductPhotoItem; mode: "rename" | "move"; folders: CatalogFolder[]; onClose(): void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [folderId, setFolderId] = useState(item.folderId ?? "");
+  const options = folders.map(f => ({ id: f.id, label: folderPath(folders, f.id) })).sort((a, b) => a.label.localeCompare(b.label));
+  const save = () => {
+    if (mode === "rename") {
+      const v = name.trim().slice(0, 60);
+      if (!v) { toast.error("Enter a name"); return; }
+      if (v !== item.name) { updateDb(d => { const x = d.productPhotoItems.find(i => i.id === item.id); if (x) x.name = v; }); toast.success(`Renamed to ${v}`); }
+    } else if (folderId && folderId !== item.folderId) {
+      updateDb(d => { const x = d.productPhotoItems.find(i => i.id === item.id); if (x) x.folderId = folderId; });
+      toast.success(`Moved to ${folderPath(folders, folderId)}`);
+    }
+    onClose();
+  };
+  return (
+    <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={mode === "rename" ? Pencil : FolderInput}
+      title={mode === "rename" ? "Rename" : "Move to another folder"}
+      description={mode === "rename" ? "The name shown under it, and the file name it downloads as." : `Now in ${item.folderId ? folderPath(folders, item.folderId) : "the library"}. Share links already sent keep showing it where it was.`}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">{mode === "rename" ? "Save" : "Move"}</AsyncButton>
+        </div>
+      }>
+      {mode === "rename" ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="pp_item_name" className="text-xs">Name</Label>
+          <Input id="pp_item_name" value={name} autoFocus maxLength={60} onChange={e => setName(e.target.value)} onKeyDown={e => { if (e.key === "Enter") save(); }} className="h-10 rounded-xl" />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <Label className="text-xs">Folder</Label>
+          <Select value={folderId} onValueChange={setFolderId}>
+            <SelectTrigger className="h-10 rounded-xl" aria-label="Folder"><SelectValue placeholder="Choose a folder" /></SelectTrigger>
+            <SelectContent>{options.map(o => <SelectItem key={o.id} value={o.id}>{o.label}{o.id === item.folderId ? " (here now)" : ""}</SelectItem>)}</SelectContent>
+          </Select>
+        </div>
+      )}
+    </ActionSheet>
   );
 }
 
@@ -263,8 +324,11 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   const descendantIds = (rootId: string): string[] => { const out = [rootId]; const stack = [rootId]; while (stack.length) { const cur = stack.pop()!; for (const f of folders) if ((f.parentId ?? null) === cur) { out.push(f.id); stack.push(f.id); } } return out; };
   const deleteFolder = async (id: string) => {
     const f = folders.find(x => x.id === id);
-    if (!(await confirmBox(`Delete folder "${f?.name}" and everything inside it?`))) return;
     const ids = descendantIds(id);
+    // Say what goes with it: the folders inside, and the files themselves.
+    const subs = ids.length - 1, files = allItems.filter(i => ids.includes(i.folderId)).length;
+    const what = [subs ? `${subs} folder${subs !== 1 ? "s" : ""}` : "", files ? `${files} photo/video file${files !== 1 ? "s" : ""}` : ""].filter(Boolean).join(" and ");
+    if (!(await confirmBox(`Delete folder "${f?.name}" and everything inside it?\n\n${what ? `${what} inside go with it — the files are deleted from storage, and share links to them stop working.` : "It is empty."} This cannot be undone.`))) return;
     const removed = allItems.filter(i => ids.includes(i.folderId));
     updateDb(d => { d.productPhotoFolders = d.productPhotoFolders.filter(x => !ids.includes(x.id)); d.productPhotoItems = d.productPhotoItems.filter(i => !ids.includes(i.folderId)); });
     for (const it of removed) await deleteByUrl(it.url);
@@ -375,7 +439,27 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   };
 
 
-  const deleteItem = async (id: string) => { const it = allItems.find(x => x.id === id); updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); }); if (it) await deleteByUrl(it.url); };
+  // The file goes with it, so it asks first.
+  const deleteItem = async (id: string) => {
+    const it = allItems.find(x => x.id === id);
+    if (!it) return;
+    if (!(await confirmBox(`Delete "${it.name}"?\n\nThe ${it.type} file is deleted from storage — gone from this folder, from downloads, and from any share link that shows it. This cannot be undone.`))) return;
+    updateDb(d => { d.productPhotoItems = d.productPhotoItems.filter(x => x.id !== id); });
+    await deleteByUrl(it.url);
+    toast.success(`${it.type === "video" ? "Video" : "Photo"} deleted`);
+  };
+  const [itemSheet, setItemSheet] = useState<{ item: ProductPhotoItem; mode: "rename" | "move" } | null>(null);
+  // Staff: what can be done to one item — greyed with the reason when their access doesn't reach it.
+  const itemMenu = (id: string): MoreAction[] | undefined => {
+    const it = allItems.find(x => x.id === id);
+    if (!it || !isStaff) return undefined;
+    return [
+      { label: "Rename", icon: Pencil, hint: canEdit ? undefined : needsAccess("productPhotos", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item: it, mode: "rename" }) },
+      { label: "Move to another folder", icon: FolderInput, hint: !canEdit ? needsAccess("productPhotos", "edit") : folders.length > 1 ? undefined : "There is no other folder yet",
+        disabled: !canEdit || folders.length < 2, onSelect: () => setItemSheet({ item: it, mode: "move" }) },
+      { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("productPhotos", "delete"), disabled: !canDelete, onSelect: () => deleteItem(it.id) },
+    ];
+  };
   const downloadAll = async () => {
     const name = (currentFolderId ? folders.find((f: CatalogFolder) => f.id === currentFolderId)?.name : "") || "photos";
     setDownloading(true);
@@ -478,7 +562,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
 
       {gallery.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
-          {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={canDelete ? () => deleteItem(item.id) : undefined} />)}
+          {gallery.map((item, i) => <ItemCard key={item.id} item={item} onOpen={() => setLightbox(i)} onDownload={() => downloadOne(item.src, item.filename)} onDelete={canDelete ? () => deleteItem(item.id) : undefined} menu={itemMenu(item.id)} />)}
         </div>
       )}
 
@@ -494,6 +578,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
       )}
 
       <AnimatePresence>{lightbox !== null && <Lightbox items={gallery} startIndex={lightbox} onClose={() => setLightbox(null)} />}</AnimatePresence>
+      {itemSheet && <PhotoItemSheet item={itemSheet.item} mode={itemSheet.mode} folders={folders} onClose={() => setItemSheet(null)} />}
     </div>
   );
 }

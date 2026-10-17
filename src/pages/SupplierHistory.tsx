@@ -1,5 +1,5 @@
-import { useMayExport } from "@/hooks/useCan";
-import { MoreMenu } from "@/components/MoreMenu";
+import { useCan, useMayExport } from "@/hooks/useCan";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
@@ -7,7 +7,7 @@ import { coField, workCompanyOf } from "@/lib/companies";
 import { isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir, type Supplier } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -17,8 +17,13 @@ import {
 import { increaseStock } from "@/lib/stock";
 import {
   canVoidPurchase, canEditPurchase, editPurchase, voidPurchase as voidPurchaseCascade,
-  purchaseLabel, voidImpact, type PurchaseEdit,
+  purchaseLabel, voidImpact, purchaseEditScope, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
+import { listEntries, type MoneyEntry } from "@/lib/moneyEntries";
+import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
+import { SupplierEditDialog } from "@/components/SupplierEditDialog";
+import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
+import { needsAccess } from "@/lib/actionHints";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
@@ -28,7 +33,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard,
-  Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle,
+  Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -135,6 +140,12 @@ function SupplierHistoryPageBody() {
   const db = useDb();
   const addNew = useAddNew();
   const otherMaterials = useOtherMaterials();
+  const can = useCan();
+  const isAdmin = user?.role === "admin";
+  // Correcting the profile, a purchase or a payment from here: each opens in a
+  // panel over the page.
+  const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null);
+  const [editingEntry, setEditingEntry] = useState<MoneyEntry | null>(null);
 
   const supplier = db.suppliers.find(s => s.id === id);
   if (!supplier) {
@@ -443,9 +454,9 @@ function SupplierHistoryPageBody() {
   // Deliberately CONSERVATIVE: a void only proceeds when it can fully and safely
   // reverse itself. It refuses (with a clear reason) if any payment was recorded
   // (those may have been FIFO-allocated and can't be traced back cleanly — the
-  // payment must be reversed from the locker first), if a certified packet has
-  // already left stock, or if pooled stock has already been consumed. This keeps
-  // production money/inventory from silently drifting.
+  // payment must be cancelled in Payments → Supplier payments first), if a
+  // certified packet has already left stock, or if pooled stock has already been
+  // consumed. This keeps production money/inventory from silently drifting.
   const [voidingId, setVoidingId] = useState<string | null>(null);
   const [editingPurchase, setEditingPurchase] = useState<Purchase | null>(null);
 
@@ -486,6 +497,64 @@ function SupplierHistoryPageBody() {
   };
 
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
+
+  // ── What can be done to each line ──
+  // Every action is offered; one that can't be done is greyed out with the
+  // reason underneath, rather than hidden or refused with a toast on click.
+  const ADMIN_ONLY = "Only an admin can change a supplier's purchases";
+  const purchaseActions = (p: Purchase): MoreAction[] => {
+    const o = p.orderId ? db.orders.find(x => x.id === p.orderId) : undefined;
+    const edit = canEditPurchase(db, p);
+    const scope = purchaseEditScope(db, p);
+    const voidable = canVoidPurchase(db, p);
+    return [
+      { label: "View order", icon: ExternalLink, show: !!o,
+        hint: can("orders") ? `Bought for ${o?.orderNumber}` : needsAccess("orders", "view"),
+        disabled: !can("orders"), onSelect: () => navigate(`/orders/${o!.id}`) },
+      { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), disabled: !isAdmin || !edit.ok,
+        // Open, but only the rate: say so before the panel does.
+        hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
+      { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true,
+        disabled: !isAdmin || voidingId === p.id || !voidable.ok, onSelect: () => voidPurchase(p),
+        hint: !isAdmin ? ADMIN_ONLY : voidable.ok ? "Reverses the supplier due, stock and factory issue" : voidable.reason },
+    ];
+  };
+
+  // A payment, refund or advance on the statement is corrected with the same
+  // panel and menu as Payments → Supplier payments (MoneyEntryEditor), so the
+  // bill and the account it went through move together. Worked out once, on
+  // first use.
+  let entryCache: MoneyEntry[] | undefined;
+  const entryOf = (rowId: string) =>
+    (entryCache ??= listEntries(db, "supplier")).find(e => e.id === rowId || e.legIds?.includes(rowId));
+  const statementActions = (r: StatementRow): MoreAction[] => {
+    if (r.kind === "Purchase") {
+      const p = purchases.find(x => x.id === r.id);
+      return p ? purchaseActions(p) : [];
+    }
+    if (r.kind !== "Payment" && r.kind !== "Received" && r.kind !== "Advance") return [];
+    const e = entryOf(r.id);
+    if (!e) {
+      const why = "Correct it in Payments → Supplier payments";
+      return [{ label: "Edit", icon: Lock, disabled: true, hint: why, onSelect: () => {} }];
+    }
+    return entryRowActions(e, {
+      mayEdit: can("payments", "edit"), mayDelete: can("payments", "delete"),
+      editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
+      onEdit: setEditingEntry, onDelete: x => { void confirmDeleteEntry(db, x); },
+    });
+  };
+
+  // ── The supplier themselves ──
+  const deleteGuard = supplierDeleteGuard(db, supplier);
+  const deleteSupplier = async () => {
+    const refused = await deleteRefusal("supplier", supplier);
+    if (refused) { toast.error(refused); return; }
+    if (!(await confirmBox(`Delete ${supplier.name}?\n\nThey have no purchases, payments or refunds, so no other record changes. This cannot be undone.`))) return;
+    updateDb(d => { d.suppliers = d.suppliers.filter(x => x.id !== supplier.id); });
+    toast.success("Supplier deleted");
+    navigate("/suppliers");
+  };
 
   /**
    * What was actually bought, in the words a jeweller uses. The weight has its
@@ -768,10 +837,17 @@ function SupplierHistoryPageBody() {
           <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-400/15 grid place-items-center shrink-0">
             <Truck className="h-7 w-7 text-amber-600" />
           </div>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{supplier.name}</h1>
             <p className="text-muted-foreground mt-1 break-words">{supplier.contactPerson}</p>
           </div>
+          {/* Its own label, apart from the account's "More actions" below. */}
+          <MoreMenu label="Supplier actions" title="Supplier" actions={[
+            { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
+              hint: isAdmin ? "Name, contact, GSTIN, address" : "Only an admin can change suppliers" },
+            { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !isAdmin || !deleteGuard.ok,
+              hint: !isAdmin ? "Only an admin can change suppliers" : deleteGuard.reason },
+          ]} />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
           <div className="flex items-start gap-2 min-w-0"><Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{supplier.email || "—"}</p></div></div>
@@ -868,6 +944,7 @@ function SupplierHistoryPageBody() {
         debitLabel="Bill"
         creditLabel="Paid"
         details={statementDetails}
+        rowActions={statementActions}
         onExport={() => setShowExport(true)}
         summary={[
           { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
@@ -905,13 +982,9 @@ function SupplierHistoryPageBody() {
             }}
             // Correcting beats voiding and re-entering: a void unwinds the
             // factory issue, the stock trail and the certified packet with it.
-            // This was the one list where a purchase could be removed but not
-            // put right. A void is only offered while nothing has been paid.
-            rowActions={p => [
-              { label: "Edit", icon: Pencil, onSelect: () => openEditPurchase(p), show: user?.role === "admin" },
-              { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true, disabled: voidingId === p.id,
-                onSelect: () => voidPurchase(p), show: user?.role === "admin" && purchasePaid(p) === 0 },
-            ]}
+            // Both are always offered, greyed with the reason when they can't
+            // be done — a paid bill says to cancel the payment first.
+            rowActions={purchaseActions}
             emptyText="No purchases recorded yet."
           />
         </div>
@@ -920,7 +993,12 @@ function SupplierHistoryPageBody() {
         purchase={editingPurchase}
         onClose={() => setEditingPurchase(null)}
         onSave={saveEditPurchase}
+        // Material already made into a piece keeps its weight; the rate can still move.
+        lockQuantity={!!editingPurchase && !purchaseEditScope(db, editingPurchase).quantity}
+        lockNote={editingPurchase ? purchaseEditScope(db, editingPurchase).reason : undefined}
       />
+      <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("payments", "delete")} />
+      <SupplierEditDialog supplier={editingSupplier} onClose={() => setEditingSupplier(null)} />
 
       {/* The three money actions slide in from the right, so the ledger and the
           statement behind stay where they were. Closing a panel keeps what was

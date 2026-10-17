@@ -1,13 +1,19 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { MoreMenu } from "@/components/MoreMenu";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, worksOnClient, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { ClientInvoiceLedger, buildInvoiceBlocks } from "@/components/ClientInvoiceLedger";
+import { ClientInvoiceLedger, buildInvoiceBlocks, type InvoiceBlock, type InvoicePayment } from "@/components/ClientInvoiceLedger";
+import { ClientEditDialog } from "@/components/ClientEditDialog";
+import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
+import { cancelCreditNoteFlow, creditNoteCancelBlocker } from "@/components/creditNoteCancel";
+import { printNote, useMayReturn } from "@/components/SalesReturn";
+import { clientDeleteBlocker, deleteClientFlow, toggleClientActive } from "@/lib/clientActions";
+import { needsAccess } from "@/lib/actionHints";
 import { StatusBadge } from "@/components/StatusBadge";
 import { GiftCardAdminPanel } from "@/components/GiftCardAdminPanel";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -25,6 +31,7 @@ import {
   ArrowLeft, Package, Mail, Phone, MapPin, Globe, Undo2,
   FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
   Download, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
+  Pencil, Trash2, Power, Eye, Printer, XCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -63,12 +70,17 @@ export function ClientHistoryPage() {
 
 function ClientHistoryPageBody() {
   const mayExport = useMayExport();
+  const mayExportInvoices = useMayExport("invoices");
+  const mayReturn = useMayReturn();
   const { id } = useParams();
   const navigate = useNavigate();
   const { user } = useAuth();
   const can = useCan();
   const db = useDb();
   const addNew = useAddNew();
+  // Before the early return below, so they run on every draw.
+  const [editingClient, setEditingClient] = useState(false);
+  const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
 
   const client = db.clients.find(c => c.id === id);
 
@@ -249,35 +261,47 @@ function ClientHistoryPageBody() {
     toast.success("Credit applied to oldest outstanding bills");
   };
 
-  // Reverse a wrongly-entered payment (admin). A payment is ONE deposit event:
-  // its allocations across orders all carry the exact same timestamp, and it
-  // wrote one matching locker income line. We only allow a clean reversal — when
-  // the client isn't carrying credit — so we never have to guess how much of an
-  // opaque credit balance came from this particular payment. If credit is being
-  // held, we refuse and point the admin at Apply Credit / manual adjustment.
-  const reversePayment = async (paymentCreatedAt: string) => {
-    if (user?.role !== "admin") { toast.error("Only an admin can reverse a payment."); return; }
-    if ((client?.creditBalance || 0) > 0) {
-      toast.error("This client is carrying credit on account, so a payment can't be cleanly reversed here. Clear the credit first, or adjust manually.");
-      return;
-    }
-    const affected = billableOrders.flatMap(o => (o.advances || []).filter(a => a.createdAt === paymentCreatedAt));
-    const total = affected.reduce((s, a) => s + a.amount, 0);
-    if (affected.length === 0) { toast.error("Couldn't find this payment's allocations."); return; }
-    if (!(await confirmBox(`Reverse this payment of ${fmtMoney(total)}? It will be removed from the ${affected.length} bill(s) it was applied to and from the locker. This can't be undone.`))) return;
-    updateDb(d => {
-      for (const o of d.orders.filter(o => o.clientId === id)) {
-        if (o.advances) o.advances = o.advances.filter(a => a.createdAt !== paymentCreatedAt);
-      }
-      if (d.lockerTransactions) {
-        d.lockerTransactions = d.lockerTransactions.filter(
-          t => !(t.refType === "clientPayment" && t.refId === id && t.createdAt === paymentCreatedAt),
-        );
-      }
-    });
-    toast.success("Payment reversed");
+  // ── Correcting the record ──
+  // A payment is corrected or cancelled through its RECEIPT, which also holds
+  // its locker deposit and any credit it left — never by removing advances on
+  // their own (the old "reverse" matched advances by time and only cleared a
+  // deposit filed under the client, so a payment taken on an order page kept
+  // its deposit, and its receipt was never cancelled).
+  const mayEditClient = can("clients", "edit");
+  const mayDeleteClient = can("clients", "delete");
+  const mayPayEdit = can("payments", "edit");
+  const mayPayDelete = can("payments", "delete");
+  const clientDeleteWhy = !mayDeleteClient ? needsAccess("clients", "delete") : clientDeleteBlocker(db, id!);
+
+  const removeClient = async () => {
+    if (await deleteClientFlow(id!)) navigate("/clients");
   };
 
+  const receiptNo = (rid?: string) => (rid ? (db.clientReceipts ?? []).find(r => r.id === rid)?.receiptNo : undefined);
+  const paymentActions = (p: InvoicePayment): MoreAction[] => {
+    const lock = paymentLockReason(db, p);
+    const rcpt = receiptNo(p.receiptId) ? `receipt ${receiptNo(p.receiptId)}` : "the receipt";
+    return [
+      { label: "Edit", icon: Pencil, disabled: !!lock || !mayPayEdit,
+        hint: lock ?? (mayPayEdit ? `Correct ${rcpt} — amount, date, account, mode` : needsAccess("payments", "edit")),
+        onSelect: async () => { await loadReceipts(); setEditReceiptId(p.receiptId!); } },
+      { label: "Delete", icon: Trash2, danger: true, disabled: !!lock || !mayPayDelete,
+        hint: lock ?? (mayPayDelete ? `Cancels ${rcpt} — off the bills, the account and any credit` : needsAccess("payments", "delete")),
+        onSelect: () => cancelReceiptFlow(p.receiptId!, user!.id) },
+    ];
+  };
+  const creditActions = (c: InvoiceBlock["credits"][number]): MoreAction[] => {
+    const why = !mayReturn ? needsAccess("invoices", "edit") : creditNoteCancelBlocker(db, c.id);
+    return [
+      { label: "Print credit note", icon: Printer, onSelect: () => printNote(c.id), show: mayExportInvoices },
+      { label: "Cancel return", icon: XCircle, danger: true, disabled: !!why,
+        hint: why ?? "The pieces count as theirs again and the credit comes back off", onSelect: () => cancelCreditNoteFlow(c.id, user!) },
+    ];
+  };
+  const invoiceActions = (b: InvoiceBlock): MoreAction[] => [
+    { label: "View invoice", icon: Eye, onSelect: () => navigate(`/invoices?q=${encodeURIComponent(b.number)}`),
+      disabled: !can("invoices"), hint: can("invoices") ? "Open it on the Invoices page" : needsAccess("invoices", "view") },
+  ];
 
 
   /** Trim only when the text genuinely cannot fit the column (8.5pt Helvetica
@@ -561,11 +585,22 @@ function ClientHistoryPageBody() {
               <p className="text-muted-foreground mt-1 break-words">{client.ownerName}</p>
             </div>
           </div>
-          <IfExport>
-          <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2 w-full sm:w-auto shrink-0">
-            <Download className="h-4 w-4" /> Export Report
-          </Button>
-          </IfExport>
+          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
+            <IfExport>
+            <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2 flex-1 sm:flex-none">
+              <Download className="h-4 w-4" /> Export Report
+            </Button>
+            </IfExport>
+            {/* The record itself. Greyed with the reason when access doesn't
+                reach it — or, for Delete, when anything is on record for them. */}
+            <MoreMenu title="Client" actions={[
+              { label: "Edit details", icon: Pencil, onSelect: () => setEditingClient(true), disabled: !mayEditClient,
+                hint: mayEditClient ? "Name, contact, address, opening balance" : needsAccess("clients", "edit") },
+              { label: client.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggleClientActive(client.id), disabled: !mayEditClient,
+                hint: !mayEditClient ? needsAccess("clients", "edit") : client.status === "active" ? "They can no longer sign in; their history stays" : "They can sign in again" },
+              { label: "Delete client", icon: Trash2, danger: true, onSelect: removeClient, disabled: !!clientDeleteWhy, hint: clientDeleteWhy },
+            ]} />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
@@ -682,8 +717,12 @@ function ClientHistoryPageBody() {
         openingDebit={openingDebitAmt(client)}
         openingCredit={openingCreditAmt(client)}
         onExport={() => setShowExport(true)}
-        onReversePayment={user?.role === "admin" ? reversePayment : undefined}
+        invoiceActions={invoiceActions}
+        paymentActions={paymentActions}
+        creditActions={creditActions}
       />
+      <ClientEditDialog clientId={editingClient ? client.id : null} onClose={() => setEditingClient(false)} />
+      <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
 
       {/* Account Statement — same ledger as Stock and Locker: summary, filters,
           then every entry with a running balance. */}

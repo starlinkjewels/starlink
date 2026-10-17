@@ -1,27 +1,22 @@
 import { useState, useMemo } from "react";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useAuth } from "@/lib/auth";
-import { updateDb, fmtMoney, fmtDate, orderTotal } from "@/lib/db";
+import { fmtMoney, fmtDate, orderTotal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import {
   TrendingUp, TrendingDown, Download, Filter, X, Wallet,
-  CreditCard, Receipt, Calendar, Trash2, Pencil, FileText, FileSpreadsheet,
+  CreditCard, Receipt, Calendar, Trash2, Pencil, FileText, FileSpreadsheet, Eye,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AsyncButton } from "@/components/AsyncButton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { usePagination } from "@/hooks/usePagination";
-import { PaginationBar } from "@/components/PaginationBar";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ccy, ccyOrder, fmtCcy, fmtCcyPdf, type CurrencyCode } from "@/lib/currency";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import type { MoreAction } from "@/components/MoreMenu";
+import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
+import { needsAccess } from "@/lib/actionHints";
 import { useCan } from "@/hooks/useCan";
 import { filled, linkList, lockerLabel, lockerTxnDetails, noteText, recorded, refLink, refNo, userName, when, type Detail } from "@/components/rowDetails";
 
@@ -40,7 +35,9 @@ type PassbookRow = {
   description: string;
   link?: { label: string; to: string };
   amount: number;
-  editable?: { orderId: string }; // set only for Advance/Payment/Final Payment rows
+  /** A client payment (Advance/Payment/Final Payment rows): the order it is on,
+   *  and the receipt it came in on — what it is corrected or cancelled through. */
+  editable?: { orderId: string; receiptId?: string; fromCredit?: boolean };
 };
 
 /* ─── Helpers ────────────────────────────────────────────────── */
@@ -64,7 +61,7 @@ const TYPE_TONE: Record<PassbookRowType, "neutral" | "green" | "red" | "amber" |
 export function IncomePage() {
   const { user } = useAuth();
   const db = useDb();
-  const canEdit = user!.role !== "client";
+  const navigate = useNavigate();
   const isClient = user!.role === "client";
   const can = useCan();
 
@@ -74,43 +71,29 @@ export function IncomePage() {
   const [dateTo, setDateTo]     = useState("");
   const [clientFilter, setClientFilter] = useState("all");
 
-  /* Edit/delete a transaction — corrects mistakes (wrong amount, typo, etc.).
-     Only Advance/Payment/Final Payment rows are editable here — supplier/
-     factory/locker/expense entries are managed on their own pages. */
-  const [editing, setEditing] = useState<PassbookRow | null>(null);
-  const [editAmount, setEditAmount] = useState("");
-  const [editNote, setEditNote] = useState("");
-
-  const openEdit = (row: PassbookRow) => {
-    if (!canEdit || !row.editable) return;
-    setEditing(row);
-    setEditAmount(String(row.amount));
-    setEditNote("");
+  /* Correcting a client payment. It is corrected or cancelled through its
+     RECEIPT (src/lib/receipts.ts), never by changing the advance on its own:
+     the receipt also holds the locker deposit and any credit it left, and an
+     advance edited here used to leave both behind. Supplier, factory, account
+     and expense entries are corrected on their own pages — their rows say where. */
+  const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
+  const mayPayEdit = !isClient && can("payments", "edit");
+  const mayPayDelete = !isClient && can("payments", "delete");
+  // Why a client payment row can't be corrected here; undefined when it can.
+  const payLock = (r: PassbookRow) => (r.editable ? paymentLockReason(db, r.editable) : "Not a client payment");
+  const openEdit = async (row: PassbookRow) => {
+    if (!mayPayEdit || !row.editable?.receiptId || payLock(row)) return;
+    // Receipts load on demand — this page doesn't list them.
+    await loadReceipts();
+    setEditReceiptId(row.editable.receiptId);
   };
 
-  const saveEdit = () => {
-    if (!editing?.editable) return;
-    const amt = parseFloat(editAmount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    updateDb(d => {
-      const o = d.orders.find(x => x.id === editing.editable!.orderId);
-      const adv = o?.advances.find(a => a.id === editing.id);
-      if (adv) { adv.amount = amt; if (editNote.trim()) adv.note = editNote.trim(); }
-    });
-    toast.success("Transaction updated");
-    setEditing(null);
-  };
-
-  const deleteEdit = async () => {
-    if (!editing?.editable) return;
-    if (!(await confirmBox("Delete this transaction? This cannot be undone."))) return;
-    updateDb(d => {
-      const o = d.orders.find(x => x.id === editing.editable!.orderId);
-      if (o) o.advances = o.advances.filter(a => a.id !== editing.id);
-    });
-    toast.success("Transaction deleted");
-    setEditing(null);
-  };
+  /** Where a row that isn't a client payment is corrected, by what it is. */
+  const correctedIn = (r: PassbookRow): string =>
+    r.type === "Expense" ? "Expenses"
+    : r.type === "Supplier Payment" ? "Payments → Supplier payments"
+    : r.type === "Factory Charges" ? "Payments → Factory payments"
+    : "Payments → Account entries";
 
   /* Build the unified passbook — every payment in or out, anywhere in the
      app, so a real cash-basis view (and exact profit) is possible. */
@@ -135,7 +118,7 @@ export function IncomePage() {
           description: adv.note || "Payment received",
           link: { label: order.orderNumber, to: `/orders/${order.id}` },
           amount: adv.amount,
-          editable: { orderId: order.id },
+          editable: { orderId: order.id, receiptId: adv.receiptId, fromCredit: adv.fromCredit },
         });
       });
     });
@@ -284,6 +267,31 @@ export function IncomePage() {
     // party its account.
     const t = (db.lockerTransactions ?? []).find(x => x.id === r.id);
     return t ? lockerTxnDetails(db, t, m => can(m), { voucher: true, note: !!t.category }) : [];
+  };
+
+  // What can be done to a row. Every row has the same three, so nothing reads
+  // as missing: a client payment is corrected or cancelled through its
+  // receipt; anything else is greyed with where it is corrected instead.
+  const rowActions = (r: PassbookRow): MoreAction[] => {
+    if (r.editable) {
+      const lock = payLock(r);
+      return [
+        { label: "View order", icon: Eye, onSelect: () => navigate(`/orders/${r.editable!.orderId}`),
+          disabled: !can("orders"), hint: can("orders") ? r.link?.label : needsAccess("orders", "view") },
+        { label: "Edit", icon: Pencil, onSelect: () => openEdit(r), disabled: !!lock || !mayPayEdit,
+          hint: lock ?? (mayPayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit")) },
+        { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.editable!.receiptId!, user!.id), disabled: !!lock || !mayPayDelete,
+          hint: lock ?? (mayPayDelete ? "Cancels the receipt — off the bills, the account and any credit" : needsAccess("payments", "delete")) },
+      ];
+    }
+    const where = correctedIn(r);
+    return [
+      { label: r.type === "Expense" ? "View in Expenses" : "View in Locker", icon: Eye, onSelect: () => navigate(r.link?.to ?? "/locker"),
+        disabled: !can(r.type === "Expense" ? "expenses" : "locker"),
+        hint: can(r.type === "Expense" ? "expenses" : "locker") ? undefined : needsAccess(r.type === "Expense" ? "expenses" : "locker", "view") },
+      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: `Edit in ${where}` },
+      { label: "Delete", icon: Trash2, danger: true, onSelect: () => {}, disabled: true, hint: `Delete in ${where}` },
+    ];
   };
 
   const exportCsv = () => {
@@ -453,9 +461,9 @@ export function IncomePage() {
           <h2 className="font-semibold text-brand-dark">All Transactions</h2>
         </div>
 
-        {/* Client payments open the edit dialog on a click; the rest are managed
-            on their own pages, so their rows don't look clickable. Keyed on the
-            tab and filters so a new view starts from its newest entry. */}
+        {/* A client payment with a receipt opens its correction on a click; the
+            rest open their details, and their ⋯ says where they are corrected.
+            Keyed on the tab and filters so a new view starts from its newest entry. */}
         <div className="p-3 sm:p-4">
           <DataTable
             resetKey={`${tab}|${dateFrom}|${dateTo}|${clientFilter}`}
@@ -469,12 +477,10 @@ export function IncomePage() {
             searchPlaceholder="Search party, reference, description"
             totalsLabel="Net"
             totals={{ amount: rows => { const n = rows.reduce((s, r) => s + signed(r), 0); return <span className={n >= 0 ? "text-success" : "text-destructive"}>{fmt(n)}</span>; } }}
-            onRowClick={canEdit ? openEdit : undefined}
-            canClickRow={r => !!r.editable}
+            onRowClick={mayPayEdit ? openEdit : undefined}
+            canClickRow={r => !!r.editable && !payLock(r)}
             details={rowDetails}
-            rowActions={canEdit ? r => [
-              { label: "Edit", icon: Pencil, hint: "Correct the amount or note, or delete it", onSelect: () => openEdit(r), show: !!r.editable },
-            ] : undefined}
+            rowActions={isClient ? undefined : r => rowActions(r)}
             emptyText={
               <span className="inline-flex flex-col items-center gap-2">
                 No transactions found.
@@ -492,50 +498,8 @@ export function IncomePage() {
         </div>
       </div>
 
-      {/* ── Edit / delete transaction dialog ── */}
-      <Dialog open={!!editing} onOpenChange={open => !open && setEditing(null)}>
-        <DialogContent className="max-w-2xl rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display text-2xl">Edit Transaction</DialogTitle></DialogHeader>
-          {editing && (
-            <div className="space-y-4">
-              <div className="text-xs text-muted-foreground">
-                {editing.party} · {editing.link?.label} · {fmtDate(editing.date)}
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Amount ($)</Label>
-                <Input
-                  type="number" min="0.01" step="0.01" autoFocus
-                  value={editAmount}
-                  onChange={e => setEditAmount(e.target.value)}
-                  className="rounded-xl h-10"
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs">Note</Label>
-                <Input
-                  value={editNote}
-                  onChange={e => setEditNote(e.target.value)}
-                  className="rounded-xl h-10"
-                  placeholder={editing.description}
-                />
-              </div>
-              <div className="flex items-center justify-between gap-2 pt-1">
-                <Button
-                  variant="outline" size="sm"
-                  onClick={deleteEdit}
-                  className="rounded-xl gap-2 text-destructive hover:text-destructive"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Delete
-                </Button>
-                <div className="flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => setEditing(null)} className="rounded-xl">Cancel</Button>
-                  <AsyncButton size="sm" onClick={saveEdit} className="btn-hero rounded-xl">Save</AsyncButton>
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      {/* ── Correct a client receipt (side panel) ── */}
+      <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
     </div>
   );
 }

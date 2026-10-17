@@ -561,7 +561,12 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId, type: "income",
             amountInr: currency === "USD" ? Math.round(baseAmount * 100) / 100 : totalInr,
-            currency, category: "Diamond Sale", refType: "manual",
+            // Marked as the sale's own money, tied to it by id: written as a
+            // plain "manual" entry it could be corrected alone in Payments →
+            // Account entries, leaving the sale and the stone out of step. It is
+            // also not a client paying a bill, so it is never offered for
+            // applying to one — that would rewrite it as a client payment.
+            currency, category: "Diamond Sale", refType: "diamondSale", refId: saleId, notClientPayment: true,
             note: `${effectiveCarat}ct ${kind === "certified" ? "certified " : ""}${saleShape} sold to ${buyerLabel}`,
             recordedBy: user!.id, createdAt: now,
           });

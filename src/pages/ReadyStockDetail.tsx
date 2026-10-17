@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  collectionLoaded, fmtDate, fmtMoney, keptValue, stockCostOf, updateDb, worksOnOrder,
+  collectionLoaded, fmtDate, fmtMoney, keptValue, loadDb, stockCostOf, updateDb, worksOnOrder,
   type Order, type ReadyStockEventKind, type ReadyStockItem,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -25,6 +25,8 @@ import { confirmBox } from "@/lib/confirm";
 import { companyIdOfClient, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, officeRank, otherLots } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
+import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
+import { needsAccess } from "@/lib/actionHints";
 
 /** How each kind of history line looks. */
 const KIND: Record<ReadyStockEventKind, { icon: LucideIcon; tone: string; label: string }> = {
@@ -132,21 +134,32 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
   // ── Actions — the same checks and confirms as on the Ready Stock list ──
   const adjustQty = (delta: number) => updateDb(d => stepQty(d, item.id, delta, whoOf(user)));
+  // A lot an order, a return or a build points at is never deleted — it is
+  // emptied instead (lib/readyStockGuards.ts). Checked again as it runs.
   const del = async () => {
-    if (!(await confirmBox(`Delete "${item.name}" from ready stock? This cannot be undone.`))) return;
+    const why = readyStockDeleteBlocker(loadDb(), item);
+    if (why) { toast.error(why); return; }
+    const worth = item.quantity > 0 && item.price > 0 ? ` — worth ${fmtMoney(item.price * item.quantity)}` : "";
+    if (!(await confirmBox(`Delete "${item.name}" from Ready Stock?\n\n${item.quantity > 0 ? `${item.quantity} piece${item.quantity !== 1 ? "s" : ""} at the ${officeLabel(office)}${worth} come off the shelf` : "The sold-out lot is removed"}, with its photos and its history. This cannot be undone.`))) return;
     updateDb(d => { d.readyStock = d.readyStock.filter(x => x.id !== item.id); });
     toast.success("Deleted");
     nav("/ready-stock");
   };
-  const bandOn = db.settings.barcodeBandEnabled !== false && mayExport;
   // Selling makes an order, so it asks what New Order asks.
-  const canSell = item.quantity > 0 && (isAdmin || (user?.role === "employee" && can("orders", "add")));
+  const mayOrder = isAdmin || (user?.role === "employee" && can("orders", "add"));
   const sellHref = `/orders/new?readyStock=${encodeURIComponent(item.id)}`;
+  const editWhy = canEdit ? undefined : needsAccess("readyStock", "edit");
+  const delWhy = !can("readyStock", "delete") ? needsAccess("readyStock", "delete") : readyStockDeleteBlocker(db, item);
+  // Every action is listed; one this person or this piece can't take is greyed with why.
   const actions: MoreAction[] = [
-    { label: "Move to another office", icon: ArrowRightLeft, hint: `Now at the ${officeLabel(office)}`, onSelect: () => setMoving(true), show: canEdit && item.quantity > 0 },
-    { label: "Print band", icon: Tag, onSelect: () => setBandOpen(true), show: bandOn },
-    { label: "Sell this piece", icon: ShoppingBag, hint: "A new order with this piece chosen", onSelect: () => nav(sellHref), show: canSell },
-    { label: "Delete", icon: Trash2, danger: true, onSelect: del, show: can("readyStock", "delete") },
+    // Edit is the button beside this menu; without the access it shows here, greyed.
+    { label: "Edit", icon: Pencil, hint: editWhy, disabled: true, onSelect: () => undefined, show: !canEdit },
+    { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(office)}` : "Sold out — nothing here to move"),
+      disabled: !canEdit || item.quantity <= 0, onSelect: () => setMoving(true) },
+    { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
+    { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece chosen" : "Sold out — nothing left to sell",
+      disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref) },
+    { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: del },
   ];
 
   const stepper = (

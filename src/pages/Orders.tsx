@@ -16,7 +16,13 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp } from "lucide-react";
+import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2 } from "lucide-react";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { OrderEditDialog } from "@/components/OrderEditDialog";
+import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
+import { cancelOrder, cancelQuestion } from "@/lib/orderCancel";
+import { confirmBox } from "@/lib/confirm";
+import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/productExport";
@@ -161,6 +167,34 @@ export function OrdersPage() {
   // the Invoices page, already searched for.
   const nav = useNavigate();
   const openInvoice = (number: string) => nav(`/invoices?q=${encodeURIComponent(number)}`);
+
+  // What can be done to one order from the list — the same actions, checks and
+  // reasons as the order page's own ⋯ (lib/orderGuards.ts). Staff see every
+  // action, greyed with the reason when it can't be used; a client just opens it.
+  const [editing, setEditing] = useState<Order | null>(null);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const cancel = async (o: Order) => {
+    const why = cancelAccess(user) ?? cancelBlocker(db, o);
+    if (why) { toast.error(why); return; }
+    if (!(await confirmBox(cancelQuestion(o.orderNumber)))) return;
+    setCancellingId(o.id);
+    try {
+      await cancelOrder(o.id, user!);
+      toast.success(`${o.orderNumber} cancelled — material returned & any advance moved to client credit`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to cancel order");
+    } finally { setCancellingId(null); }
+  };
+  const orderActions = (o: Order): MoreAction[] => {
+    const editWhy = orderEditAccess(db, user, can, o) ?? orderSpecLocks(db, o).all;
+    const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, o);
+    return [
+      { label: "View", icon: Eye, hint: "Open the order", onSelect: () => nav(`/orders/${o.id}`) },
+      { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
+      { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
+      { label: "Delete", icon: Trash2, danger: true, hint: "Orders are never deleted — cancel instead", disabled: true, onSelect: () => undefined, show: isStaff },
+    ];
+  };
   const toggleSel = (id: string) => setSel(prev => {
     const next = new Set(prev);
     if (!next.delete(id)) next.add(id);
@@ -548,7 +582,16 @@ export function OrdersPage() {
                     a CAD sheet's measurements run right to its corners. */}
                 <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
                   <StatusBadge status={o.status} />
-                  {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
+                  <span className="flex items-center gap-1.5">
+                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
+                    {/* Inside the card's link: a click on the menu (or in it — React
+                        events travel up from the menu's portal) must not open the order. */}
+                    {isStaff && (
+                      <span onClick={e => { e.preventDefault(); e.stopPropagation(); }} className="contents">
+                        <MoreMenu size="sm" label={`Actions for ${o.orderNumber}`} title={o.orderNumber} actions={orderActions(o)} className="h-[22px] w-[22px] rounded-md" />
+                      </span>
+                    )}
+                  </span>
                 </div>
                 {/* The whole sheet, on white: shown in full, never cropped. */}
                 <div className={`relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 ${img ? "bg-secondary/60 animate-pulse" : "bg-secondary/50"}`}>
@@ -620,6 +663,7 @@ export function OrdersPage() {
             rowKey={o => o.id}
             rowHref={o => `/orders/${o.id}`}
             details={orderDetails}
+            rowActions={orderActions}
             defaultSort={{ key: "placed", dir: "desc" }}
             selected={isStaff ? sel : undefined}
             onSelectedChange={isStaff ? setSel : undefined}
@@ -639,6 +683,8 @@ export function OrdersPage() {
       />}
 
       <TrackingModal order={trackingOrder} onClose={() => setTrackingOrder(null)} />
+
+      {editing && <OrderEditDialog order={editing} onClose={() => setEditing(null)} />}
 
       {bulkDispatch && chosen.length > 0 && (
         <BulkDispatchDialog

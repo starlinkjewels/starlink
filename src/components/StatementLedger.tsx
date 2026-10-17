@@ -6,6 +6,7 @@ import { Search, Download } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { filled, when, type Detail } from "@/components/rowDetails";
+import type { MoreAction } from "@/components/MoreMenu";
 
 export interface StatementRow {
   id: string;
@@ -69,6 +70,7 @@ export function StatementLedger({
   pageSize,
   emptyText = "No entries yet.",
   rowAction,
+  rowActions,
   details,
 }: {
   title: string;
@@ -84,6 +86,10 @@ export function StatementLedger({
   emptyText?: string;
   /** Optional control at the end of a row — reversing a payment, say. */
   rowAction?: (row: StatementRow) => ReactNode;
+  /** The ⋯ menu at the end of a row — View / Edit / Delete on the record
+   *  behind it, from the page that knows that record. Passed straight to the
+   *  table; an opening balance (pinned) never gets one. */
+  rowActions?: (row: StatementRow) => MoreAction[];
   /** More for an opened row, from the page that knows the record behind it —
    *  who recorded it, the account it went through, the full note. */
   details?: (row: StatementRow) => Detail[];
@@ -219,6 +225,7 @@ export function StatementLedger({
           pinnedRows={onlyPinned ? undefined : pinned}
           columns={columns}
           rowKey={r => r.id}
+          rowActions={rowActions}
           defaultSort={{ key: "date", dir: "desc" }}
           pageSizes={pageSize ? [pageSize, pageSize * 2, pageSize * 4] : undefined}
           emptyText={active ? "Nothing in that range." : emptyText}

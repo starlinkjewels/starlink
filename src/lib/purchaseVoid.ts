@@ -48,12 +48,12 @@ function pooledStock(p: Purchase): boolean {
  */
 export function canVoidPurchase(db: DB, p: Purchase): { ok: boolean; reason?: string } {
   if (purchasePaid(p) > 0) {
-    return { ok: false, reason: "A payment has already been made against this purchase. Reverse that payment from the Locker first, then remove it." };
+    return { ok: false, reason: "A payment has already been made against this purchase. Cancel that payment in Payments → Supplier payments first, then remove it." };
   }
   const issuances = (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
   for (const i of issuances) {
     if (issuancePaid(i) > 0) {
-      return { ok: false, reason: "Making charges have already been paid to the factory for this material. Reverse that payment first." };
+      return { ok: false, reason: "Making charges have already been paid to the factory for this material. Cancel that payment in Payments → Factory payments first." };
     }
     if (i.status === "closed" || i.finishedNetWeight != null) {
       return { ok: false, reason: "The factory has already returned the finished piece made from this material, so it can't be removed. Use Rework/Return instead." };
@@ -236,12 +236,12 @@ export function purchaseEditScope(db: DB, p: Purchase): {
   reason?: string;
 } {
   if (purchasePaid(p) > 0) {
-    return { quantity: false, money: false, reason: "A payment has already been made against this purchase. Reverse that payment from the Locker first." };
+    return { quantity: false, money: false, reason: "A payment has already been made against this purchase. Cancel that payment in Payments → Supplier payments first." };
   }
   const issuances = (db.materialIssuances ?? []).filter(i => i.source === "purchase" && i.sourcePurchaseId === p.id);
   for (const i of issuances) {
     if (issuancePaid(i) > 0) {
-      return { quantity: false, money: false, reason: "Making charges have already been paid to the factory for this material. Reverse that payment first." };
+      return { quantity: false, money: false, reason: "Making charges have already been paid to the factory for this material. Cancel that payment in Payments → Factory payments first." };
     }
     if (i.status === "closed" || i.finishedNetWeight != null) {
       return { quantity: false, money: true, reason: "The factory has already returned the finished piece made from this material, so the weight can't change — but the rate still can." };
