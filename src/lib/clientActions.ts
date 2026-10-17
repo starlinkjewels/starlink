@@ -7,10 +7,18 @@
 // books would lose who it belonged to. So a client with any of that is
 // deactivated instead (they can no longer sign in; their history stays).
 import { toast } from "sonner";
-import { collectionsLoaded, ensureCollections, fmtMoney, hasOpeningBalance, loadDb, updateDbAs, type DB } from "./db";
+import { collectionsLoaded, fmtMoney, hasOpeningBalance, loadDb, updateDbAs, type DB } from "./db";
 import { confirmBox } from "./confirm";
+import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+
+/** What the check reads beyond the clients and orders the app opens with.
+ *  These arrive by themselves in the first seconds after sign-in; until they
+ *  have, they read as empty — so Delete waits ("Checking…"). */
+const CLIENT_REF_COLS = ["invoices", "giftCards", "expenses"] as const;
+/** …and the receipt book, loaded on demand: the delete loads it and counts it. */
+const CLIENT_DELETE_COLS = [...CLIENT_REF_COLS, "clientReceipts"] as const;
 
 /**
  * Why this client can't be deleted; undefined when nothing is on record for
@@ -20,6 +28,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
 export function clientDeleteBlocker(db: DB, clientId: string): string | undefined {
   const c = db.clients.find(x => x.id === clientId);
   if (!c) return "That client is no longer there";
+  if (!collectionsLoaded(CLIENT_REF_COLS)) return CHECKING;
   const orders = db.orders.filter(o => o.clientId === clientId).length;
   const invoices = (db.invoices ?? []).filter(i => i.clientId === clientId).length;
   const receipts = collectionsLoaded(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;
@@ -40,9 +49,11 @@ export function clientDeleteBlocker(db: DB, clientId: string): string | undefine
 
 /** Ask, then delete a client with nothing on record, and their login. */
 export async function deleteClientFlow(clientId: string): Promise<boolean> {
-  // The receipt book is loaded on demand: fetch it so a client whose only
-  // record is a payment is not deleted out from under it.
-  await ensureCollections(["clientReceipts"]);
+  // Everything the check reads must be here — the receipt book is loaded on
+  // demand, and the rest read as empty for the first seconds after sign-in —
+  // so a client whose only record is a payment, a bill or a gift card is never
+  // deleted out from under it.
+  if (!(await recordsReady(CLIENT_DELETE_COLS))) { toast.error(STILL_LOADING); return false; }
   const db = loadDb();
   const c = db.clients.find(x => x.id === clientId);
   const why = clientDeleteBlocker(db, clientId);

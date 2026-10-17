@@ -2575,6 +2575,23 @@ export function ensureAllCollections(): Promise<void> {
 export function collectionsLoaded(cols: readonly string[]): boolean {
   return cols.every(c => loadedCols.has(c));
 }
+/**
+ * Before a delete or cancel asks "does anything still point at this?": a
+ * collection that has not arrived reads as empty, and empty says "no". Asks
+ * for these (loading any held back on demand), waits up to `ms`, and says
+ * whether every one of them is here — when one is not, the caller refuses
+ * ("Still loading — try again in a moment") rather than guess.
+ */
+export async function collectionsReady(cols: readonly string[], ms = 15000): Promise<boolean> {
+  if (collectionsLoaded(cols)) return true;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  await Promise.race([
+    ensureCollections(cols),
+    new Promise<void>(res => { timer = setTimeout(res, ms); }),
+  ]);
+  if (timer) clearTimeout(timer);
+  return collectionsLoaded(cols);
+}
 
 /* ── Totals kept by the server (functions/src/summaries.ts), read-only ── */
 let summaryMap = new Map<string, Record<string, unknown>>();

@@ -8,7 +8,7 @@
 // opening of 10 g that orders have since drawn 8 g from cannot come down to
 // 5 g without the history running below zero. That is refused, with how much
 // can still come off.
-import { updateDb, dayOf, type DB, type StockMovement } from "./db";
+import { updateDb, loadDb, dayOf, type DB, type StockMovement } from "./db";
 import { fmtQty, materialName, materialUnit } from "./materials";
 import { fmtMoneyInr } from "./manufacturing";
 import { adjustStockCounter } from "./stock";
@@ -115,42 +115,153 @@ export interface OpeningEdit {
   note?: string;
 }
 
-/** Correct an opening-stock entry: its own row, and the stock counter by the difference. */
-export async function editOpeningStock(db: DB, m: StockMovement, edit: OpeningEdit): Promise<void> {
-  if (!isOpeningMovement(m)) throw new Error("Only an opening-stock entry can be corrected here.");
+/** Said when the entry moved on while the panel was open: the difference
+ *  would be worked out from a figure that is no longer the one on file. */
+export const OPENING_CHANGED = "This was changed by someone else — reopen and try again.";
+
+/** Everything a correction is worked out from (the note aside — a remark
+ *  changed meanwhile moves no stock). */
+function openingBasis(m: StockMovement): string {
+  return JSON.stringify([m.quantity, m.createdAt, m.material, m.purityOrQuality, coOf(m), m.type, m.refType ?? null, m.valueInr ?? 0]);
+}
+
+/** A correction or removal worked out against the entry on file. */
+export interface OpeningPlan {
+  id: string;
+  basis: string;
+  material: StockMovement["material"];
+  companyId?: string;
+  bucket: string;
+  /** The corrected figure and moment; null when the entry is being removed. */
+  next: { quantity: number; createdAt: string } | null;
+  /** What the stock counter moves by. */
+  delta: number;
+}
+
+/** The entry as it is on file, if it is still the one the panel opened. */
+function liveOpening(live: DB, opened: StockMovement, gone: string): StockMovement | string {
+  if (!isOpeningMovement(opened)) return "Only an opening-stock entry can be changed here.";
+  const m = (live.stockMovements ?? []).find(x => x.id === opened.id);
+  if (!m) return gone;
+  if (!isOpeningMovement(m) || openingBasis(m) !== openingBasis(opened)) return OPENING_CHANGED;
+  return m;
+}
+
+/** Work out a correction from the entry on file, or why it cannot be made.
+ *  `opened` is the copy the panel opened with. Nothing is written. */
+export function planOpeningEdit(live: DB, opened: StockMovement, edit: OpeningEdit): OpeningPlan | string {
+  const m = liveOpening(live, opened, "This opening stock was removed by someone else — reopen and try again.");
+  if (typeof m === "string") return m;
   const quantity = r3(edit.quantity);
-  if (!(quantity > 0)) throw new Error("Enter the opening quantity.");
+  if (!(quantity > 0)) return "Enter the opening quantity.";
   const createdAt = onDay(edit.date, m.createdAt);
-  const refused = openingRefusal(db, m, { quantity, createdAt });
-  if (refused) throw new Error(refused);
+  const refused = openingRefusal(live, m, { quantity, createdAt });
+  if (refused) return refused;
+  return {
+    id: m.id, basis: openingBasis(m), material: m.material, companyId: m.companyId, bucket: m.purityOrQuality,
+    next: { quantity, createdAt }, delta: r3(quantity - m.quantity),
+  };
+}
 
-  // The counter first: a decrease is floor-checked and may fail, and then
-  // nothing else has changed.
-  await adjustStockCounter({
-    material: m.material, companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: r3(quantity - m.quantity),
-  }, db.stockMovements);
+/** Work out a removal from the entry on file, or why it cannot be made. */
+export function planOpeningDelete(live: DB, opened: StockMovement): OpeningPlan | string {
+  // Gone already: removing it again used to take its quantity off the
+  // counter a second time.
+  const m = liveOpening(live, opened, "This opening stock was already removed — nothing more to take off.");
+  if (typeof m === "string") return m;
+  const refused = openingRefusal(live, m, null);
+  if (refused) return refused;
+  return {
+    id: m.id, basis: openingBasis(m), material: m.material, companyId: m.companyId, bucket: m.purityOrQuality,
+    next: null, delta: -m.quantity,
+  };
+}
 
-  updateDb(d => {
-    const live = (d.stockMovements ?? []).find(x => x.id === m.id);
-    if (!live) return;
-    live.quantity = quantity;
-    live.createdAt = createdAt;
-    const value = Math.round(Number(edit.valueInr) || 0);
-    if (value > 0) live.valueInr = value; else delete live.valueInr;
-    const note = edit.note?.trim();
-    if (note) live.note = note; else delete live.note;
+/** Where the app reads, saves and moves the counter; a check passes its own. */
+export interface OpeningDeps {
+  load?: () => DB;
+  update?: (fn: (d: DB) => void) => unknown;
+  adjust?: typeof adjustStockCounter;
+}
+
+/**
+ * Move the counter and save the entry, in the order that can never leave the
+ * counter showing stock the history does not have. A decrease is floor-checked
+ * and may be refused, so it goes first — refused, nothing has changed — and is
+ * given back if the entry turns out to have changed meanwhile. An increase
+ * cannot be refused, so the entry is saved first: if the counter then fails to
+ * follow, it is short rather than over, which the Stock page rebuilds from the
+ * history (and a short counter heals itself at the next issue).
+ */
+async function carryOut(
+  plan: OpeningPlan, replan: (d: DB) => OpeningPlan | string, write: (d: DB) => void,
+  live: DB, deps: OpeningDeps,
+): Promise<void> {
+  const update = deps.update ?? updateDb;
+  const adjust = deps.adjust ?? adjustStockCounter;
+  const counter = (delta: number) => adjust({
+    material: plan.material, companyId: plan.companyId, purityOrQuality: plan.bucket, delta,
+  }, live.stockMovements ?? []);
+  const unit = materialUnit(live.settings, plan.material);
+
+  const out: { refused?: string } = {};
+  const save = () => update(d => {
+    const again = replan(d);
+    if (typeof again === "string") { out.refused = again; return; }
+    if (again.basis !== plan.basis || again.delta !== plan.delta) { out.refused = OPENING_CHANGED; return; }
+    write(d);
   });
+
+  if (plan.delta < 0) {
+    await counter(plan.delta);
+    save();
+    if (out.refused) {
+      try {
+        await counter(-plan.delta);
+      } catch {
+        throw new Error(`${out.refused} The stock counter could not be given back the ${fmtQty(-plan.delta, unit)} ${plan.bucket} it was lowered by — use Recompute from history on the Stock page before trying again.`);
+      }
+      throw new Error(out.refused);
+    }
+    return;
+  }
+
+  save();
+  if (out.refused) throw new Error(out.refused);
+  if (plan.delta > 0) {
+    try {
+      await counter(plan.delta);
+    } catch (e) {
+      throw new Error(`Saved — but the stock counter did not go up by ${fmtQty(plan.delta, unit)} ${plan.bucket} (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
+    }
+  }
+}
+
+/** Correct an opening-stock entry: its own row, and the stock counter by the
+ *  difference — worked out from the entry on file, not the panel's copy. */
+export async function editOpeningStock(db: DB, m: StockMovement, edit: OpeningEdit, deps: OpeningDeps = {}): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const plan = planOpeningEdit(live, m, edit);
+  if (typeof plan === "string") throw new Error(plan);
+  const next = plan.next!;
+  await carryOut(plan, d => planOpeningEdit(d, m, edit), d => {
+    const row = (d.stockMovements ?? []).find(x => x.id === plan.id);
+    if (!row) return;
+    row.quantity = next.quantity;
+    row.createdAt = next.createdAt;
+    const value = Math.round(Number(edit.valueInr) || 0);
+    if (value > 0) row.valueInr = value; else delete row.valueInr;
+    const note = edit.note?.trim();
+    if (note) row.note = note; else delete row.note;
+  }, live, deps);
 }
 
 /** Remove an opening-stock entry: its row goes, and its quantity leaves the counter. */
-export async function deleteOpeningStock(db: DB, m: StockMovement): Promise<void> {
-  if (!isOpeningMovement(m)) throw new Error("Only an opening-stock entry can be removed here.");
-  const refused = openingRefusal(db, m, null);
-  if (refused) throw new Error(refused);
-  await adjustStockCounter({
-    material: m.material, companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: -m.quantity,
-  }, db.stockMovements);
-  updateDb(d => {
-    d.stockMovements = (d.stockMovements ?? []).filter(x => x.id !== m.id);
-  });
+export async function deleteOpeningStock(db: DB, m: StockMovement, deps: OpeningDeps = {}): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const plan = planOpeningDelete(live, m);
+  if (typeof plan === "string") throw new Error(plan);
+  await carryOut(plan, d => planOpeningDelete(d, m), d => {
+    d.stockMovements = (d.stockMovements ?? []).filter(x => x.id !== plan.id);
+  }, live, deps);
 }

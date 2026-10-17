@@ -5,9 +5,10 @@ import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { dayOf, type DB } from "@/lib/db";
 import { ccy, ccySymbol, fmtCcy, rateOf } from "@/lib/currency";
-import { deleteEntry, editEntry, entryImpact, moveToDay, transferLegs, type MoneyEntry } from "@/lib/moneyEntries";
+import { deleteEntry, editEntry, entryDeleteQuestion, moveToDay, transferLegs, type MoneyEntry } from "@/lib/moneyEntries";
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
+import { CHECKING } from "@/lib/actionHints";
 import { ActionSheet } from "@/components/ActionSheet";
 import { RateInput } from "@/components/CurrencyFields";
 import { Input } from "@/components/ui/input";
@@ -24,7 +25,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
  */
 
 /** The ⋯ items for one entry. `e` undefined: what it belongs to is still
- *  loading, so nothing is offered yet — and the menu says why. */
+ *  loading, so nothing is offered yet — greyed "Checking…" until it is here. */
 export function entryRowActions(e: MoneyEntry | undefined, o: {
   mayEdit: boolean; mayDelete: boolean;
   /** Why not, when the person's access doesn't reach it. */
@@ -32,7 +33,10 @@ export function entryRowActions(e: MoneyEntry | undefined, o: {
   onEdit: (e: MoneyEntry) => void;
   onDelete: (e: MoneyEntry) => void;
 }): MoreAction[] {
-  if (!e) return [{ label: "Edit", icon: Pencil, disabled: true, hint: "Loading the records behind this entry…", onSelect: () => {} }];
+  if (!e) return [
+    { label: "Edit", icon: Pencil, disabled: true, hint: CHECKING, onSelect: () => {} },
+    { label: "Delete", icon: Trash2, danger: true, disabled: true, hint: CHECKING, onSelect: () => {} },
+  ];
   // Owned by another tab: say where it is corrected instead.
   if (e.locked) {
     return [{ label: e.lockedLabel ?? (e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked"), hint: e.locked, icon: Lock, disabled: true, onSelect: () => {} }];
@@ -48,8 +52,10 @@ export function entryRowActions(e: MoneyEntry | undefined, o: {
 export async function confirmDeleteEntry(db: DB, e: MoneyEntry): Promise<boolean> {
   if (e.locked) { toast.error(e.locked); return false; }
   const lockerName = db.lockers.find(l => l.id === e.lockerId)?.name;
-  if (!(await confirmBox(`Cancel this entry?\n\n${entryImpact(e, lockerName).join("\n")}\n\nThis cannot be undone.`))) return false;
-  const refused = deleteEntry(e);
+  // An account row merely not linked to its payment says so, and is deleted
+  // only once that has been read and confirmed.
+  if (!(await confirmBox(entryDeleteQuestion(e, lockerName)))) return false;
+  const refused = deleteEntry(e, { unlinkedConfirmed: true });
   if (refused) { toast.error(refused); return false; }
   toast.success("Entry cancelled");
   return true;

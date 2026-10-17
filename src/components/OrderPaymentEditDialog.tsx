@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Wallet } from "lucide-react";
 import { toast } from "sonner";
-import { balanceDue, fmtMoney, type AdvancePayment, type Order } from "@/lib/db";
+import { balanceDue, dayOf, fmtMoney, type AdvancePayment, type Order } from "@/lib/db";
+import { moveToDay } from "@/lib/moneyEntries";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { ccy, ccySymbol, roundCcy } from "@/lib/currency";
@@ -26,7 +27,9 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
   const { rec } = paymentReceipt(db, advance);
   const blocked = orderPaymentEditBlocker(db, order, advance);
   const [amount, setAmount] = useState(String(advance.amount));
-  const [date, setDate] = useState(advance.createdAt.slice(0, 10));
+  // The day as the person reads it (their own clock) — slicing the stored UTC
+  // stamp showed the day before for anything entered in the small hours in India.
+  const [date, setDate] = useState(dayOf(advance.createdAt));
   const [note, setNote] = useState(advance.note);
   const [lockerId, setLockerId] = useState(rec?.lockerId ?? advance.lockerId ?? "");
   const [deposited, setDeposited] = useState(String(rec?.lockerAmount ?? advance.lockerAmount ?? ""));
@@ -34,6 +37,16 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
   const lc = ccy(locker?.currency);
   const amt = Number(amount) || 0;
   const room = Math.round((balanceDue(order) + advance.amount) * 100) / 100;
+
+  // In a dollar account what landed follows a change to the amount, so a
+  // wire fee already taken off stays taken off; it can still be typed over.
+  const changeAmount = (v: string) => {
+    if (locker && lc === "USD" && deposited !== "") {
+      const next = Math.round((Number(deposited) + (Number(v) || 0) - amt) * 100) / 100;
+      setDeposited(next > 0 ? String(next) : "");
+    }
+    setAmount(v);
+  };
 
   const pickLocker = (v: string) => {
     const id = v === NONE ? "" : v;
@@ -47,13 +60,14 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
     if (!(amt > 0)) { toast.error("Enter the amount received"); return; }
     if (!date) { toast.error("Pick the day it came in"); return; }
     if (!note.trim()) { toast.error("Say what the payment was — e.g. Cash, Bank transfer"); return; }
-    const dep = locker ? (lc === "USD" ? amt : Number(deposited) || 0) : undefined;
+    const dep = locker ? Number(deposited) || 0 : undefined;
     if (locker && !(dep! > 0)) { toast.error(`Enter what actually landed in ${locker.name}`); return; }
     try {
       const toCredit = editOrderPayment(order.id, advance.id, {
         amountUsd: amt,
-        // Keep the original time of day, so the day's entries stay in order.
-        date: `${date}T${advance.createdAt.slice(11) || "00:00:00.000Z"}`,
+        // Keep the original time of day, so the day's entries stay in order;
+        // an unchanged day leaves the stamp exactly as it was.
+        date: moveToDay(advance.createdAt, date),
         note: note.trim(),
         lockerId: locker?.id,
         lockerAmount: locker ? roundCcy(dep!, lc) : undefined,
@@ -82,7 +96,7 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label className="text-xs" htmlFor="pay_amt">Amount received ($)</Label>
-            <Input id="pay_amt" type="number" min={0} step="0.01" value={amount} onChange={e => setAmount(e.target.value)} disabled={!!blocked} className="h-10 rounded-xl" />
+            <Input id="pay_amt" type="number" min={0} step="0.01" value={amount} onChange={e => changeAmount(e.target.value)} disabled={!!blocked} className="h-10 rounded-xl" />
             {amt > room && <p className="text-[11px] text-amber-700">Only {fmtMoney(room)} is due on this order — the other {fmtMoney(Math.round((amt - room) * 100) / 100)} goes to the client's credit.</p>}
           </div>
           <div className="space-y-1">
@@ -103,7 +117,7 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
               </SelectContent>
             </Select>
           </div>
-          {locker && lc !== "USD" && (
+          {locker && (
             <div className="space-y-1">
               <Label className="text-xs" htmlFor="pay_dep">Amount deposited ({ccySymbol(lc).trim()})</Label>
               <Input id="pay_dep" type="number" min={0} step="0.01" value={deposited} onChange={e => setDeposited(e.target.value)} disabled={!!blocked} className="h-10 rounded-xl" />

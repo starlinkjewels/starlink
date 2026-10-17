@@ -7,7 +7,7 @@ import { useCan } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
 import { DEFAULT_EXPENSE_CATEGORIES, dayOf, ensureCollections, fmtExpenseAmount, loadDb, type Expense } from "@/lib/db";
 import { ccy, ccySymbol } from "@/lib/currency";
-import { deleteExpense, editExpense, expenseImpact, moveToDay } from "@/lib/moneyEntries";
+import { deleteExpense, editExpense, expenseImpact, expenseMoneyLock, moveToDay } from "@/lib/moneyEntries";
 import { expenseBlock } from "@/lib/expenseRights";
 import { confirmBox } from "@/lib/confirm";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -96,10 +96,18 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   };
 
   const acct = db.lockers.find(l => l.id === f.lockerId);
+  // Paid from an account whose entry for it isn't found (older data): the
+  // amount, date and account would change on the expense alone, so they are
+  // fixed here and the account side is corrected in Account entries. Known
+  // only once the account entries are in; saving waits for them anyway.
+  const moneyLock = ready ? expenseMoneyLock(db, e) : undefined;
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} size="md" icon={Receipt}
       title="Edit expense"
-      description={e.lockerId ? "Its entry in the account moves with it — the amount, the date and the account." : "Not paid from an account — only the expense itself changes."}
+      description={!e.lockerId ? "Not paid from an account — only the expense itself changes."
+        : moneyLock ? `${moneyLock} The title, category, notes and the rest can still be changed here.`
+        : ready ? "Its entry in the account moves with it — the amount, the date and the account."
+        : "Paid from an account — checking its entry there…"}
       footer={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -122,8 +130,8 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
           <Label className="text-xs">Paid from account</Label>
           {e.lockerId ? (
             <>
-              <Select value={f.lockerId} onValueChange={v => setF({ ...f, lockerId: v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
+              <Select value={f.lockerId} onValueChange={v => setF({ ...f, lockerId: v })} disabled={!!moneyLock}>
+                <SelectTrigger className="h-10 rounded-xl mt-1 disabled:opacity-60"><SelectValue placeholder="Choose account" /></SelectTrigger>
                 <SelectContent>{accounts.map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}</SelectContent>
               </Select>
               {otherCcy && (
@@ -145,12 +153,13 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
           <div className="relative mt-1">
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">{sym}</span>
             <Input type="number" min={0} step="0.01" value={f.amount} onChange={x => setF({ ...f, amount: x.target.value })}
-              className="h-10 rounded-xl" style={{ paddingLeft: `${Math.max(1.75, sym.length * 0.55 + 1.1)}rem` }} />
+              disabled={!!moneyLock} className="h-10 rounded-xl disabled:opacity-60" style={{ paddingLeft: `${Math.max(1.75, sym.length * 0.55 + 1.1)}rem` }} />
           </div>
         </div>
         <div>
           <Label className="text-xs">Date</Label>
-          <Input type="date" value={f.date} onChange={x => setF({ ...f, date: x.target.value })} className="rounded-xl h-10 mt-1" />
+          <Input type="date" value={f.date} onChange={x => setF({ ...f, date: x.target.value })} disabled={!!moneyLock}
+            className="rounded-xl h-10 mt-1 disabled:opacity-60" />
         </div>
 
         <div>

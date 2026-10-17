@@ -3,14 +3,14 @@ import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } f
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { loadDb, updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, ensureCollections, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, collectionsLoaded, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useDb } from "@/hooks/useDb";
 import { useLoaded } from "@/hooks/useLoaded";
 import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
-import { LOCKER_REF_COLS, lockerDeleteBlock } from "@/lib/lockerGuards";
-import { needsAccess } from "@/lib/actionHints";
+import { LOCKER_DELETE_COLS, lockerDeleteBlock } from "@/lib/lockerGuards";
+import { CHECKING, STILL_LOADING, needsAccess, recordsReady } from "@/lib/actionHints";
 import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
 import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialog";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
@@ -109,8 +109,12 @@ export function LockerPage() {
 
   // What each ledger row belongs to — a supplier's payment, an expense, a
   // diamond sale — decides whether it is corrected here or where it was made.
-  // Those records load on demand; until they have, nothing is offered.
-  const entriesReady = useLoaded(ENTRY_COLS.locker);
+  // Those books are not this page's (pageData.ts): they are asked for only
+  // once a row's ⋯ is opened, and until they are here its items are greyed
+  // "Checking…" — never loaded on every visit to the Locker.
+  const [wantEntries, setWantEntries] = useState(false);
+  useLoaded(wantEntries ? ENTRY_COLS.locker : []);
+  const entriesReady = collectionsLoaded(ENTRY_COLS.locker);
   const entryById = new Map(entriesReady ? listEntries(db, "locker").map(e => [e.id, e] as const) : []);
 
   // ── Client payments recorded straight from the locker ──────────────────────
@@ -195,7 +199,7 @@ export function LockerPage() {
   const deleteLocker = async (l: Locker) => {
     // Everything that could name the account is loaded and counted first —
     // the card's menu only knew what this page had.
-    await ensureCollections(LOCKER_REF_COLS);
+    if (!(await recordsReady(LOCKER_DELETE_COLS))) { toast.error(STILL_LOADING); return; }
     const fresh = loadDb();
     const block = lockerDeleteBlock(fresh, l.id);
     if (block) { toast.error(`${l.name}: ${block}`); return; }
@@ -206,7 +210,15 @@ export function LockerPage() {
       "• nothing has ever gone through it, so no balance, payment or report changes",
     ]);
     if (!ok) return;
-    updateDb(d => { d.lockers = d.lockers.filter(x => x.id !== l.id); });
+    let gone = false;
+    updateDb(d => {
+      // Counted again on the live records: money may have gone through it
+      // while the question was open.
+      if (lockerDeleteBlock(d, l.id)) return;
+      d.lockers = d.lockers.filter(x => x.id !== l.id);
+      gone = true;
+    });
+    if (!gone) { toast.error(`Could not delete ${l.name} — something went through it meanwhile`); return; }
     toast.success(`${l.name} deleted`);
     if (selected?.id === l.id) setSelectedId(null);
   };
@@ -359,17 +371,22 @@ export function LockerPage() {
    *  it — or, for a row made by another record, where that is done. */
   const rowActionsFor = (t: LockerTransaction): MoreAction[] => {
     const e = entryById.get(t.id);
-    const mayEdit = can("locker", "edit");
+    // Applying loose money to a bill is the Locker's own action, as it always
+    // was. Correcting or cancelling the entry is the same act as in Payments →
+    // Account entries and the day book, so it asks the same access — the same
+    // row is never editable by one role on one page and not on another.
+    const mayApply = can("locker", "edit");
+    const mayEdit = can("payments", "edit"), mayDelete = can("payments", "delete");
     const owned = e?.locked ? (e.lockedWhere ?? "another tab") : undefined;
-    const notYet = !e ? "Loading the records behind this entry…" : undefined;
-    const why = !mayEdit ? needsAccess("locker", "edit") : notYet ?? applyBlock(t, owned);
+    const notYet = !e ? CHECKING : undefined;
+    const why = !mayApply ? needsAccess("locker", "edit") : notYet ?? applyBlock(t, owned);
     return [
       { label: "Apply to a client’s bill", icon: HandCoins, hint: why ?? "Money a client sent — settle their bill with it",
         disabled: !!why, show: t.type === "income" && t.refType !== "clientPayment",
         onSelect: () => setFixTxnId(t.id) },
       ...entryRowActions(e, {
-        mayEdit, mayDelete: can("locker", "delete"),
-        editNeeds: needsAccess("locker", "edit"), deleteNeeds: needsAccess("locker", "delete"),
+        mayEdit, mayDelete,
+        editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
         onEdit: setEditingEntry,
         onDelete: x => { void confirmDeleteEntry(db, x); },
       }),
@@ -695,6 +712,7 @@ export function LockerPage() {
             // where that is done, greyed with the reason. The opening row is the
             // locker's own (its Edit sits in the row).
             rowActions={r => (r.t ? rowActionsFor(r.t) : [])}
+            onRowActionsOpen={() => setWantEntries(true)}
             // Opened: the voucher and note on their own lines, who recorded it and
             // when, the other account of a transfer and its rate, and whatever it
             // settled — a client's receipt, supplier bills, factory jobs, an expense.
@@ -905,7 +923,7 @@ export function LockerPage() {
       <ApplyToClientDialog txnId={fixTxnId} onClose={() => setFixTxnId(null)} />
 
       {/* Correcting a ledger row — the same panel as Payments' ledgers. */}
-      <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("locker", "delete")} />
+      <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("payments", "delete")} />
 
     </div>
   );

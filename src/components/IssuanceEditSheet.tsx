@@ -45,6 +45,9 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
 
   const save = async () => {
     if (!mi) return;
+    // Every place this opens from offers it to an admin only (the factory's
+    // page, Buy & Assign); checked again here, as the rules don't.
+    if (user?.role !== "admin") { toast.error("Only an admin can change what was issued to a factory"); return; }
     const qty = Number(f.qty);
     if (!certified && (!qty || qty <= 0)) { toast.error(`Enter the ${unit === "g" ? "weight" : "quantity"}`); return; }
     try {

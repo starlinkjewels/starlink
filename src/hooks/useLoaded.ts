@@ -12,7 +12,7 @@ import type { LazyCol } from "@/lib/pageData";
  * that belongs to nobody. So an action that needs them waits for this, and the
  * page asks for them by name rather than by reading them early.
  */
-export function useLoaded(cols: readonly LazyCol[]): boolean {
+export function useLoaded(cols: readonly (LazyCol | "expenses")[]): boolean {
   useDb(); // re-read whenever the store changes, a collection arriving included
   const [, bump] = useState(0);
   const ready = collectionsLoaded(cols);

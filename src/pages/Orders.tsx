@@ -20,7 +20,7 @@ import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, 
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
-import { cancelOrder, cancelQuestion } from "@/lib/orderCancel";
+import { cancelOrder, cancelQuestion, cancelRefusal } from "@/lib/orderCancel";
 import { confirmBox } from "@/lib/confirm";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -174,7 +174,9 @@ export function OrdersPage() {
   const [editing, setEditing] = useState<Order | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const cancel = async (o: Order) => {
-    const why = cancelAccess(user) ?? cancelBlocker(db, o);
+    // Checked with the invoices and Ready Stock loaded — read before they
+    // arrive, a billed order would look cancellable.
+    const why = cancelAccess(user) ?? await cancelRefusal(o.id);
     if (why) { toast.error(why); return; }
     if (!(await confirmBox(cancelQuestion(o.orderNumber)))) return;
     setCancellingId(o.id);

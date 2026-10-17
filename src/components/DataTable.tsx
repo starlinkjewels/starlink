@@ -63,7 +63,7 @@ function Tick({ state, onClick, label }: { state: "on" | "off" | "some"; onClick
 
 export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
-  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, selected, onSelectedChange,
+  pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
   rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
 }: {
   /** Names this table's remembered choices — unique per table. */
@@ -110,6 +110,8 @@ export function DataTable<T>({
   details?: false | ((row: T) => { label: string; value: ReactNode }[]);
   /** What can be done to a row: a ⋯ at its end. */
   rowActions?: (row: T) => MoreAction[];
+  /** A row's ⋯ is being opened — for loading what its items need only then. */
+  onRowActionsOpen?: (row: T) => void;
   /** Tick boxes: the keys ticked, and what to do when they change. */
   selected?: Set<string>;
   onSelectedChange?: (next: Set<string>) => void;
@@ -376,7 +378,7 @@ export function DataTable<T>({
                   )}
                   {rowActions && (
                     <td className={`w-12 px-2 ${PAD[dense]} text-right`} data-no-row>
-                      {!pin && <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100" />}
+                      {!pin && <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100" />}
                     </td>
                   )}
                 </tr>

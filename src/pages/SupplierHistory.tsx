@@ -551,7 +551,15 @@ function SupplierHistoryPageBody() {
     const refused = await deleteRefusal("supplier", supplier);
     if (refused) { toast.error(refused); return; }
     if (!(await confirmBox(`Delete ${supplier.name}?\n\nThey have no purchases, payments or refunds, so no other record changes. This cannot be undone.`))) return;
-    updateDb(d => { d.suppliers = d.suppliers.filter(x => x.id !== supplier.id); });
+    let gone = false;
+    updateDb(d => {
+      // Counted again on the live records, as the question may have sat open.
+      const live = d.suppliers.find(x => x.id === supplier.id);
+      if (!live || !supplierDeleteGuard(d, live).ok) return;
+      d.suppliers = d.suppliers.filter(x => x.id !== supplier.id);
+      gone = true;
+    });
+    if (!gone) { toast.error("Could not delete — something was recorded for them meanwhile"); return; }
     toast.success("Supplier deleted");
     navigate("/suppliers");
   };

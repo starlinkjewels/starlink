@@ -60,7 +60,9 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/orders/new": ["clientReceipts", "lockerTransactions"],
   "/orders/:id": [...COST, "lockerTransactions"],
   "/invoices": ["purchases", "materialIssuances", "diamondPackets", "clientReceipts", "lockerTransactions"],
-  "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments"],
+  // diamondSales: an account entry a diamond sale paid in is corrected with
+  // the sale, not alone — the day book and Account entries read that (ENTRY_COLS).
+  "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments", "diamondSales"],
   "/clients": [],
   "/clients/:id": ["clientReceipts", "lockerTransactions"],
   "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments"],
