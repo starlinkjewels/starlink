@@ -1,4 +1,5 @@
 import { DataTable } from "@/components/DataTable";
+import { useCan } from "@/hooks/useCan";
 import { filled, userName, type Detail } from "@/components/rowDetails";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
@@ -13,6 +14,7 @@ import type { ReportCtx } from "./context";
 
 export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
   const { db, orders, period, withProfit, version, fileTag } = ctx;
+  const can = useCan();
 
   const data = useMemo(() => {
     const rows = clientTable(db, orders, period, withProfit).filter(r => !ctx.clientIds || ctx.clientIds.has(r.id));
@@ -104,6 +106,9 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
           id="reports-clients"
           rows={list}
           rowKey={r => r.id}
+          // A row is a client: it opens their page, for whoever may see clients.
+          rowHref={can("clients") ? r => `/clients/${r.id}` : undefined}
+          canClickRow={r => db.clients.some(c => c.id === r.id)}
           details={clientDetails}
           defaultSort={{ key: "sales", dir: "desc" }}
           searchText={r => r.name}

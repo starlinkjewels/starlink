@@ -7,6 +7,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Search, Download, ChevronDown, FileText, Package, Undo2 } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 
 // The shared DataTable's header and cell classes, so this table reads the same.
 const TH = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
@@ -39,9 +40,22 @@ export interface InvoiceBlock {
   received: number;
   balance: number;
   /** Payments received against this invoice's orders, for the drill-down. */
-  payments: { id: string; date: string; note: string; amount: number }[];
-  /** Credit notes for pieces sent back, for the drill-down. */
+  payments: InvoicePayment[];
+  /** Credit notes for pieces sent back, for the drill-down. `id` is the note's id. */
   credits: { id: string; date: string; note: string; amount: number }[];
+}
+
+/** One payment line on an invoice: the advances of one receipt (or, before
+ *  receipts were numbered, of one save) added back together. */
+export interface InvoicePayment {
+  id: string;
+  date: string;
+  note: string;
+  amount: number;
+  /** The receipt it came in on — what it is corrected or cancelled through. */
+  receiptId?: string;
+  /** Credit the client already had, moved onto these bills — not new money. */
+  fromCredit?: boolean;
 }
 
 /** One line per piece, the way it reads on the invoice itself. */
@@ -99,22 +113,25 @@ export function buildInvoiceBlocks(
   // grouped by the moment and note they were written with, which is what a
   // single save produced.
   const paymentsOf = (os: Order[]) => {
-    const byReceipt = new Map<string, { id: string; date: string; note: string; amount: number; orders: Set<string> }>();
+    const byReceipt = new Map<string, { id: string; date: string; note: string; amount: number; orders: Set<string>; receiptId?: string; fromCredit: boolean }>();
     for (const o of os) {
       for (const a of o.advances || []) {
         const key = a.receiptId || `${a.createdAt}|${a.note}|${a.recordedBy}`;
         const g = byReceipt.get(key);
-        if (g) { g.amount = Math.round((g.amount + a.amount) * 100) / 100; g.orders.add(o.orderNumber); }
+        if (g) { g.amount = Math.round((g.amount + a.amount) * 100) / 100; g.orders.add(o.orderNumber); g.fromCredit = g.fromCredit && !!a.fromCredit; }
         else byReceipt.set(key, {
           id: key, date: a.createdAt, note: a.note || "Payment",
           amount: a.amount, orders: new Set([o.orderNumber]),
+          receiptId: a.receiptId, fromCredit: !!a.fromCredit,
         });
       }
     }
     return [...byReceipt.values()]
-      .map(g => ({
+      .map((g): InvoicePayment => ({
         id: g.id, date: g.date, amount: g.amount,
         note: g.orders.size > 1 ? `${g.note} · ${g.orders.size} orders` : `${g.note} · ${[...g.orders][0]}`,
+        ...(g.receiptId ? { receiptId: g.receiptId } : {}),
+        ...(g.fromCredit ? { fromCredit: true } : {}),
       }))
       .sort((a, b) => +new Date(a.date) - +new Date(b.date));
   };
@@ -153,17 +170,30 @@ export function buildInvoiceBlocks(
 }
 
 export function ClientInvoiceLedger({
-  blocks, client, openingDebit = 0, openingCredit = 0, onExport, onReversePayment,
+  blocks, client, openingDebit = 0, openingCredit = 0, onExport, invoiceActions, paymentActions, creditActions,
 }: {
   blocks: InvoiceBlock[];
   client: Client;
   openingDebit?: number;
   openingCredit?: number;
   onExport?: () => void;
-  /** Reverse a payment recorded in error. Kept on the payment row itself, which
-   *  is the only place it can be aimed at the right entry. */
-  onReversePayment?: (createdAt: string) => void;
+  /** What can be done to an invoice, a payment line or a credit note — a ⋯ at
+   *  the end of its line. A payment is corrected or cancelled through its
+   *  receipt; kept on the line itself, which is the only place it can be aimed
+   *  at the right entry. */
+  invoiceActions?: (b: InvoiceBlock) => MoreAction[];
+  paymentActions?: (p: InvoicePayment, b: InvoiceBlock) => MoreAction[];
+  creditActions?: (c: InvoiceBlock["credits"][number], b: InvoiceBlock) => MoreAction[];
 }) {
+  const acts = !!(invoiceActions || paymentActions || creditActions);
+  const cols = acts ? 10 : 9;
+  // The ⋯ cell. Clicks inside it (the menu too — React bubbles through its
+  // portal) must not open or close the invoice row.
+  const menuCell = (actions: MoreAction[] | undefined, title: string) => (acts ? (
+    <td className="w-12 px-2 py-1.5 text-right" onClick={e => e.stopPropagation()}>
+      {actions && <MoreMenu size="sm" label="Row actions" title={title} actions={actions} />}
+    </td>
+  ) : null);
   const [q, setQ] = useState("");
   const [open, setOpen] = useState<Set<string>>(new Set());
   const [only, setOnly] = useState<"all" | "due" | "paid">("all");
@@ -265,6 +295,7 @@ export function ClientInvoiceLedger({
               <th className={`${TH} text-right`}>Returned</th>
               <th className={`${TH} text-right`}>Received</th>
               <th className={`${TH} text-right`}>Balance</th>
+              {acts && <th className="w-12 px-2 py-3"><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
@@ -277,10 +308,11 @@ export function ClientInvoiceLedger({
                 <td />
                 <td className={`${TD} text-right text-success`}>{openingCredit ? fmtMoney(openingCredit) : ""}</td>
                 <td className={`${TD} text-right font-semibold`}>{fmtMoney(openingDebit - openingCredit)}</td>
+                {acts && <td />}
               </tr>
             ) : null}
             {filtered.length === 0 ? (
-              <tr><td colSpan={9} className="px-3 py-12 text-center text-sm text-muted-foreground">Nothing to show.</td></tr>
+              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">Nothing to show.</td></tr>
             ) : filtered.map(b => (
               <>
                 <tr key={b.id} onClick={() => toggle(b.id)}
@@ -300,6 +332,7 @@ export function ClientInvoiceLedger({
                   <td className={`${TD} text-right font-semibold ${b.balance > 0.009 ? "text-destructive" : "text-success"}`}>
                     {b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"}
                   </td>
+                  {menuCell(invoiceActions?.(b), `Invoice ${b.number}`)}
                 </tr>
 
                 {open.has(b.id) && b.items.map(i => (
@@ -318,6 +351,7 @@ export function ClientInvoiceLedger({
                     <td className={`${SUB} text-right text-amber-800`}>{i.returned ? `−${fmtMoney(i.returned)}` : ""}</td>
                     <td className={`${SUB} text-right text-success`}>{i.received ? fmtMoney(i.received) : ""}</td>
                     <td className={`${SUB} text-right`}>{i.balance > 0.009 ? fmtMoney(i.balance) : "—"}</td>
+                    {acts && <td />}
                   </tr>
                 ))}
 
@@ -328,6 +362,7 @@ export function ClientInvoiceLedger({
                     <td colSpan={4} className="px-3 py-1.5 text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 text-amber-700" />Credit note {c.note}</span></td>
                     <td className={`${SUB} text-right text-amber-800 font-medium`}>−{fmtMoney(c.amount)}</td>
                     <td colSpan={2} />
+                    {menuCell(creditActions?.(c, b), "Credit note")}
                   </tr>
                 ))}
 
@@ -337,15 +372,8 @@ export function ClientInvoiceLedger({
                     <td className="px-3 py-1.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(p.date)}</td>
                     <td colSpan={5} className="px-3 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
                     <td className={`${SUB} text-right text-success font-medium`}>{fmtMoney(p.amount)}</td>
-                    <td className="px-3 py-1.5 text-right">
-                      {onReversePayment && (
-                        <button onClick={e => { e.stopPropagation(); onReversePayment(p.date); }}
-                          title="Reverse this payment"
-                          className="text-[11px] text-muted-foreground hover:text-destructive hover:underline">
-                          reverse
-                        </button>
-                      )}
-                    </td>
+                    <td />
+                    {menuCell(paymentActions?.(p, b), "Payment")}
                   </tr>
                 ))}
               </>
@@ -362,6 +390,7 @@ export function ClientInvoiceLedger({
               <td className={`${TD} text-right ${closing > 0.009 ? "text-destructive" : "text-success"}`}>
                 {fmtMoney(Math.max(0, closing))}
               </td>
+              {acts && <td />}
             </tr>
           </tfoot>
         </table>

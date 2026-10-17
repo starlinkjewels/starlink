@@ -1,14 +1,13 @@
-import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { ClientCreateDialog } from "@/components/create/ClientCreateDialog";
-import { MAIN_COMPANY_ID, companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies, worksFor } from "@/lib/companies";
+import { ClientEditDialog } from "@/components/ClientEditDialog";
+import { companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { loadDb, updateDb, fmtMoney, fmtDate, clientAccount, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
+import { Link, useNavigate } from "react-router-dom";
+import { loadDb, updateDbAs, fmtMoney, fmtDate, clientAccount, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
 import { filled, refLink, noteText, type Detail } from "@/components/rowDetails";
 import { AccountSummary } from "@/components/AccountSummary";
-import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { auth } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -16,17 +15,16 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
+import { clientDeleteBlocker, deleteClientFlow, toggleClientActive } from "@/lib/clientActions";
+import { needsAccess } from "@/lib/actionHints";
 
 const PAGE_SIZE = 9;
 
@@ -132,7 +130,7 @@ export function ClientsPage() {
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
-  const addNew = useAddNew();
+  const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
     try { return (localStorage.getItem("clients-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
@@ -149,54 +147,10 @@ export function ClientsPage() {
 
   const [open, setOpen] = useState(false);
 
-  // Editing an existing client — login email/password aren't included here:
-  // email is the Firebase Auth identifier (changing it needs a privileged
-  // Admin SDK operation, not a plain Firestore write) and password already has
-  // its own "Reset Password" email-link flow just below.
+  // Editing an existing client — the shared form (ClientEditDialog), the same
+  // one the client's own page opens.
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [ef, setEf] = useState<Partial<Client>>({});
-  const [savingEdit, setSavingEdit] = useState(false);
-  const openEdit = (c: Client) => {
-    setEf({
-      companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
-      country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address,
-      accountManagerId: c.accountManagerId,
-      companyId: companyIdOfClient(c),
-      openingBalance: c.openingBalance, openingDir: c.openingDir, openingDate: c.openingDate,
-    });
-    setEditingId(c.id);
-  };
-  const saveEdit = async () => {
-    if (!editingId) return;
-    if (!ef.companyName?.trim()) { toast.error("Company name is required"); return; }
-    setSavingEdit(true);
-    try {
-      updateDb(d => {
-        const c = d.clients.find(x => x.id === editingId)!;
-        c.companyName = ef.companyName!.trim();
-        c.ownerName = ef.ownerName?.trim() || "";
-        c.phone = ef.phone?.trim() || "";
-        c.country = ef.country?.trim() || "";
-        c.zip = ef.zip?.trim() || undefined;
-        c.gstVat = ef.gstVat?.trim() || "";
-        c.address = ef.address?.trim() || "";
-        // Opening balance (migration) — clear direction/date when amount is blank/0.
-        c.openingBalance = ef.openingBalance || undefined;
-        c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
-        c.openingDate = ef.openingBalance ? (ef.openingDate || undefined) : undefined;
-        if (user!.role === "admin") c.accountManagerId = ef.accountManagerId;
-        // Moving a client to another company changes who bills them from now
-        // on; every invoice already raised keeps the company that issued it.
-        if (user!.role === "admin" && ef.companyId) {
-          if (ef.companyId === MAIN_COMPANY_ID) delete c.companyId; else c.companyId = ef.companyId;
-        }
-        const u = d.users.find(u => u.clientId === c.id);
-        if (u) { u.name = c.ownerName || c.companyName; u.phone = c.phone; }
-      });
-      toast.success("Client details updated");
-      setEditingId(null);
-    } finally { setSavingEdit(false); }
-  };
+  const openEdit = (c: Client) => setEditingId(c.id);
 
   const employees = db.users.filter(u => u.role === "employee");
 
@@ -246,32 +200,24 @@ export function ClientsPage() {
     catch (e) { toast.error(authErrorMessage(e)); }
   };
 
-  const toggle = (c: Client) => {
-    updateDb(d => {
-      const x = d.clients.find(x => x.id === c.id)!;
-      x.status = x.status === "active" ? "inactive" : "active";
-      const u = d.users.find(u => u.clientId === c.id);
-      if (u) u.status = x.status;
-    });
-    toast.success("Status updated");
-  };
+  const toggle = (c: Client) => toggleClientActive(c.id);
 
   const togglePhotoAccess = (c: Client) => {
-    updateDb(d => {
+    updateDbAs({ summary: `${c.productPhotoAccess ? "Revoked" : "Granted"} Product Photos access — ${c.companyName}` }, d => {
       const x = d.clients.find(x => x.id === c.id)!;
       x.productPhotoAccess = !x.productPhotoAccess;
     });
     toast.success(c.productPhotoAccess ? "Photo access revoked" : "Photo access granted");
   };
 
-  const del = async (id: string) => {
-    if (!(await confirmBox("Delete client?"))) return;
-    updateDb(d => {
-      d.clients = d.clients.filter(c => c.id !== id);
-      d.users = d.users.filter(u => u.clientId !== id);
-    });
-    toast.success("Deleted");
-  };
+  // Only a client with nothing on record can be deleted — anyone with orders,
+  // invoices, receipts or gift cards is deactivated instead (clientActions.ts).
+  const del = (id: string) => deleteClientFlow(id);
+  const mayEdit = staffCan("edit");
+  const mayDelete = staffCan("delete");
+  function staffCan(action: "edit" | "delete") { return user!.role !== "client" && can("clients", action); }
+  /** Why Delete is greyed for this client, if it is. */
+  const deleteWhy = (c: Client) => (!mayDelete ? needsAccess("clients", "delete") : clientDeleteBlocker(db, c.id));
 
   // ── List view: the shared table ──
   // Order counts and each client's login, gathered in one pass — the table
@@ -373,71 +319,7 @@ export function ClientsPage() {
         )}
       </div>
 
-      <Dialog open={!!editingId} onOpenChange={v => !v && setEditingId(null)}>
-        <DialogContent className="max-w-4xl rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display text-2xl">Edit Client</DialogTitle></DialogHeader>
-          <p className="text-xs text-muted-foreground -mt-2">
-            Login email and password aren't editable here — use "Reset Password" for credentials.
-          </p>
-          <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mt-2">
-            {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address"] as const).map(k => (
-              <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
-                <Label className="text-xs capitalize">
-                  {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k.replace(/([A-Z])/g, " $1")}
-                </Label>
-                <Input
-                  value={(ef as Record<string, string>)[k] || ""}
-                  onChange={e => setEf({ ...ef, [k]: e.target.value })}
-                  className="rounded-xl mt-1"
-                />
-              </div>
-            ))}
-          </div>
-          <div className="mt-3">
-            <OpeningBalanceFields
-              amount={ef.openingBalance != null ? String(ef.openingBalance) : ""}
-              dir={ef.openingDir || "debit"}
-              date={ef.openingDate || ""}
-              onAmount={v => setEf({ ...ef, openingBalance: v === "" ? undefined : Number(v) })}
-              onDir={v => setEf({ ...ef, openingDir: v })}
-              onDate={v => setEf({ ...ef, openingDate: v || undefined })}
-              debitLabel="Client owes us (Debit)"
-              creditLabel="We owe client / advance (Credit)"
-              hint="Adjust the balance carried in from your previous system. Shown as the first line of their ledger."
-            />
-          </div>
-          {user!.role === "admin" && multiCo && (
-            <div className="mt-3">
-              <Label className="text-xs">Our company — who bills this client</Label>
-              <Select value={ef.companyId || MAIN_COMPANY_ID} onValueChange={addNew("company", v => setEf(prev => ({ ...prev, companyId: v })))}>
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {companiesOf(dbNow.settings).filter(co => co.active !== false || co.id === ef.companyId).map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
-                <AddNewItem kind="company" /></SelectContent>
-              </Select>
-              {editingId && ef.companyId !== companyIdOfClient(dbNow.clients.find(x => x.id === editingId)) && (
-                <p className="text-[11px] text-amber-700 mt-1">From now on their new invoices come from this company. Invoices already raised keep the company that issued them.</p>
-              )}
-            </div>
-          )}
-          {user!.role === "admin" && (
-            <div className="mt-3">
-              <Label className="text-xs">Assign Employee</Label>
-              <Select
-                value={ef.accountManagerId || "__none"}
-                onValueChange={addNew("employee", v => setEf(prev => ({ ...prev, accountManagerId: v === "__none" ? undefined : v })))}
-              >
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — Admin handles this client" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-                  {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
-                <AddNewItem kind="employee" /></SelectContent>
-              </Select>
-            </div>
-          )}
-          <div className="flex justify-end"><Button onClick={saveEdit} disabled={savingEdit} className="btn-hero rounded-xl max-sm:w-full sm:min-w-40">{savingEdit ? "Saving…" : "Save Changes"}</Button></div>
-        </DialogContent>
-      </Dialog>
+      <ClientEditDialog clientId={editingId} onClose={() => setEditingId(null)} />
 
       <AccountSummary
         receivable={totals.receivable}
@@ -497,18 +379,25 @@ export function ClientsPage() {
                 return <><span className="text-destructive">{fmtMoney(due)}</span>{held > 0 && <span className="text-success"> · +{fmtMoney(held)}</span>}</>;
               },
             }}
-            // The grid card's buttons, same permissions; no ⋯ for someone who
-            // may use none of them.
-            rowActions={mayExport || (staff && (can("clients", "edit") || can("clients", "delete"))) ? c => [
-              { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
-              { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff && can("clients", "edit") },
-              { label: c.productPhotoAccess ? "Revoke photo access" : "Grant photo access", icon: Camera,
-                hint: c.productPhotoAccess ? "Product Photos access is on" : "Product Photos access is off",
-                onSelect: () => togglePhotoAccess(c), show: staff && can("clients", "edit") },
-              { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff && can("clients", "edit") },
-              { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff && can("clients", "edit") },
-              { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff && can("clients", "delete") },
-            ] : undefined}
+            // The grid card's buttons, plus View. An action someone's access
+            // doesn't reach, or that this client can't take (Delete for a client
+            // with anything on record), is greyed with the reason under it.
+            rowActions={c => {
+              const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
+              const delWhy = staff ? deleteWhy(c) : undefined;
+              return [
+                { label: "View", icon: Eye, hint: "Their page — account, invoices, orders", onSelect: () => navigate(`/clients/${c.id}`) },
+                { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
+                { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff,
+                  disabled: !mayEdit, hint: noEdit ?? (c.status === "active" ? "They can no longer sign in; their history stays" : undefined) },
+                { label: c.productPhotoAccess ? "Revoke photo access" : "Grant photo access", icon: Camera,
+                  hint: noEdit ?? (c.productPhotoAccess ? "Product Photos access is on" : "Product Photos access is off"),
+                  onSelect: () => togglePhotoAccess(c), show: staff, disabled: !mayEdit },
+                { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff, disabled: !mayEdit, hint: noEdit },
+                { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff, disabled: !mayEdit, hint: noEdit },
+                { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff, disabled: !!delWhy, hint: delWhy },
+              ];
+            }}
             emptyText="No clients found."
           />
         </div>
@@ -617,33 +506,46 @@ export function ClientsPage() {
                 </IfExport>
               </div>
 
-              {user!.role !== "client" && (
+              {user!.role !== "client" && (() => {
+                // Greyed (not hidden) when access doesn't reach them, the reason
+                // in the tooltip; Delete also when this client has anything on record.
+                const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
+                const delWhy = deleteWhy(c);
+                return (
                 // Fits a 360px phone: the label button may shrink, the icons are a
                 // touch smaller there. It did not, and pushed the card off-screen.
-                <div className="flex gap-1.5 sm:gap-2 mt-2">
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} className="rounded-lg flex-1 min-w-0 px-2">
+                <div className="mt-2 space-y-1">
+                <div className="flex gap-1.5 sm:gap-2">
+                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} disabled={!mayEdit} title={noEdit} className="rounded-lg flex-1 min-w-0 px-2">
                     {c.status === "active" ? "Deactivate" : "Activate"}
-                  </AsyncButton>}
-                  {can("clients", "edit") && <AsyncButton
-                    size="sm" variant="outline" onClick={() => togglePhotoAccess(c)}
+                  </AsyncButton>
+                  <AsyncButton
+                    size="sm" variant="outline" onClick={() => togglePhotoAccess(c)} disabled={!mayEdit}
                     className={`rounded-lg w-8 sm:w-9 shrink-0 px-0 ${c.productPhotoAccess
                       ? "text-success border-success/40 bg-success/5 hover:text-success hover:bg-success/10"
                       : "text-destructive border-destructive/40 bg-destructive/5 hover:text-destructive hover:bg-destructive/10"}`}
-                    title={c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant"}
+                    title={noEdit ?? (c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant")}
                   >
                     <Camera className="h-3.5 w-3.5" />
-                  </AsyncButton>}
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title="Edit client details">
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} disabled={!mayEdit} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title={noEdit ?? "Edit client details"}>
                     <Pencil className="h-3.5 w-3.5" />
-                  </AsyncButton>}
-                  {can("clients", "edit") && <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title="Send password reset email">
+                  </AsyncButton>
+                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} disabled={!mayEdit} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title={noEdit ?? "Send password reset email"}>
                     <KeyRound className="h-3.5 w-3.5" />
-                  </AsyncButton>}
-                  {can("clients", "delete") && <AsyncButton size="sm" variant="outline" onClick={() => del(c.id)} className="rounded-lg w-8 sm:w-9 shrink-0 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive" title="Delete client">
+                  </AsyncButton>
+                  {/* Kept clickable when blocked: a disabled button can't show
+                      its tooltip everywhere, and the click says why. */}
+                  <AsyncButton size="sm" variant="outline" onClick={() => (delWhy ? toast.error(delWhy) : del(c.id))} aria-disabled={!!delWhy}
+                    className={`rounded-lg w-8 sm:w-9 shrink-0 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive ${delWhy ? "opacity-50" : ""}`}
+                    title={delWhy ? `Delete client — ${delWhy}` : "Delete client"}>
                     <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>}
+                  </AsyncButton>
                 </div>
-              )}
+                {noEdit && <p className="text-[10px] text-muted-foreground">{noEdit}</p>}
+                </div>
+                );
+              })()}
             </div>
           );
         })}

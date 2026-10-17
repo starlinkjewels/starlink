@@ -24,14 +24,16 @@ export function unappliedIncome(db: DB): LockerTransaction[] {
     // Not every rupee coming in is a client paying a bill — capital, interest
     // and profit from elsewhere are income too, and always will be. Marking one
     // settles the question for good instead of asking again every time.
-    .filter(t => t.type === "income" && t.refType !== "clientPayment" && !t.notClientPayment)
+    // A diamond sale's money is the sale's — undone only by cancelling the sale.
+    .filter(t => t.type === "income" && t.refType !== "clientPayment" && t.refType !== "diamondSale" && !t.notClientPayment)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 }
 
 /** Money in that staff have said is not a client payment — so it can be undone. */
 export function markedNotClientPayment(db: DB): LockerTransaction[] {
   return (db.lockerTransactions ?? [])
-    .filter(t => t.notClientPayment)
+    // A diamond sale's money is marked too, but it is not something to unmark.
+    .filter(t => t.notClientPayment && t.refType !== "diamondSale")
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 }
 

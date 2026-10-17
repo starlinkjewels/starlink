@@ -2,7 +2,7 @@ import { DataTable, CellAmount, type DataColumn } from "@/components/DataTable";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
 import { useState } from "react";
 import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
@@ -15,8 +15,14 @@ import {
 import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { Link, useSearchParams } from "react-router-dom";
-import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift, Undo2 } from "lucide-react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle } from "lucide-react";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { buildInvoiceBlocks, type InvoicePayment } from "@/components/ClientInvoiceLedger";
+import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
+import { cancelCreditNoteFlow, creditNoteCancelBlocker } from "@/components/creditNoteCancel";
+import { deleteInvoiceFlow, invoiceDeleteBlocker } from "@/lib/invoiceDelete";
+import { needsAccess } from "@/lib/actionHints";
 import { ReturnDialog, useMayReturn, printNote } from "@/components/SalesReturn";
 import { invoiceCreditNotes, returnBlocker } from "@/lib/salesReturn";
 import { toast } from "sonner";
@@ -50,6 +56,8 @@ export function InvoicesPage() {
   const can = useCan();
   const db = useDb();
   const addNew = useAddNew();
+  const navigate = useNavigate();
+  const mayExport = useMayExport();
   const isStaff = user!.role !== "client";
   // Arriving from an order's invoice badge: open with that invoice already
   // searched for, rather than landing on the whole list to hunt for it.
@@ -365,6 +373,50 @@ export function InvoicesPage() {
 
   const detailInv = detailInvId ? db.invoices.find(i => i.id === detailInvId) : undefined;
 
+  // ── Managing the record ──
+  // An invoice follows its orders, so it is never edited; it is deleted only
+  // while nothing has happened on it (lib/invoiceDelete.ts). Payments on it are
+  // corrected or cancelled through their receipts; a credit note by cancelling
+  // the return. Anything that can't be done is greyed with the reason.
+  const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
+  const openInvoice = (id: string) => { setDetailInvId(id); setPayOrderId(null); };
+  const mayDeleteInv = isStaff && can("invoices", "delete");
+  const invDeleteWhy = (inv: Invoice) => (!mayDeleteInv ? needsAccess("invoices", "delete") : invoiceDeleteBlocker(db, inv));
+  const removeInvoice = async (inv: Invoice) => {
+    if (await deleteInvoiceFlow(inv.id) && detailInvId === inv.id) { setDetailInvId(null); setPayOrderId(null); }
+  };
+  const NO_EDIT = "Change the order's pricing — the invoice follows it";
+  const invoiceActions = (inv: Invoice, opened = false): MoreAction[] => {
+    const delWhy = invDeleteWhy(inv);
+    return [
+      { label: "View", icon: Eye, onSelect: () => openInvoice(inv.id), show: !opened },
+      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: NO_EDIT, show: isStaff },
+      { label: "Print", icon: Printer, onSelect: () => printInv(inv), show: mayExport && !opened },
+      { label: "Delete", icon: Trash2, danger: true, onSelect: () => removeInvoice(inv), show: isStaff, disabled: !!delWhy,
+        hint: delWhy ?? "Only the bill goes — the orders and their payments stay" },
+    ];
+  };
+  const mayPayEdit = isStaff && can("payments", "edit");
+  const mayPayDelete = isStaff && can("payments", "delete");
+  const paymentActions = (p: InvoicePayment): MoreAction[] => {
+    const lock = paymentLockReason(db, p);
+    return [
+      { label: "Edit", icon: Pencil, disabled: !!lock || !mayPayEdit,
+        hint: lock ?? (mayPayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit")),
+        onSelect: async () => { await loadReceipts(); setEditReceiptId(p.receiptId!); } },
+      { label: "Delete", icon: Trash2, danger: true, disabled: !!lock || !mayPayDelete,
+        hint: lock ?? (mayPayDelete ? "Cancels the receipt — off the bills, the account and any credit" : needsAccess("payments", "delete")),
+        onSelect: () => cancelReceiptFlow(p.receiptId!, user!.id) },
+    ];
+  };
+  const creditActions = (noteId: string): MoreAction[] => {
+    const why = !mayReturn ? needsAccess("invoices", "edit") : creditNoteCancelBlocker(db, noteId);
+    return [
+      { label: "Cancel return", icon: XCircle, danger: true, disabled: !!why,
+        hint: why ?? "The pieces count as theirs again and the credit comes back off", onSelect: () => cancelCreditNoteFlow(noteId, user!) },
+    ];
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Invoices</h1>
@@ -485,8 +537,9 @@ export function InvoicesPage() {
             noun="invoice"
             rows={invRows}
             rowKey={r => r.inv.id}
-            onRowClick={r => { setDetailInvId(r.inv.id); setPayOrderId(null); }}
+            onRowClick={r => openInvoice(r.inv.id)}
             details={invoiceDetails}
+            rowActions={r => invoiceActions(r.inv)}
             defaultSort={{ key: "date", dir: "desc" }}
             pageSizes={[25, 50, 100]}
             emptyText={ql ? "No invoices match your search." : isStaff ? "No invoices yet — select dispatched orders above to create one." : "No invoices yet."}
@@ -548,6 +601,15 @@ export function InvoicesPage() {
               pageSizes={[10, 25, 50]}
               emptyText="No orders match your search."
               details={ledgerDetails}
+              rowActions={o => {
+                const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
+                return [
+                  { label: "View order", icon: Eye, onSelect: () => navigate(`/orders/${o.id}`),
+                    disabled: !can("orders"), hint: can("orders") ? undefined : needsAccess("orders", "view") },
+                  { label: "View invoice", icon: FileText, onSelect: () => inv && openInvoice(inv.id),
+                    disabled: !inv, hint: inv ? inv.number : "Not invoiced yet" },
+                ];
+              }}
               totals={{
                 total: rows => fmtMoney(ledgerSum(rows, orderTotal)),
                 advance: rows => <span className="text-success">{fmtMoney(ledgerSum(rows, totalAdvance))}</span>,
@@ -588,6 +650,7 @@ export function InvoicesPage() {
                       <IfExport>
                       <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
                       </IfExport>
+                      {isStaff && <MoreMenu size="sm" title={`Invoice ${detailInv.number}`} actions={invoiceActions(detailInv, true)} />}
                     </div>
                   </div>
 
@@ -611,6 +674,7 @@ export function InvoicesPage() {
                       <span className="flex items-center gap-2">
                         <span className="font-semibold text-amber-800">−{fmtMoney(n.creditUsd)}</span>
                         <IfExport><Button size="sm" variant="ghost" onClick={() => printNote(n.noteId)} className="rounded-lg h-7 px-2 gap-1 text-xs"><Printer className="h-3.5 w-3.5" /> Print</Button></IfExport>
+                        {isStaff && <MoreMenu size="sm" label="Credit note actions" title={`Credit note ${n.no}`} actions={creditActions(n.noteId)} className="h-7 w-7" />}
                       </span>
                     </div>
                   ))}
@@ -637,6 +701,32 @@ export function InvoicesPage() {
                     </div>
                   )}
 
+
+                  {/* Each payment against this invoice's orders, one line a receipt
+                      (staff) — corrected or cancelled through that receipt. */}
+                  {isStaff && (() => {
+                    const pays = buildInvoiceBlocks([detailInv], db.orders, detailInv.clientId)[0]?.payments ?? [];
+                    if (!pays.length) return null;
+                    return (
+                      <div className="space-y-1.5">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Payments received</p>
+                        {pays.map(p => {
+                          const no = p.receiptId ? (db.clientReceipts ?? []).find(r => r.id === p.receiptId)?.receiptNo : undefined;
+                          return (
+                            <div key={p.id} className="flex items-center justify-between gap-3 rounded-xl bg-success/5 border border-success/20 px-3 py-2 text-sm">
+                              <span className="min-w-0 text-muted-foreground text-xs">
+                                {fmtDate(p.date)}{no && <> · <span className="font-mono font-semibold text-brand-dark">Receipt {no}</span></>} · {p.note}{p.fromCredit ? " · from credit" : ""}
+                              </span>
+                              <span className="flex items-center gap-2 shrink-0">
+                                <span className="font-semibold text-success">{fmtMoney(p.amount)}</span>
+                                <MoreMenu size="sm" label="Payment actions" title="Payment" actions={paymentActions(p)} className="h-7 w-7" />
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
 
                   <div className="space-y-2">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Orders on this invoice</p>
@@ -707,6 +797,7 @@ export function InvoicesPage() {
           })()}
         </DialogContent>
       </Dialog>
+      <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
       {returning && (
         <ReturnDialog
           orders={invoiceOrderIds(returning.inv).map(id => db.orders.find(o => o.id === id)).filter((o): o is Order => !!o)}

@@ -277,6 +277,60 @@ export async function decreaseStockSelfHealing(
 }
 
 /**
+ * Move one bucket's counter by a signed difference WITHOUT writing a movement.
+ *
+ * For a movement corrected in place (an opening-stock figure — see
+ * lib/openingStock.ts): its own history row is rewritten, so a second row for
+ * the difference would count the change twice. An increase is a plain atomic
+ * increment, as increaseStock's; a decrease is floor-checked in a transaction,
+ * as decreaseStock's, and resyncs a stale-low counter from the history once
+ * before giving up, as decreaseStockSelfHealing does.
+ */
+export async function adjustStockCounter(args: {
+  material: MaterialKey;
+  companyId?: string;
+  purityOrQuality: string;
+  /** Positive adds, negative takes away. */
+  delta: number;
+}, movements: StockMovement[]): Promise<void> {
+  const field = args.material;
+  const delta = Math.round(args.delta * 1000) / 1000;
+  if (!delta) return;
+  if (delta > 0) {
+    await setDoc(stockRef(args.companyId), {
+      [field]: { [args.purityOrQuality]: increment(delta) },
+      updatedAt: new Date().toISOString(),
+      version: increment(1),
+    }, { merge: true });
+    return;
+  }
+  const take = async () => runTransaction(fsdb, async (tx) => {
+    const ref = stockRef(args.companyId);
+    const snap = await tx.get(ref);
+    const levels = (snap.exists() ? snap.data() : { gold: {}, diamond: {} }) as StockLevels;
+    const have = ((levels as unknown as Record<string, Record<string, number> | undefined>)[field])?.[args.purityOrQuality] || 0;
+    if (have < -delta) {
+      throw new Error(`Insufficient ${args.purityOrQuality} ${args.material} stock: have ${have}, need ${-delta}.`);
+    }
+    tx.set(ref, {
+      [field]: { [args.purityOrQuality]: Math.round((have + delta) * 1000) / 1000 },
+      updatedAt: new Date().toISOString(),
+      version: increment(1),
+    }, { merge: true });
+  });
+  try {
+    await take();
+  } catch (e) {
+    if (e instanceof Error && e.message.startsWith("Insufficient")) {
+      await recomputeStockFromHistory(movements, args.companyId);
+      await take();
+    } else {
+      throw e;
+    }
+  }
+}
+
+/**
  * Move stock from one of our companies to another: out of the sender's
  * counter (floor-checked, as any issue), into the receiver's, both legs
  * sharing one id. The receiving leg carries what it cost the sender, so the

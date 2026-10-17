@@ -8,6 +8,13 @@ import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilte
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { lockerTxnDetails } from "@/components/rowDetails";
 import { useCan } from "@/hooks/useCan";
+import { useLoaded } from "@/hooks/useLoaded";
+import { HandCoins } from "lucide-react";
+import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
+import { needsAccess } from "@/lib/actionHints";
+import type { MoreAction } from "@/components/MoreMenu";
+import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
+import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialog";
 
 /** One line of the book: the entry, and the account's balance after it. */
 type Line = { t: LockerTransaction; balance: number };
@@ -48,6 +55,14 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [dir, setDir] = useState("");
+  // A line's ⋯ — the same as the Locker page's ledger: correct or cancel it,
+  // apply loose money to a client's bill, or say where it is corrected.
+  const [editing, setEditing] = useState<MoneyEntry | null>(null);
+  const [applyTxnId, setApplyTxnId] = useState<string | null>(null);
+  // What each line belongs to (a bill, an expense, a sale) loads on demand;
+  // nothing is offered for a line until it has.
+  const entriesReady = useLoaded(ENTRY_COLS.locker);
+  const entryById = new Map(entriesReady ? listEntries(db, "locker").map(e => [e.id, e] as const) : []);
 
   const locker = db.lockers.find(l => l.id === lockerId);
   // Any currency the account is held in; on screen with its symbol, on the
@@ -147,6 +162,26 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
       cell: r => <span className="font-medium tabular-nums whitespace-nowrap">{money(r.balance)}</span> },
   ];
 
+  // The day book sits under Payments, so Payments access decides — as it does
+  // for the Account Entries tab beside it.
+  const rowActions = ({ t }: Line): MoreAction[] => {
+    const e = entryById.get(t.id);
+    const mayEdit = can("payments", "edit");
+    const owned = e?.locked ? (e.lockedWhere ?? "another tab") : undefined;
+    const why = !mayEdit ? needsAccess("payments", "edit") : !e ? "Loading the records behind this entry…" : applyBlock(t, owned);
+    return [
+      { label: "Apply to a client’s bill", icon: HandCoins, hint: why ?? "Money a client sent — settle their bill with it",
+        disabled: !!why, show: t.type === "income" && t.refType !== "clientPayment",
+        onSelect: () => setApplyTxnId(t.id) },
+      ...entryRowActions(e, {
+        mayEdit, mayDelete: can("payments", "delete"),
+        editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
+        onEdit: setEditing,
+        onDelete: x => { void confirmDeleteEntry(db, x); },
+      }),
+    ];
+  };
+
   if (!lockers.length) {
     return <div className="card-luxe p-8 text-center text-muted-foreground">No accounts yet — add one on the Locker page.</div>;
   }
@@ -215,8 +250,12 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
         // Opened: the note as typed, who recorded it and when, and what the
         // movement was — the other account of a transfer, the client, bill or job.
         details={({ t }) => lockerTxnDetails(db, t, m => can(m), { note: true })}
+        rowActions={rowActions}
         emptyText={filtered ? "Nothing matches these filters." : "Nothing on this account yet."}
       />
+
+      <MoneyEntryEditor entry={editing} onClose={() => setEditing(null)} mayDelete={can("payments", "delete")} />
+      <ApplyToClientDialog txnId={applyTxnId} onClose={() => setApplyTxnId(null)} />
     </div>
   );
 }

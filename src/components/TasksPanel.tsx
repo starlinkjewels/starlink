@@ -3,8 +3,9 @@ import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, updateDb, uid, type Task, type User } from "@/lib/db";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
-import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo } from "lucide-react";
+import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo, Pencil, Check } from "lucide-react";
 import { toast } from "sonner";
+import { confirmBox } from "@/lib/confirm";
 
 interface Props {
   /** Whose tasks to show. Pass the userId. */
@@ -30,6 +31,7 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
 
   const assignedByUser = (t: Task): User | undefined =>
     db.users.find(u => u.id === t.assignedBy);
+  const empName = db.users.find(u => u.id === userId)?.name ?? "Employee";
 
   const addTask = () => {
     const title = newTitle.trim();
@@ -71,13 +73,23 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
     reload();
   };
 
-  const deleteTask = (taskId: string) => {
-    updateDb(d => { d.tasks = (d.tasks ?? []).filter(x => x.id !== taskId); });
+  // Gone for whoever it was assigned to as well, so it asks first.
+  const deleteTask = async (task: Task) => {
+    if (!(await confirmBox(`Delete this task?\n\n"${task.title}"${task.completed ? " (done)" : ""} — it goes off ${asAdmin ? `${empName}'s` : "your"} list for good. This cannot be undone.`))) return;
+    updateDb(d => { d.tasks = (d.tasks ?? []).filter(x => x.id !== task.id); });
     reload();
     toast.success("Task removed");
   };
 
-  const empName = db.users.find(u => u.id === userId)?.name ?? "Employee";
+  // Correct a task's wording; who it is for and whether it is done stay as they are.
+  const renameTask = (taskId: string, title: string) => {
+    const t = title.trim();
+    if (!t) { toast.error("A task needs some words"); return false; }
+    updateDb(d => { const x = (d.tasks ?? []).find(y => y.id === taskId); if (x) x.title = t; });
+    reload();
+    return true;
+  };
+
 
   return (
     <AnimatePresence>
@@ -158,7 +170,8 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                     task={task}
                     assigner={assignedByUser(task)}
                     onToggle={done => toggleTask(task.id, done)}
-                    onDelete={() => deleteTask(task.id)}
+                    onDelete={() => deleteTask(task)}
+                    onRename={title => renameTask(task.id, title)}
                   />
                 ))}
               </div>
@@ -190,7 +203,8 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                             task={task}
                             assigner={assignedByUser(task)}
                             onToggle={done => toggleTask(task.id, done)}
-                            onDelete={() => deleteTask(task.id)}
+                            onDelete={() => deleteTask(task)}
+                            onRename={title => renameTask(task.id, title)}
                           />
                         ))}
                       </motion.div>
@@ -223,12 +237,17 @@ function TaskRow({
   assigner,
   onToggle,
   onDelete,
+  onRename,
 }: {
   task: Task;
   assigner?: User;
   onToggle: (done: boolean) => void;
   onDelete: () => void;
+  /** Saves new wording; false keeps the row open (nothing to save). */
+  onRename: (title: string) => boolean;
 }) {
+  const [editing, setEditing] = useState<string | null>(null);
+  const save = () => { if (editing !== null && (editing.trim() === task.title || onRename(editing))) setEditing(null); };
   return (
     <motion.div
       layout
@@ -240,6 +259,7 @@ function TaskRow({
       {/* Checkbox */}
       <button
         onClick={() => onToggle(!task.completed)}
+        aria-label={task.completed ? "Mark not done" : "Mark done"}
         className={`mt-0.5 shrink-0 h-5 w-5 rounded-full border-2 grid place-items-center transition-colors
           ${task.completed
             ? "border-primary bg-primary text-white"
@@ -252,9 +272,19 @@ function TaskRow({
 
       {/* Content */}
       <div className="flex-1 min-w-0">
-        <p className={`text-sm leading-snug ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}>
-          {task.title}
-        </p>
+        {editing !== null ? (
+          <div className="flex items-center gap-1.5">
+            <Input value={editing} autoFocus aria-label="Task" onChange={e => setEditing(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(null); }}
+              className="h-8 rounded-lg text-sm" />
+            <button onClick={save} aria-label="Save the task" className="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-success hover:bg-success/10"><Check className="h-3.5 w-3.5" /></button>
+            <button onClick={() => setEditing(null)} aria-label="Keep it as it was" className="h-7 w-7 shrink-0 rounded-lg grid place-items-center text-muted-foreground hover:bg-secondary"><X className="h-3.5 w-3.5" /></button>
+          </div>
+        ) : (
+          <p className={`text-sm leading-snug ${task.completed ? "line-through text-muted-foreground" : "text-foreground"}`}>
+            {task.title}
+          </p>
+        )}
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {task.completed
             ? `Completed: ${fmtCompleted(task.completedAt)}`
@@ -262,13 +292,19 @@ function TaskRow({
         </p>
       </div>
 
-      {/* Delete */}
-      <button
-        onClick={onDelete}
-        className="opacity-0 group-hover:opacity-100 transition-opacity mt-0.5 h-5 w-5 rounded grid place-items-center text-muted-foreground hover:text-destructive"
-      >
-        <X className="h-3 w-3" />
-      </button>
+      {/* Edit · Delete — always visible on a phone, on hover on a computer */}
+      {editing === null && (
+        <div className="flex items-center gap-0.5 mt-0.5 opacity-100 md:opacity-0 md:group-hover:opacity-100 transition-opacity">
+          <button onClick={() => setEditing(task.title)} aria-label="Edit task" title="Edit"
+            className="h-5 w-5 rounded grid place-items-center text-muted-foreground hover:text-primary">
+            <Pencil className="h-3 w-3" />
+          </button>
+          <button onClick={onDelete} aria-label="Delete task" title="Delete"
+            className="h-5 w-5 rounded grid place-items-center text-muted-foreground hover:text-destructive">
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
     </motion.div>
   );
 }

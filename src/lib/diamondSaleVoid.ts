@@ -1,5 +1,5 @@
 import { companyOf } from "@/lib/companies";
-import { updateDb, type DB, type DiamondSale } from "@/lib/db";
+import { updateDb, type DB, type DiamondSale, type LockerTransaction } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
 import { fmtCcy } from "@/lib/currency";
 
@@ -8,6 +8,27 @@ import { fmtCcy } from "@/lib/currency";
  *  only be paid into an account holding it. */
 const proceeds = (sale: DiamondSale) => sale.totalUsd ?? sale.totalInr;
 const proceedsCcy = (sale: DiamondSale) => (sale.totalUsd != null ? "USD" : "INR");
+
+/**
+ * The account movement a sale paid into. Sales recorded from now on carry
+ * refType "diamondSale" and the sale's id, so they are found exactly. Older
+ * ones were written as plain "manual" entries with no link, and are matched
+ * the way every other paired movement is: same account, money in, the same
+ * amount, written within two seconds of the sale. Only a manual (or untagged)
+ * row is ever taken that way — one since applied to a client's bills belongs
+ * to that client now and is not this sale's to remove.
+ */
+export function saleTxn(txns: LockerTransaction[] | undefined, sale: DiamondSale): LockerTransaction | undefined {
+  const list = txns ?? [];
+  const tagged = list.find(t => t.refType === "diamondSale" && t.refId === sale.id);
+  if (tagged || !sale.lockerId) return tagged;
+  const at = +new Date(sale.createdAt);
+  return list.find(t =>
+    (t.refType === "manual" || !t.refType)
+    && t.lockerId === sale.lockerId && t.type === "income"
+    && Math.abs(t.amountInr - proceeds(sale)) < 0.01
+    && Math.abs(+new Date(t.createdAt) - at) < 2000);
+}
 
 /**
  * Undoing a diamond sold straight out of stock.
@@ -41,9 +62,13 @@ export function saleVoidImpact(db: DB, sale: DiamondSale): string[] {
     ? (db.clients.find(c => c.id === sale.clientId)?.companyName ?? "the client")
     : (sale.buyerName ?? "the buyer");
   out.push(`• the sale to ${buyer} is removed`);
-  if (sale.lockerId) {
-    const locker = db.lockers.find(l => l.id === sale.lockerId);
-    out.push(`• ${locker?.name ?? "the account"} goes down by ${fmtCcy(proceeds(sale), proceedsCcy(sale))}`);
+  const txn = saleTxn(db.lockerTransactions, sale);
+  if (txn) {
+    const locker = db.lockers.find(l => l.id === txn.lockerId);
+    out.push(`• ${locker?.name ?? "the account"} goes down by ${fmtCcy(txn.amountInr, txn.currency ?? proceedsCcy(sale))}`);
+  } else if (sale.lockerId) {
+    // Said rather than assumed: nothing will come off the account.
+    out.push("• no account entry was found for its money, so no account changes");
   }
   out.push("• nothing else changes");
   return out;
@@ -69,15 +94,9 @@ export async function voidDiamondSale(db: DB, sale: DiamondSale, userId: string)
       if (p && p.status === "sold") { p.status = "in_stock"; p.orderId = undefined; }
     }
     d.diamondSales = (d.diamondSales ?? []).filter(s => s.id !== sale.id);
-    // The money it brought in. Matched on the account, the amount and the
-    // moment, the same way every other paired movement is found.
-    if (sale.lockerId) {
-      const at = +new Date(sale.createdAt);
-      const idx = (d.lockerTransactions ?? []).findIndex(t =>
-        t.lockerId === sale.lockerId && t.type === "income"
-        && Math.abs(t.amountInr - proceeds(sale)) < 0.01
-        && Math.abs(+new Date(t.createdAt) - at) < 2000);
-      if (idx >= 0) d.lockerTransactions.splice(idx, 1);
-    }
+    // The money it brought in — by its tag, or (an older sale) by the
+    // account, the amount and the moment. See saleTxn.
+    const txn = saleTxn(d.lockerTransactions, sale);
+    if (txn) d.lockerTransactions = d.lockerTransactions.filter(t => t.id !== txn.id);
   });
 }

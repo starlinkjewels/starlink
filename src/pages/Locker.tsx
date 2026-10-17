@@ -2,11 +2,18 @@ import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useState } from "react";
-import { updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, DEFAULT_LOCKER_CATEGORIES, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
+import { useSearchParams } from "react-router-dom";
+import { loadDb, updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, ensureCollections, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
-import { applyIncomeToClient } from "@/lib/clientPayments";
 import { useDb } from "@/hooks/useDb";
+import { useLoaded } from "@/hooks/useLoaded";
+import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
+import { LOCKER_REF_COLS, lockerDeleteBlock } from "@/lib/lockerGuards";
+import { needsAccess } from "@/lib/actionHints";
+import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
+import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialog";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useAuth } from "@/lib/auth";
 import { lockerBalance } from "@/lib/manufacturing";
 import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateFields, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
@@ -18,7 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins } from "lucide-react";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins, Power, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -50,7 +57,15 @@ export function LockerPage() {
   const can = useCan();
   const [open, setOpen] = useState(false);
 
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  // "View account" elsewhere opens this page on that account (?account=id).
+  const [params] = useSearchParams();
+  const [selectedId, setSelectedId] = useState<string | null>(() => params.get("account"));
+  // Deactivated accounts stay on record; shown on request, so one can be
+  // looked at or switched back on. Opened straight onto one, they show.
+  const [showInactive, setShowInactive] = useState(() => {
+    const want = params.get("account");
+    return !!want && db.lockers.some(l => l.id === want && l.active === false);
+  });
   const [showExport, setShowExport] = useState(false);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
@@ -78,17 +93,25 @@ export function LockerPage() {
   const [txnInvoiceId, setTxnInvoiceId] = useState("");
   // Repairing an income row that was typed in as a loose entry when it was
   // really a client payment — the cash is already in the locker, only the
-  // allocation to their orders is missing.
+  // allocation to their orders is missing. (src/components/ApplyToClientDialog.tsx)
   const [fixTxnId, setFixTxnId] = useState<string | null>(null);
-  const [fixClientId, setFixClientId] = useState("");
-  const [fixInvoiceId, setFixInvoiceId] = useState("");
-  const [fixRate, setFixRate] = useState<number | "">("");
+  // Correcting a row of the ledger — the panel Payments' ledgers use.
+  const [editingEntry, setEditingEntry] = useState<MoneyEntry | null>(null);
 
   const lockers = db.lockers.filter(l => l.active !== false);
+  const inactiveLockers = db.lockers.filter(l => l.active === false);
+  const shownLockers = showInactive ? [...lockers, ...inactiveLockers] : lockers;
   // The ledger is the page, so one locker is always open: the one picked, or
   // the first. Resolved on every render, so it still lands on an account when
   // the lockers arrive a moment after the page.
-  const selected = lockers.find(l => l.id === selectedId) ?? lockers[0] ?? null;
+  const selected = shownLockers.find(l => l.id === selectedId) ?? lockers[0] ?? shownLockers[0] ?? null;
+  const selectedInactive = selected?.active === false;
+
+  // What each ledger row belongs to — a supplier's payment, an expense, a
+  // diamond sale — decides whether it is corrected here or where it was made.
+  // Those records load on demand; until they have, nothing is offered.
+  const entriesReady = useLoaded(ENTRY_COLS.locker);
+  const entryById = new Map(entriesReady ? listEntries(db, "locker").map(e => [e.id, e] as const) : []);
 
   // ── Client payments recorded straight from the locker ──────────────────────
   const clientsSorted = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
@@ -146,6 +169,60 @@ export function LockerPage() {
       toast.success("Locker updated");
       setEditId(null);
     } finally { setEditSaving(false); }
+  };
+
+  // ── Deactivate / activate / delete a locker ──
+  // `active` is read everywhere (every account picker leaves an inactive one
+  // out) but nothing ever set it. Deactivating is how an account with history
+  // is retired: its entries and balance stay in the books.
+  const setActive = async (l: Locker, active: boolean) => {
+    if (!active) {
+      const bal = lockerBalance(l, db.lockerTransactions);
+      const ok = await confirmBox([
+        `Deactivate ${l.name}?`, "",
+        "• it is no longer offered when money is paid, received or transferred",
+        "• its entries stay on record, and every report still counts them",
+        ...(Math.abs(bal) > 0.005 ? [`• it still holds ${fmtCcy(bal, l.currency)} — move that out first if the money is elsewhere now`] : []),
+        "• you can activate it again any time",
+      ], { confirmText: "Deactivate" });
+      if (!ok) return;
+    }
+    updateDb(d => { const x = d.lockers.find(y => y.id === l.id); if (x) x.active = active; });
+    toast.success(active ? `${l.name} is active again` : `${l.name} deactivated`);
+    if (!active && selected?.id === l.id && !showInactive) setSelectedId(null);
+  };
+
+  const deleteLocker = async (l: Locker) => {
+    // Everything that could name the account is loaded and counted first —
+    // the card's menu only knew what this page had.
+    await ensureCollections(LOCKER_REF_COLS);
+    const fresh = loadDb();
+    const block = lockerDeleteBlock(fresh, l.id);
+    if (block) { toast.error(`${l.name}: ${block}`); return; }
+    const ok = await confirmBox([
+      `Delete ${l.name}?`, "",
+      "• the account is removed for good",
+      ...(l.openingBalance ? [`• its opening balance of ${fmtCcy(l.openingBalance, l.currency)} goes with it`] : []),
+      "• nothing has ever gone through it, so no balance, payment or report changes",
+    ]);
+    if (!ok) return;
+    updateDb(d => { d.lockers = d.lockers.filter(x => x.id !== l.id); });
+    toast.success(`${l.name} deleted`);
+    if (selected?.id === l.id) setSelectedId(null);
+  };
+
+  /** A card's ⋯ — what can be done to the account, each greyed with the reason when it can't. */
+  const lockerActions = (l: Locker): MoreAction[] => {
+    const mayEdit = can("locker", "edit"), mayDelete = can("locker", "delete");
+    const block = lockerDeleteBlock(db, l.id);
+    return [
+      { label: "Edit", icon: Pencil, onSelect: () => openEditLocker(l), disabled: !mayEdit, hint: mayEdit ? "Name, type, number, opening balance" : needsAccess("locker", "edit") },
+      l.active === false
+        ? { label: "Activate", icon: Power, onSelect: () => setActive(l, true), disabled: !mayEdit, hint: mayEdit ? "Offer it for payments again" : needsAccess("locker", "edit") }
+        : { label: "Deactivate", icon: Power, onSelect: () => setActive(l, false), disabled: !mayEdit, hint: mayEdit ? "Hide it from every account picker — asks first" : needsAccess("locker", "edit") },
+      { label: "Delete", icon: Trash2, danger: true, onSelect: () => deleteLocker(l),
+        disabled: !mayDelete || !!block, hint: !mayDelete ? needsAccess("locker", "delete") : block ?? "Only an account nothing has gone through — asks first" },
+    ];
   };
 
   /** A client payment entered here, waiting for its receipt number. */
@@ -278,20 +355,25 @@ export function LockerPage() {
     setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnClientId(""); setTxnInvoiceId(""); setTxnMode(false);
   };
 
-  // Shared with Settings' sweep of old entries — see src/lib/clientPayments.ts.
-  const applyIncome = async () => {
-    const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
-    const client = db.clients.find(c => c.id === fixClientId);
-    if (!txn || !client) { toast.error("Choose the client this money came from"); return; }
-    const res = await applyIncomeToClient({
-      txnId: txn.id, clientId: client.id,
-      invoiceId: fixInvoiceId || undefined,
-      exchangeRate: Number(fixRate) || undefined,
-      userId: user!.id,
-    });
-    if (!res.ok) { toast.error(res.error); return; }
-    toast.success(`${fmtMoney(res.settled)} applied to ${client.companyName}'s bills`);
-    setFixTxnId(null);
+  /** A ledger row's ⋯: apply loose money to a client's bill, correct or cancel
+   *  it — or, for a row made by another record, where that is done. */
+  const rowActionsFor = (t: LockerTransaction): MoreAction[] => {
+    const e = entryById.get(t.id);
+    const mayEdit = can("locker", "edit");
+    const owned = e?.locked ? (e.lockedWhere ?? "another tab") : undefined;
+    const notYet = !e ? "Loading the records behind this entry…" : undefined;
+    const why = !mayEdit ? needsAccess("locker", "edit") : notYet ?? applyBlock(t, owned);
+    return [
+      { label: "Apply to a client’s bill", icon: HandCoins, hint: why ?? "Money a client sent — settle their bill with it",
+        disabled: !!why, show: t.type === "income" && t.refType !== "clientPayment",
+        onSelect: () => setFixTxnId(t.id) },
+      ...entryRowActions(e, {
+        mayEdit, mayDelete: can("locker", "delete"),
+        editNeeds: needsAccess("locker", "edit"), deleteNeeds: needsAccess("locker", "delete"),
+        onEdit: setEditingEntry,
+        onDelete: x => { void confirmDeleteEntry(db, x); },
+      }),
+    ];
   };
 
 
@@ -368,6 +450,17 @@ export function LockerPage() {
           <div className="flex items-center gap-2.5">
             <div className="h-8 w-8 rounded-lg grid place-items-center shrink-0 bg-primary/10 text-primary"><History className="h-4 w-4" /></div>
             <CellMain title="Opening balance" sub="Starting cash when this locker was created" />
+            {/* A pinned row has no ⋯ of its own, so its one action sits here:
+                the opening balance is the locker's, corrected in its editor. */}
+            {selected && (
+              <button type="button" data-no-row onClick={e => { e.stopPropagation(); openEditLocker(selected); }}
+                disabled={!can("locker", "edit")}
+                title={can("locker", "edit") ? "Edit opening balance" : needsAccess("locker", "edit")}
+                aria-label="Edit opening balance"
+                className="not-italic ml-1 inline-flex items-center gap-1 h-7 px-2 rounded-lg text-[11px] font-medium text-primary hover:bg-primary/10 disabled:text-muted-foreground disabled:hover:bg-transparent disabled:cursor-not-allowed shrink-0">
+                <Pencil className="h-3 w-3" /> Edit
+              </button>
+            )}
           </div>
         );
         return (
@@ -463,9 +556,10 @@ export function LockerPage() {
       {/* The accounts, compact: picking one opens its ledger below. On a phone
           they scroll sideways inside their own row, so the ledger stays near the top. */}
       <div className="flex gap-3 overflow-x-auto no-scrollbar p-0.5 sm:p-0 sm:grid sm:grid-cols-2 lg:grid-auto-tiles sm:overflow-visible">
-        {lockers.map(l => {
+        {shownLockers.map(l => {
           const bal = lockerBalance(l, db.lockerTransactions);
           const isSelected = selected?.id === l.id;
+          const off = l.active === false;
           return (
             <div
               key={l.id}
@@ -473,24 +567,22 @@ export function LockerPage() {
               tabIndex={0}
               aria-pressed={isSelected}
               onClick={() => { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); }}
-              onKeyDown={e => { if (e.key === "Enter") { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
-              className={`card-luxe shrink-0 flex-1 min-w-[15rem] sm:min-w-0 px-4 py-3.5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"}`}
+              onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
+              className={`card-luxe shrink-0 flex-1 min-w-[15rem] sm:min-w-0 px-4 py-3.5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"} ${off ? "opacity-70" : ""}`}
             >
-              {can("locker", "edit") && <button
-                onClick={e => { e.stopPropagation(); openEditLocker(l); }}
-                className="absolute top-3 right-3 h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                title="Edit locker"
-              >
-                <Pencil className="h-3.5 w-3.5" />
-              </button>}
-              <div className="flex items-center gap-2.5 pr-8">
+              {/* The account's own menu. Its clicks (portalled, but still bubbling
+                  through React) must not also pick the card. */}
+              <div className="absolute top-2.5 right-2.5" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                <MoreMenu size="sm" label={`Actions for ${l.name}`} actions={lockerActions(l)} />
+              </div>
+              <div className="flex items-center gap-2.5 pr-9">
                 <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/15 to-brand-light/20 grid place-items-center shrink-0">
                   {l.type === "bank" ? <Landmark className="h-4 w-4 text-primary" /> : <Wallet className="h-4 w-4 text-primary" />}
                 </div>
                 <div className="min-w-0">
                   <p className="font-medium text-brand-dark truncate leading-tight">{l.name}</p>
                   <p className="text-[11px] text-muted-foreground">
-                    {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {ccy(l.currency)}
+                    {l.type === "bank" ? `Bank${l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""}` : "Cash"} · {ccy(l.currency)}{off ? " · Inactive" : ""}
                   </p>
                 </div>
               </div>
@@ -498,10 +590,18 @@ export function LockerPage() {
             </div>
           );
         })}
-        {lockers.length === 0 && (
-          <div className="w-full sm:col-span-full card-luxe p-12 text-center text-muted-foreground">No lockers yet — add your first bank/cash account.</div>
+        {shownLockers.length === 0 && (
+          <div className="w-full sm:col-span-full card-luxe p-12 text-center text-muted-foreground">
+            {inactiveLockers.length ? "Every account is deactivated — show them below to switch one back on." : "No lockers yet — add your first bank/cash account."}
+          </div>
         )}
       </div>
+      {inactiveLockers.length > 0 && (
+        <button type="button" onClick={() => setShowInactive(v => !v)} aria-pressed={showInactive}
+          className="-mt-2 text-xs font-medium text-primary hover:underline">
+          {showInactive ? "Hide inactive accounts" : `Show inactive accounts (${inactiveLockers.length})`}
+        </button>
+      )}
 
       {selected && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-4 sm:p-5 space-y-4">
@@ -514,6 +614,7 @@ export function LockerPage() {
                 <h3 className="font-display text-lg text-brand-dark">{selected.name} — Ledger</h3>
                 <p className="text-xs text-muted-foreground">
                   {filtersActive ? `${filteredTxns.length} of ${txns.length} transactions` : `${txns.length} transaction${txns.length !== 1 ? "s" : ""}`}
+                  {selectedInactive ? " · inactive — activate it to record entries" : ""}
                 </p>
               </div>
             </div>
@@ -526,7 +627,10 @@ export function LockerPage() {
                 { label: "Ledger — Excel", sublabel: "Transactions with running balance", kind: "excel", run: exportCsv },
               ]} />
               {can("locker", "add") && (
-                <Button onClick={() => setTxnMode(true)} className="btn-hero rounded-xl gap-2">
+                // A deactivated account takes no new money — greyed, saying why.
+                <Button onClick={() => setTxnMode(true)} disabled={selectedInactive}
+                  title={selectedInactive ? "Inactive — activate it from its card's ⋯ to record entries" : undefined}
+                  className="btn-hero rounded-xl gap-2">
                   <Plus className="h-4 w-4" /> Record Transaction
                 </Button>
               )}
@@ -587,11 +691,10 @@ export function LockerPage() {
               debit: rows => <span className="text-destructive">{fmtCcy(ledgerSum(rows, false), selected.currency)}</span>,
               credit: rows => <span className="text-success">{fmtCcy(ledgerSum(rows, true), selected.currency)}</span>,
             }}
-            rowActions={can("locker", "edit") ? r => [
-              { label: "Apply to a client’s bill", icon: HandCoins, hint: "Money a client sent — settle their bill with it",
-                show: !!r.t && r.t.type === "income" && r.t.refType !== "clientPayment",
-                onSelect: () => { setFixTxnId(r.t!.id); setFixClientId(""); setFixInvoiceId(""); setFixRate(""); } },
-            ] : undefined}
+            // Every row: correct or cancel it here, or — made by another record —
+            // where that is done, greyed with the reason. The opening row is the
+            // locker's own (its Edit sits in the row).
+            rowActions={r => (r.t ? rowActionsFor(r.t) : [])}
             // Opened: the voucher and note on their own lines, who recorded it and
             // when, the other account of a transfer and its rate, and whatever it
             // settled — a client's receipt, supplier bills, factory jobs, an expense.
@@ -799,70 +902,10 @@ export function LockerPage() {
 
       {/* Apply a loose income row to a client's bill (repairs a payment that was
           typed in as a plain locker entry and never reached their orders). */}
-      <Dialog open={!!fixTxnId} onOpenChange={o => { if (!o) setFixTxnId(null); }}>
-        <DialogContent className="max-w-2xl rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display text-xl">Apply to a client&rsquo;s bill</DialogTitle></DialogHeader>
-          {(() => {
-            const txn = db.lockerTransactions.find(t => t.id === fixTxnId);
-            if (!txn) return null;
-            // Read the same way applyIncomeToClient reads it, so this preview
-            // and what it settles agree.
-            const txnCcy = ccy(txn.currency);
-            const isUsd = txnCcy === "USD";
-            const rate = Number(fixRate) || 0;
-            const billed = isUsd ? txn.amountInr : (rate > 0 ? txn.amountInr / rate : 0);
-            const invs = fixClientId
-              ? (db.invoices ?? [])
-                  .filter(i => i.clientId === fixClientId)
-                  .map(i => ({ inv: i, bal: invLiveBalance(invoiceOrderIds(i)) }))
-                  .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
-              : [];
-            return (
-              <>
-                <p className="text-sm text-muted-foreground -mt-1">
-                  {fmtCcy(txn.amountInr, txn.currency)} received on {fmtDate(txn.createdAt)} is already counted in this locker.
-                  It was never applied to anyone&rsquo;s orders, which is why their invoice still shows as pending. No second
-                  entry is made here — only the missing allocation.
-                </p>
-                <div className="space-y-2.5 mt-1">
-                  <div>
-                    <Label className="text-xs">Received from</Label>
-                    <Select value={fixClientId} onValueChange={v => { setFixClientId(v); setFixInvoiceId(""); }}>
-                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose the client" /></SelectTrigger>
-                      <SelectContent>{clientsSorted.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                  {fixClientId && (
-                    <div>
-                      <Label className="text-xs">Against</Label>
-                      <Select value={fixInvoiceId || "fifo"} onValueChange={v => setFixInvoiceId(v === "fifo" ? "" : v)}>
-                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="fifo">Oldest bills first</SelectItem>
-                          {invs.map(({ inv, bal }) => (
-                            <SelectItem key={inv.id} value={inv.id}>
-                              Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  {!isUsd && (
-                    // Their bill is in dollars: this locker's currency for $1, on the day it came in.
-                    <RateInput id="fix-rate" from="USD" to={txnCcy} value={fixRate} onChange={setFixRate} at={txn.createdAt} />
-                  )}
-                  {billed > 0 && <p className="text-[11px] text-muted-foreground">Settles {fmtMoney(billed)} of their billing.</p>}
-                </div>
-                <div className="flex gap-2 mt-4">
-                  <Button variant="outline" onClick={() => setFixTxnId(null)} className="rounded-xl flex-1">Cancel</Button>
-                  <Button onClick={applyIncome} disabled={!fixClientId} className="btn-hero rounded-xl flex-1">Apply</Button>
-                </div>
-              </>
-            );
-          })()}
-        </DialogContent>
-      </Dialog>
+      <ApplyToClientDialog txnId={fixTxnId} onClose={() => setFixTxnId(null)} />
+
+      {/* Correcting a ledger row — the same panel as Payments' ledgers. */}
+      <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("locker", "delete")} />
 
     </div>
   );

@@ -264,10 +264,20 @@ export function ActivityPage() {
                   </div>
                 ),
               }}
-              rowActions={e => [
-                { label: "Undo", icon: Undo2, hint: "Every record it changed goes back as it was",
-                  show: e.kind !== "undo" && !e.undoneAt && e.undoable, onSelect: () => tryUndo(e) },
-              ]}
+              rowActions={e => {
+                // Undo is always listed; when it can't be done, greyed with the
+                // reason (the live check, so "changed since" shows before a click).
+                const check = e.kind === "change" ? undoCheck(e) : null;
+                const why = e.kind === "undo" ? "An undo can't itself be undone — make the change again instead"
+                  : e.kind !== "change" ? `Nothing was changed — a ${e.kind === "export" ? "download" : e.kind === "print" ? "print" : "sign-in"} is only recorded`
+                  : check && !check.ok ? [check.reason, ...(check.moved ?? []).slice(0, 2)].join(" · ") : undefined;
+                return [
+                  { label: "Undo", icon: Undo2, hint: why ?? "Every record it changed goes back as it was", disabled: !!why, onSelect: () => tryUndo(e) },
+                  // The log is the record of what happened — never rewritten.
+                  { label: "Edit", icon: Pencil, hint: "The activity log is permanent — entries can't be edited", disabled: true, onSelect: () => undefined },
+                  { label: "Delete", icon: Trash2, danger: true, hint: "The activity log is permanent — entries can't be deleted", disabled: true, onSelect: () => undefined },
+                ];
+              }}
               emptyText={loading
                 ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto" />
                 : "Nothing recorded for these filters."}

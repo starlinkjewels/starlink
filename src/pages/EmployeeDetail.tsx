@@ -1,5 +1,8 @@
 import { useMayExport } from "@/hooks/useCan";
-import { MoreMenu } from "@/components/MoreMenu";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
+import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
+import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, orderTotal, findInvoiceForOrder, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
@@ -11,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
   ArrowLeft, Mail, Phone, Building2, Users,
-  CheckCircle2, Clock, ListTodo, Wallet, Receipt, FileSpreadsheet, FileText,
+  CheckCircle2, Clock, ListTodo, Wallet, Receipt, FileSpreadsheet, FileText, Pencil, Trash2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -24,6 +27,10 @@ export function EmployeeDetailPage() {
   const navigate = useNavigate();
   const db = useDb();
   const [tasksOpen, setTasksOpen] = useState(false);
+  // Their details (and opening salary), and a salary payment — each in its panel.
+  const [editingSelf, setEditingSelf] = useState(false);
+  const [editingExpense, setEditingExpense] = useState<string | null>(null);
+  const expenseRight = useExpenseRights();
 
   // Salary is payable to any staff member — employees AND the admin/owner.
   const employee = db.users.find(u => u.id === id && (u.role === "employee" || u.role === "admin"));
@@ -126,9 +133,12 @@ export function EmployeeDetailPage() {
 
   // Downloadable salary ledger (opening row + each payment).
   const year = new Date().getFullYear();
+  // Each payment keeps its expense's id, so a row's ⋯ edits or deletes that
+  // very expense; the opening line is the person's own figure.
+  const OPENING_ID = "__opening";
   const salaryRows = [
-    ...(opening > 0 ? [{ date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur, thisYear: openingInThisYear }] : []),
-    ...salaryLedger.map(e => ({ date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: ccy(e.currency), thisYear: new Date(e.createdAt).getFullYear() === year })),
+    ...(opening > 0 ? [{ id: OPENING_ID, date: employee.openingPaidDate || employee.createdAt, particulars: "Opening (brought forward)", category: "Opening", amount: opening, currency: openingCur, thisYear: openingInThisYear }] : []),
+    ...salaryLedger.map(e => ({ id: e.id, date: e.createdAt, particulars: e.title, category: e.category, amount: e.amount, currency: ccy(e.currency), thisYear: new Date(e.createdAt).getFullYear() === year })),
   ];
   // Paid from several accounts (rupees, dollars, AUD…), each currency is
   // totalled on its own — never added together. One currency, as nearly
@@ -152,21 +162,48 @@ export function EmployeeDetailPage() {
     return salaryRows
       .filter(r => r.currency === code)
       .sort((a, b) => +new Date(a.date) - +new Date(b.date))
-      .map((r, i) => {
+      .map(r => {
         running = Math.round((running + r.amount) * 100) / 100;
         return {
-          id: `${r.date}-${i}`,
+          // The opening line once per currency's statement — never twice in one.
+          id: r.id === OPENING_ID ? `${OPENING_ID}-${code}` : r.id,
           date: r.date,
           particulars: r.particulars,
           kind: r.category,
           debit: r.amount,
           credit: 0,
           balance: running,
-          pinned: r.category === "Opening",
+          pinned: r.id === OPENING_ID,
         };
       })
       .reverse();
   };
+
+  /** A salary line's ⋯. A payment is an expense: edited in the expense panel
+   *  (its account entry moves with it), deleted with what that changes —
+   *  by the one rule for expenses everywhere. The opening line is this
+   *  person's own figure, corrected with their details. */
+  const salaryRowActions = (r: StatementRow): MoreAction[] => {
+    if (r.id.startsWith(OPENING_ID)) {
+      return [{ label: "Edit opening amount", icon: Pencil, hint: "Already paid before this app", onSelect: () => setEditingSelf(true) }];
+    }
+    const x = db.expenses.find(e => e.id === r.id);
+    if (!x) return [];
+    const editWhy = expenseRight(x, "edit"), delWhy = expenseRight(x, "delete");
+    return [
+      { label: "Edit", icon: Pencil, hint: editWhy ?? "The expense, and its account entry with it", disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
+      { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => confirmDeleteExpense(x) },
+    ];
+  };
+
+  // The profile's ⋯: their details, and deleting them — greyed, saying why,
+  // when the books still point at them.
+  const delBlock = employeeDeleteBlock(db, employee);
+  const profileActions: MoreAction[] = [
+    { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingSelf(true) },
+    { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login — asks first", disabled: !!delBlock,
+      onSelect: async () => { if (await confirmDeleteEmployee(db, employee)) navigate("/employees"); } },
+  ];
 
 
   // jsPDF's built-in font can't render ₹ — fmtCcyPdf writes "Rs." (and the
@@ -217,9 +254,12 @@ export function EmployeeDetailPage() {
               <p className="text-muted-foreground mt-1">{employee.department || "—"}</p>
             </div>
           </div>
-          <Button onClick={() => setTasksOpen(true)} className="btn-hero rounded-xl gap-2">
-            <ListTodo className="h-4 w-4" /> Assign / View Tasks
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button onClick={() => setTasksOpen(true)} className="btn-hero rounded-xl gap-2">
+              <ListTodo className="h-4 w-4" /> Assign / View Tasks
+            </Button>
+            <MoreMenu label={`Actions for ${employee.name}`} actions={profileActions} />
+          </div>
         </div>
 
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
@@ -270,7 +310,15 @@ export function EmployeeDetailPage() {
             </div>
             <div>
               <h2 className="font-display text-xl text-brand-dark">Salary &amp; Payments</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""}{opening > 0 ? " (incl. opening)" : ""}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""}{opening > 0 ? " (incl. opening)" : ""}
+                {/* The opening line is pinned, and a pinned line has no ⋯ of
+                    its own — so its edit sits here too. */}
+                {" · "}
+                <button type="button" onClick={() => setEditingSelf(true)} className="text-primary hover:underline font-medium">
+                  {opening > 0 ? "Edit opening amount" : "Add opening amount"}
+                </button>
+              </p>
             </div>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
@@ -315,6 +363,8 @@ export function EmployeeDetailPage() {
                 fmt={(v: number) => fmtExpenseAmount(v, code)}
                 debitLabel="Paid"
                 creditLabel=""
+                // Edit / Delete the expense behind each payment.
+                rowActions={salaryRowActions}
                 summary={[
                   { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear.get(code) ?? 0, code) },
                   { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total.get(code) ?? 0, code), tone: "in" },
@@ -401,6 +451,8 @@ export function EmployeeDetailPage() {
       )}
 
       <TasksPanel userId={employee.id} open={tasksOpen} onClose={() => setTasksOpen(false)} asAdmin />
+      <EmployeeEditDialog userId={editingSelf ? employee.id : null} onClose={() => setEditingSelf(false)} />
+      <ExpenseEditDialog expenseId={editingExpense} onClose={() => setEditingExpense(null)} />
     </div>
   );
 }

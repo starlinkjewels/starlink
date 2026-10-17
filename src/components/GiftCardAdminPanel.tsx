@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired, giftCardGranted } from "@/lib/db";
+import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired, giftCardGranted, type GiftCard } from "@/lib/db";
 import { sendMail } from "@/lib/email";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Gift, Ban, Check } from "lucide-react";
+import { Gift, Ban, Check, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
-import { confirmBox } from "@/lib/confirm";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { GIFT_CARD_NO_DELETE, GIFT_CARD_NO_EDIT, cancelGiftCardFlow, giftCardCancelBlocker } from "@/lib/giftCardActions";
 
 /** Admin-only panel on a client's page: enable gift cards/cashback for this
  *  client, issue a welcome gift card, set a cashback %, and see their cards. */
@@ -62,10 +63,17 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
     setAmount(""); setNote("");
   };
 
-  const revoke = async (id: string) => {
-    if (!(await confirmBox("Cancel this gift card? The client will no longer be able to use it."))) return;
-    updateDb(d => { const c = (d.giftCards ?? []).find(x => x.id === id); if (c) c.revoked = true; });
-    toast.success("Gift card cancelled");
+  const revoke = (id: string) => cancelGiftCardFlow(id);
+  // Cancel stays a button on a live card; the ⋯ holds the rest, greyed with
+  // why — a card is never edited or deleted, and a dead one can't be cancelled.
+  // (No "View": this panel is on the client's own page.)
+  const cardActions = (c: GiftCard): MoreAction[] => {
+    const dead = giftCardCancelBlocker(c, db.orders);
+    return [
+      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_EDIT },
+      { label: "Cancel card", icon: Ban, danger: true, onSelect: () => revoke(c.id), disabled: !!dead, hint: dead ?? "Stops what is left on it being spent" },
+      { label: "Delete", icon: Trash2, danger: true, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_DELETE },
+    ];
   };
 
   return (
@@ -150,11 +158,14 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
                         {c.revoked ? "Cancelled" : expired ? "Expired" : `${fmtMoney(remaining)} left`} · expires {fmtDate(c.expiresAt)}
                       </p>
                     </div>
-                    {!dead && (
-                      <button onClick={() => revoke(c.id)} className="inline-flex items-center gap-1 text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg px-2 py-1 shrink-0">
-                        <Ban className="h-3.5 w-3.5" /> Cancel
-                      </button>
-                    )}
+                    <div className="flex items-center gap-1 shrink-0">
+                      {!dead && (
+                        <button onClick={() => revoke(c.id)} className="inline-flex items-center gap-1 text-xs font-medium text-destructive hover:bg-destructive/10 rounded-lg px-2 py-1 shrink-0">
+                          <Ban className="h-3.5 w-3.5" /> Cancel
+                        </button>
+                      )}
+                      <MoreMenu size="sm" label="Gift card actions" title="Gift card" actions={cardActions(c)} className="h-7 w-7" />
+                    </div>
                   </div>
                 );
               })}

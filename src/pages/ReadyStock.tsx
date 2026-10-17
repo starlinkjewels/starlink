@@ -2,7 +2,9 @@ import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/com
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
+import { loadDb, updateDb, fmtDate, fmtMoney, stockCostOf, worksOnOrder, type Order, type ReadyStockItem } from "@/lib/db";
+import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
+import { needsAccess } from "@/lib/actionHints";
 import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -12,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2 } from "lucide-react";
+import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye } from "lucide-react";
 import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
@@ -168,19 +170,30 @@ export function ReadyStockPage() {
     else nav(pieceHref(item));
   };
 
+  // A lot an order, a return or a build points at is never deleted — it is
+  // emptied instead (lib/readyStockGuards.ts). Checked again as it runs.
   const del = async (item: ReadyStockItem) => {
-    if (!(await confirmBox(`Delete "${item.name}" from ready stock? This cannot be undone.`))) return;
+    const why = readyStockDeleteBlocker(loadDb(), item);
+    if (why) { toast.error(why); return; }
+    const worth = item.quantity > 0 && item.price > 0 ? ` — worth ${fmtMoney(item.price * item.quantity)}` : "";
+    if (!(await confirmBox(`Delete "${item.name}" from Ready Stock?\n\n${item.quantity > 0 ? `${item.quantity} piece${item.quantity !== 1 ? "s" : ""} at the ${officeLabel(officeOf(item))}${worth} come off the shelf` : "The sold-out lot is removed"}, with its photos and its history. This cannot be undone.`))) return;
     updateDb(d => { d.readyStock = d.readyStock.filter(x => x.id !== item.id); });
     toast.success("Deleted");
   };
 
-  const bandOn = db.settings.barcodeBandEnabled !== false && mayExport;
-  const itemActions = (item: ReadyStockItem): MoreAction[] => [
-    { label: "Edit", icon: Pencil, onSelect: () => openEdit(item), show: can("readyStock", "edit") },
-    { label: "Move to another office", icon: ArrowRightLeft, hint: `Now at the ${officeLabel(officeOf(item))}`, onSelect: () => setMoving([item]), show: can("readyStock", "edit") && item.quantity > 0 },
-    { label: "Print band", icon: Tag, onSelect: () => setBandItem(item), show: bandOn },
-    { label: "Delete", icon: Trash2, danger: true, onSelect: () => del(item), show: can("readyStock", "delete") },
-  ];
+  // Every action is listed; one this person or this piece can't take is greyed with why.
+  const itemActions = (item: ReadyStockItem): MoreAction[] => {
+    const editWhy = can("readyStock", "edit") ? undefined : needsAccess("readyStock", "edit");
+    const delWhy = !can("readyStock", "delete") ? needsAccess("readyStock", "delete") : readyStockDeleteBlocker(db, item);
+    return [
+      { label: "View", icon: Eye, hint: "Its page — photos, history, sales", onSelect: () => nav(pieceHref(item)) },
+      { label: "Edit", icon: Pencil, hint: editWhy, disabled: !!editWhy, onSelect: () => openEdit(item) },
+      { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(officeOf(item))}` : "Sold out — nothing here to move"),
+        disabled: !!editWhy || item.quantity <= 0, onSelect: () => setMoving([item]) },
+      { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandItem(item), show: db.settings.barcodeBandEnabled !== false },
+      { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => del(item) },
+    ];
+  };
 
   const costOf = (i: ReadyStockItem) => (isAdmin ? stockCostOf(db, i) : undefined);
   const listColumns: DataColumn<ReadyStockItem>[] = [

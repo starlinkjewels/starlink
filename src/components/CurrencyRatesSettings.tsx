@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Globe2, RefreshCw, Trash2 } from "lucide-react";
+import { Check, Globe2, Pencil, RefreshCw, Trash2, X } from "lucide-react";
 import { toast } from "sonner";
 import { updateDbAs, fmtDate, todayLocal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -34,6 +34,8 @@ export function CurrencyRatesSettings({ onSaved }: { onSaved?: (next: CurrencyRa
   const [rate, setRate] = useState("");
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState<string | null>(null);
+  // One dated rate being corrected in place.
+  const [editing, setEditing] = useState<{ code: string; from: string; inr: string } | null>(null);
 
   const save = async (next: CurrencyRate[], summary: string) => {
     await updateDbAs({ summary }, d => { d.settings = { ...d.settings, currencyRates: next }; });
@@ -59,8 +61,16 @@ export function CurrencyRatesSettings({ onSaved }: { onSaved?: (next: CurrencyRa
     setRate("");
     toast.success(`1 ${code} = ₹${fmtRate(r)} from ${fmtDate(from)} saved`);
   };
+  const saveEdit = async () => {
+    if (!editing) return;
+    const r = Number(editing.inr);
+    if (!(r > 0)) { toast.error("Enter how many rupees one unit is"); return; }
+    await save(withRates(table, editing.from, { [editing.code]: r }), `Exchange rate corrected: 1 ${editing.code} = ₹${r} from ${fmtDate(editing.from)}`);
+    toast.success(`1 ${editing.code} = ₹${fmtRate(r)} from ${fmtDate(editing.from)} saved`);
+    setEditing(null);
+  };
   const remove = async (row: CurrencyRate) => {
-    if (!(await confirmBox(`Remove 1 ${row.code} = ₹${fmtRate(row.inr)} from ${fmtDate(row.from)}?`))) return;
+    if (!(await confirmBox(`Remove 1 ${row.code} = ₹${fmtRate(row.inr)} from ${fmtDate(row.from)}?\n\nFrom that day the rate before it is used instead, until the next one.`))) return;
     await save(table.filter(x => !(ccy(x.code) === ccy(row.code) && x.from === row.from)), `Exchange rate removed: ${row.code} from ${fmtDate(row.from)}`);
   };
 
@@ -101,10 +111,22 @@ export function CurrencyRatesSettings({ onSaved }: { onSaved?: (next: CurrencyRa
                   {rows.map((r, i) => (
                     <div key={r.from} className="flex items-center justify-between gap-3 pl-3 text-[11px]">
                       <span>From {fmtDate(r.from)}{i === 0 && <span className="ml-1.5 font-semibold text-success">current</span>}</span>
-                      <span className="flex items-center gap-2">
-                        <span className="tabular-nums">₹{fmtRate(r.inr)}</span>
-                        <button type="button" onClick={() => remove(r)} aria-label={`Remove ${c} rate from ${r.from}`} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
-                      </span>
+                      {editing && editing.code === c && editing.from === r.from ? (
+                        <span className="flex items-center gap-1.5">
+                          <Input type="number" min={0} step="any" value={editing.inr} autoFocus aria-label={`Rupees for 1 ${c} from ${r.from}`}
+                            onChange={e => setEditing({ ...editing, inr: e.target.value })}
+                            onKeyDown={e => { if (e.key === "Enter") void saveEdit(); if (e.key === "Escape") setEditing(null); }}
+                            className="h-7 w-24 rounded-lg text-[11px]" />
+                          <button type="button" onClick={() => void saveEdit()} aria-label="Save the rate" className="text-success"><Check className="h-3.5 w-3.5" /></button>
+                          <button type="button" onClick={() => setEditing(null)} aria-label="Keep the rate" className="text-muted-foreground"><X className="h-3.5 w-3.5" /></button>
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2">
+                          <span className="tabular-nums">₹{fmtRate(r.inr)}</span>
+                          <button type="button" onClick={() => setEditing({ code: c, from: r.from, inr: String(r.inr) })} aria-label={`Edit ${c} rate from ${r.from}`} className="text-muted-foreground hover:text-primary"><Pencil className="h-3 w-3" /></button>
+                          <button type="button" onClick={() => remove(r)} aria-label={`Remove ${c} rate from ${r.from}`} className="text-muted-foreground hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
+                        </span>
+                      )}
                     </div>
                   ))}
                 </div>

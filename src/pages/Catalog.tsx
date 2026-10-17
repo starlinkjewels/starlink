@@ -22,7 +22,16 @@ import {
   Heart,
   ImagePlus,
   FileText,
+  FolderInput,
 } from "lucide-react";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { ActionSheet } from "@/components/ActionSheet";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
+import { AsyncButton } from "@/components/AsyncButton";
+import { needsAccess } from "@/lib/actionHints";
+import { updateCatalogItem, folderPath } from "@/lib/catalogItemEdit";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
@@ -411,6 +420,7 @@ function ItemCard({
   onToggleFav,
   onDelete,
   onSetBanner,
+  menu,
 }: {
   item: CatalogItem;
   isFav: boolean;
@@ -421,6 +431,8 @@ function ItemCard({
   onToggleFav(): void;
   onDelete?(): void;
   onSetBanner?(): void;
+  /** Staff: rename, move, delete — greyed with the reason when not theirs to do. */
+  menu?: MoreAction[];
 }) {
   return (
     <motion.div
@@ -519,6 +531,7 @@ function ItemCard({
             </p>
           )}
         </div>
+        {menu && <MoreMenu size="sm" label={`Actions for ${item.name}`} title={item.name} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
         <HeartBtn
           active={isFav}
           onToggle={(e) => {
@@ -528,6 +541,67 @@ function ItemCard({
         />
       </div>
     </motion.div>
+  );
+}
+
+/**
+ * Rename an item, or move it to another folder — one field on the item, in
+ * the side panel. Moving leaves favourites alone (they follow the item).
+ */
+function CatalogItemSheet({ item, mode, folders, onClose, onSaved }: {
+  item: CatalogItem;
+  mode: "rename" | "move";
+  folders: CatalogFolder[];
+  onClose(): void;
+  onSaved(next: CatalogItem): void;
+}) {
+  const [name, setName] = useState(item.name);
+  const [folderId, setFolderId] = useState(item.folderId);
+  const options = folders.map((f) => ({ id: f.id, label: folderPath(folders, f.id) })).sort((a, b) => a.label.localeCompare(b.label));
+  const save = async () => {
+    if (mode === "rename") {
+      const v = name.trim();
+      if (!v) { toast.error("Enter a name"); return; }
+      if (v === item.name) { onClose(); return; }
+      await updateCatalogItem(item.id, { name: v });
+      toast.success(`Renamed to ${v}`);
+      onSaved({ ...item, name: v });
+    } else {
+      if (folderId === item.folderId) { onClose(); return; }
+      await updateCatalogItem(item.id, { folderId });
+      toast.success(`Moved to ${folderPath(folders, folderId)}`);
+      onSaved({ ...item, folderId });
+    }
+    onClose();
+  };
+  return (
+    <ActionSheet open onOpenChange={(o) => { if (!o) onClose(); }} icon={mode === "rename" ? Edit2 : FolderInput}
+      title={mode === "rename" ? "Rename item" : "Move to another folder"}
+      description={mode === "rename" ? "The name shown under it, and the file name it downloads as." : `Now in ${folderPath(folders, item.folderId) || "a folder"}. Share links already sent keep showing it where it was.`}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">{mode === "rename" ? "Save" : "Move"}</AsyncButton>
+        </div>
+      }>
+      {mode === "rename" ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="cat_item_name" className="text-xs">Name</Label>
+          <Input id="cat_item_name" value={name} autoFocus onChange={(e) => setName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void save(); }} className="h-10 rounded-xl" />
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          <Label className="text-xs">Folder</Label>
+          <Select value={folderId} onValueChange={setFolderId}>
+            <SelectTrigger className="h-10 rounded-xl" aria-label="Folder"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}{o.id === item.folderId ? " (here now)" : ""}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+    </ActionSheet>
   );
 }
 
@@ -544,6 +618,7 @@ function FavoritesGallery({
   onOpen,
   onToggleFav,
   onDelete,
+  itemMenu,
 }: {
   favoriteItems: CatalogItem[];
   folders: CatalogFolder[];
@@ -553,6 +628,7 @@ function FavoritesGallery({
   onOpen(items: CatalogItem[], idx: number): void;
   onToggleFav(id: string): void;
   onDelete(id: string): void;
+  itemMenu?(item: CatalogItem): MoreAction[];
 }) {
   if (favoriteItems.length === 0) {
     return (
@@ -589,6 +665,7 @@ function FavoritesGallery({
               onOpen={() => onOpen(favoriteItems, i)}
               onToggleFav={() => onToggleFav(item.id)}
               onDelete={canDelete ? () => onDelete(item.id) : undefined}
+              menu={itemMenu?.(item)}
             />
           );
         }}
@@ -618,6 +695,7 @@ function ItemGallery({
   onDelete,
   onSetBanner,
   onSortChange,
+  itemMenu,
 }: {
   items: CatalogItem[];
   itemsLoading: boolean;
@@ -634,6 +712,7 @@ function ItemGallery({
   onDelete(id: string): void;
   onSetBanner(item: CatalogItem): void;
   onSortChange(sort: CatalogSort): void;
+  itemMenu?(item: CatalogItem): MoreAction[];
 }) {
   if (items.length === 0 && !itemsLoading && !canEdit) return null;
   return (
@@ -672,6 +751,7 @@ function ItemGallery({
                 onToggleFav={() => onToggleFav(item.id)}
                 onDelete={canDelete ? () => onDelete(item.id) : undefined}
                 onSetBanner={canEdit ? () => onSetBanner(item) : undefined}
+                menu={itemMenu?.(item)}
               />
             )}
           />
@@ -735,6 +815,7 @@ export function CatalogPage() {
   const [uploadProgress, setUploadProgress] = useState<{ done: number; total: number; pct: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [itemSheet, setItemSheet] = useState<{ item: CatalogItem; mode: "rename" | "move" } | null>(null);
 
   /* ── Load folders + favourite ids (small, bounded collections — still the shared cache) ── */
   const reload = useCallback(() => {
@@ -1119,6 +1200,30 @@ export function CatalogPage() {
     }
   }
 
+  // Staff: what can be done to one item — each greyed with the reason when
+  // this person's access doesn't reach it.
+  const itemMenu = (item: CatalogItem): MoreAction[] => [
+    { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item, mode: "rename" }) },
+    { label: "Move to another folder", icon: FolderInput, hint: canEdit ? (folders.length > 1 ? undefined : "There is no other folder yet") : needsAccess("catalog", "edit"),
+      disabled: !canEdit || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
+    { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("catalog", "delete"), disabled: !canDelete, onSelect: () => setDeleteConfirm(item.id) },
+  ];
+  // A renamed or moved item, as the screen holds it: moved out of the folder
+  // on screen, it leaves the grid; and a folder's banner doesn't stay pointing
+  // at a picture that is no longer in it.
+  function itemSaved(next: CatalogItem, before: CatalogItem) {
+    setItems((prev) => (next.folderId !== before.folderId && before.folderId === currentFolderId
+      ? prev.filter((it) => it.id !== next.id)
+      : prev.map((it) => (it.id === next.id ? next : it))));
+    setFavoriteItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
+    if (next.folderId !== before.folderId) {
+      updateDb((db) => {
+        const f = db.catalogFolders.find((x) => x.id === before.folderId);
+        if (f?.bannerItemId === next.id) { delete f.bannerItemId; delete f.bannerUrl; }
+      });
+    }
+  }
+
   async function deleteItem(id: string) {
     await deleteCatalogItem(id);
     setItems((prev) => prev.filter((it) => it.id !== id));
@@ -1320,7 +1425,7 @@ export function CatalogPage() {
   function DeleteModal() {
     const isFolder = folders.some((f) => f.id === deleteConfirm);
     const folder = folders.find((f) => f.id === deleteConfirm);
-    const item = items.find((it) => it.id === deleteConfirm);
+    const item = items.find((it) => it.id === deleteConfirm) ?? favoriteItems.find((it) => it.id === deleteConfirm);
     const childCnt = folder ? (folderCounts[folder.id] ?? 0) : 0;
 
     return (
@@ -1549,6 +1654,7 @@ export function CatalogPage() {
           onOpen={(its, idx) => setLightbox({ items: its, idx })}
           onToggleFav={toggleFavorite}
           onDelete={(id) => setDeleteConfirm(id)}
+          itemMenu={isStaff ? itemMenu : undefined}
         />
       )}
 
@@ -1712,12 +1818,17 @@ export function CatalogPage() {
             onDelete={(id) => setDeleteConfirm(id)}
             onSetBanner={(item) => currentFolderId && setFolderBanner(currentFolderId, item)}
             onSortChange={setItemsSort}
+            itemMenu={isStaff ? itemMenu : undefined}
           />
         </>
       )}
 
       {/* ── Modals ── */}
       <DeleteModal />
+      {itemSheet && (
+        <CatalogItemSheet item={itemSheet.item} mode={itemSheet.mode} folders={folders}
+          onClose={() => setItemSheet(null)} onSaved={(next) => itemSaved(next, itemSheet.item)} />
+      )}
       <AnimatePresence>
         {lightbox && (
           <Lightbox

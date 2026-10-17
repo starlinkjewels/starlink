@@ -152,7 +152,7 @@ export function MaterialsSettings() {
   };
   const remove = async (m: MaterialDef) => {
     if (materialUses(db, m.id)) { toast.error(`${m.name} is in use — stop offering it instead.`); return; }
-    if (!(await confirmBox(`Delete ${m.name}? Nothing uses it yet.`, { danger: true, confirmText: "Delete" }))) return;
+    if (!(await confirmBox(`Delete ${m.name}?\n\nNothing uses it yet — no purchase, stock or factory issue. It goes off every material list${m.grades.length ? `, with its grades (${m.grades.join(", ")})` : ""}.`, { danger: true, confirmText: "Delete" }))) return;
     updateDb(d => { d.settings.materials = (d.settings.materials ?? []).filter(y => y.id !== m.id); });
     toast.success(`${m.name} deleted`);
   };
@@ -186,7 +186,11 @@ export function MaterialsSettings() {
               <div className="flex items-center gap-1 shrink-0">
                 <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" aria-label={`Edit ${m.name}`} onClick={() => setEditing(m)}><Pencil className="h-3.5 w-3.5" /></Button>
                 <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" aria-label={m.active === false ? `Offer ${m.name} again` : `Stop offering ${m.name}`} onClick={() => toggle(m)}><Power className="h-3.5 w-3.5" /></Button>
-                {!uses && <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg text-destructive hover:text-destructive hover:bg-destructive/10" aria-label={`Delete ${m.name}`} onClick={() => remove(m)}><X className="h-3.5 w-3.5" /></Button>}
+                {/* Always there; greyed with the reason once records use it (a tap says it too). */}
+                <Button size="icon" variant="ghost" aria-label={`Delete ${m.name}`} aria-disabled={uses > 0}
+                  title={uses ? `In use by ${uses} record${uses !== 1 ? "s" : ""} — stop offering it instead` : `Delete ${m.name}`}
+                  className={`h-8 w-8 rounded-lg ${uses ? "opacity-40 cursor-not-allowed text-muted-foreground" : "text-destructive hover:text-destructive hover:bg-destructive/10"}`}
+                  onClick={() => remove(m)}><X className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
           );

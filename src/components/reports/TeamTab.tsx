@@ -73,6 +73,8 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
           id="reports-team"
           rows={active}
           rowKey={r => r.id}
+          // A row is a person: it opens their page — the admin's alone, like the page.
+          rowHref={ctx.isAdmin ? r => `/employees/${r.id}` : undefined}
           details={personDetails}
           defaultSort={{ key: "sales", dir: "desc" }}
           searchText={r => r.name}

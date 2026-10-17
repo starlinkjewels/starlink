@@ -1,17 +1,21 @@
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import {
-  canEditPurchase, canVoidPurchase, editPurchase, purchaseLabel, voidImpact,
+  canEditPurchase, canVoidPurchase, editPurchase, purchaseLabel, voidImpact, purchaseEditScope,
   voidPurchase as voidPurchaseCascade, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
-import { Pencil, Trash2 } from "lucide-react";
-import { canEditIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
+import { ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
+import { IssuanceEditSheet } from "@/components/IssuanceEditSheet";
+import { OpeningStockEditSheet, openingStockActions } from "@/components/OpeningStockEditSheet";
+import { needsAccess } from "@/lib/actionHints";
 import { canVoidSale, saleVoidImpact, voidDiamondSale } from "@/lib/diamondSaleVoid";
 import { toast } from "sonner";
-import { fmtDate, type Purchase } from "@/lib/db";
+import { fmtDate, type MaterialIssuance, type Purchase, type StockMovement } from "@/lib/db";
 import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -65,6 +69,9 @@ export function StockActivityLedger() {
   const [billFilter, setBillFilter] = useState("");
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
+  const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
+  const [editingOpening, setEditingOpening] = useState<StockMovement | null>(null);
+  const navigate = useNavigate();
 
   /**
    * Correcting a purchase from the ledger.
@@ -98,7 +105,7 @@ export function StockActivityLedger() {
   const removeAssignment = async (id: string) => {
     const mi = (db.materialIssuances ?? []).find(x => x.id === id);
     if (!mi) return;
-    const check = canEditIssuance(db, mi);
+    const check = canCancelIssuance(db, mi);
     if (!check.ok) { toast.error(check.reason!); return; }
     if (!(await confirmBox([
       `Cancel this assignment of ${mi.quantityIssued}${materialUnit(db.settings, mi.material)} ${mi.purityOrQuality}?`,
@@ -311,30 +318,72 @@ export function StockActivityLedger() {
   });
 
   type Item = NonNullable<Row["items"]>[number];
+  // Every action is offered; one that can't be done — not allowed, already
+  // paid, already used — is greyed out with the reason, never left out and
+  // never refused only after the click.
+  const mayEdit = can("buyAssign", "edit"), mayDelete = can("buyAssign", "delete");
+  const viewAction = (label: string, hint: string, to: string, module: Parameters<typeof needsAccess>[0]): MoreAction => ({
+    label, icon: ExternalLink, disabled: !can(module), hint: can(module) ? hint : needsAccess(module, "view"), onSelect: () => navigate(to),
+  });
   /** Correcting or removing one purchase — a single-line bill, or one line of a bigger one. */
-  const purchaseActions = (id: string, what: "purchase" | "item"): MoreAction[] => [
-    { label: `Edit ${what}`, hint: `Correct this ${what}`, icon: Pencil, onSelect: () => openEdit(id), show: can("buyAssign", "edit") },
-    { label: `Remove ${what}`, hint: "Reverses the supplier due, stock and factory issue", icon: Trash2, danger: true,
-      disabled: removingId === id, onSelect: () => remove(id), show: can("buyAssign", "delete") },
-  ];
+  const purchaseActions = (id: string, what: "purchase" | "item"): MoreAction[] => {
+    const p = (db.purchases ?? []).find(x => x.id === id);
+    if (!p) return [];
+    const edit = canEditPurchase(db, p);
+    const scope = purchaseEditScope(db, p);
+    const voidable = canVoidPurchase(db, p);
+    return [
+      ...(what === "purchase" ? [viewAction("View purchase", `On ${db.suppliers.find(x => x.id === p.supplierId)?.name ?? "the supplier"}'s page`, `/suppliers/${p.supplierId}`, "suppliers")] : []),
+      { label: `Edit ${what}`, icon: Pencil, onSelect: () => openEdit(id), disabled: !mayEdit || !edit.ok,
+        hint: !mayEdit ? needsAccess("buyAssign", "edit") : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : `Correct this ${what}` },
+      { label: `Remove ${what}`, icon: Trash2, danger: true, onSelect: () => remove(id), disabled: !mayDelete || removingId === id || !voidable.ok,
+        hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? voidable.reason : "Reverses the supplier due, stock and factory issue" },
+    ];
+  };
   const actionsFor = (r: Row): MoreAction[] => {
-    if (r.kind === "Assigned to factory") return [
-      { label: "Cancel assignment", hint: "The material goes back into stock", icon: Trash2, danger: true,
-        disabled: removingId === r.id, onSelect: () => removeAssignment(r.id), show: can("buyAssign", "delete") },
-    ];
-    if (r.kind === "Diamond sold") return [
-      { label: "Cancel sale", hint: "Reverses the stone, the sale and the money", icon: Trash2, danger: true,
-        disabled: removingId === r.id, onSelect: () => removeSale(r.id), show: can("buyAssign", "delete") },
-    ];
-    // An opening balance is a starting figure, not an event; it is corrected on
-    // the Stock page where it was set.
-    if (r.kind !== "Purchase") return [];
+    if (r.kind === "Assigned to factory") {
+      const mi = (db.materialIssuances ?? []).find(x => x.id === r.id);
+      if (!mi) return [];
+      const edit = canEditIssuance(db, mi);
+      const cancel = canCancelIssuance(db, mi);
+      return [
+        viewAction("View factory", r.party, `/factories/${mi.factoryId}`, "factories"),
+        { label: "Edit assignment", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !mayEdit || !edit.ok,
+          hint: !mayEdit ? needsAccess("buyAssign", "edit") : !edit.ok ? edit.reason : "Quantity, purity or grade, note — stock moves by the difference" },
+        { label: "Cancel assignment", icon: Trash2, danger: true, onSelect: () => removeAssignment(r.id), disabled: !mayDelete || removingId === r.id || !cancel.ok,
+          hint: !mayDelete ? needsAccess("buyAssign", "delete") : !cancel.ok ? cancel.reason : "The material goes back into stock" },
+      ];
+    }
+    if (r.kind === "Diamond sold") {
+      const sale = (db.diamondSales ?? []).find(x => x.id === r.id);
+      if (!sale) return [];
+      const voidable = canVoidSale(db, sale);
+      return [
+        ...(sale.clientId ? [viewAction("View client", r.party, `/clients/${sale.clientId}`, "clients")] : []),
+        // A sale moves a stone, a buyer and money at once; correcting one of
+        // them alone is how they fall out of step.
+        { label: "Edit", icon: Pencil, disabled: true, onSelect: () => {}, hint: "Cancel the sale and enter it again" },
+        { label: "Cancel sale", icon: Trash2, danger: true, onSelect: () => removeSale(r.id), disabled: !mayDelete || removingId === r.id || !voidable.ok,
+          hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? voidable.reason : "Reverses the stone, the sale and the money" },
+      ];
+    }
+    if (r.kind === "Opening stock") {
+      const m = (db.stockMovements ?? []).find(x => x.id === r.id);
+      if (!m) return [];
+      return [
+        viewAction("View in Stock", "Its ledger, with everything since", `/stock/${m.material}`, "stock"),
+        ...openingStockActions(db, m, {
+          onEdit: () => setEditingOpening(m),
+          editDenied: mayEdit ? undefined : needsAccess("buyAssign", "edit"),
+          deleteDenied: mayDelete ? undefined : needsAccess("buyAssign", "delete"),
+        }),
+      ];
+    }
     // A bill of several lines is corrected line by line, since each line is its
     // own purchase with its own supplier due and factory issue — so its actions
     // sit on the lines, which open below.
     if ((r.items?.length ?? 0) > 1) return [
-      { label: "Edit each item", hint: "Open the bill to correct its lines one by one", disabled: true, onSelect: () => {},
-        show: can("buyAssign", "edit") || can("buyAssign", "delete") },
+      { label: "Edit each item", hint: "Open the bill to correct its lines one by one", disabled: true, onSelect: () => {} },
     ];
     return purchaseActions(r.items![0].id, "purchase");
   };
@@ -439,7 +488,12 @@ export function StockActivityLedger() {
         purchase={editing}
         onClose={() => setEditing(null)}
         onSave={saveEdit}
+        // Material already made into a piece keeps its weight; the rate can still move.
+        lockQuantity={!!editing && !purchaseEditScope(db, editing).quantity}
+        lockNote={editing ? purchaseEditScope(db, editing).reason : undefined}
       />
+      <IssuanceEditSheet issuance={editingIssuance} onClose={() => setEditingIssuance(null)} />
+      <OpeningStockEditSheet movement={editingOpening} onClose={() => setEditingOpening(null)} />
     </div>
   );
 }

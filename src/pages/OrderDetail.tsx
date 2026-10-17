@@ -3,7 +3,14 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { MoreMenu } from "@/components/MoreMenu";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { OrderEditDialog } from "@/components/OrderEditDialog";
+import { OrderPaymentEditDialog } from "@/components/OrderPaymentEditDialog";
+import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
+import { cancelOrder as cancelOrderNow, cancelQuestion, returnIssuedMaterials as returnIssuedFor } from "@/lib/orderCancel";
+import { orderPaymentEditBlocker, paymentReceipt } from "@/lib/orderPaymentEdit";
+import { meltPlan } from "@/lib/melt";
+import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { exportAllowed } from "@/lib/access";
@@ -36,7 +43,7 @@ import {
   ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
   Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame,
   CalendarClock, CalendarDays, Hash, UserRound,
-  Undo2, XCircle,
+  Undo2, XCircle, type LucideIcon,
 } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
@@ -59,7 +66,7 @@ import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from 
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
-import { receiptForAdvance } from "@/lib/receipts";
+import { receiptForAdvance, deleteReceipt, deleteImpact } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
@@ -193,6 +200,23 @@ function OrderSpec({ label, value, wide }: { label: string; value?: string | num
       <p className="text-[11px] text-muted-foreground">{label}</p>
       <p className="text-sm font-semibold text-brand-dark mt-0.5 break-words">{value}</p>
     </div>
+  );
+}
+
+/**
+ * A small icon action on a manufacturing row. When it can't be used it stays
+ * in place, greyed, with the reason as its tooltip — and a tap says it, since
+ * a phone has no tooltips.
+ */
+function RowAction({ icon: Icon, label, why, onRun, danger, busy }: {
+  icon: LucideIcon; label: string; why?: string; onRun: () => unknown; danger?: boolean; busy?: boolean;
+}) {
+  return (
+    <button type="button" disabled={busy} title={why ?? label} aria-label={label} aria-disabled={!!why}
+      onClick={e => { e.preventDefault(); e.stopPropagation(); if (why) toast.error(why); else void onRun(); }}
+      className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 disabled:opacity-50 ${why ? "opacity-40 cursor-not-allowed text-muted-foreground" : danger ? "text-destructive hover:bg-destructive/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}>
+      <Icon className="h-3.5 w-3.5" />
+    </button>
   );
 }
 
@@ -342,6 +366,9 @@ function OrderDetailPageBody() {
   const [cancelling, setCancelling] = useState(false);
   const [meltOpen, setMeltOpen] = useState(false);
   const [returnOpen, setReturnOpen] = useState(false);
+  // The order's details (side panel), and a payment row being corrected.
+  const [editOpen, setEditOpen] = useState(false);
+  const [editingPayId, setEditingPayId] = useState<string | null>(null);
   const mayReturn = useMayReturn();
   const mayExport = useMayExport();
   // An in-house build going into Ready Stock: which office will keep it.
@@ -501,6 +528,13 @@ function OrderDetailPageBody() {
     }
   };
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
+  // Why a linked purchase can't be corrected / removed from here (admin only,
+  // as before) — shown on its greyed button rather than the button vanishing.
+  const purchaseWhy = (p: Purchase, what: "edit" | "remove"): string | undefined => {
+    if (user!.role !== "admin") return "Only the admin can correct or remove a purchase";
+    const check = what === "edit" ? canEditPurchase(db, p) : canVoidPurchase(db, p);
+    return check.ok ? undefined : check.reason;
+  };
 
   const buyGrandTotalInr = buyBills.reduce((s, b) => s + billTotalInr(b), 0);
   const buyLineCount = buyBills.reduce((s, b) => s + b.lines.length, 0);
@@ -1509,60 +1543,9 @@ function OrderDetailPageBody() {
 
   // Return any gold/diamond issued for this order back to stock, release undrawn
   // factory-pool draws, free certified packets, and close open issuances. Shared
-  // by both Reject and Cancel so a rejected order never strands material.
-  const returnIssuedMaterials = async () => {
-    const openIssuances = db.materialIssuances.filter(i => i.orderId === order.id && i.status === "open");
-    for (const mi of openIssuances) {
-      if (mi.diamondKind === "certified") continue; // returned via its DiamondPacket below
-      if (mi.source === "stock") {
-        // Stock-sourced: return only the part not actually consumed into a piece.
-        const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
-        const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
-        if (remaining > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user!.id, note: `Returned from cancelled order ${order.orderNumber}` });
-      } else if (mi.source === "purchase") {
-        // Bought new for THIS order and sent to the factory (never entered the
-        // shared pool). On cancel the piece isn't being made, so the material
-        // comes back from the factory into general Stock, available for reuse.
-        // The supplier purchase itself stays — that money was really spent.
-        if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user!.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock` });
-      }
-    }
-    updateDb(d => {
-      for (const mi of d.materialIssuances) {
-        if (mi.orderId === order.id && mi.status === "open") {
-          // Drop the returned material from the factory's DERIVED balance:
-          //  • stock/pool → keep only what was genuinely consumed (remainder went back);
-          //  • purchase → fully returned to Stock above, so zero it out.
-          if (mi.source === "purchase") { mi.quantityIssued = 0; mi.finishedPieces = []; }
-          else if (mi.source === "factoryPool" || mi.source === "stock") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
-          mi.status = "closed";
-        }
-      }
-      for (const p of d.diamondPackets || []) {
-        if (p.orderId === order.id) { p.status = "in_stock"; p.orderId = undefined; }
-      }
-      // A cancelled/rejected Ready-Stock SALE returns the finished piece to
-      // inventory (creation decremented it by one). Guarded so it restores once.
-      if (order.materialSourcing === "readyStock" && order.readyStockItemId && order.status !== "Rejected") {
-        const item = d.readyStock?.find(x => x.id === order.readyStockItemId);
-        if (item) {
-          item.quantity += 1;
-          logItem(item, { ...whoOf(user), kind: "unsold", text: `Order ${order.orderNumber} cancelled — back in stock · ${item.quantity - 1} → ${item.quantity}`, ref: { orderId: order.id } });
-        }
-      }
-      // Any advance already paid on this order becomes client credit — usable on
-      // their other orders, or refundable — never stranded on cancelled work.
-      if (order.status !== "Rejected") {
-        const o2 = d.orders.find(x => x.id === order.id);
-        const paid = (o2?.advances || []).reduce((s, a) => s + a.amount, 0);
-        if (o2 && paid > 0) {
-          const c = d.clients.find(x => x.id === o2.clientId);
-          if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + paid) * 100) / 100;
-          o2.advances = [];
-        }
-      }
-    });
-  };
+  // by both Reject and Cancel so a rejected order never strands material — and
+  // now by the Orders list's Cancel too, so it lives in lib/orderCancel.ts.
+  const returnIssuedMaterials = () => returnIssuedFor(order.id, user!);
 
   const approve = async (yes: boolean) => {
     if (!yes && !(await confirmBox("Reject this order? Any issued gold/diamond returns to stock and any advance paid moves to the client's credit. You can re-open it later if this was a mistake."))) return;
@@ -1620,22 +1603,16 @@ function OrderDetailPageBody() {
 
   // Cancel an order (admin) — returns any issued gold/diamond and certified
   // packets to stock, closes its issuances, and stops billing it (Rejected is
-  // excluded from client totals). Re-openable afterwards.
+  // excluded from client totals). Re-openable afterwards. Refused once it has
+  // been dispatched or billed (lib/orderGuards.ts says why) — the menu shows it
+  // greyed with that reason, and the lib checks again as it runs.
   const cancelOrder = async () => {
-    if (!(await confirmBox("Cancel this order? Any issued material/diamonds return to stock, any advance paid moves to the client's credit, and it will no longer be billed. You can re-open it later."))) return;
+    const why = cancelAccess(user) ?? cancelBlocker(db, order);
+    if (why) { toast.error(why); return; }
+    if (!(await confirmBox(cancelQuestion(order.orderNumber)))) return;
     setCancelling(true);
     try {
-      await returnIssuedMaterials(); // return gold/diamond, free packets, close issuances
-      const now = new Date().toISOString();
-      updateDb(d => {
-        const o = d.orders.find(x => x.id === order.id)!;
-        o.status = "Rejected";
-        const clientUser = d.users.find(u => u.clientId === o.clientId);
-        if (clientUser) d.notifications.unshift({
-          id: uid("n_"), userId: clientUser.id, title: "Order Cancelled",
-          body: `${o.orderNumber} has been cancelled.`, type: "order", read: false, createdAt: now,
-        });
-      });
+      await cancelOrderNow(order.id, user!);
       toast.success("Order cancelled — material returned & any advance moved to client credit");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to cancel order");
@@ -1862,7 +1839,15 @@ function OrderDetailPageBody() {
     if (videos.length) await addProductVideo(videos[0]);
   };
 
+  // The client downloads these from Product Photos, and removing one deletes
+  // the file itself — so it asks first.
   const removeProductPhoto = async (photoUrl: string) => {
+    const n = (order.productPhotos ?? []).indexOf(photoUrl) + 1;
+    if (!(await confirmBox([
+      `Remove ${n ? `photo ${n}` : "this photo"} of ${order.orderNumber}?`,
+      "",
+      `The file is deleted — it disappears from this order and from Product Photos (design ${order.designNumber || order.orderNumber}), and the client can no longer download it. This cannot be undone.`,
+    ].join("\n")))) return;
     updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productPhotos = (o.productPhotos ?? []).filter(u => u !== photoUrl); });
     await deleteByUrl(photoUrl);
     toast.success("Photo removed");
@@ -1870,6 +1855,8 @@ function OrderDetailPageBody() {
 
   const removeProductVideo = async () => {
     const videoUrl = order.productVideo;
+    if (!videoUrl) return;
+    if (!(await confirmBox(`Remove the product video of ${order.orderNumber}?\n\nThe file is deleted — it disappears from this order and from Product Photos, and the client can no longer download it. This cannot be undone.`))) return;
     updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productVideo = undefined; });
     await deleteByUrl(videoUrl);
     toast.success("Video removed");
@@ -2175,6 +2162,55 @@ function OrderDetailPageBody() {
     toast.success("Gift card removed");
   };
 
+  // ── The ⋯ menus. Staff see every action; one that can't be used now is
+  // greyed with the reason under it, never left out. A client's view has none.
+  const isStaffUser = user!.role !== "client";
+  const editWhy = orderEditAccess(db, user, can, order) ?? orderSpecLocks(db, order).all;
+  const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, order);
+  const returnWhy = !mayReturn ? needsAccess("invoices", "edit") : returnBlocker(order);
+  // Melt opens when the piece is a finished, made, unsold piece; its dialog
+  // then says anything else in the way. Otherwise the plan's own reason.
+  const meltWhy = (): string | undefined => {
+    if (user!.role !== "admin") return "Only the admin can melt a piece";
+    if (order.melted) return "Already melted";
+    if (order.returns?.length || !hasActuals || isDiamondOnlyOrder(order) || order.materialSourcing === "readyStock" || order.readyStockCreatedId)
+      return meltPlan(db, order).blocked ?? "Record the factory's actual details (Final Approval) first";
+    return undefined;
+  };
+  const meltReason = meltWhy();
+  const orderActions: MoreAction[] = [
+    { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
+    { label: "Print band", icon: Tag, hint: order.melted ? "Melted — the piece no longer exists" : !mayExport ? needsAccess("orders", "export") : "The barcode jewellery tag",
+      disabled: !!order.melted || !mayExport, onSelect: () => setBandOpen(true),
+      show: db.settings.barcodeBandEnabled !== false && isStaffUser },
+    { label: "Return pieces", icon: Undo2, hint: returnWhy ?? "The client sent pieces back — credit note, pieces into Ready Stock", disabled: !!returnWhy, onSelect: () => setReturnOpen(true),
+      show: isStaffUser },
+    { label: "Melt", icon: Flame, danger: true, hint: meltReason ?? "Gold back to a factory or stock, stones back to stock", disabled: !!meltReason, onSelect: () => setMeltOpen(true),
+      show: isStaffUser },
+    { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling || !!cancelWhy,
+      show: isStaffUser },
+    { label: "Delete", icon: Trash2, danger: true, hint: "Orders are never deleted — cancel instead", disabled: true, onSelect: () => undefined, show: isStaffUser },
+  ];
+
+  // A payment row: corrected or deleted as the receipt it came in on.
+  const removePayment = async (a: (typeof advances)[number]) => {
+    const { rec, why } = paymentReceipt(loadDb(), a);
+    if (!rec) { toast.error(why ?? "No receipt to delete"); return; }
+    if (!(await confirmBox(`Delete this ${fmtMoney(a.amount)} payment — receipt ${rec.receiptNo}?\n\n${deleteImpact(db, rec.id).join("\n")}\n\nThis cannot be undone.`))) return;
+    deleteReceipt(rec.id, user!.id);
+    toast.success(`Receipt ${rec.receiptNo} cancelled — the payment is off the order`);
+  };
+  const paymentActions = (a: (typeof advances)[number]): MoreAction[] => {
+    const { rec, why } = paymentReceipt(db, a);
+    const editBlock = !can("payments", "edit") ? needsAccess("payments", "edit") : orderPaymentEditBlocker(db, order, a);
+    const delBlock = !can("payments", "delete") ? needsAccess("payments", "delete") : why;
+    return [
+      { label: "Edit", icon: Pencil, hint: editBlock ?? `Receipt ${rec?.receiptNo} — amount, day, note, account`, disabled: !!editBlock, onSelect: () => setEditingPayId(a.id) },
+      { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? `Cancels receipt ${rec?.receiptNo} and its deposit`, disabled: !!delBlock, onSelect: () => removePayment(a) },
+    ];
+  };
+  const editingPay = editingPayId ? advances.find(a => a.id === editingPayId) : undefined;
+
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-5">
@@ -2254,16 +2290,7 @@ function OrderDetailPageBody() {
                         : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
                     ))
                   : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
-                <MoreMenu title="This order" actions={[
-                  { label: "Print band", icon: Tag, hint: "The barcode jewellery tag", onSelect: () => setBandOpen(true),
-                    show: db.settings.barcodeBandEnabled !== false && user!.role !== "client" && !order.melted && mayExport },
-                  { label: "Return pieces", icon: Undo2, hint: "The client sent pieces back — credit note, pieces into Ready Stock", onSelect: () => setReturnOpen(true),
-                    show: mayReturn && !returnBlocker(order) },
-                  { label: "Melt", icon: Flame, danger: true, hint: "Gold back to a factory or stock, stones back to stock", onSelect: () => setMeltOpen(true),
-                    show: user!.role === "admin" && !order.melted && !order.returns?.length && hasActuals && !isDiamondOnlyOrder(order) && order.materialSourcing !== "readyStock" && !order.readyStockCreatedId },
-                  { label: "Cancel order", icon: XCircle, danger: true, hint: "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling,
-                    show: user!.role === "admin" && order.status !== "Rejected" && !order.returns?.length },
-                ]} />
+                <MoreMenu title="This order" actions={orderActions} />
               </div>
             </div>
             <div className="mt-5">
@@ -2470,10 +2497,20 @@ function OrderDetailPageBody() {
           </div>
         )}
 
-        {order.instructions && (
+        {(order.instructions || (isStaffUser && !editWhy)) && (
           <div className="mt-4 p-3 rounded-xl bg-secondary text-sm">
-            <p className="text-xs text-muted-foreground mb-1">Special Instructions</p>
-            {order.instructions}
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <p className="text-xs text-muted-foreground">Special Instructions</p>
+              {/* Changed with the rest of the details, in the side panel. */}
+              {isStaffUser && (
+                <button type="button" onClick={() => (editWhy ? toast.error(editWhy) : setEditOpen(true))} title={editWhy ?? "Edit the instructions and other details"}
+                  aria-label="Edit instructions" aria-disabled={!!editWhy}
+                  className={`h-6 w-6 rounded grid place-items-center text-muted-foreground shrink-0 ${editWhy ? "opacity-40 cursor-not-allowed" : "hover:text-primary hover:bg-primary/10"}`}>
+                  <Pencil className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {order.instructions || <span className="text-muted-foreground italic">None yet — add them with Edit details.</span>}
           </div>
         )}
 
@@ -3256,7 +3293,11 @@ function OrderDetailPageBody() {
                       </p>
                     </div>
                   </div>
-                  <p className="font-semibold text-success shrink-0">{fmtMoney(a.amount)}</p>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <p className="font-semibold text-success">{fmtMoney(a.amount)}</p>
+                    {/* Staff: correct or delete it as its receipt; why not, when it can't be. */}
+                    {isStaffUser && <MoreMenu size="sm" label="Payment actions" title={paymentReceipt(db, a).rec ? `Receipt ${paymentReceipt(db, a).rec!.receiptNo}` : "This payment"} actions={paymentActions(a)} />}
+                  </div>
                 </motion.div>
               );
             })}
@@ -3860,21 +3901,11 @@ function OrderDetailPageBody() {
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                      {user!.role === "admin" && (
+                      {isStaffUser && (
                         <>
-                        <button
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); openEditPurchase(p); }}
-                          title="Correct this purchase (wrong carat / rate / invoice)"
-                          className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </button>
-                        <button
-                          onClick={e => { e.preventDefault(); e.stopPropagation(); removeLinkedPurchase(p); }}
-                          disabled={removingPurchaseId === p.id}
-                          title="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
-                          className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
+                        <RowAction icon={Pencil} label="Correct this purchase (wrong carat / rate / invoice)" why={purchaseWhy(p, "edit")} onRun={() => openEditPurchase(p)} />
+                        <RowAction icon={Trash2} danger label="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
+                          why={purchaseWhy(p, "remove")} busy={removingPurchaseId === p.id} onRun={() => removeLinkedPurchase(p)} />
                         </>
                       )}
                     </span>
@@ -3917,38 +3948,22 @@ function OrderDetailPageBody() {
                       <span className="flex items-center gap-2 shrink-0">
                         {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
                         <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                        {!srcPurchase && isStockIssuance(mi) && canEditStage() && (
+                        {!srcPurchase && isStockIssuance(mi) && isStaffUser && (() => {
+                          // The same reasons the page gives on a click, shown before it.
+                          const check = canEditIssuance(db, mi);
+                          const why = orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason);
+                          return (
+                            <>
+                            <RowAction icon={Pencil} label="Correct what was taken from stock (wrong carat / shape)" why={why} onRun={() => openEditIssuance(mi)} />
+                            <RowAction icon={Trash2} danger label="Cancel this issue — the material goes back into stock" why={why} busy={removingIssuanceId === mi.id} onRun={() => removeIssuance(mi)} />
+                            </>
+                          );
+                        })()}
+                        {srcPurchase && isStaffUser && (
                           <>
-                          <button
-                            onClick={() => openEditIssuance(mi)}
-                            title="Correct what was taken from stock (wrong carat / shape)"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => removeIssuance(mi)}
-                            disabled={removingIssuanceId === mi.id}
-                            title="Cancel this issue — the material goes back into stock"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                          </>
-                        )}
-                        {srcPurchase && user!.role === "admin" && (
-                          <>
-                          <button
-                            onClick={() => openEditPurchase(srcPurchase)}
-                            title="Correct this purchase (wrong carat / rate / invoice)"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-muted-foreground hover:text-primary hover:bg-primary/10 shrink-0">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button
-                            onClick={() => removeLinkedPurchase(srcPurchase)}
-                            disabled={removingPurchaseId === srcPurchase.id}
-                            title="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
-                            className="h-7 w-7 rounded-lg grid place-items-center text-destructive hover:bg-destructive/10 disabled:opacity-50 shrink-0">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
+                          <RowAction icon={Pencil} label="Correct this purchase (wrong carat / rate / invoice)" why={purchaseWhy(srcPurchase, "edit")} onRun={() => openEditPurchase(srcPurchase)} />
+                          <RowAction icon={Trash2} danger label="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
+                            why={purchaseWhy(srcPurchase, "remove")} busy={removingPurchaseId === srcPurchase.id} onRun={() => removeLinkedPurchase(srcPurchase)} />
                           </>
                         )}
                       </span>
@@ -4508,6 +4523,8 @@ function OrderDetailPageBody() {
       )}
 
     {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
+    {editOpen && <OrderEditDialog order={order} onClose={() => setEditOpen(false)} />}
+    {editingPay && <OrderPaymentEditDialog order={order} advance={editingPay} onClose={() => setEditingPayId(null)} />}
     {returnOpen && <ReturnDialog orders={[order]} invoice={findInvoiceForOrder(db.invoices, order.id)} onClose={() => setReturnOpen(false)} />}
 
     {/* ── Barcode band print/download modal ── */}

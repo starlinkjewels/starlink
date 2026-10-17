@@ -1,8 +1,11 @@
 import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { updateDb, uid, fmtDate, hasOpeningBalance, type Supplier } from "@/lib/db";
+import { Link, useNavigate } from "react-router-dom";
+import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDebitAmt, type Supplier } from "@/lib/db";
+import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
+import { SupplierEditDialog } from "@/components/SupplierEditDialog";
+import type { MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -13,7 +16,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
@@ -32,6 +35,8 @@ export function SuppliersPage() {
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
+  const [editing, setEditing] = useState<Supplier | null>(null);
+  const navigate = useNavigate();
 
   // Every supplier's account, worked out once: the rows, the sort and the grand
   // totals all read the same figures instead of each recomputing their own.
@@ -64,10 +69,39 @@ export function SuppliersPage() {
     toast.success("Status updated");
   };
 
-  const del = async (id: string) => {
-    if (!(await confirmBox("Delete supplier? This does not delete their purchase history."))) return;
-    updateDb(d => { d.suppliers = d.suppliers.filter(s => s.id !== id); });
+  // Only a supplier nothing hangs off may be deleted — one with purchases or
+  // payments is deactivated instead, or those records point at nobody. The
+  // menu greys Delete out with the reason (from the totals on this light
+  // page); the delete itself loads the books and counts before it asks.
+  const guardOf = (s: Supplier) => supplierDeleteGuard(db, s, accounts.get(s.id));
+  const del = async (s: Supplier) => {
+    const refused = await deleteRefusal("supplier", s);
+    if (refused) { toast.error(refused); return; }
+    const opening = hasOpeningBalance(s) ? openingCreditAmt(s) || openingDebitAmt(s) : 0;
+    if (!(await confirmBox([
+      `Delete ${s.name}?`,
+      "",
+      "• they have no purchases, payments or refunds, so no other record changes",
+      ...(opening ? [`• their opening balance of ${fmtMoneyInr(opening)} goes with them`] : []),
+      "",
+      "This cannot be undone.",
+    ].join("\n")))) return;
+    updateDb(d => { d.suppliers = d.suppliers.filter(x => x.id !== s.id); });
     toast.success("Deleted");
+  };
+
+  // View first, then the changes — each greyed out with the reason when it
+  // can't be done, never left out. Changing a supplier is an admin's job.
+  const ADMIN_ONLY = "Only an admin can change suppliers";
+  const actionsFor = (s: Supplier): MoreAction[] => {
+    const guard = guardOf(s);
+    return [
+      { label: "View ledger", icon: History, hint: "Purchases, payments and the account statement", onSelect: () => navigate(`/suppliers/${s.id}`) },
+      { label: "Edit details", icon: Pencil, onSelect: () => setEditing(s), disabled: !isAdmin, hint: isAdmin ? "Name, contact, GSTIN, address" : ADMIN_ONLY },
+      { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
+      { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s),
+        disabled: !isAdmin || !guard.ok, hint: !isAdmin ? ADMIN_ONLY : guard.reason },
+    ];
   };
 
   // ── List view: the shared table ──
@@ -178,11 +212,7 @@ export function SuppliersPage() {
                 return <><span className="text-destructive">{fmtMoneyInr(owe)}</span>{owed > 0 && <span className="text-blue-600"> · +{fmtMoneyInr(owed)}</span>}</>;
               },
             }}
-            // The grid card's buttons — admin only, as there.
-            rowActions={isAdmin ? s => [
-              { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s) },
-              { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s.id) },
-            ] : undefined}
+            rowActions={actionsFor}
             emptyText="No suppliers found."
           />
         </div>
@@ -237,16 +267,28 @@ export function SuppliersPage() {
                 <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
                   <Link to={`/suppliers/${s.id}`}><History className="h-4 w-4 text-primary" />View Ledger</Link>
                 </Button>
-                {isAdmin && (
-                <div className="flex gap-2">
-                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(s)} className="rounded-lg flex-1">
-                    {s.active === false ? "Activate" : "Deactivate"}
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => del(s.id)} className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive">
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                </div>
-                )}
+                {isAdmin && (() => {
+                  const guard = guardOf(s);
+                  return (
+                    <>
+                      <div className="flex gap-2">
+                        <Button size="sm" variant="outline" onClick={() => setEditing(s)} aria-label="Edit supplier" title="Edit details" className="rounded-lg w-9 px-0">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <AsyncButton size="sm" variant="outline" onClick={() => toggle(s)} className="rounded-lg flex-1">
+                          {s.active === false ? "Activate" : "Deactivate"}
+                        </AsyncButton>
+                        <AsyncButton size="sm" variant="outline" onClick={() => del(s)} disabled={!guard.ok} aria-label="Delete supplier"
+                          title={guard.reason ?? "Delete supplier"}
+                          className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </AsyncButton>
+                      </div>
+                      {/* Why Delete is greyed, said on the card rather than only on hover. */}
+                      {!guard.ok && <p className="text-[11px] text-muted-foreground leading-snug">Delete: {guard.reason}</p>}
+                    </>
+                  );
+                })()}
               </div>
             </div>
           );
@@ -257,6 +299,8 @@ export function SuppliersPage() {
 
       {/* The list pages itself; these pages are the grid's. */}
       {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />}
+
+      <SupplierEditDialog supplier={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

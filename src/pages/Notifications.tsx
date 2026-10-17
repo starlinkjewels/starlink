@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, currentUserOrders, type Notification } from "@/lib/db";
 import { filled, refLink, linkList, type Detail } from "@/components/rowDetails";
-import { Bell, Info, Package, AlertCircle, Trash2 } from "lucide-react";
+import { Bell, Info, Package, AlertCircle, Trash2, Pencil, Mail, MailOpen } from "lucide-react";
 import { AsyncButton } from "@/components/AsyncButton";
 import { DataTable, CellMain, CellTag, CellDate, type DataColumn } from "@/components/DataTable";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
@@ -44,13 +44,16 @@ export function NotificationsPage() {
 
   const markAll = () => updateDb(d => d.notifications.forEach(n => { if (n.userId === user!.id) n.read = true; }));
 
-  const markOne = (id: string) => updateDb(d => {
+  const markOne = (id: string, read = true) => updateDb(d => {
     const n = d.notifications.find(n => n.id === id);
-    if (n) n.read = true;
+    if (n) n.read = read;
   });
 
-  const deleteOne = (id: string) =>
-    updateDb(d => { d.notifications = d.notifications.filter(n => n.id !== id); });
+  // Gone for good once deleted — there is no bin to fetch it back from.
+  const deleteOne = async (n: Notification) => {
+    if (!(await confirmBox(`Delete this notification?\n\n"${n.title}" — ${when(n.createdAt)}. It is removed from your list for good; nothing it tells you about changes.`))) return;
+    updateDb(d => { d.notifications = d.notifications.filter(x => x.id !== n.id); });
+  };
 
   const clearAll = async () => {
     if (!(await confirmBox("Delete all your notifications? This cannot be undone."))) return;
@@ -129,7 +132,12 @@ export function NotificationsPage() {
           details={notificationDetails}
           rowClassName={n => (n.read ? "opacity-75" : "bg-primary/[0.04]")}
           rowActions={n => [
-            { label: "Delete", icon: Trash2, danger: true, onSelect: () => deleteOne(n.id) },
+            n.read
+              ? { label: "Mark unread", icon: Mail, hint: "Keep it in view as new", onSelect: () => markOne(n.id, false) }
+              : { label: "Mark read", icon: MailOpen, onSelect: () => markOne(n.id) },
+            // Written by the app itself, as a record of what happened.
+            { label: "Edit", icon: Pencil, hint: "System message — can't be edited", disabled: true, onSelect: () => undefined },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => deleteOne(n) },
           ]}
           emptyText={
             <span className="inline-flex flex-col items-center">

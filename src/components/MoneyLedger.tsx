@@ -1,23 +1,20 @@
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
-import { Lock, Pencil, Trash2 } from "lucide-react";
-import { useAuth } from "@/lib/auth";
+import { useNavigate } from "react-router-dom";
+import { Eye, Pencil, Trash2 } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
+import { useLoaded } from "@/hooks/useLoaded";
 import { fmtDate } from "@/lib/db";
-import { ccy, ccyOrder, ccySymbol, fmtCcy, fmtCcyMix, fmtCcyPdf, rateOf, sumByCcy, type CurrencyCode } from "@/lib/currency";
-import { listEntries, editEntry, deleteEntry, entryImpact, transferLegs, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
-import { RateInput } from "@/components/CurrencyFields";
+import { ccyOrder, fmtCcy, fmtCcyMix, fmtCcyPdf, sumByCcy, type CurrencyCode } from "@/lib/currency";
+import { ENTRY_COLS, listEntries, type EntryKind, type MoneyEntry } from "@/lib/moneyEntries";
+import { needsAccess } from "@/lib/actionHints";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import type { MoreAction } from "@/components/MoreMenu";
+import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
+import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
 import { filled, linkList, lockerTxnDetails, recorded, refLink, type Detail } from "@/components/rowDetails";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
-import { toast } from "sonner";
-import { confirmBox } from "@/lib/confirm";
 
 const TITLES: Record<EntryKind, string> = {
   supplier: "Supplier Payments",
@@ -56,19 +53,25 @@ function fmtMixPdf(m: Map<CurrencyCode, number>): string {
  * is confirmed; see src/lib/moneyEntries.ts.
  */
 export function MoneyLedger({ kind }: { kind: EntryKind }) {
-  const { user } = useAuth();
   const can = useCan();
   const db = useDb();
+  const navigate = useNavigate();
+  const expenseRight = useExpenseRights();
   const [q, setQ] = useState("");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [party, setParty] = useState("");
   const [acct, setAcct] = useState("");
   const [dir, setDir] = useState("");
+  // Correcting a payment or account entry (the shared panel), or an expense
+  // (its own panel — every field, not only the money).
   const [editing, setEditing] = useState<MoneyEntry | null>(null);
-  const [ef, setEf] = useState({ amount: "", date: "", note: "", lockerId: "", toLockerId: "", rate: "" });
+  const [editingExpense, setEditingExpense] = useState<string | null>(null);
 
-  const all = listEntries(db, kind);
+  // Each row is matched to the bill or sale behind it, which may still be on
+  // its way — listed only once it is here, so no row is offered wrongly.
+  const ready = useLoaded(ENTRY_COLS[kind]);
+  const all = ready ? listEntries(db, kind) : [];
   // The party list is built from the entries themselves, so it only ever offers
   // names that will actually match something.
   const parties = [...new Set(all.map(e => e.party).filter(Boolean))].sort();
@@ -91,64 +94,6 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   const totalOut = sumByCcy(rows.filter(r => r.direction === "out"), r => r.amount, r => r.currency);
   const totalIn = sumByCcy(rows.filter(r => r.direction === "in"), r => r.amount, r => r.currency);
   const anyOf = (m: Map<CurrencyCode, number>) => [...m.values()].some(v => v > 0);
-
-  const lockerCcy = (id?: string) => ccy(db.lockers.find(l => l.id === id)?.currency);
-  /** The rate a transfer was recorded at, as 1 from = ? to, for this pair of accounts. */
-  const recordedRate = (entryId: string, fromId: string, toId: string): string => {
-    const legs = transferLegs(db, entryId);
-    const f = lockerCcy(fromId), t = lockerCcy(toId);
-    const r = legs && f !== t ? rateOf(legs.out, f, t) ?? rateOf(legs.inn, f, t) : undefined;
-    return r ? String(r) : "";
-  };
-
-  const open = (e: MoneyEntry) => {
-    if (e.locked) { toast.error(e.locked); return; }
-    setEditing(e);
-    // A transfer opens with both sides, so the destination can be corrected —
-    // sending money to the wrong account is the single most common slip. It
-    // opens the money's way round (from the account it left, for the amount
-    // that left it) whichever of its two rows was clicked; one whose other
-    // row is gone opens as itself, as before.
-    const legs = e.transfer ? transferLegs(db, e.id) : undefined;
-    const row = e.transfer && !legs ? db.lockerTransactions.find(t => t.id === e.id) : undefined;
-    const fromId = legs ? legs.out.lockerId : e.lockerId ?? "";
-    const toId = legs ? legs.inn.lockerId : row?.pairedLockerId ?? "";
-    const orphanRate = row && rateOf(row, lockerCcy(fromId), lockerCcy(toId));
-    setEf({
-      amount: String(legs ? legs.out.amountInr : e.amount), date: e.date.slice(0, 10), note: e.note ?? "",
-      lockerId: fromId,
-      toLockerId: toId,
-      rate: legs ? recordedRate(e.id, fromId, toId) : orphanRate && orphanRate !== 1 ? String(orphanRate) : "",
-    });
-  };
-
-  /** A transfer's account changed: a rate for another pair of currencies means
-   *  nothing for this one, so it starts again from what the transfer was
-   *  recorded at between these two, else the rate field offers Settings' rate. */
-  const pickTransferSide = (side: "lockerId" | "toLockerId", v: string) => setEf(f => {
-    const next = { ...f, [side]: v };
-    const samePair = lockerCcy(f.lockerId) === lockerCcy(next.lockerId) && lockerCcy(f.toLockerId) === lockerCcy(next.toLockerId);
-    return samePair || !editing ? next : { ...next, rate: recordedRate(editing.id, next.lockerId, next.toLockerId) };
-  });
-
-  const save = () => {
-    if (!editing) return;
-    const amt = Number(ef.amount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    const refused = editEntry(editing, {
-      amount: amt,
-      date: `${ef.date}T${editing.date.slice(11) || "00:00:00.000Z"}`,
-      note: ef.note,
-      lockerId: ef.lockerId || undefined,
-      userId: user!.id,
-      toLockerId: ef.toLockerId || undefined,
-      exchangeRate: Number(ef.rate) || undefined,
-    });
-    // Nothing was written — say why and leave the dialog open to fix it.
-    if (refused) { toast.error(refused); return; }
-    toast.success("Entry corrected");
-    setEditing(null);
-  };
 
   // Both downloads carry exactly what is on screen — the same filter, the same
   // order — so a printed copy can be checked against the page it came from.
@@ -202,13 +147,49 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   });
 
 
-  const remove = async (e: MoneyEntry) => {
-    if (e.locked) { toast.error(e.locked); return; }
-    const lockerName = db.lockers.find(l => l.id === e.lockerId)?.name;
-    if (!(await confirmBox(`Cancel this entry?\n\n${entryImpact(e, lockerName).join("\n")}\n\nThis cannot be undone.`))) return;
-    deleteEntry(e);
-    toast.success("Entry cancelled");
-    setEditing(null);
+  /** View: the page of who (or what) the money was with — greyed, saying
+   *  why, for someone whose access doesn't open that page. */
+  const viewAction = (e: MoneyEntry): MoreAction | undefined => {
+    const go = (label: string, to: string, module: Parameters<typeof can>[0]): MoreAction => ({
+      label, icon: Eye, onSelect: () => navigate(to), disabled: !can(module), hint: can(module) ? undefined : needsAccess(module, "view"),
+    });
+    if (kind === "supplier" && e.partyId) return go(`View ${e.party}`, `/suppliers/${e.partyId}`, "suppliers");
+    if (kind === "factory" && e.partyId) return go(`View ${e.party}`, `/factories/${e.partyId}`, "factories");
+    if (kind === "expense") {
+      const x = db.expenses.find(ex => ex.id === e.id);
+      const paidTo = x?.paidToEmployeeId ? db.users.find(u => u.id === x.paidToEmployeeId) : undefined;
+      if (paidTo) return go(`View ${paidTo.name}`, `/employees/${paidTo.id}`, "employees");
+      const client = x?.clientId ? db.clients.find(c => c.id === x.clientId) : undefined;
+      if (client) return go(`View ${client.companyName}`, `/clients/${client.id}`, "clients");
+      return undefined;
+    }
+    if (kind === "locker" && e.lockerId) return go("View account", `/locker?account=${e.lockerId}`, "locker");
+    return undefined;
+  };
+
+  /** A row's ⋯: View, then Edit / Delete — an expense by the one expense rule,
+   *  everything else by Payments access; a row owned by another tab says where. */
+  const rowActions = (e: MoneyEntry): MoreAction[] => {
+    const view = viewAction(e);
+    if (kind === "expense") {
+      const x = db.expenses.find(ex => ex.id === e.id);
+      const editWhy = x ? expenseRight(x, "edit") : "That expense is no longer on file";
+      const delWhy = x ? expenseRight(x, "delete") : "That expense is no longer on file";
+      return [
+        ...(view ? [view] : []),
+        { label: "Edit", icon: Pencil, onSelect: () => setEditingExpense(e.id), disabled: !!editWhy, hint: editWhy },
+        { label: "Delete", icon: Trash2, danger: true, onSelect: () => { if (x) void confirmDeleteExpense(x); }, disabled: !!delWhy, hint: delWhy },
+      ];
+    }
+    return [
+      ...(view ? [view] : []),
+      ...entryRowActions(e, {
+        mayEdit: can("payments", "edit"), mayDelete: can("payments", "delete"),
+        editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
+        onEdit: setEditing,
+        onDelete: x => { void confirmDeleteEntry(db, x); },
+      }),
+    ];
   };
 
   const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
@@ -221,8 +202,14 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
   })));
   const entryDetails = (e: MoneyEntry): Detail[] => {
     const ids = e.legIds ?? [e.id];
-    // Corrected from another tab: say which, as the ⋯ menu does.
-    const where = e.lockedWhere ? { label: "Recorded in", value: e.lockedWhere } : e.locked ? { label: "Editing", value: e.locked } : undefined;
+    // Corrected from another tab: say which, as the ⋯ menu does. A payment
+    // and its account that disagree, or an account row on its own, say so.
+    const where = e.lockedWhere ? { label: "Recorded in", value: e.lockedWhere }
+      : e.locked ? { label: "Editing", value: e.locked }
+      : e.orphan ? { label: "Editing", value: e.orphan }
+      : e.noTxn ? { label: "In the account", value: `No movement found in ${lockerName(e.lockerId) || "its account"}` }
+      : e.txnAmount !== undefined ? { label: "In the account", value: `${fmtCcy(e.txnAmount, e.currency)} — not ${fmtCcy(e.amount, e.currency)}` }
+      : undefined;
     if (kind === "supplier") {
       const parts = (db.purchases ?? []).flatMap(p => (p.payments ?? []).filter(pay => ids.includes(pay.id)).map(pay => ({ p, pay })));
       const other = (db.supplierReceipts ?? []).find(r => r.id === e.id) ?? (db.supplierPayments ?? []).find(a => a.id === e.id);
@@ -323,116 +310,15 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         columns={columns}
         rowKey={e => e.id}
         defaultSort={{ key: "date", dir: "desc" }}
-        emptyText={filtered ? "Nothing matches these filters." : "No entries yet."}
+        emptyText={filtered ? "Nothing matches these filters." : ready ? "No entries yet." : "Loading entries…"}
         details={entryDetails}
-        rowActions={e => e.locked
-          // Owned by another tab: say where it is corrected instead.
-          ? [{ label: e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked", hint: e.locked, icon: Lock, disabled: true, onSelect: () => {} }]
-          : [
-            { label: "Edit", icon: Pencil, onSelect: () => open(e), show: can("payments", "edit") },
-            { label: "Delete", icon: Trash2, danger: true, onSelect: () => remove(e), show: can("payments", "delete") },
-          ]}
+        // View, Edit, Delete — greyed with the reason where they can't be used.
+        rowActions={rowActions}
       />
 
-      <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditing(null); }}>
-        <DialogContent className="max-w-xl rounded-2xl">
-          <DialogHeader><DialogTitle className="font-display text-xl">Correct this entry</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground -mt-1">
-            {editing?.party}{editing?.against ? ` · ${editing.against}` : ""}. The account it came from moves with it,
-            so the balance and what is owed stay in step.
-          </p>
-          {editing?.legIds && (
-            <p className="text-[11px] text-muted-foreground rounded-xl bg-secondary/60 p-2.5">
-              This one payment settled {editing.legLabels?.length} bills — {editing.legLabels?.join(", ")}.
-              The date, account and remarks can be corrected and all of them move together.
-              <span className="font-medium text-foreground"> The total cannot be changed here</span>, because there
-              is no saying which bill should get more or less — cancel it and enter it again instead.
-            </p>
-          )}
-          <div className="grid grid-cols-2 gap-3 mt-1">
-            <div>
-              {/* A transfer's amount is what left the FROM account, in its currency. */}
-              <Label className="text-xs">Amount ({ccySymbol(editing?.transfer ? lockerCcy(ef.lockerId) : editing?.currency).trim()})</Label>
-              <Input type="number" min={0} step="0.01" value={ef.amount} disabled={!!editing?.legIds}
-                onChange={e => setEf({ ...ef, amount: e.target.value })}
-                className="rounded-xl h-10 mt-1 disabled:opacity-60" />
-            </div>
-            <div>
-              <Label className="text-xs">Date</Label>
-              <Input type="date" value={ef.date}
-                onChange={e => setEf({ ...ef, date: e.target.value })} className="rounded-xl h-10 mt-1" />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs">{editing?.transfer ? "From account" : "Account"}</Label>
-            <Select value={ef.lockerId || "none"}
-              onValueChange={v => (editing?.transfer ? pickTransferSide("lockerId", v === "none" ? "" : v) : setEf({ ...ef, lockerId: v === "none" ? "" : v }))}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No account</SelectItem>
-                {/* Anything but a transfer can only move to an account in its own
-                    currency — the amount would otherwise be read as another
-                    currency's money. Its current account is always listed. */}
-                {db.lockers.filter(l => l.active !== false
-                  && (editing?.transfer || ccy(l.currency) === ccy(editing?.currency) || l.id === editing?.lockerId)).map(l => (
-                  <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {editing && !editing.transfer && db.lockers.some(l => l.active !== false && ccy(l.currency) !== ccy(editing.currency)) && (
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Only {ccy(editing.currency)} accounts — this entry is in {ccy(editing.currency)}. Money that changed currency is a transfer.
-              </p>
-            )}
-          </div>
-          {editing?.transfer && (
-            <>
-              <div>
-                <Label className="text-xs">To account</Label>
-                <Select value={ef.toLockerId} onValueChange={v => pickTransferSide("toLockerId", v)}>
-                  <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose the destination" /></SelectTrigger>
-                  <SelectContent>
-                    {db.lockers.filter(l => l.active !== false && l.id !== ef.lockerId).map(l => (
-                      <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              {(() => {
-                const from = db.lockers.find(l => l.id === ef.lockerId);
-                const to = db.lockers.find(l => l.id === ef.toLockerId);
-                if (!from || !to || ccy(from.currency) === ccy(to.currency)) return null;
-                // Always 1 FROM-currency = rate TO-currency, however it is shown.
-                return (
-                  <RateInput id="ledger-transfer-rate" from={ccy(from.currency)} to={ccy(to.currency)}
-                    value={Number(ef.rate) > 0 ? Number(ef.rate) : ""}
-                    onChange={r => setEf(f => ({ ...f, rate: r === "" ? "" : String(r) }))}
-                    amount={Number(ef.amount) || undefined} at={ef.date} />
-                );
-              })()}
-              <p className="text-[11px] text-muted-foreground">
-                Both sides move together — the money leaves the first account and arrives in the second, converted at
-                this rate when the two are in different currencies.
-              </p>
-            </>
-          )}
-
-          <div>
-            <Label className="text-xs">Remarks</Label>
-            <Input value={ef.note} onChange={e => setEf({ ...ef, note: e.target.value })} className="rounded-xl h-10 mt-1" />
-          </div>
-          <div className="flex gap-2 mt-3 flex-wrap">
-            {can("payments", "delete") && (
-              <Button variant="outline" onClick={() => editing && remove(editing)}
-                className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
-                Cancel entry
-              </Button>
-            )}
-            <Button variant="outline" onClick={() => setEditing(null)} className="rounded-xl ml-auto">Close</Button>
-            <Button onClick={save} className="btn-hero rounded-xl">Save</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* The same correction panel as the Locker page and the day book. */}
+      <MoneyEntryEditor entry={editing} onClose={() => setEditing(null)} mayDelete={can("payments", "delete")} />
+      <ExpenseEditDialog expenseId={editingExpense} onClose={() => setEditingExpense(null)} />
     </div>
   );
 }

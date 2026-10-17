@@ -6,12 +6,16 @@ import { companyOf, coField, companyById } from "@/lib/companies";
 import { useCan } from "@/hooks/useCan";
 import { fmtCcy, rateText } from "@/lib/currency";
 import { filled, noteText, recorded, refLink, type Detail } from "@/components/rowDetails";
-import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket } from "@/lib/db";
+import { fmtDate, loadDb, updateDb, DIAMOND_SHAPES, nextDiamondStockNumber, type DiamondPacket, type StockMovement, type Purchase } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { stockBucketHistory, deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { recomputeStockFromHistory } from "@/lib/stock";
-import { purchaseEditScope, editPurchase } from "@/lib/purchaseVoid";
+import { purchaseEditScope, editPurchase, canVoidPurchase, voidPurchase, voidImpact } from "@/lib/purchaseVoid";
+import { isOpeningMovement } from "@/lib/openingStock";
+import { OpeningStockEditSheet, openingStockActions } from "@/components/OpeningStockEditSheet";
+import type { MoreAction } from "@/components/MoreMenu";
+import { needsAccess } from "@/lib/actionHints";
 import { AsyncButton } from "@/components/AsyncButton";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -20,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Gem, Coins, BadgeCheck, Pencil, Trash2, Download, Layers } from "lucide-react";
+import { ArrowLeft, Gem, Coins, BadgeCheck, Pencil, Trash2, Download, Layers, ExternalLink, Lock } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
@@ -203,6 +207,63 @@ function MaterialSection({ material }: { material: MaterialKey }) {
     ]);
   };
 
+  // ── What can be done to a movement ──
+  // A movement is the trace another record left: a purchase, an issue, a sale.
+  // It is corrected there, so each row offers a way to that record and says
+  // where Edit and Delete live, greyed out — correcting the trace alone is how
+  // the stock and its source fall out of step. Opening stock is the exception:
+  // it has nothing behind it, so it is corrected here (lib/openingStock.ts).
+  const [editingOpening, setEditingOpening] = useState<StockMovement | null>(null);
+  const isAdmin = user?.role === "admin";
+  const view = (label: string, hint: string, to: string, allowed: boolean, module: Parameters<typeof needsAccess>[0]): MoreAction => ({
+    label, icon: ExternalLink, hint: allowed ? hint : needsAccess(module, "view"), disabled: !allowed, onSelect: () => navigate(to),
+  });
+  const locked = (why: string): MoreAction[] => [
+    { label: "Edit", icon: Lock, disabled: true, hint: why, onSelect: () => {} },
+    { label: "Delete", icon: Trash2, danger: true, disabled: true, hint: why, onSelect: () => {} },
+  ];
+  const movementActions = (m: Movement): MoreAction[] => {
+    if (isOpeningMovement(m)) {
+      const live = db.stockMovements.find(x => x.id === m.id) ?? m;
+      const denied = isAdmin ? undefined : "Only an admin can change stock";
+      return openingStockActions(db, live, { onEdit: () => setEditingOpening(live), editDenied: denied, deleteDenied: denied });
+    }
+    const orderView = (id: string) => view("View order", db.orders.find(o => o.id === id)?.orderNumber ?? "The order", `/orders/${id}`, can("orders"), "orders");
+    if (m.refType === "purchase") {
+      const p = m.refId ? db.purchases.find(x => x.id === m.refId) : undefined;
+      if (!p) return locked("The purchase behind it has been removed — this line is what is left of it");
+      return [
+        view("View purchase", `On ${db.suppliers.find(x => x.id === p.supplierId)?.name ?? "the supplier"}'s page${p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}`, `/suppliers/${p.supplierId}`, can("suppliers"), "suppliers"),
+        ...(p.orderId ? [orderView(p.orderId)] : []),
+        ...locked(m.type === "purchase_in"
+          ? "Edit the purchase on the supplier's page — this line follows it"
+          : "Written when the purchase was corrected or removed — it follows the purchase"),
+      ];
+    }
+    if (m.refType === "materialIssuance") {
+      const mi = m.refId ? db.materialIssuances.find(x => x.id === m.refId) : undefined;
+      if (!mi) return locked("The issue behind it has been cancelled — this line is what is left of it");
+      return mi.orderId
+        ? [orderView(mi.orderId), ...locked("Edit the issuance on the order — this line follows it")]
+        : [view("View factory", db.factories.find(f => f.id === mi.factoryId)?.name ?? "The factory", `/factories/${mi.factoryId}`, can("factories"), "factories"),
+          ...locked("Edit the assignment in Buy & Assign or on the factory's page — this line follows it")];
+    }
+    if (m.refType === "order" && m.refId) {
+      return [orderView(m.refId), ...locked("Bought for this order — edit the purchase on the supplier's page; this line follows it")];
+    }
+    if (m.refType === "diamondSale") {
+      return [view("View in Buy & Assign", "The sale is listed in its ledger", "/buy-assign", can("buyAssign"), "buyAssign"),
+        ...locked("Cancel the sale in Buy & Assign — this line follows it")];
+    }
+    if (m.refType === "transfer") return locked("Moved between companies — move it back from the Stock page");
+    // A correction, a return or a cancelled issue wrote it; point at the issue when it is still there.
+    const mi = m.refId ? db.materialIssuances.find(x => x.id === m.refId) : undefined;
+    const why = "Written by a correction, a return or a cancelled entry — it follows that entry and can't be changed on its own";
+    if (mi?.orderId) return [orderView(mi.orderId), ...locked(why)];
+    if (mi) return [view("View factory", db.factories.find(f => f.id === mi.factoryId)?.name ?? "The factory", `/factories/${mi.factoryId}`, can("factories"), "factories"), ...locked(why)];
+    return locked(why);
+  };
+
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
@@ -348,6 +409,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
             searchText={m => [m.purityOrQuality, m.link.label, m.note].filter(Boolean).join(" ")}
             searchPlaceholder="Search movements"
             details={movementDetails}
+            rowActions={movementActions}
             totals={{
               in: list => <span className="text-success">{sumQty(list.filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
               out: list => <span className="text-destructive">{sumQty(list.filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
@@ -356,6 +418,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
           />
         </div>
       </div>
+      <OpeningStockEditSheet movement={editingOpening} onClose={() => setEditingOpening(null)} />
     </div>
   );
 }
@@ -365,6 +428,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 function CertifiedSection() {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   const db = useDb();
   const [editPacket, setEditPacket] = useState<DiamondPacket | null>(null);
   // Rate is edited as free text so a half-typed number does not snap to 0.
@@ -672,16 +736,78 @@ function CertifiedSection() {
     setEditPacket(null);
   };
 
+  // A stone that left stock is undone where it went — never deleted here.
+  const STATUS_REASON: Record<Exclude<DiamondPacket["status"], "in_stock">, string> = {
+    issued: "Issued to an order — cancel the issue on the order instead",
+    used: "Used in a finished piece — it can't be changed here",
+    sold: "Sold — cancel the sale in Buy & Assign instead",
+  };
+  /**
+   * Whether a stone can be deleted, and through what. One bought from a
+   * supplier IS that purchase — a certified line is one stone — so deleting
+   * the stone alone left the supplier's bill (and anything it created) behind
+   * for a stone that no longer existed. It goes through the purchase's own
+   * removal instead, with that removal's rules: nothing paid against it yet.
+   */
+  const packetDeletion = (p: DiamondPacket): { ok: boolean; reason?: string; purchase?: Purchase } => {
+    if (p.status !== "in_stock") return { ok: false, reason: STATUS_REASON[p.status] };
+    const purchase = purchaseOf(p.purchaseId);
+    if (!purchase) return { ok: true };
+    const check = canVoidPurchase(db, purchase);
+    return check.ok ? { ok: true, purchase } : { ok: false, reason: check.reason, purchase };
+  };
+
   const deletePacket = async (p: DiamondPacket) => {
-    if (p.status !== "in_stock") {
-      toast.error("This packet is already issued or used — cancel it from the order instead.");
+    const del = packetDeletion(p);
+    if (!del.ok) { toast.error(del.reason!); return; }
+    const purchase = del.purchase;
+    if (purchase) {
+      if (!(await confirmBox([
+        `Delete this ${p.shape} ${p.carat}ct stone (Report ${p.certificateNumber})?`,
+        "",
+        `It was bought from ${supplierName(purchase.supplierId) ?? "a supplier"}${purchase.invoiceNumber ? ` on bill ${purchase.invoiceNumber}` : ""}, so that purchase is removed with it:`,
+        ...voidImpact(db, purchase),
+        "",
+        "This cannot be undone.",
+      ].join("\n")))) return;
+      try {
+        await voidPurchase(db, purchase, user!.id);
+        toast.success("Stone deleted — its purchase was removed and the supplier's due reversed");
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : "Couldn't remove its purchase — nothing was changed.");
+      }
       return;
     }
-    if (!(await confirmBox(`Delete this ${p.shape} ${p.carat}ct packet (Report ${p.certificateNumber})? This can't be undone.`))) return;
+    // Opening stock or a stone whose purchase is already gone: only the stone.
+    if (!(await confirmBox(`Delete this ${p.shape} ${p.carat}ct packet (Report ${p.certificateNumber})?\n\nNo purchase is on file for it, so only the stone is removed. This can't be undone.`))) return;
     updateDb(d => {
       d.diamondPackets = (d.diamondPackets ?? []).filter(x => x.id !== p.id);
     });
     toast.success("Packet deleted");
+  };
+
+  // ── The ⋯ on a stone, in stock or in the history ──
+  const ADMIN_ONLY = "Only an admin can change stock";
+  const packetActions = (p: DiamondPacket): MoreAction[] => {
+    const del = packetDeletion(p);
+    const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
+    const inStock = p.status === "in_stock";
+    return [
+      { label: "View order", icon: ExternalLink, show: !!p.orderId, disabled: !can("orders"),
+        hint: can("orders") ? `${inStock ? "Reserved for" : p.status === "used" ? "Used in" : "Issued to"} ${orderNoOf(p.orderId) ?? "the order"}` : needsAccess("orders", "view"),
+        onSelect: () => navigate(`/orders/${p.orderId}`) },
+      { label: "View sale", icon: ExternalLink, show: p.status === "sold", disabled: !can("buyAssign"),
+        hint: can("buyAssign") ? `In Buy & Assign${sale ? ` · ${fmtDate(sale.createdAt)}` : ""}` : needsAccess("buyAssign", "view"),
+        onSelect: () => navigate("/buy-assign") },
+      { label: "View purchase", icon: ExternalLink, show: !!p.supplierId, disabled: !can("suppliers"),
+        hint: can("suppliers") ? `On ${supplierName(p.supplierId) ?? "the supplier"}'s page` : needsAccess("suppliers", "view"),
+        onSelect: () => navigate(`/suppliers/${p.supplierId}`) },
+      { label: "Edit", icon: Pencil, disabled: !isAdmin || !inStock,
+        hint: !isAdmin ? ADMIN_ONLY : !inStock ? STATUS_REASON[p.status as Exclude<DiamondPacket["status"], "in_stock">] : "Certificate, grading and cost",
+        onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); } },
+      { label: "Delete", icon: Trash2, danger: true, disabled: !isAdmin || !del.ok, onSelect: () => deletePacket(p),
+        hint: !isAdmin ? ADMIN_ONLY : !del.ok ? del.reason : del.purchase ? "Removes the purchase it came from too" : "Only the stone — no purchase is on file for it" },
+    ];
   };
 
   return (
@@ -719,10 +845,7 @@ function CertifiedSection() {
           exportName="Stock-Certified_Diamonds-In_Stock"
           totals={{ diamond: list => `${sumCarat(list)} ct` }}
           details={p => packetDetails(p, "stock")}
-          rowActions={p => [
-            { label: "Edit", icon: Pencil, onSelect: () => { setEditPacket({ ...p }); setEditRate(p.ratePerCaratInr ? String(p.ratePerCaratInr) : ""); }, show: user?.role === "admin" },
-            { label: "Delete", icon: Trash2, danger: true, onSelect: () => deletePacket(p), show: user?.role === "admin" },
-          ]}
+          rowActions={packetActions}
           emptyText="No certified diamonds in stock."
         />
       </div>
@@ -760,6 +883,7 @@ function CertifiedSection() {
             searchText={p => [packetSearch(p), STATUS_LABEL[p.status], orderNoOf(p.orderId)].filter(Boolean).join(" ")}
             searchPlaceholder="Search stock #, certificate, supplier…"
             details={p => packetDetails(p, "history")}
+            rowActions={packetActions}
             totals={{
               diamond: list => `${sumCarat(list)} ct`,
               cost: list => fmtMoneyInr(list.reduce((s, p) => s + (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : 0), 0)),

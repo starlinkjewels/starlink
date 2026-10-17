@@ -12,10 +12,10 @@ import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, CalendarDays, Trash2,
+  TrendingUp, TrendingDown, CalendarDays, Trash2, Pencil,
 } from "lucide-react";
-import { confirmBox } from "@/lib/confirm";
 import { filled, linkList, lockerLabel, noteText, recorded, refLink, when } from "@/components/rowDetails";
+import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 
@@ -201,15 +201,21 @@ export function ExpensesPage() {
     setSaving(false);
   }
 
+  // One rule for who may edit or delete an expense, the same as Payments →
+  // Expenses and an employee's salary ledger (src/lib/expenseRights.ts).
+  const expenseRight = useExpenseRights();
+  const [editingId, setEditingId] = useState<string | null>(null);
+
   async function handleDelete(id: string) {
-    if (!(await confirmBox("Delete this expense? Its linked locker entry is also removed. This cannot be undone."))) return;
-    // In-place on the live cache — only this expense + its locker line go.
-    updateDb(d => {
-      d.expenses = d.expenses.filter(e => e.id !== id);
-      d.lockerTransactions = (d.lockerTransactions ?? []).filter(t => !(t.refType === "expense" && t.refId === id));
-    });
+    const e = db.expenses.find(x => x.id === id);
+    if (!e) return;
+    const why = expenseRight(e, "delete");
+    if (why) { toast.error(why); return; }
+    // Says what goes with it — its account entry, its line on a salary
+    // ledger, its share of an order's cost — then removes it and its account
+    // entry in one save, in place on the live cache.
+    if (!(await confirmDeleteExpense(e))) return;
     setDb(loadDb());
-    toast.success("Expense deleted");
   }
 
   // Closing the form (Cancel, ✕, Esc or a click outside) clears what was typed —
@@ -401,8 +407,8 @@ export function ExpensesPage() {
             lockers={db.lockers}
             orders={db.orders}
             onDelete={handleDelete}
-            mayDelete={can("expenses", "delete")}
-            currentUserId={user!.id}
+            onEdit={setEditingId}
+            rights={expenseRight}
           />
         </div>
       )}
@@ -493,8 +499,8 @@ export function ExpensesPage() {
             lockers={db.lockers}
             orders={db.orders}
             onDelete={handleDelete}
-            mayDelete={can("expenses", "delete")}
-            currentUserId={user!.id}
+            onEdit={setEditingId}
+            rights={expenseRight}
           />
         </div>
       )}
@@ -652,6 +658,9 @@ export function ExpensesPage() {
           </div>
         </div>
       </ActionSheet>
+
+      {/* Edit Expense — the same side panel as Add, every field, its account entry in step. */}
+      <ExpenseEditDialog expenseId={editingId} onClose={() => { setEditingId(null); setDb(loadDb()); }} />
     </div>
   );
 }
@@ -667,12 +676,12 @@ interface ExpenseListProps {
   lockers: DB["lockers"];
   orders: DB["orders"];
   onDelete: (id: string) => void;
-  currentUserId: string;
-  /** Whether this person's role lets them delete expenses at all. */
-  mayDelete: boolean;
+  onEdit: (id: string) => void;
+  /** Why this person may not edit / delete an expense — nothing when they may. */
+  rights: (e: Expense, action: "edit" | "delete") => string | undefined;
 }
 
-function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, currentUserId, mayDelete }: ExpenseListProps) {
+function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, onEdit, rights }: ExpenseListProps) {
   const can = useCan();
   // A nil total reads in the list's one currency ("$0"), else in rupees.
   const codes = new Set(expenses.map(e => ccy(e.currency)));
@@ -709,9 +718,15 @@ function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, 
         exportName="Expenses"
         // A total per currency ("₹84,910 + A$1,200") — rupees and dollars never added.
         totals={{ amount: rows => <span className="text-destructive">{fmtCcyMix(totalsOf(rows), nilCcy)}</span> }}
-        rowActions={e => [
-          { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), show: mayDelete && e.employeeId === currentUserId },
-        ]}
+        // Your own, or anyone's for an admin / Expenses access — otherwise
+        // greyed, naming who added it.
+        rowActions={e => {
+          const editWhy = rights(e, "edit"), delWhy = rights(e, "delete");
+          return [
+            { label: "Edit", icon: Pencil, onSelect: () => onEdit(e.id), disabled: !!editWhy, hint: editWhy ?? "Every field, and its account entry with it" },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), disabled: !!delWhy, hint: delWhy },
+          ];
+        }}
         // Opened: the account it was paid from, who recorded it and when, the note
         // as typed, and the client and orders it was for.
         details={e => filled([
