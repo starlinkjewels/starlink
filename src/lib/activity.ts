@@ -3,7 +3,8 @@ import {
   type QueryDocumentSnapshot, type DocumentData,
 } from "firebase/firestore";
 import { db as fsdb, auth } from "./firebase";
-import { loadDb, updateDbAs, collectionLoaded, type DB } from "./db";
+import { loadDb, updateDbAs, collectionLoaded, invoiceOrderIds, type DB, type Invoice } from "./db";
+import { companyIdOfInvoice } from "./companies";
 import { stable, type ActivityEntry, type LoggedChange } from "./activityFormat";
 
 /**
@@ -43,6 +44,41 @@ function current(d: DB, c: LoggedChange): Record<string, unknown> | null {
 
 export type UndoCheck = { ok: true } | { ok: false; reason: string; moved?: string[] };
 
+/**
+ * Putting an invoice back — undoing its delete, or a change to its number or
+ * its orders — must not leave the book with two bills of one number, or an
+ * order billed twice. Its records can be untouched and still clash: the
+ * number may since have gone to another bill (a renumber, or a number handed
+ * back by a delete in Settings), or its orders may be on a new invoice. So it
+ * is worked out on the book as the undo would leave it.
+ *
+ * Not in activityFormat's undoBlocker: that is decided once, when the save is
+ * logged, and cannot know what is billed or numbered later.
+ */
+function invoiceClashes(changes: LoggedChange[], d: DB): string[] {
+  const touched = changes.filter(c => c.col === "invoices");
+  if (!touched.length) return [];
+  const after = new Map((d.invoices ?? []).map(i => [i.id, i] as const));
+  for (const c of touched) {
+    if (c.op === "add") after.delete(c.id);
+    else if (c.before) after.set(c.id, c.before as unknown as Invoice);
+  }
+  const book = [...after.values()];
+  const out = new Set<string>();
+  for (const c of touched) {
+    const inv = after.get(c.id);
+    if (!inv) continue;
+    const co = companyIdOfInvoice(inv);
+    if (book.some(o => o.id !== inv.id && o.number === inv.number && companyIdOfInvoice(o) === co)) {
+      out.add(`Invoice number ${inv.number} has since gone to another bill — putting this back would make two invoices ${inv.number}`);
+    }
+    const mine = new Set(invoiceOrderIds(inv));
+    const other = book.find(o => o.id !== inv.id && invoiceOrderIds(o).some(x => mine.has(x)));
+    if (other) out.add(`Its orders are on invoice ${other.number} now — putting this back would bill them twice`);
+  }
+  return [...out];
+}
+
 /** Whether this entry can be put back right now, and if not, exactly why. */
 export function undoCheck(e: ActivityEntry, d: DB = loadDb()): UndoCheck {
   if (e.undoneAt) return { ok: false, reason: `Already undone by ${e.undoneByName ?? "someone"}.` };
@@ -65,6 +101,10 @@ export function undoCheck(e: ActivityEntry, d: DB = loadDb()): UndoCheck {
   }
   if (moved.length) {
     return { ok: false, reason: "Can't undo safely — something has changed since, and undoing would erase it.", moved };
+  }
+  const clashes = invoiceClashes(e.changes, d);
+  if (clashes.length) {
+    return { ok: false, reason: "Can't undo safely — the invoice would clash with the book as it is now.", moved: clashes };
   }
   return { ok: true };
 }

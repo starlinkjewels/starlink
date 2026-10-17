@@ -7,7 +7,7 @@ import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { OrderPaymentEditDialog } from "@/components/OrderPaymentEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
-import { cancelOrder as cancelOrderNow, cancelQuestion, returnIssuedMaterials as returnIssuedFor } from "@/lib/orderCancel";
+import { cancelOrder as cancelOrderNow, cancelQuestion, cancelRefusal, returnIssuedMaterials as returnIssuedFor } from "@/lib/orderCancel";
 import { orderPaymentEditBlocker, paymentReceipt } from "@/lib/orderPaymentEdit";
 import { meltPlan } from "@/lib/melt";
 import { needsAccess } from "@/lib/actionHints";
@@ -66,7 +66,7 @@ import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from 
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
-import { receiptForAdvance, deleteReceipt, deleteImpact } from "@/lib/receipts";
+import { receiptForAdvance, deleteReceipt, deleteImpact, receiptCancelBlocker } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
 import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
@@ -1607,7 +1607,9 @@ function OrderDetailPageBody() {
   // been dispatched or billed (lib/orderGuards.ts says why) — the menu shows it
   // greyed with that reason, and the lib checks again as it runs.
   const cancelOrder = async () => {
-    const why = cancelAccess(user) ?? cancelBlocker(db, order);
+    // Checked with the invoices and Ready Stock loaded — read before they
+    // arrive, a billed order would look cancellable.
+    const why = cancelAccess(user) ?? await cancelRefusal(order.id);
     if (why) { toast.error(why); return; }
     if (!(await confirmBox(cancelQuestion(order.orderNumber)))) return;
     setCancelling(true);
@@ -1703,7 +1705,9 @@ function OrderDetailPageBody() {
     if (applied > 0) {
       try {
         const r = await receiptForAdvance({
-          clientId: order.clientId, advanceIds: [advanceId], amountUsd: applied,
+          // The whole amount received: what went past this order's balance
+          // is credit this receipt left, and comes back off if it is cancelled.
+          clientId: order.clientId, advanceIds: [advanceId], amountUsd: amt,
           date: at, method: advNote || "Payment received",
           lockerTxnId: advLockerId ? txnId : undefined, userId: user!.id,
         });
@@ -2196,14 +2200,23 @@ function OrderDetailPageBody() {
   const removePayment = async (a: (typeof advances)[number]) => {
     const { rec, why } = paymentReceipt(loadDb(), a);
     if (!rec) { toast.error(why ?? "No receipt to delete"); return; }
-    if (!(await confirmBox(`Delete this ${fmtMoney(a.amount)} payment — receipt ${rec.receiptNo}?\n\n${deleteImpact(db, rec.id).join("\n")}\n\nThis cannot be undone.`))) return;
-    deleteReceipt(rec.id, user!.id);
+    // Said before asking: a receipt whose credit has been spent since, or whose
+    // account entry can't be told apart from its neighbours, isn't cancelled.
+    const stuck = receiptCancelBlocker(loadDb(), rec.id);
+    if (stuck) { toast.error(stuck); return; }
+    if (!(await confirmBox(`Delete this ${fmtMoney(a.amount)} payment — receipt ${rec.receiptNo}?\n\n${deleteImpact(loadDb(), rec.id).join("\n")}\n\nThis cannot be undone.`))) return;
+    try {
+      deleteReceipt(rec.id, user!.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Couldn't cancel this receipt");
+      return;
+    }
     toast.success(`Receipt ${rec.receiptNo} cancelled — the payment is off the order`);
   };
   const paymentActions = (a: (typeof advances)[number]): MoreAction[] => {
     const { rec, why } = paymentReceipt(db, a);
     const editBlock = !can("payments", "edit") ? needsAccess("payments", "edit") : orderPaymentEditBlocker(db, order, a);
-    const delBlock = !can("payments", "delete") ? needsAccess("payments", "delete") : why;
+    const delBlock = !can("payments", "delete") ? needsAccess("payments", "delete") : why ?? (rec ? receiptCancelBlocker(db, rec.id) : undefined);
     return [
       { label: "Edit", icon: Pencil, hint: editBlock ?? `Receipt ${rec?.receiptNo} — amount, day, note, account`, disabled: !!editBlock, onSelect: () => setEditingPayId(a.id) },
       { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? `Cancels receipt ${rec?.receiptNo} and its deposit`, disabled: !!delBlock, onSelect: () => removePayment(a) },

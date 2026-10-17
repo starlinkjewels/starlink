@@ -87,7 +87,16 @@ export function FactoriesPage() {
       "",
       "This cannot be undone.",
     ].join("\n")))) return;
-    updateDb(d => { d.factories = d.factories.filter(f => f.id !== fac.id); });
+    let gone = false;
+    updateDb(d => {
+      // Counted again on the live records: something may have been issued or
+      // paid while the question was open.
+      const live = d.factories.find(f => f.id === fac.id);
+      if (!live || !factoryDeleteGuard(d, live).ok) return;
+      d.factories = d.factories.filter(f => f.id !== fac.id);
+      gone = true;
+    });
+    if (!gone) { toast.error("Could not delete — something was recorded for it meanwhile"); return; }
     toast.success("Deleted");
   };
 

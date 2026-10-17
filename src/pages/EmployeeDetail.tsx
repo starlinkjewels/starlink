@@ -202,7 +202,7 @@ export function EmployeeDetailPage() {
   const profileActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingSelf(true) },
     { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login — asks first", disabled: !!delBlock,
-      onSelect: async () => { if (await confirmDeleteEmployee(db, employee)) navigate("/employees"); } },
+      onSelect: async () => { if (await confirmDeleteEmployee(employee)) navigate("/employees"); } },
   ];
 
 

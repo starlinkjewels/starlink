@@ -25,6 +25,9 @@ import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 
+const ISSUE_ADMIN_ONLY = "Only an admin can change what was issued to a factory";
+const STOCK_ADMIN_ONLY = "Only an admin can change stock";
+
 /** One thing this page did, whichever tab did it. */
 interface Row {
   id: string;
@@ -72,6 +75,12 @@ export function StockActivityLedger() {
   const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
   const [editingOpening, setEditingOpening] = useState<StockMovement | null>(null);
   const navigate = useNavigate();
+  // Stock and what was issued to a factory are changed by an admin only — as
+  // on the Stock page and the factory's page. The rules let any staff member
+  // write these, so the menus here are the guard: Buy & Assign access alone
+  // must not reach them (it never could cancel more than an assignment, and
+  // that needed Buy & Assign → Delete).
+  const isAdmin = user?.role === "admin";
 
   /**
    * Correcting a purchase from the ledger.
@@ -103,6 +112,7 @@ export function StockActivityLedger() {
   /** Gold handed to a factory in bulk. It draws down real stock, so entering it
    *  twice or for the wrong factory leaves the stock short until it is undone. */
   const removeAssignment = async (id: string) => {
+    if (!isAdmin) { toast.error(ISSUE_ADMIN_ONLY); return; }
     const mi = (db.materialIssuances ?? []).find(x => x.id === id);
     if (!mi) return;
     const check = canCancelIssuance(db, mi);
@@ -322,6 +332,9 @@ export function StockActivityLedger() {
   // paid, already used — is greyed out with the reason, never left out and
   // never refused only after the click.
   const mayEdit = can("buyAssign", "edit"), mayDelete = can("buyAssign", "delete");
+  // Why a pool delivery / opening stock may not be changed by this person.
+  const issueDenied = !isAdmin ? ISSUE_ADMIN_ONLY : undefined;
+  const stockDenied = !isAdmin ? STOCK_ADMIN_ONLY : undefined;
   const viewAction = (label: string, hint: string, to: string, module: Parameters<typeof needsAccess>[0]): MoreAction => ({
     label, icon: ExternalLink, disabled: !can(module), hint: can(module) ? hint : needsAccess(module, "view"), onSelect: () => navigate(to),
   });
@@ -348,10 +361,10 @@ export function StockActivityLedger() {
       const cancel = canCancelIssuance(db, mi);
       return [
         viewAction("View factory", r.party, `/factories/${mi.factoryId}`, "factories"),
-        { label: "Edit assignment", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !mayEdit || !edit.ok,
-          hint: !mayEdit ? needsAccess("buyAssign", "edit") : !edit.ok ? edit.reason : "Quantity, purity or grade, note — stock moves by the difference" },
-        { label: "Cancel assignment", icon: Trash2, danger: true, onSelect: () => removeAssignment(r.id), disabled: !mayDelete || removingId === r.id || !cancel.ok,
-          hint: !mayDelete ? needsAccess("buyAssign", "delete") : !cancel.ok ? cancel.reason : "The material goes back into stock" },
+        { label: "Edit assignment", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !!issueDenied || !edit.ok,
+          hint: issueDenied ?? (!edit.ok ? edit.reason : "Quantity, purity or grade, note — stock moves by the difference") },
+        { label: "Cancel assignment", icon: Trash2, danger: true, onSelect: () => removeAssignment(r.id), disabled: !!issueDenied || removingId === r.id || !cancel.ok,
+          hint: issueDenied ?? (!cancel.ok ? cancel.reason : "The material goes back into stock") },
       ];
     }
     if (r.kind === "Diamond sold") {
@@ -374,8 +387,8 @@ export function StockActivityLedger() {
         viewAction("View in Stock", "Its ledger, with everything since", `/stock/${m.material}`, "stock"),
         ...openingStockActions(db, m, {
           onEdit: () => setEditingOpening(m),
-          editDenied: mayEdit ? undefined : needsAccess("buyAssign", "edit"),
-          deleteDenied: mayDelete ? undefined : needsAccess("buyAssign", "delete"),
+          editDenied: stockDenied,
+          deleteDenied: stockDenied,
         }),
       ];
     }

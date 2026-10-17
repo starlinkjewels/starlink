@@ -86,7 +86,16 @@ export function SuppliersPage() {
       "",
       "This cannot be undone.",
     ].join("\n")))) return;
-    updateDb(d => { d.suppliers = d.suppliers.filter(x => x.id !== s.id); });
+    let gone = false;
+    updateDb(d => {
+      // Counted again on the live records: a purchase or payment may have
+      // been recorded while the question was open.
+      const live = d.suppliers.find(x => x.id === s.id);
+      if (!live || !supplierDeleteGuard(d, live).ok) return;
+      d.suppliers = d.suppliers.filter(x => x.id !== s.id);
+      gone = true;
+    });
+    if (!gone) { toast.error("Could not delete — something was recorded for them meanwhile"); return; }
     toast.success("Deleted");
   };
 

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Boxes, Pencil, Trash2 } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
+import { useAuth } from "@/lib/auth";
 import { dayOf, type DB, type StockMovement } from "@/lib/db";
 import { fmtQty, materialName, materialUnit } from "@/lib/materials";
 import { fmtMoneyInr } from "@/lib/manufacturing";
@@ -65,6 +66,7 @@ export function openingStockActions(db: DB, m: StockMovement, opts: {
  */
 export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMovement | null; onClose: () => void }) {
   const db = useDb();
+  const { user } = useAuth();
   const [f, setF] = useState({ qty: "", value: "", date: "", note: "" });
   useEffect(() => {
     if (movement) setF({
@@ -79,6 +81,9 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
 
   const save = async () => {
     if (!m) return;
+    // Offered to an admin only (the Stock page, Buy & Assign); checked again
+    // here, as the rules don't.
+    if (user?.role !== "admin") { toast.error("Only an admin can change stock"); return; }
     const qty = Number(f.qty);
     if (!qty || qty <= 0) { toast.error("Enter the opening quantity"); return; }
     try {

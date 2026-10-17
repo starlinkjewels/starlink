@@ -6,14 +6,26 @@
 // its pieces have shipped, or money or a credit note has been put against it,
 // the bill is part of the books and is corrected with a return / credit note
 // (or by cancelling the receipt), never by making it disappear.
+//
+// Only an admin may delete one — as it was when Settings was the only place to
+// do it. The rules let any staff member write invoices, so this is the guard.
+//
+// Its number is never handed back. The bill may already have been printed or
+// emailed with it; a new bill given the same number would make two different
+// bills with one number — and an undo from the Activity log after that would
+// put both in the book. The series keeps the gap.
 import { toast } from "sonner";
 import {
-  ensureCollections, loadDb, updateDbAs, fmtMoney, invoiceOrderIds, orderIsDispatched, totalAdvance,
-  type DB, type Invoice, type Order,
+  loadDb, updateDbAs, fmtMoney, invoiceOrderIds, orderIsDispatched, totalAdvance,
+  type DB, type Invoice, type Order, type User,
 } from "./db";
-import { companyIdOfInvoice } from "./companies";
-import { releaseInvoiceNumber } from "./counters";
 import { confirmBox } from "./confirm";
+import { STILL_LOADING, recordsReady } from "./actionHints";
+
+/** Who may delete an invoice: an admin only. Undefined when they may. */
+export function invoiceDeleteAccess(user: Pick<User, "role"> | null | undefined): string | undefined {
+  return user?.role === "admin" ? undefined : "Only an admin can delete an invoice";
+}
 
 /** Why this invoice can't be deleted; undefined when it can. */
 export function invoiceDeleteBlocker(db: DB, inv: Invoice): string | undefined {
@@ -27,13 +39,15 @@ export function invoiceDeleteBlocker(db: DB, inv: Invoice): string | undefined {
 }
 
 /**
- * Ask, then delete the invoice: the bill is removed, receipts that named it
- * stop pointing at it, and its number is handed back when it was the newest
- * (each company keeps its own series). Returns whether it was deleted.
+ * Ask, then delete the invoice (an admin only): the bill is removed and
+ * receipts that named it stop pointing at it. Its number stays a gap — never
+ * reused. Returns whether it was deleted.
  */
-export async function deleteInvoiceFlow(invoiceId: string): Promise<boolean> {
+export async function deleteInvoiceFlow(invoiceId: string, user: Pick<User, "role"> | null | undefined): Promise<boolean> {
+  const denied = invoiceDeleteAccess(user);
+  if (denied) { toast.error(denied); return false; }
   // Receipts that name the invoice are cleared with it — so they must be here.
-  await ensureCollections(["clientReceipts"]);
+  if (!(await recordsReady(["clientReceipts"]))) { toast.error(STILL_LOADING); return false; }
   const db = loadDb();
   const inv = (db.invoices ?? []).find(i => i.id === invoiceId);
   if (!inv) { toast.error("That invoice is no longer there"); return false; }
@@ -47,8 +61,8 @@ export async function deleteInvoiceFlow(invoiceId: string): Promise<boolean> {
     "• the orders can be invoiced again once they are dispatched",
   ];
   if (named.length) lines.push(`• receipt${named.length !== 1 ? "s" : ""} ${named.map(r => r.receiptNo).join(", ")} stop naming this invoice — the money stays where it is`);
+  lines.push(`• its number ${inv.number} won't be reused — a copy already printed or sent stays the only bill with it`);
   if (!(await confirmBox(`Delete invoice ${inv.number}?\n\n${lines.join("\n")}`))) return false;
-  const companyId = companyIdOfInvoice(inv);
   let gone = false;
   updateDbAs({ summary: `Deleted invoice ${inv.number} — ${client}` }, d => {
     // Checked again on the live record: someone may have dispatched or taken
@@ -60,10 +74,8 @@ export async function deleteInvoiceFlow(invoiceId: string): Promise<boolean> {
     gone = true;
   });
   if (!gone) { toast.error("Could not delete — the invoice changed meanwhile"); return false; }
-  // If this was the newest number, hand it back so the next invoice takes it
-  // instead of the book skipping one. Older numbers are left alone — their
-  // hole can only be closed by renumbering (Settings).
-  await releaseInvoiceNumber(inv.number, companyId);
-  toast.success(`Invoice ${inv.number} deleted`);
+  // The number is NOT handed back (see the top of this file): the next bill
+  // takes the next number, and this one stays a gap in the series.
+  toast.success(`Invoice ${inv.number} deleted — its number won't be reused`);
   return true;
 }

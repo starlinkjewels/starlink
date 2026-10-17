@@ -91,7 +91,7 @@ export function EmployeesPage() {
 
   // Asks with what it changes; refused (and the menu item greyed, saying why)
   // for an owner, an admin, or anyone the books still point at.
-  const del = (u: User) => confirmDeleteEmployee(db, u);
+  const del = (u: User) => confirmDeleteEmployee(u);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   /** Count pending tasks for an employee */

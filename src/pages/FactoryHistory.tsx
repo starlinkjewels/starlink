@@ -594,7 +594,15 @@ function FactoryHistoryPageBody() {
     const refused = await deleteRefusal("factory", factory);
     if (refused) { toast.error(refused); return; }
     if (!(await confirmBox(`Delete ${factory.name}?\n\nIt has no material issued, no payments and no order assigned, so no other record changes. This cannot be undone.`))) return;
-    updateDb(d => { d.factories = d.factories.filter(x => x.id !== factory.id); });
+    let gone = false;
+    updateDb(d => {
+      // Counted again on the live records, as the question may have sat open.
+      const live = d.factories.find(x => x.id === factory.id);
+      if (!live || !factoryDeleteGuard(d, live).ok) return;
+      d.factories = d.factories.filter(x => x.id !== factory.id);
+      gone = true;
+    });
+    if (!gone) { toast.error("Could not delete — something was recorded for it meanwhile"); return; }
     toast.success("Factory deleted");
     navigate("/factories");
   };

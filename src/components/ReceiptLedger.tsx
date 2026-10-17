@@ -4,20 +4,14 @@ import { Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { fmtMoney, fmtDate, type ClientReceipt } from "@/lib/db";
-import { ccy, fmtCcy, fmtCcyPdf, fmtRate, rateText, roundCcy } from "@/lib/currency";
-import { RateInput } from "@/components/CurrencyFields";
-import { editReceipt, deleteReceipt, deleteImpact, listReceipts, receiptApplied } from "@/lib/receipts";
+import { ccy, fmtCcy, fmtCcyPdf, fmtRate, rateText } from "@/lib/currency";
+import { listReceipts, receiptApplied, receiptCancelBlocker } from "@/lib/receipts";
+import { ReceiptEditSheet, cancelReceiptFlow } from "@/components/ReceiptEditSheet";
+import { needsAccess } from "@/lib/actionHints";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { filled, linkList, recorded, refLink, refNo, when, type Detail } from "@/components/rowDetails";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
-import { toast } from "sonner";
-import { confirmBox } from "@/lib/confirm";
 
 const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
 
@@ -38,10 +32,9 @@ export function ReceiptLedger() {
   const [clientId, setClientId] = useState("");
   const [acct, setAcct] = useState("");
   const [mode, setMode] = useState("");
+  // The receipt open in the correction panel — the same panel, and the same
+  // checks, as everywhere else a payment is corrected (ReceiptEditSheet).
   const [editId, setEditId] = useState<string | null>(null);
-  // `rate` is the account's currency for $1 (₹ per $, A$ per $…), as on the receipt.
-  const [ef, setEf] = useState<{ amount: string; date: string; method: string; remarks: string; lockerId: string; rate: number | "" }>(
-    { amount: "", date: "", method: "Cash", remarks: "", lockerId: "", rate: "" });
 
   const allReceipts = listReceipts(db);
   const ql = q.trim().toLowerCase();
@@ -66,10 +59,6 @@ export function ReceiptLedger() {
     .map(id => ({ value: id, label: db.clients.find(c => c.id === id)?.companyName ?? "Client" }))
     .sort((a, b) => a.label.localeCompare(b.label));
 
-  const editing = editId ? db.clientReceipts?.find(x => x.id === editId) : undefined;
-  const editLocker = db.lockers.find(l => l.id === ef.lockerId);
-  const editLockerCcy = ccy(editLocker?.currency);
-
   // The currency a receipt's deposit is in. Older receipts may not name it;
   // their account does (unset is rupees).
   const depositCcy = (r: ClientReceipt) =>
@@ -86,54 +75,6 @@ export function ReceiptLedger() {
     if (!r.exchangeRate) return "";
     const c = depositCcy(r);
     return c === "INR" || c === "USD" ? String(r.exchangeRate) : `${c} ${fmtRate(r.exchangeRate)}`;
-  };
-
-  const open = (id: string) => {
-    const r = db.clientReceipts?.find(x => x.id === id);
-    if (!r) return;
-    // A deposit typed straight in (an order's advance) has no rate on record.
-    // Start from the one it actually landed at, so saving a corrected remark
-    // leaves the deposit exactly as it was instead of re-working it at today's
-    // Settings rate.
-    const c = depositCcy(r);
-    const landedAt = r.lockerId && c !== "USD" && r.lockerAmount && r.amountUsd > 0 ? r.lockerAmount / r.amountUsd : undefined;
-    setEditId(id);
-    setEf({
-      amount: String(r.amountUsd),
-      date: r.date.slice(0, 10),
-      method: r.method,
-      remarks: r.remarks ?? "",
-      lockerId: r.lockerId ?? "",
-      rate: r.exchangeRate || landedAt || "",
-    });
-  };
-
-  const save = () => {
-    if (!editing) return;
-    const amt = Number(ef.amount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    const rate = Number(ef.rate) || 0;
-    if (editLocker && editLockerCcy !== "USD" && rate <= 0) {
-      toast.error("Enter the exchange rate for that account"); return;
-    }
-    // Keep the original time of day so the day's entries stay in the same order.
-    const date = `${ef.date}T${editing.date.slice(11) || "00:00:00.000Z"}`;
-    editReceipt(editing.id, {
-      amountUsd: amt,
-      date,
-      method: ef.method,
-      remarks: ef.remarks,
-      lockerId: ef.lockerId || undefined,
-      // Billed in USD; what lands is that × the account's currency for $1.
-      lockerAmount: editLocker
-        ? (editLockerCcy === "USD" ? amt : roundCcy(amt * rate, editLockerCcy))
-        : undefined,
-      lockerCurrency: editLocker ? editLockerCcy : undefined,
-      exchangeRate: editLocker && editLockerCcy !== "USD" ? rate : undefined,
-      userId: user!.id,
-    });
-    toast.success(`Receipt ${editing.receiptNo} corrected`);
-    setEditId(null);
   };
 
   // What is on screen is what downloads — same search, same order.
@@ -180,17 +121,6 @@ export function ReceiptLedger() {
     filename: "Payments-Received",
   });
 
-
-  const remove = async (id: string) => {
-    const rec = db.clientReceipts?.find(x => x.id === id);
-    if (!rec) return;
-    if (!(await confirmBox(
-      `Cancel receipt ${rec.receiptNo}?\n\n${deleteImpact(db, id).join("\n")}\n\nThis cannot be undone.`
-    ))) return;
-    deleteReceipt(id, user!.id);
-    toast.success(`Receipt ${rec.receiptNo} cancelled`);
-    setEditId(null);
-  };
 
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
   const lockerName = (id?: string) => (id ? db.lockers.find(l => l.id === id)?.name : undefined) ?? "";
@@ -282,82 +212,21 @@ export function ReceiptLedger() {
         defaultSort={{ key: "date", dir: "desc" }}
         emptyText={filtered ? "Nothing matches these filters." : "No payments recorded yet."}
         details={receiptDetails}
-        rowActions={r => [
-          { label: "Edit", icon: Pencil, onSelect: () => open(r.id), show: can("payments", "edit") },
-          { label: "Delete", icon: Trash2, danger: true, onSelect: () => remove(r.id), show: can("payments", "delete") },
-        ]}
+        rowActions={r => {
+          const mayEdit = can("payments", "edit"), mayDelete = can("payments", "delete");
+          // Said up front: a receipt whose credit has been spent since, or whose
+          // account entry can't be told apart from its neighbours, isn't cancelled.
+          const stuck = mayDelete ? receiptCancelBlocker(db, r.id) : undefined;
+          return [
+            { label: "Edit", icon: Pencil, onSelect: () => setEditId(r.id), disabled: !mayEdit,
+              hint: mayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit") },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.id, user!.id), disabled: !mayDelete || !!stuck,
+              hint: !mayDelete ? needsAccess("payments", "delete") : stuck ?? "Cancels the receipt — off the bills, the account and any credit" },
+          ];
+        }}
       />
 
-      <Dialog open={!!editing} onOpenChange={o => { if (!o) setEditId(null); }}>
-        <DialogContent className="max-w-xl rounded-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-xl">Correct receipt {editing?.receiptNo}</DialogTitle>
-          </DialogHeader>
-          <p className="text-sm text-muted-foreground -mt-1">
-            The old allocation and deposit are taken back out and the corrected figures applied fresh, so the
-            client&rsquo;s bills, their credit and the account balance all end up right. The receipt number never changes.
-          </p>
-          <div className="grid grid-cols-2 gap-3 mt-1">
-            <div>
-              <Label className="text-xs">Amount received ($)</Label>
-              <Input type="number" min={0} step="0.01" value={ef.amount}
-                onChange={e => setEf({ ...ef, amount: e.target.value })} className="rounded-xl h-10 mt-1" />
-            </div>
-            <div>
-              <Label className="text-xs">Date</Label>
-              <Input type="date" value={ef.date}
-                onChange={e => setEf({ ...ef, date: e.target.value })} className="rounded-xl h-10 mt-1" />
-            </div>
-          </div>
-          <div>
-            <Label className="text-xs">Deposited to account</Label>
-            <Select value={ef.lockerId || "none"} onValueChange={v => {
-              const lockerId = v === "none" ? "" : v;
-              const next = db.lockers.find(l => l.id === lockerId);
-              // A rate belongs to one currency: an account in another starts afresh
-              // (from Settings) rather than carrying ₹83 into an AUD account.
-              const same = !!editLocker && !!next && ccy(next.currency) === editLockerCcy;
-              setEf(p => ({ ...p, lockerId, rate: same ? p.rate : "" }));
-            }}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No account</SelectItem>
-                {db.lockers.filter(l => l.active !== false).map(l => (
-                  <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          {editLocker && editLockerCcy !== "USD" && (
-            <RateInput id="receipt-edit-rate" from="USD" to={editLockerCcy} value={ef.rate}
-              onChange={rate => setEf(p => ({ ...p, rate }))}
-              amount={Number(ef.amount) || undefined} at={ef.date || undefined} />
-          )}
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs">Mode</Label>
-              <Select value={ef.method} onValueChange={v => setEf({ ...ef, method: v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{METHODS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label className="text-xs">Remarks</Label>
-              <Input value={ef.remarks} onChange={e => setEf({ ...ef, remarks: e.target.value })} className="rounded-xl h-10 mt-1" />
-            </div>
-          </div>
-          <div className="flex gap-2 mt-3 flex-wrap">
-            {can("payments", "delete") && (
-              <Button variant="outline" onClick={() => editing && remove(editing.id)}
-                className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10">
-                Cancel receipt
-              </Button>
-            )}
-            <Button variant="outline" onClick={() => setEditId(null)} className="rounded-xl ml-auto">Close</Button>
-            <Button onClick={save} className="btn-hero rounded-xl">Save</Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      <ReceiptEditSheet receiptId={editId} onClose={() => setEditId(null)} />
     </div>
   );
 }

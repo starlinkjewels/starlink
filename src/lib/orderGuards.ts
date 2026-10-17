@@ -3,10 +3,10 @@
 // same thing — and an action that isn't possible is shown greyed with its
 // reason instead of disappearing.
 import {
-  findInvoiceForOrder, isDiamondOnlyOrder, orderIsDispatched, worksOnOrder,
+  collectionsLoaded, findInvoiceForOrder, isDiamondOnlyOrder, orderIsDispatched, worksOnOrder,
   type DB, type Order, type User,
 } from "./db";
-import { needsAccess } from "./actionHints";
+import { CHECKING, needsAccess } from "./actionHints";
 
 type Can = (module: "orders", action: "edit") => boolean;
 
@@ -18,10 +18,16 @@ type Can = (module: "orders", action: "edit") => boolean;
  * sent or billed: those come back through a return (credit note), and a bill
  * is deleted or credited first, never stranded on a cancelled order.
  */
+/** What cancelBlocker reads beyond the orders the app opens with. They arrive
+ *  by themselves in the first seconds after sign-in and read as empty until
+ *  then — an invoice not yet here would let a billed order be cancelled. */
+export const CANCEL_REF_COLS = ["invoices", "readyStock"] as const;
+
 export function cancelBlocker(db: DB, o: Order): string | undefined {
   if (o.melted) return "Melted — the piece no longer exists";
   if (o.status === "Rejected") return "Already cancelled — re-open it on the order page to change it";
   if (orderIsDispatched(o) || o.returns?.length) return "Dispatched — record a return instead";
+  if (!collectionsLoaded(CANCEL_REF_COLS)) return CHECKING;
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `On invoice ${inv.number} — delete or credit the invoice first`;
   // An in-house build already in Ready Stock: cancelling would put its gold

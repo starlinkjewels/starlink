@@ -21,7 +21,7 @@ import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { buildInvoiceBlocks, type InvoicePayment } from "@/components/ClientInvoiceLedger";
 import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
 import { cancelCreditNoteFlow, creditNoteCancelBlocker } from "@/components/creditNoteCancel";
-import { deleteInvoiceFlow, invoiceDeleteBlocker } from "@/lib/invoiceDelete";
+import { deleteInvoiceFlow, invoiceDeleteAccess, invoiceDeleteBlocker } from "@/lib/invoiceDelete";
 import { needsAccess } from "@/lib/actionHints";
 import { ReturnDialog, useMayReturn, printNote } from "@/components/SalesReturn";
 import { invoiceCreditNotes, returnBlocker } from "@/lib/salesReturn";
@@ -230,7 +230,9 @@ export function InvoicesPage() {
     if (applied > 0) {
       try {
         const r = await receiptForAdvance({
-          clientId: o.clientId, advanceIds: [advanceId], amountUsd: applied,
+          // The whole amount received: what went past this order's balance
+          // is credit this receipt left, and comes back off if it is cancelled.
+          clientId: o.clientId, advanceIds: [advanceId], amountUsd: amt,
           date: at, method: payNote.trim() || "Payment received",
           lockerTxnId: payLockerId ? txnId : undefined, userId: user!.id,
         });
@@ -380,10 +382,12 @@ export function InvoicesPage() {
   // the return. Anything that can't be done is greyed with the reason.
   const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
   const openInvoice = (id: string) => { setDetailInvId(id); setPayOrderId(null); };
-  const mayDeleteInv = isStaff && can("invoices", "delete");
-  const invDeleteWhy = (inv: Invoice) => (!mayDeleteInv ? needsAccess("invoices", "delete") : invoiceDeleteBlocker(db, inv));
+  // An admin only, as when Settings was the one place to do it — the rules
+  // let any staff member write invoices, so this is the guard.
+  const invDeleteDenied = invoiceDeleteAccess(user);
+  const invDeleteWhy = (inv: Invoice) => invDeleteDenied ?? invoiceDeleteBlocker(db, inv);
   const removeInvoice = async (inv: Invoice) => {
-    if (await deleteInvoiceFlow(inv.id) && detailInvId === inv.id) { setDetailInvId(null); setPayOrderId(null); }
+    if (await deleteInvoiceFlow(inv.id, user) && detailInvId === inv.id) { setDetailInvId(null); setPayOrderId(null); }
   };
   const NO_EDIT = "Change the order's pricing — the invoice follows it";
   const invoiceActions = (inv: Invoice, opened = false): MoreAction[] => {
@@ -393,7 +397,7 @@ export function InvoicesPage() {
       { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: NO_EDIT, show: isStaff },
       { label: "Print", icon: Printer, onSelect: () => printInv(inv), show: mayExport && !opened },
       { label: "Delete", icon: Trash2, danger: true, onSelect: () => removeInvoice(inv), show: isStaff, disabled: !!delWhy,
-        hint: delWhy ?? "Only the bill goes — the orders and their payments stay" },
+        hint: delWhy ?? `Only the bill goes — the orders and their payments stay; ${inv.number} won't be reused` },
     ];
   };
   const mayPayEdit = isStaff && can("payments", "edit");

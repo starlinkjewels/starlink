@@ -40,11 +40,13 @@ const TAB: Record<Exclude<EntryKind, "locker">, string> = {
  * look like nobody's, and its account row would be offered for editing on its
  * own. See src/hooks/useLoaded.ts.
  */
-export const ENTRY_COLS: Record<EntryKind, LazyCol[]> = {
+export const ENTRY_COLS: Record<EntryKind, (LazyCol | "expenses")[]> = {
   supplier: ["lockerTransactions", "purchases", "supplierReceipts", "supplierPayments"],
   factory: ["lockerTransactions", "materialIssuances", "factoryPayments"],
-  expense: ["lockerTransactions"],
-  locker: ["lockerTransactions", "purchases", "supplierReceipts", "supplierPayments", "materialIssuances", "factoryPayments", "diamondSales"],
+  // Expenses arrive at sign-in, but not in the first moment: read before they
+  // have, every expense's account row would look like its expense was gone.
+  expense: ["lockerTransactions", "expenses"],
+  locker: ["lockerTransactions", "purchases", "supplierReceipts", "supplierPayments", "materialIssuances", "factoryPayments", "diamondSales", "expenses"],
 };
 
 export interface MoneyEntry {
@@ -79,6 +81,10 @@ export interface MoneyEntry {
   /** An account row whose entry is gone (or no longer matches it): why it is
    *  corrected here, on its own, rather than from the tab that made it. */
   orphan?: string;
+  /** An account row that is merely not linked to anything (an older row, or
+   *  one shared by two entries) — its record may well still be on file. What
+   *  the person is told, and must confirm, before it is deleted on its own. */
+  unlinked?: string;
   /** Voucher number, for a cash entry that has one. */
   voucherNo?: string;
   /** True for a locker-to-locker transfer: editing it moves both legs. */
@@ -199,7 +205,7 @@ function rowTypesOf(e: MoneyEntry): (string | undefined)[] {
  * correctable; an account row that no payment claims is corrected on its own.
  * `claimed` collects every row matched, for the account ledger to read.
  */
-function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>) {
+function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>, shared?: Map<string, MoneyEntry[]>) {
   const found = new Map<MoneyEntry, LockerTransaction[]>();
   const take = (e: MoneyEntry, ts: LockerTransaction[]) => { found.set(e, ts); for (const t of ts) claimed.add(t.id); };
 
@@ -230,6 +236,7 @@ function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>)
   // 3 · A supplier's or factory's payment whose bills no longer add up to its
   //     movement: the movement of its kind from the same save. Never a
   //     hand-typed row on timing alone, and never a guess between two.
+  const reach = new Map<MoneyEntry, LockerTransaction[]>();
   for (const e of entries) {
     if (!e.lockerId || found.has(e) || e.kind === "expense") continue;
     const types = rowTypesOf(e).filter(x => x && x !== "manual");
@@ -239,18 +246,53 @@ function pairEntries(entries: MoneyEntry[], idx: TxnIndex, claimed: Set<string>)
       const named = cands.filter(t => !!e.party && (t.category ?? "").includes(e.party));
       if (named.length) cands = named;
     }
+    if (cands.length) reach.set(e, cands);
+  }
+  // Two entries that could each claim the same movement share it — a payment
+  // on bills and the advance recovered beside it (lib/supplierRepair.ts) are
+  // ONE account row: same party, same account, same moment. Whichever was
+  // listed first used to take the whole row with no amount check, and
+  // cancelling or correcting it moved the whole sum while the other entry
+  // stayed. Neither claims it now: both are locked, saying why, and the row
+  // is corrected (or cancelled) in the account ledger.
+  const reachers = new Map<string, MoneyEntry[]>();
+  for (const [e, cands] of reach) {
+    for (const t of cands) {
+      const l = reachers.get(t.id);
+      if (l) l.push(e); else reachers.set(t.id, [e]);
+    }
+  }
+  const contested = new Set<MoneyEntry>();
+  for (const [id, es] of reachers) {
+    if (es.length < 2) continue;
+    for (const e of es) contested.add(e);
+    shared?.set(id, es);
+  }
+  for (const [e, cands] of reach) {
+    if (contested.has(e)) continue;
     const sum = r2(cands.reduce((s, t) => s + t.amountInr, 0));
     const pick = cands.length === 1 || (cands.length > 1 && Math.abs(sum - e.amount) < 0.01) ? cands : [];
     if (pick.length) take(e, pick);
+  }
+  for (const e of contested) {
+    const others = [...new Set(reach.get(e)!.flatMap(t => reachers.get(t.id) ?? []))].filter(o => o !== e);
+    e.locked = `Shares one account movement with another entry (${others.map(sharerLabel).join("; ")}) — cancel or correct both in Payments → Account entries.`;
+    e.lockedLabel = "Correct in Account entries";
   }
 
   for (const e of entries) {
     const ts = found.get(e) ?? [];
     e.txnIds = ts.map(t => t.id);
-    if (!ts.length) { if (e.lockerId) e.noTxn = true; continue; }
+    // A shared movement is not "no movement": it is there, and locked.
+    if (!ts.length) { if (e.lockerId && !contested.has(e)) e.noTxn = true; continue; }
     const sum = r2(ts.reduce((s, t) => s + t.amountInr, 0));
     if (Math.abs(sum - e.amount) >= 0.01) e.txnAmount = sum;
   }
+}
+
+/** One entry, as the other side of a shared movement names it. */
+function sharerLabel(e: MoneyEntry): string {
+  return `${e.against ?? e.party} ${fmtCcy(e.amount, e.currency)}`;
 }
 
 /** Every entry of one party kind, as recorded — before any account matching. */
@@ -352,14 +394,40 @@ function partyEntries(db: DB, kind: Exclude<EntryKind, "locker">): MoneyEntry[] 
   return out;
 }
 
-/** Why an account row whose entry is gone is corrected here, by what made it. */
-const ORPHAN_OF: Record<string, string> = {
-  purchase: "No supplier payment matches this movement any more",
-  supplierReceipt: "No money received from a supplier matches this movement any more",
-  materialIssuance: "No factory payment matches this movement any more",
-  expense: "Its expense is no longer on file",
-  diamondSale: "Its diamond sale is no longer on file",
-};
+/** An account row no entry claims, by what made it: is its record provably
+ *  gone (it names one that is not on file), or is it merely not linked — an
+ *  older row with nothing to match it by, whose record may well still be on
+ *  file? Only the first may be called gone; saying so of the second invited
+ *  deleting a movement whose payment still stands. Read once ENTRY_COLS.locker
+ *  have loaded (expenses among them), so "not on file" is the truth. */
+function unclaimedRow(db: DB, t: LockerTransaction): { gone: string } | { unlinked: string } {
+  const has = (list: { id: string }[] | undefined, id?: string) => !!id && (list ?? []).some(x => x.id === id);
+  const supplierPaymentOnFile = (id: string) =>
+    (db.purchases ?? []).some(p => (p.payments ?? []).some(x => x.id === id)) || has(db.supplierPayments, id);
+  const factoryPaymentOnFile = (id: string) =>
+    (db.materialIssuances ?? []).some(mi => (mi.makingCharges?.payments ?? []).some(x => x.id === id)) || has(db.factoryPayments, id);
+  switch (t.refType) {
+    case "purchase":
+      if (t.paymentId && !supplierPaymentOnFile(t.paymentId)) return { gone: "Its supplier payment is no longer on file" };
+      if (t.refId && !has(db.purchases, t.refId)) return { gone: "The purchase it paid is no longer on file" };
+      return { unlinked: "Not linked to a supplier payment (older entry) — check the supplier's ledger before changing it" };
+    case "supplierReceipt":
+      if (t.paymentId && !has(db.supplierReceipts, t.paymentId)) return { gone: "The money received from the supplier is no longer on file" };
+      return { unlinked: "Not linked to money received from a supplier (older entry) — check the supplier's ledger before changing it" };
+    case "materialIssuance":
+      if (t.paymentId && !factoryPaymentOnFile(t.paymentId)) return { gone: "Its factory payment is no longer on file" };
+      if (t.refId && !has(db.materialIssuances, t.refId)) return { gone: "The factory job it paid is no longer on file" };
+      return { unlinked: "Not linked to a factory payment (older entry) — check the factory's ledger before changing it" };
+    case "expense":
+      if (t.refId && !has(db.expenses, t.refId)) return { gone: "Its expense is no longer on file" };
+      return { unlinked: "Not linked to an expense (older entry) — check Expenses before changing it" };
+    case "diamondSale":
+      if (t.refId && !has(db.diamondSales, t.refId)) return { gone: "Its diamond sale is no longer on file" };
+      return { unlinked: "Not linked to a diamond sale (older entry) — check Buy & Assign before changing it" };
+    default:
+      return { unlinked: "Not linked to any record (older entry) — check where it came from before changing it" };
+  }
+}
 
 /**
  * The account ledger. A row made BY another record (a supplier payment, an
@@ -374,9 +442,11 @@ function lockerEntries(db: DB): MoneyEntry[] {
   // Which tab owns each row: the same matching the party ledgers use, so a
   // row is editable on exactly one side.
   const owner = new Map<string, string>();
+  // Rows two entries could each claim, so neither does (pairEntries, step 3).
+  const shared = new Map<string, MoneyEntry[]>();
   for (const k of ["supplier", "factory", "expense"] as const) {
     const claimed = new Set<string>();
-    pairEntries(partyEntries(db, k), idx, claimed);
+    pairEntries(partyEntries(db, k), idx, claimed, shared);
     for (const id of claimed) if (!owner.has(id)) owner.set(id, TAB[k]);
   }
 
@@ -405,6 +475,8 @@ function lockerEntries(db: DB): MoneyEntry[] {
     const ref: string | undefined = t.refType;
     const where = owner.get(t.id);
     let locked: string | undefined, lockedWhere: string | undefined, lockedLabel: string | undefined, orphan: string | undefined;
+    let unlinked: string | undefined;
+    const sharers = where ? undefined : shared.get(t.id);
     if (saleRows.has(t.id)) {
       lockedWhere = RECORDED_IN.diamondSale;
       lockedLabel = "Cancel the sale in Buy & Assign";
@@ -412,8 +484,19 @@ function lockerEntries(db: DB): MoneyEntry[] {
     } else if (ref === "clientPayment" || where) {
       lockedWhere = where ?? RECORDED_IN.clientPayment;
       locked = `This is the account side of an entry recorded in ${lockedWhere}. Correcting it there moves both; correcting it here would leave the two disagreeing.`;
+    } else if (sharers) {
+      // One movement for two entries (a payment and the advance recovered
+      // beside it): neither may move it alone, so it is corrected here.
+      unlinked = `One account movement shared by ${sharers.length} entries on ${sharers[0].party}'s books — ${sharers.map(sharerLabel).join("; ")}`;
+      orphan = `${unlinked}. Corrected or cancelled here, it changes the account only. Once it is cancelled, each of those entries shows no account movement and can be cancelled on its own without moving the account again.`;
     } else if (ref && ref !== "manual" && ref !== "transfer" && !t.pairedLockerId) {
-      orphan = `${ORPHAN_OF[ref] ?? "Nothing else is linked to this movement any more"}, so it is corrected here — that changes the account only.`;
+      const why = unclaimedRow(db, t);
+      if ("gone" in why) {
+        orphan = `${why.gone}, so it is corrected here — that changes the account only.`;
+      } else {
+        unlinked = why.unlinked;
+        orphan = `${why.unlinked}. Corrected here, it changes the account only.`;
+      }
     }
     out.push({
       id: t.id, kind: "locker", date: t.createdAt,
@@ -424,7 +507,7 @@ function lockerEntries(db: DB): MoneyEntry[] {
       direction: t.type === "income" || t.type === "transfer_in" ? "in" : "out",
       voucherNo: t.voucherNo,
       transfer: !!t.pairedLockerId,
-      locked, lockedWhere, lockedLabel, orphan,
+      locked, lockedWhere, lockedLabel, orphan, unlinked,
     });
   }
   return out;
@@ -584,8 +667,16 @@ function planTransfer(d: DB, out: LockerTransaction, inn: LockerTransaction, pat
 
 /** Why this correction cannot be saved, or nothing when it can. Checked before
  *  anything is written, so a refusal leaves every record exactly as it was. */
-function editRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
+export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): string | undefined {
   if (entry.locked) return entry.locked;
+  // Paid from no account: giving it one here would have the books say the
+  // money left that account while the account never moved — syncTxn moves
+  // the rows an entry already has, it never makes one.
+  if (entry.kind !== "locker" && !entry.lockerId && patch.lockerId) {
+    return entry.kind === "expense"
+      ? "This expense was not paid from an account. If it was, delete it and record it again from that account."
+      : "This payment was not made from an account — giving it one here would show money leaving an account that never moved. If it was paid from one, cancel it and record it again from that account.";
+  }
   if (entry.kind === "locker") {
     const legs = transferLegs(d, entry.id);
     if (legs) {
@@ -618,7 +709,7 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefi
   if (entry.txnAmount !== undefined && patch.amount !== undefined && Math.abs(patch.amount - entry.amount) < 0.005) {
     patch = { ...patch, amount: undefined };
   }
-  const refused = editRefusal(loadDb(), entry, patch);
+  const refused = entryEditRefusal(loadDb(), entry, patch);
   if (refused) return refused;
   updateDb(d => {
     if (entry.kind === "supplier") {
@@ -766,6 +857,7 @@ export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefi
 export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
   const money = fmtCcy(entry.amount, entry.currency);
   const out: string[] = [];
+  if (entry.unlinked) out.push(`• ${entry.unlinked}`);
   if (entry.kind === "supplier") {
     out.push(entry.direction === "out"
       ? `• ${money} goes back onto ${entry.party}'s dues — that bill will show as unpaid again`
@@ -798,10 +890,22 @@ export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
   return out;
 }
 
+/** The question asked before an entry is cancelled. An account row that is
+ *  merely not linked says so first: its payment may still be on the books,
+ *  and deleting the row alone would leave the two disagreeing. */
+export function entryDeleteQuestion(entry: MoneyEntry, lockerName?: string): string {
+  const head = entry.unlinked
+    ? "Delete this account entry on its own? It changes the account only — whatever it paid may still be on the books, and the two would then disagree."
+    : "Cancel this entry?";
+  return `${head}\n\n${entryImpact(entry, lockerName).join("\n")}\n\nThis cannot be undone.`;
+}
+
 /** Cancel one entry: the party's books and the account both come back.
- *  Returns why it was refused (nothing is written then). */
-export function deleteEntry(entry: MoneyEntry): string | undefined {
+ *  Returns why it was refused (nothing is written then). An unlinked account
+ *  row goes only once the person has confirmed entryDeleteQuestion. */
+export function deleteEntry(entry: MoneyEntry, opts: { unlinkedConfirmed?: boolean } = {}): string | undefined {
   if (entry.locked) return entry.locked;
+  if (entry.unlinked && !opts.unlinkedConfirmed) return `${entry.unlinked}. Confirm that before deleting it.`;
   if (!collectionsLoaded(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
   updateDb(d => {
     if (entry.kind === "supplier") {
@@ -892,6 +996,21 @@ function expenseRows(d: DB, e: Expense): LockerTransaction[] {
   return legacy ? [legacy] : [];
 }
 
+/** Said when an expense names an account but no entry for it is found there. */
+export const EXPENSE_UNLINKED = "This expense's account entry isn't linked — correct the account side in Payments → Account entries.";
+
+/**
+ * Why an expense's amount, date and account cannot be changed from its own
+ * panel, or nothing when they can. It names an account, but its entry there
+ * was not found (older data): changed, they would change on the expense alone
+ * and the account would keep saying otherwise. Read with the account entries
+ * loaded.
+ */
+export function expenseMoneyLock(d: DB, e: Expense): string | undefined {
+  if (!e.lockerId || expenseRows(d, e).length) return undefined;
+  return EXPENSE_UNLINKED;
+}
+
 /** Why this expense cannot be saved like this, or nothing when it can.
  *  Checked before anything is written. */
 export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | undefined {
@@ -903,6 +1022,14 @@ export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | und
   // Adding an account would conjure a movement nobody recorded, or count one
   // twice if it was entered there by hand.
   if (!e.lockerId && p.lockerId) return "This expense was not paid from an account. If it was, delete it and record it again from that account.";
+  const amountChanged = Math.abs(roundCcy(p.amount, ccy(e.currency)) - e.amount) >= 0.005;
+  if (amountChanged || p.date !== e.createdAt || (p.lockerId || undefined) !== (e.lockerId || undefined)) {
+    const lock = expenseMoneyLock(d, e);
+    if (lock) return `${lock} Its title, category, notes and the rest can still be changed here.`;
+    const rows = expenseRows(d, e).length;
+    // Each row would be set to the whole new amount.
+    if (amountChanged && rows > 1) return `This expense left the account as ${rows} movements, so its amount can't be changed here — correct them in Payments → Account entries.`;
+  }
   if (p.lockerId && p.lockerId !== e.lockerId) {
     if (!d.lockers.some(l => l.id === p.lockerId)) return "That account is no longer on file.";
     const held = lockerCcy(d, p.lockerId), own = ccy(e.currency);

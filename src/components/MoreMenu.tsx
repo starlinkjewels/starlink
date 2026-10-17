@@ -24,7 +24,7 @@ export type MoreAction = {
  * button beside it, everything else waits in here. Renders nothing when no
  * action applies, so a page never shows an empty menu.
  */
-export function MoreMenu({ actions, label = "More actions", title, className = "", size = "md" }: {
+export function MoreMenu({ actions, label = "More actions", title, className = "", size = "md", onOpen }: {
   actions: MoreAction[];
   label?: string;
   /** A heading inside the menu. */
@@ -32,6 +32,9 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
   className?: string;
   /** "sm" on a card, "md" in a page header. */
   size?: "sm" | "md";
+  /** Called as the menu opens — to load what its items need only when
+   *  someone actually looks (they show "Checking…" until it is here). */
+  onOpen?: () => void;
 }) {
   const shown = actions.filter(a => a.show !== false);
   if (!shown.length) return null;
@@ -52,7 +55,7 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
     </DropdownMenuItem>
   );
   return (
-    <DropdownMenu modal={false}>
+    <DropdownMenu modal={false} onOpenChange={o => { if (o) onOpen?.(); }}>
       <DropdownMenuTrigger asChild>
         <Button type="button" variant="outline" aria-label={label} title={label}
           className={`${size === "sm" ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>

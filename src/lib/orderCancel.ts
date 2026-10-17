@@ -6,7 +6,8 @@ import { increaseStock } from "./stock";
 import { companyOf } from "./companies";
 import { issuanceUsed } from "./manufacturing";
 import { logItem, whoOf } from "./readyStockHistory";
-import { cancelBlocker } from "./orderGuards";
+import { CANCEL_REF_COLS, cancelAccess, cancelBlocker } from "./orderGuards";
+import { STILL_LOADING, recordsReady } from "./actionHints";
 
 type Who = Pick<User, "id" | "name" | "role">;
 
@@ -74,6 +75,24 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
   });
 }
 
+/** Everything a cancel reads: what cancelBlocker checks, and the issues and
+ *  certified stones returnIssuedMaterials puts back — read before they have
+ *  arrived, nothing would go back to stock. */
+const CANCEL_COLS = [...CANCEL_REF_COLS, "materialIssuances", "diamondPackets"] as const;
+
+/**
+ * Why this order can't be cancelled right now, checked with everything it
+ * reads loaded (waited for, up to a moment). For the check made before the
+ * question is asked; cancelOrder checks again as it runs.
+ */
+export async function cancelRefusal(orderId: string): Promise<string | undefined> {
+  if (!(await recordsReady(CANCEL_COLS))) return STILL_LOADING;
+  const db = loadDb();
+  const o = db.orders.find(x => x.id === orderId);
+  if (!o) return "That order is not there any more";
+  return cancelBlocker(db, o);
+}
+
 /** What cancelling will do, for the confirmation — the first line asks. */
 export function cancelQuestion(orderNumber: string): string {
   return `Cancel order ${orderNumber}?\n\nAny issued material/diamonds return to stock, any advance paid moves to the client's credit, and it will no longer be billed. You can re-open it later.`;
@@ -87,10 +106,7 @@ export function cancelQuestion(orderNumber: string): string {
  * something dispatched since.
  */
 export async function cancelOrder(orderId: string, user: Who): Promise<void> {
-  const fresh = loadDb();
-  const o = fresh.orders.find(x => x.id === orderId);
-  if (!o) throw new Error("That order is not there any more");
-  const why = cancelBlocker(fresh, o);
+  const why = cancelAccess(user) ?? await cancelRefusal(orderId);
   if (why) throw new Error(why);
   await returnIssuedMaterials(orderId, user); // return gold/diamond, free packets, close issuances
   const now = new Date().toISOString();
