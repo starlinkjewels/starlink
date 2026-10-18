@@ -70,7 +70,7 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
           </Button>
         ) : (
           <Button type="button" variant="outline" aria-label={label} title={label}
-            className={`${size === "xs" ? "h-8 w-8 rounded-lg border-transparent shadow-none bg-transparent hover:bg-secondary" : size === "sm" ? "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-lg" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>
+            className={`${size === "xs" ? "h-8 w-8 rounded-lg border-transparent bg-transparent" : size === "sm" ? "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-lg border-transparent bg-transparent text-muted-foreground hover:text-foreground" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>
             <MoreHorizontal className={size === "md" ? "h-5 w-5" : "h-4 w-4"} />
           </Button>
         )}

@@ -266,20 +266,25 @@ export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode
           const zero = typeof it.value === "string" && /^[^\d-]*0+(?:[.,]0+)?(?:\s*[^\d\s]*)?$/.test(it.value.trim());
           const t = STAT_TONE[zero ? "none" : it.tone ?? "none"];
           const Icon = it.icon ?? t.icon;
+          // On a phone two figures share a row; one left over takes the row.
+          const lastAlone = n % 2 === 1 && i === n - 1;
           return (
             <div key={it.label}
-              className={`relative min-w-0 px-4 sm:px-5 py-3.5 sm:py-4 flex items-start gap-3
+              className={`@container relative min-w-0 px-4 sm:px-5 py-3.5 sm:py-4 flex items-start gap-3
+                ${lastAlone ? "max-sm:col-span-2" : ""}
                 ${i > 0 ? "sm:border-l sm:border-border/60" : ""}
                 ${i % 2 === 1 ? "max-sm:border-l max-sm:border-border/60" : ""}
                 ${i >= 2 ? "max-sm:border-t max-sm:border-border/60" : ""}`}>
               {it.op && i > 0 && (
                 <span aria-hidden className="max-sm:hidden absolute -left-[11px] top-1/2 -translate-y-1/2 z-[1] h-[22px] w-[22px] grid place-items-center rounded-full bg-white border border-border text-[13px] font-semibold text-muted-foreground leading-none">{it.op}</span>
               )}
-              <span className={`h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip}`}><Icon className="h-[18px] w-[18px]" /></span>
-              <div className="min-w-0">
-                <p className="text-xs font-medium text-muted-foreground truncate">{it.label}</p>
-                <p className={`mt-0.5 text-lg sm:text-xl font-semibold tracking-tight tabular-nums leading-tight break-words ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
-                {it.sub && <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{it.sub}</p>}
+              {/* The picture only where there is room for it beside the figure. */}
+              <span className={`h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip} @max-[14rem]:hidden`}><Icon className="h-[18px] w-[18px]" /></span>
+              <div className="min-w-0 flex-1">
+                <p className="text-xs font-medium text-muted-foreground leading-snug line-clamp-2">{it.label}</p>
+                {/* A figure is never split across lines: it sizes to its tile instead. */}
+                <p className={`mt-1 text-[clamp(0.95rem,11cqi,1.375rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
+                {it.sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">{it.sub}</p>}
               </div>
             </div>
           );

@@ -48,6 +48,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { confirmBox } from "@/lib/confirm";
 
+/** An action on an issuance card: a light text button, icon and word. */
+const ISSUE_ACTION = "inline-flex items-center gap-1.5 h-9 px-2.5 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors";
+
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
 type IssuanceAction = "piece" | "charge" | "pay" | "return" | "close" | null;
@@ -59,7 +62,7 @@ function PanelFooter({ label, value, sub, children }: { label?: string; value?: 
       {label != null && (
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">{label}</p>
-          <p className="font-display text-lg font-bold text-brand-dark leading-tight break-words">{value}</p>
+          <p className="text-lg font-semibold text-foreground tabular-nums leading-tight whitespace-nowrap">{value}</p>
           {sub && <p className="text-[11px] text-muted-foreground">{sub}</p>}
         </div>
       )}
@@ -565,6 +568,14 @@ function FactoryHistoryPageBody() {
     const cancel = canCancelIssuance(db, mi);
     const certified = mi.diamondKind === "certified";
     return [
+      // The day-to-day steps that are not the card's own buttons (the card shows
+      // at most two: Finished piece, and Set charge — or Pay while some is owed).
+      { label: "Set charge", icon: Coins, show: isAdmin && !!mi.orderId && mi.makingCharges.amountInr > 0 && issuancePending(mi) > 0,
+        hint: "Change the making charge", onSelect: () => openAction(mi.id, "charge") },
+      { label: "Return material", icon: Undo2, show: isAdmin && mi.status === "open",
+        hint: "What the factory gives back unused", onSelect: () => openAction(mi.id, "return") },
+      { label: "Close issuance", icon: Archive, show: isAdmin && mi.status === "open",
+        hint: "Settle it — wastage is worked out", onSelect: () => openAction(mi.id, "close") },
       { label: "View order", icon: ExternalLink, show: !!order, disabled: !can("orders"),
         hint: can("orders") ? `${mi.source === "melt" ? "The melted piece" : "Order"} ${order?.orderNumber ?? ""}`.trim() : needsAccess("orders", "view"),
         onSelect: () => navigate(`/orders/${order!.id}`) },
@@ -1102,64 +1113,66 @@ function FactoryHistoryPageBody() {
 
           return (
             <div key={mi.id} className="card-luxe p-4">
-              <div className="flex items-start justify-between gap-3 flex-wrap">
-                <div>
-                  <p className="font-semibold text-sm">
-                    {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
-                    )}
-                    <span className="ml-2 text-xs font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{mi.status === "open" ? "In progress" : "Closed"}</span>
-                    {mi.source === "purchase" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">Direct purchase</span>}
-                    {mi.source === "factoryPool" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">From factory pool</span>}
-                    {mi.source === "transfer" && <span className="ml-1.5 text-xs font-medium px-2 py-0.5 rounded-full bg-primary/10 text-primary">Moved from another company</span>}
-                    {view === "all" && <CompanyBadge id={companyOf(mi)} className="ml-1.5" />}
-                  </p>
+              <div className="flex items-start gap-2">
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+                    <p className="font-semibold text-[15px] min-w-0">
+                      {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
+                      )}
+                    </p>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${mi.status === "open" ? "bg-violet-50 text-violet-800" : "bg-secondary text-muted-foreground"}`}>{mi.status === "open" ? "In progress" : "Closed"}</span>
+                    {mi.source === "purchase" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">Direct purchase</span>}
+                    {mi.source === "factoryPool" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">From factory pool</span>}
+                    {mi.source === "transfer" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">Moved from another company</span>}
+                    {view === "all" && <CompanyBadge id={companyOf(mi)} />}
+                  </div>
                   {mi.source === "melt" && mi.quantityIssued === 0 ? (
-                    <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                      <Coins className="h-3 w-3" /> Charge only, {fmtDate(mi.issuedAt)} — the gold did not stay with this factory
+                    <p className="text-sm text-muted-foreground mt-1.5 flex items-start gap-1.5">
+                      <Coins className="h-3.5 w-3.5 mt-[3px] shrink-0" /> Charge only, {fmtDate(mi.issuedAt)} — the gold did not stay with this factory
                     </p>
                   ) : (
-                  <p className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
-                    {mi.material === "gold" ? <Coins className="h-3 w-3" /> : <Gem className="h-3 w-3" />}
-                    {mi.quantityIssued}{unit} {mi.purityOrQuality}{isOtherMaterial(mi.material) ? ` ${materialName(db.settings, mi.material)}` : ""} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
-                    {mi.status === "closed" && wastage !== 0 ? (wastage > 0 ? ` · ${wastage}${unit} wastage` : ` · ${Math.abs(wastage)}${unit} over-used`) : ""}
+                  <p className="text-sm text-muted-foreground mt-1.5 flex items-start gap-1.5">
+                    {mi.material === "gold" ? <Coins className="h-3.5 w-3.5 mt-[3px] shrink-0" /> : <Gem className="h-3.5 w-3.5 mt-[3px] shrink-0" />}
+                    <span>
+                      {mi.quantityIssued}{unit} {mi.purityOrQuality}{isOtherMaterial(mi.material) ? ` ${materialName(db.settings, mi.material)}` : ""} issued {fmtDate(mi.issuedAt)} · {used}{unit} used
+                      {mi.status === "closed" && wastage !== 0 ? (wastage > 0 ? ` · ${wastage}${unit} wastage` : ` · ${Math.abs(wastage)}${unit} over-used`) : ""}
+                    </span>
                   </p>
                   )}
                 </div>
-                <div className="flex items-start gap-2 shrink-0">
-                  <div className="text-right">
-                    <p className="text-sm font-semibold">{mi.makingCharges.amountInr > 0 ? fmtMoneyInr(mi.makingCharges.amountInr) : "No charge set"}</p>
-                    {mi.makingCharges.amountInr > 0 && (
-                      <p className={`text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}</p>
-                    )}
-                  </div>
-                  <MoreMenu size="sm" label="Issuance actions" title="This issue" actions={issuanceActions(mi)} className="relative after:absolute after:-inset-1" />
-                </div>
+                <MoreMenu size="sm" label="Issuance actions" title="This issue" actions={issuanceActions(mi)} className="-mr-1.5 -mt-1.5" />
               </div>
 
-              {user?.role === "admin" && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {mi.orderId && (
-                  <>
-                    {used < mi.quantityIssued - 0.001 && (
-                      <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "piece")} className="rounded-lg gap-1.5"><CheckCircle2 className="h-3.5 w-3.5" />Finished Piece</Button>
+              {/* The making charge, and the next step — two light text buttons at
+                  most; Return and Close are in the ⋯ menu. */}
+              <div className="mt-3 pt-3 border-t border-border/60 flex items-center justify-between gap-x-4 gap-y-2 flex-wrap">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Making charge</p>
+                  <p className="mt-0.5 text-[15px] font-semibold tabular-nums whitespace-nowrap">
+                    {mi.makingCharges.amountInr > 0 ? fmtMoneyInr(mi.makingCharges.amountInr) : <span className="font-medium text-muted-foreground">Not set</span>}
+                    {mi.makingCharges.amountInr > 0 && (
+                      <span className={`ml-2 text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}</span>
                     )}
-                    <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "charge")} className="rounded-lg gap-1.5"><Coins className="h-3.5 w-3.5" />Set Charge</Button>
-                    {mi.makingCharges.amountInr > 0 && pending > 0 && (
-                      <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "pay")} className="rounded-lg gap-1.5"><CreditCard className="h-3.5 w-3.5" />Pay</Button>
+                  </p>
+                </div>
+                {user?.role === "admin" && (
+                  <div className="flex flex-wrap items-center gap-1 -mr-2">
+                    {mi.orderId && (
+                      <>
+                        {used < mi.quantityIssued - 0.001 && (
+                          <button type="button" onClick={() => openAction(mi.id, "piece")} className={ISSUE_ACTION}><CheckCircle2 className="h-4 w-4" />Finished piece</button>
+                        )}
+                        {mi.makingCharges.amountInr > 0 && pending > 0
+                          ? <button type="button" onClick={() => openAction(mi.id, "pay")} className={ISSUE_ACTION}><CreditCard className="h-4 w-4" />Pay</button>
+                          : <button type="button" onClick={() => openAction(mi.id, "charge")} className={ISSUE_ACTION}><Coins className="h-4 w-4" />Set charge</button>}
+                      </>
                     )}
-                  </>
-                )}
-                {mi.status === "open" && (
-                  <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "return")} className="rounded-lg gap-1.5"><Undo2 className="h-3.5 w-3.5" />Return</Button>
-                )}
-                {mi.status === "open" && (
-                  <Button size="sm" variant="outline" onClick={() => openAction(mi.id, "close")} className="rounded-lg gap-1.5"><Archive className="h-3.5 w-3.5" />Close Issuance</Button>
+                  </div>
                 )}
               </div>
-              )}
             </div>
           );
         })}
@@ -1340,9 +1353,9 @@ function FactoryHistoryPageBody() {
             <div className="space-y-3">
               {/* Colour on the figure only, a zero in grey — as every figure strip. */}
               <div className="grid grid-cols-3 rounded-xl border border-border/60 bg-white divide-x divide-border/60 text-center">
-                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Charge</p><p className={`text-sm font-semibold tabular-nums break-words ${mi.makingCharges.amountInr ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(mi.makingCharges.amountInr)}</p></div>
-                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className={`text-sm font-semibold tabular-nums break-words ${issuancePaid(mi) ? "text-success" : "text-muted-foreground"}`}>{fmtMoneyInr(issuancePaid(mi))}</p></div>
-                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className={`text-sm font-semibold tabular-nums break-words ${pending ? "text-destructive" : "text-muted-foreground"}`}>{fmtMoneyInr(pending)}</p></div>
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Charge</p><p className={`text-sm font-semibold tabular-nums whitespace-nowrap ${mi.makingCharges.amountInr ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(mi.makingCharges.amountInr)}</p></div>
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className={`text-sm font-semibold tabular-nums whitespace-nowrap ${issuancePaid(mi) ? "text-success" : "text-muted-foreground"}`}>{fmtMoneyInr(issuancePaid(mi))}</p></div>
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className={`text-sm font-semibold tabular-nums whitespace-nowrap ${pending ? "text-destructive" : "text-muted-foreground"}`}>{fmtMoneyInr(pending)}</p></div>
               </div>
               <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
               <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>

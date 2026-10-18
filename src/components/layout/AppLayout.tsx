@@ -229,6 +229,9 @@ export function AppLayout() {
   }, [appearanceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate();
   const loc = useLocation();
+  // A page that is one task from start to finish (placing an order) puts the
+  // tab bar away on a phone, so its own Cancel / Submit bar owns the bottom edge.
+  const focusPage = /^\/orders\/new\/?$/.test(loc.pathname);
   const [unread, setUnread] = useState(0);
   const [profileOpen, setProfileOpen] = useState(false);
   const [tasksOpen, setTasksOpen] = useState(false);
@@ -551,7 +554,7 @@ export function AppLayout() {
 
         {/* ── Bottom nav (mobile) — 5 items: 4 tabs + More ── */}
         <nav
-          className="app-tabbar md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t flex items-center justify-around"
+          className={`app-tabbar md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t flex items-center justify-around ${focusPage ? "hidden" : ""}`}
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)", paddingTop: "0.5rem" }}>
 
           {MOBILE_NAV.map(item => (
