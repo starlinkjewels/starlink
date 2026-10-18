@@ -2053,10 +2053,9 @@ function OrderDetailPageBody() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
       o.shippingCharge = ship;
-      const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "Order Priced", body: `${o.orderNumber} order value set to ${fmtMoney(val)}${ship > 0 ? ` + ${fmtMoney(ship)} shipping` : ""}`, type: "info", read: false, createdAt: new Date().toISOString() });
+      // The client is not told: a price set or changed here sends no notice.
     });
-    toast.success("Pricing saved — client notified");
+    toast.success("Pricing saved");
     setShowPricing(false);
   };
 
@@ -2475,7 +2474,7 @@ function OrderDetailPageBody() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <AsyncButton size="sm" onClick={savePricing} className="rounded-xl">Save &amp; Notify Client</AsyncButton>
+                    <AsyncButton size="sm" onClick={savePricing} className="rounded-xl">Save</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowPricing(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </motion.div>
