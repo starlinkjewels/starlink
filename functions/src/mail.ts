@@ -29,7 +29,7 @@ const MAX_SUBJECT = 300;
 const DAILY_CAP = { staff: 400, client: 30 } as const;
 const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]{2,}$/;
 
-interface MailRequest { to?: unknown; subject?: unknown; html?: unknown }
+interface MailRequest { to?: unknown; subject?: unknown; html?: unknown; onceKey?: unknown }
 
 export const sendMail = onCall<MailRequest>(
   { region: "asia-south1", secrets: [SMTP_PASSWORD], memory: "256MiB", maxInstances: 5, timeoutSeconds: 60 },
@@ -58,6 +58,13 @@ export const sendMail = onCall<MailRequest>(
       throw new HttpsError("permission-denied", "Not allowed to send to that address.");
     }
 
+    // A "once a day" email (the client-active alert) goes out once per login per
+    // day — whichever of their devices asks first; the rest are skipped.
+    const onceKey = typeof req.data?.onceKey === "string" && /^[a-z0-9-]{1,40}$/.test(req.data.onceKey) ? req.data.onceKey : null;
+    const today = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+    const onceRef = onceKey ? db.collection("mailOnce").doc(`${uid}_${today}_${onceKey}`) : null;
+    if (onceRef && (await onceRef.get()).exists) return { ok: true, skipped: true };
+
     // A daily cap per account, so a runaway screen or a misused login can't flood the mailbox.
     const day = new Date().toISOString().slice(0, 10);
     const usage = db.collection("mailUsage").doc(`${uid}_${day}`);
@@ -75,6 +82,7 @@ export const sendMail = onCall<MailRequest>(
     });
     try {
       await transport.sendMail({ from: FROM, to, subject, html });
+      if (onceRef) await onceRef.set({ uid, day: today, key: onceKey, at: FieldValue.serverTimestamp() });
       return { ok: true };
     } catch (err) {
       console.error("[sendMail] SMTP send failed:", err);
