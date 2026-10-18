@@ -47,6 +47,9 @@ export const IS_DEMO = false;
  */
 export const AI_ENABLED = true;
 
+/** The name the assistant goes by in this app. */
+export const AI_NAME = "Assistant";
+
 /** Uploads go straight into this project's own bucket — no folder prefix. */
 export const STORAGE_PREFIX = "";
 

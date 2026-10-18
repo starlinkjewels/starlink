@@ -205,6 +205,17 @@
   }
 }
 
+/* A page that is one screen tall, not a scrolling column (the assistant): the
+   space left inside the page area. Laptop: below the 4rem top bar, less the
+   page's own 1.5rem / 2rem padding. Phone: below the fixed top bar and its
+   padding, above the tab bar's 6rem, less the notch and the home bar. */
+.app-fill-page { height: calc(100dvh - 7.5rem); }
+/* Liquid Glass floats the laptop top bar with 12px above and 4px below it. */
+@media (min-width: 768px) { :root[data-ui="glass"] .app-fill-page { height: calc(100dvh - 8.5rem); } }
+@media (max-width: 767px) {
+  .app-fill-page { height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 11.5rem); }
+}
+
 /* iPhone / iPad Safari only (the one browser with -webkit-touch-callout): drop
    the native box so the field takes the width and height it is given, and keep
    its text on the left like every other field instead of centred. In the base
