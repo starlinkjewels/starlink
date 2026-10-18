@@ -30,7 +30,7 @@ const VERSION = 4;
 const REGION = "us-central1";
 
 /** Owners recognised by email, as each database's rules recognise them. */
-const OWNER_EMAILS: Record<DbName, string[]> = {
+export const OWNER_EMAILS: Record<DbName, string[]> = {
   diamondflow: ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com"],
   ssdiamdemo: ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com", "test@gmail.com"],
 };

@@ -8,6 +8,8 @@ import { buildToolDefs } from "./tools/schema";
 import { executeTool } from "./tools/execute";
 
 export { sendNotificationPush } from "./notifications";
+// Transactional email from the company's own Gmail account (see mail.ts).
+export { sendMail } from "./mail";
 
 // Totals kept on the server (see summaries.ts), one set per database, each
 // deployed by its own name so one is never redeployed with the other:

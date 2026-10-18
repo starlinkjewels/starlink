@@ -1,92 +1,109 @@
-// Transactional email via the marketing send-mail API.
+// Transactional email, sent by this project's own Cloud Function (sendMail in
+// functions/src/mail.ts) from the company's Gmail account — no outside mail
+// service is involved.
 // Fire-and-forget: an email failure must NEVER block or fail the order action,
 // so every call is wrapped and returns a boolean instead of throwing.
+import { httpsCallable } from "firebase/functions";
+import { functions } from "./firebase";
 
-const ENDPOINT = "https://emailmarketing-iota.vercel.app/send-mail";
+/** The company inbox that gets the internal alerts (new order, client login). */
 export const MARKETING_EMAIL = "marketing.starlinkjewels@gmail.com";
+
+const sendMailFn = httpsCallable<{ to: string; subject: string; html: string }, { ok: boolean }>(functions, "sendMail");
 
 export async function sendMail(to: string, subject: string, html: string): Promise<boolean> {
   if (!to || !to.includes("@")) return false;
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject, html }),
-    });
-    return res.ok;
+    const res = await sendMailFn({ to, subject, html });
+    return !!res.data?.ok;
   } catch {
     return false;
   }
 }
 
-/* ───────────────────────── Branded template shell ───────────────────────── */
+/* ───────────────────────── The brand ───────────────────────── */
 
-const BRAND = "#2F5DAA";
-const GOLD = "#C8A24B";
-const INK = "#1B2A4A";
-const MUTED = "#6b7280";
-const BG = "#F4F6FB";
+const BRAND_NAME = "Starlink Jewels";
+const BRAND_LINE = "Fine Diamond Jewelry";
+const LOGO_FILE = "/starlink-logo.png";
+const INK = "#1B2A4A";       // headings and figures
+const MUTED = "#6B7280";
+const LINE = "#E8EBF0";
+const PAGE = "#F4F5F7";
 
-/** Wrap body content in a consistent, email-client-safe branded layout. */
-function shell(opts: { preheader: string; accent?: string; heading: string; intro: string; body: string; cta?: { label: string; url: string } }): string {
-  const accent = opts.accent || BRAND;
-  return `
-  <div style="margin:0;padding:0;background:${BG};font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-    <span style="display:none!important;opacity:0;color:${BG};height:0;width:0;overflow:hidden;">${opts.preheader}</span>
-    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${BG};padding:24px 12px;">
-      <tr><td align="center">
-        <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,.08);">
-          <!-- Header -->
-          <tr><td style="background:${INK};padding:22px 28px;">
-            <div style="font-size:20px;font-weight:800;letter-spacing:3px;color:#ffffff;">STARLINK <span style="color:${GOLD};">JEWELS</span></div>
-            <div style="font-size:11px;letter-spacing:2px;color:#9fb0d0;margin-top:2px;">FINE DIAMOND JEWELRY</div>
-          </td></tr>
-          <!-- Accent bar -->
-          <tr><td style="height:4px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>
-          <!-- Body -->
-          <tr><td style="padding:32px 28px;">
-            <h1 style="margin:0 0 8px;font-size:22px;line-height:1.3;color:${INK};font-weight:700;">${opts.heading}</h1>
-            <p style="margin:0 0 20px;font-size:15px;line-height:1.6;color:${MUTED};">${opts.intro}</p>
-            ${opts.body}
-            ${opts.cta ? `
-            <div style="margin:26px 0 4px;">
-              <a href="${opts.cta.url}" style="display:inline-block;background:${accent};color:#ffffff;text-decoration:none;font-size:14px;font-weight:600;padding:12px 26px;border-radius:10px;">${opts.cta.label}</a>
-            </div>` : ""}
-          </td></tr>
-          <!-- Footer -->
-          <tr><td style="padding:20px 28px;border-top:1px solid #eef1f6;">
-            <p style="margin:0;font-size:12px;line-height:1.6;color:#9aa3b2;">This is an automated message from Starlink Jewels. Please do not reply directly to this email.</p>
-            <p style="margin:6px 0 0;font-size:12px;color:#9aa3b2;">© ${brandYear()} Starlink Jewels · Fine Diamond Jewelry</p>
-          </td></tr>
-        </table>
-      </td></tr>
-    </table>
-  </div>`;
+/** Where the app lives — the logo is loaded from there (the emails are written in the browser). */
+const appUrl = () => (typeof window !== "undefined" ? window.location.origin : "");
+
+const esc = (s: unknown) => String(s ?? "").replace(/[<>&"]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" }[c]!));
+
+/* ───────────────────────── The shell every email shares ───────────────────────── */
+
+type Tone = "neutral" | "success" | "info" | "gift";
+const TONE: Record<Tone, { bg: string; fg: string }> = {
+  neutral: { bg: "#EEF1F6", fg: "#3A4A66" },
+  success: { bg: "#E7F6EE", fg: "#11733F" },
+  info: { bg: "#E8EFFB", fg: "#24489A" },
+  gift: { bg: "#FBF3E2", fg: "#8A6416" },
+};
+
+/**
+ * One layout for every email: the logo on white, a small status label, the
+ * heading, a short paragraph, the details and a quiet footer. Information
+ * only — no buttons and no links. Tables and inline styles only — what every
+ * mail app reads the same way.
+ */
+function shell(o: { preheader: string; label: string; tone?: Tone; heading: string; intro: string; body?: string; footerNote: string }): string {
+  const t = TONE[o.tone ?? "neutral"];
+  const logo = appUrl()
+    ? `<img src="${appUrl()}${LOGO_FILE}" alt="${BRAND_NAME}" height="40" style="display:block;height:40px;width:auto;border:0;outline:none;text-decoration:none;font-size:18px;font-weight:700;color:${INK};" />`
+    : `<span style="font-size:18px;font-weight:700;color:${INK};letter-spacing:1px;">${BRAND_NAME.toUpperCase()}</span>`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>${esc(o.label)}</title></head>
+<body style="margin:0;padding:0;background:${PAGE};">
+  <span style="display:none!important;visibility:hidden;opacity:0;color:${PAGE};height:0;width:0;overflow:hidden;mso-hide:all;">${esc(o.preheader)}</span>
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:${PAGE};">
+    <tr><td align="center" style="padding:28px 12px;">
+      <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid ${LINE};border-radius:12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+        <tr><td style="padding:24px 32px 20px;border-bottom:1px solid ${LINE};">${logo}</td></tr>
+        <tr><td style="padding:28px 32px 8px;">
+          <span style="display:inline-block;padding:4px 10px;border-radius:999px;background:${t.bg};color:${t.fg};font-size:12px;font-weight:600;letter-spacing:0.2px;">${esc(o.label)}</span>
+          <h1 style="margin:14px 0 8px;font-size:22px;line-height:1.3;font-weight:700;color:${INK};">${o.heading}</h1>
+          <p style="margin:0;font-size:15px;line-height:1.6;color:#374151;">${o.intro}</p>
+        </td></tr>
+        ${o.body ? `<tr><td style="padding:16px 32px 4px;">${o.body}</td></tr>` : ""}
+        <tr><td style="padding:28px 32px 28px;">
+          <p style="margin:0;padding-top:18px;border-top:1px solid ${LINE};font-size:12px;line-height:1.6;color:${MUTED};">${o.footerNote}</p>
+          <p style="margin:6px 0 0;font-size:12px;line-height:1.6;color:${MUTED};">© ${new Date().getFullYear()} ${BRAND_NAME}${BRAND_LINE ? ` · ${BRAND_LINE}` : ""}</p>
+        </td></tr>
+      </table>
+    </td></tr>
+  </table>
+</body></html>`;
 }
 
-// Year without relying on side-effectful Date at module scope elsewhere.
-function brandYear(): number {
-  return new Date().getFullYear();
-}
-
-/** A clean key/value detail table for order info. */
-function detailRows(rows: [string, string][]): string {
+/** The details of an order, as quiet label / value rows. */
+function detailRows(rows: [string, string | number | undefined | null][]): string {
   const cells = rows
     .filter(([, v]) => v != null && v !== "")
-    .map(
-      ([k, v]) =>
-        `<tr>
-          <td style="padding:9px 0;font-size:13px;color:${MUTED};width:42%;vertical-align:top;">${k}</td>
-          <td style="padding:9px 0;font-size:14px;color:${INK};font-weight:600;">${v}</td>
-        </tr>`,
-    )
+    .map(([k, v], i) =>
+      `<tr>
+        <td style="padding:11px 0;${i ? `border-top:1px solid ${LINE};` : ""}font-size:14px;color:${MUTED};width:42%;vertical-align:top;">${esc(k)}</td>
+        <td style="padding:11px 0;${i ? `border-top:1px solid ${LINE};` : ""}font-size:14px;color:${INK};font-weight:600;text-align:right;">${esc(v)}</td>
+      </tr>`)
     .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef1f6;border-radius:12px;padding:6px 16px;background:#fbfcfe;">${cells}</table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-top:1px solid ${LINE};border-bottom:1px solid ${LINE};">${cells}</table>`;
 }
 
-const esc = (s: unknown) => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]!));
+const fmtDay = (iso?: string) => {
+  if (!iso) return undefined;
+  const d = new Date(iso);
+  return isNaN(+d) ? iso : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
+};
 
-/* ───────────────────────── The three emails ───────────────────────── */
+const TO_CLIENT = `You're receiving this because you have an account with ${BRAND_NAME}.`;
+const TO_TEAM = `An automatic note from your ${BRAND_NAME} portal.`;
+
+/* ───────────────────────── The emails ───────────────────────── */
 
 export interface OrderEmailInfo {
   orderNumber: string;
@@ -97,42 +114,39 @@ export interface OrderEmailInfo {
   expectedDelivery?: string;
 }
 
-/** 1 — a new order was received → to the marketing inbox. */
+const pieceRows = (o: OrderEmailInfo): [string, string | number | undefined][] => [
+  ["Order", o.orderNumber],
+  ["Piece", [o.jewelleryType, o.metal].filter(Boolean).join(" · ") || undefined],
+  ["Quantity", o.quantity ? `${o.quantity} pc${o.quantity === 1 ? "" : "s"}` : undefined],
+  ["Expected delivery", fmtDay(o.expectedDelivery)],
+];
+
+/** A new order was placed → the team's inbox. */
 export function orderReceivedEmail(o: OrderEmailInfo): { subject: string; html: string } {
   return {
-    subject: `New Order Received — ${o.orderNumber}`,
+    subject: `New order ${o.orderNumber} — ${o.clientName}`,
     html: shell({
-      preheader: `New order ${o.orderNumber} from ${o.clientName}`,
-      heading: "New Order Received",
-      intro: `A new order has just been placed and is waiting for your review and approval.`,
-      body: detailRows([
-        ["Order Number", esc(o.orderNumber)],
-        ["Client", esc(o.clientName)],
-        ["Jewellery Type", esc(o.jewelleryType)],
-        ["Metal", esc(o.metal)],
-        ["Quantity", o.quantity ? esc(o.quantity) : ""],
-        ["Expected Delivery", esc(o.expectedDelivery)],
-      ]),
+      preheader: `${o.clientName} placed order ${o.orderNumber}.`,
+      label: "New order", tone: "info",
+      heading: `New order from ${esc(o.clientName)}`,
+      intro: "A new order has been placed and is waiting for review and approval.",
+      body: detailRows([["Client", o.clientName], ...pieceRows(o)]),
+      footerNote: TO_TEAM,
     }),
   };
 }
 
-/** 2 — the order was approved → to the client. */
+/** The order was approved → the client. */
 export function orderApprovedEmail(o: OrderEmailInfo): { subject: string; html: string } {
   return {
-    subject: `Your Order ${o.orderNumber} is Approved`,
+    subject: `Your order ${o.orderNumber} is approved`,
     html: shell({
-      accent: "#1f9d55",
-      preheader: `Good news — order ${o.orderNumber} is approved and in production`,
-      heading: "Your Order is Approved ✓",
-      intro: `Dear ${esc(o.clientName)},<br/>Thank you for your order. We're pleased to let you know it has been <b>approved</b> and is now moving into production. We'll keep you updated at each step.`,
-      body: detailRows([
-        ["Order Number", esc(o.orderNumber)],
-        ["Jewellery Type", esc(o.jewelleryType)],
-        ["Metal", esc(o.metal)],
-        ["Quantity", o.quantity ? esc(o.quantity) : ""],
-        ["Expected Delivery", esc(o.expectedDelivery)],
-      ]),
+      preheader: `Good news — order ${o.orderNumber} is approved and moving into production.`,
+      label: "Order approved", tone: "success",
+      heading: "Your order is approved",
+      intro: `Dear ${esc(o.clientName)},<br>Thank you for your order. It has been approved and is now moving into production. We'll keep you posted at each step.`,
+      body: detailRows(pieceRows(o)),
+      footerNote: TO_CLIENT,
     }),
   };
 }
@@ -140,7 +154,28 @@ export function orderApprovedEmail(o: OrderEmailInfo): { subject: string; html: 
 export interface DispatchEmailInfo extends OrderEmailInfo {
   courierName?: string;
   trackingNumber?: string;
+  /** Accepted but not shown: the emails carry information only, no links. */
   trackingLink?: string;
+}
+
+/** The order was dispatched → the client, with courier and tracking. */
+export function orderDispatchedEmail(o: DispatchEmailInfo): { subject: string; html: string } {
+  return {
+    subject: `Your order ${o.orderNumber} is on its way`,
+    html: shell({
+      preheader: `Order ${o.orderNumber} has been dispatched${o.courierName ? ` with ${o.courierName}` : ""}.`,
+      label: "Dispatched", tone: "info",
+      heading: "Your order is on its way",
+      intro: `Dear ${esc(o.clientName)},<br>Your order has been dispatched. The shipment details are below.`,
+      body: detailRows([
+        ["Order", o.orderNumber],
+        ["Piece", [o.jewelleryType, o.metal].filter(Boolean).join(" · ") || undefined],
+        ["Courier", o.courierName],
+        ["Tracking number", o.trackingNumber],
+      ]),
+      footerNote: TO_CLIENT,
+    }),
+  };
 }
 
 export interface ClientLoginEmailInfo {
@@ -149,40 +184,42 @@ export interface ClientLoginEmailInfo {
   at: string; // ISO
 }
 
-/** 3.5 — a client just signed into the portal → to the marketing inbox, so
- *  staff notice engagement (or the lack of it) without watching the app. */
+/** A client just signed in → the team's inbox, so staff notice engagement. */
 export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; html: string } {
-  const when = new Date(o.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+  const when = new Date(o.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep");
   return {
-    subject: `Client Login — ${o.companyName}`,
+    subject: `${o.companyName} signed in`,
     html: shell({
-      preheader: `${o.companyName} just logged into the portal`,
-      heading: "Client Logged In",
-      intro: `${esc(o.companyName)} just signed into the Starlink Jewels portal.`,
-      body: detailRows([
-        ["Client", esc(o.companyName)],
-        ["Login Email", esc(o.email)],
-        ["Time", esc(when)],
-      ]),
+      preheader: `${o.companyName} just signed in to the portal.`,
+      label: "Client sign-in", tone: "neutral",
+      heading: `${esc(o.companyName)} signed in`,
+      intro: `${esc(o.companyName)} just signed in to the ${BRAND_NAME} portal.`,
+      body: detailRows([["Client", o.companyName], ["Login", o.email], ["Time", when]]),
+      footerNote: TO_TEAM,
     }),
   };
 }
 
-/** 3 — the order was dispatched → to the client, with courier/tracking. */
-export function orderDispatchedEmail(o: DispatchEmailInfo): { subject: string; html: string } {
+export interface GiftCardEmailInfo {
+  clientName: string;
+  /** Already formatted, e.g. "$500". */
+  amount: string;
+  /** e.g. "17 Nov 2026" — when it can last be used. */
+  validUntil?: string;
+  note?: string;
+}
+
+/** A gift card was issued → the client. */
+export function giftCardEmail(o: GiftCardEmailInfo): { subject: string; html: string } {
   return {
-    subject: `Your Order ${o.orderNumber} has been Dispatched`,
+    subject: `You've received a ${o.amount} gift card`,
     html: shell({
-      accent: "#2F5DAA",
-      preheader: `Order ${o.orderNumber} is on its way`,
-      heading: "Your Order is on its Way 🚚",
-      intro: `Dear ${esc(o.clientName)},<br/>Your order has been <b>dispatched</b> and is on its way to you. Use the details below to track your shipment.`,
-      body: detailRows([
-        ["Order Number", esc(o.orderNumber)],
-        ["Courier", esc(o.courierName)],
-        ["Tracking Number", esc(o.trackingNumber)],
-      ]),
-      cta: o.trackingLink ? { label: "Track Your Shipment", url: o.trackingLink } : undefined,
+      preheader: `A ${o.amount} gift card from ${BRAND_NAME}, ready for your next order.`,
+      label: "Gift card", tone: "gift",
+      heading: `A ${esc(o.amount)} gift card for you`,
+      intro: `Dear ${esc(o.clientName)},<br>You've received a gift card to use on your next order.${o.note ? `<br><br>${esc(o.note)}` : ""}`,
+      body: detailRows([["Value", o.amount], ["Valid until", o.validUntil]]),
+      footerNote: TO_CLIENT,
     }),
   };
 }
