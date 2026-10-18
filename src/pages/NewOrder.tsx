@@ -1138,7 +1138,7 @@ export function NewOrderPage() {
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-brand-dark">Apply gift card — save up to ${giftMax.toLocaleString()}</p>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    Up to {Math.round(giftPct * 100)}% of the order · balance ${giftBalance.toLocaleString()} · expires {new Date(giftCard.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
+                    Up to {Math.round(giftPct * 100)}% of the order · balance ${giftBalance.toLocaleString()} · expires {new Date(giftCard.expiresAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep")}
                   </p>
                   {willRedeem && <p className="text-xs font-medium text-success mt-1">New total after gift card: ${(grandTotal - giftMax).toLocaleString()}</p>}
                 </div>

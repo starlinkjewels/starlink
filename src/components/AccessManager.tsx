@@ -162,7 +162,7 @@ const toLocalInput = (iso?: string) => {
   const d = new Date(iso); const p = (n: number) => String(n).padStart(2, "0");
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 };
-const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+const when = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep");
 function left(iso: string, now: number): string {
   const ms = +new Date(iso) - now;
   const h = Math.round(ms / 3600e3);
@@ -460,7 +460,7 @@ export function AccessSummary({ u, db }: { u: User; db: DB }) {
         <span className="font-semibold px-2 py-0.5 rounded-md bg-primary/10 text-primary">{tpl ? `${tpl.name} access` : "Custom access"}</span>
         {live.map(t => (
           <span key={t.id} title={permWords(t.perms, t.reach)} className="font-medium px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-700 inline-flex items-center gap-1">
-            <Clock className="h-3 w-3" />{tempState(t, now) === "upcoming" ? `from ${new Date(t.from!).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `until ${new Date(t.until).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`}
+            <Clock className="h-3 w-3" />{tempState(t, now) === "upcoming" ? `from ${new Date(t.from!).toLocaleDateString("en-IN", { day: "numeric", month: "short" }).replace(/\bSept\b/, "Sep")}` : `until ${new Date(t.until).toLocaleDateString("en-IN", { day: "numeric", month: "short" }).replace(/\bSept\b/, "Sep")}`}
           </span>
         ))}
       </div>

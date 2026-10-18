@@ -137,7 +137,7 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
               </p>
             </div>
           )}
-          {existing && <p className="text-[11px] text-muted-foreground mt-2">Last updated {new Date(existing.updatedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>}
+          {existing && <p className="text-[11px] text-muted-foreground mt-2">Last updated {new Date(existing.updatedAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}</p>}
           {/* db referenced so the button reflects share create/delete immediately */}
           <span className="hidden">{db.shares?.length}</span>
         </DialogContent>

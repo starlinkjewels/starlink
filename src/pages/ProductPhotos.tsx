@@ -373,7 +373,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     if (!media.length) { toast.error("That folder has no images or videos"); return; }
 
     const firstRel = picked.map(relOf).find(r => r.includes("/")) || "";
-    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
+    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep")}`;
     const byPath = new Map<string, string>();
     updateDb(d => {
       if (!d.productPhotoFolders) d.productPhotoFolders = [];

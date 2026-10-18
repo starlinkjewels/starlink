@@ -163,7 +163,7 @@ export function ActivityPage() {
     const d = new Date(iso);
     return (
       <span className="text-muted-foreground tabular-nums">
-        <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })},</span>{" "}
+        <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep")},</span>{" "}
         <span className="whitespace-nowrap">{d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
       </span>
     );

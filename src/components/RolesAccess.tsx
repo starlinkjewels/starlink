@@ -45,7 +45,7 @@ export function RolesPanel() {
             <div className="min-w-0">
               <p className="text-sm font-medium text-brand-dark truncate">{u.name}</p>
               <p className="text-[11px] text-muted-foreground truncate">
-                {live.map(t => `${permWords(t.perms, t.reach)} ${tempState(t, now) === "upcoming" ? `from ${new Date(t.from!).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}` : `until ${new Date(t.until).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}`}`).join(" · ")}
+                {live.map(t => `${permWords(t.perms, t.reach)} ${tempState(t, now) === "upcoming" ? `from ${new Date(t.from!).toLocaleDateString("en-IN", { day: "numeric", month: "short" }).replace(/\bSept\b/, "Sep")}` : `until ${new Date(t.until).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`}`).join(" · ")}
               </p>
             </div>
             <Button size="sm" variant="outline" onClick={() => setManaging(u)} className="rounded-lg h-8 shrink-0">Manage</Button>

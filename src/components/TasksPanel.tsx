@@ -229,7 +229,7 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
 
 function fmtCompleted(iso?: string) {
   if (!iso) return "";
-  return new Date(iso).toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric" });
+  return new Date(iso).toLocaleDateString("en-IN", { weekday: "short", month: "short", day: "numeric" }).replace(/\bSept\b/, "Sep");
 }
 
 function TaskRow({
