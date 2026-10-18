@@ -3434,7 +3434,7 @@ export function fmtDate(iso?: string) {
     month: "short",
     day: "numeric",
     year: "numeric",
-  });
+  }).replace(/\bSept\b/, "Sep");
 }
 
 // Heartbeat cadence (see src/lib/presence.ts) is ~45s — anything fresher than

@@ -110,7 +110,7 @@ export function previousPeriod(p: Period): Period | null {
 }
 
 export function periodLabel(p: Period): string {
-  const f = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const f = (s: string) => new Date(s + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
   if (!p.from && !p.to) return "All time";
   if (p.from && p.to) return `${f(p.from)} – ${f(p.to)}`;
   return p.from ? `From ${f(p.from)}` : `Up to ${f(p.to)}`;
@@ -132,7 +132,7 @@ export function monthsOf(p: Period, orders: Order[], now = new Date()): string[]
 
 export function monthLabel(key: string): string {
   const [y, m] = key.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+  return new Date(y, m - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "2-digit" }).replace(/\bSept\b/, "Sep");
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;

@@ -31,7 +31,7 @@ type PanelProps = { open: boolean; onOpenChange: (open: boolean) => void };
 /** "2026-10-16" as "16 Oct 2026", read as the local day it names. */
 function fmtDay(day: string): string {
   const [y, m, d] = day.split("-").map(Number);
-  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  return new Date(y, (m || 1) - 1, d || 1).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
 }
 
 /**

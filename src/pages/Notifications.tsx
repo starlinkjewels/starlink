@@ -23,7 +23,7 @@ const typeTag = (type: string) => (
 const when = (iso: string) => new Date(iso).toLocaleString("en-IN", {
   month: "short", day: "numeric", year: "numeric",
   hour: "2-digit", minute: "2-digit",
-});
+}).replace(/\bSept\b/, "Sep");
 
 /** The date and the time, each kept whole: where a phone has no room, the
  *  time goes under the date instead of being cut off. */
@@ -31,7 +31,7 @@ function WhenCell({ iso }: { iso: string }) {
   const d = new Date(iso);
   return (
     <span className="text-muted-foreground tabular-nums">
-      <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })},</span>{" "}
+      <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" }).replace(/\bSept\b/, "Sep")},</span>{" "}
       <span className="whitespace-nowrap">{d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
     </span>
   );

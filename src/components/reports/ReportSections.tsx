@@ -243,7 +243,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
       doc.text("Starlink Jewels — Material Purchase Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`, 20, 30);
+      doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       let y = 44;
       const section = (title: string, unit: string, b: typeof r.g) => {
         doc.setFont("helvetica", "bold"); doc.setFontSize(12); doc.text(title, 20, y); y += 7;
@@ -424,7 +424,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const profitPeriodLabel = periodLabel(profitFrom, profitTo);
   const monthLabel = (k: string) => {
     const [y, m] = k.split("-").map(Number);
-    return new Date(y, (m || 1) - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" });
+    return new Date(y, (m || 1) - 1, 1).toLocaleDateString("en-IN", { month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
   };
 
   /* ── Payments report exports ── */
@@ -436,7 +436,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
       doc.text("Starlink Jewels — Payments Made Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${payPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`, 20, 30);
+      doc.text(`Period: ${payPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       doc.setFontSize(11);
       doc.text(`Supplier payments: ${rupees(r.supTotal)}`, 20, 44);
       doc.text(`Factory payments:  ${rupees(r.facTotal)}`, 20, 52);
@@ -478,7 +478,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
       doc.text("Starlink Jewels — Sales / Billing Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
-      doc.text(`Period: ${salesPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`, 20, 30);
+      doc.text(`Period: ${salesPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       doc.setFontSize(11);
       doc.text(`Orders: ${r.orders.length}`, 20, 44);
       doc.text(`Billed: ${fmtMoney(r.billed)}`, 20, 52);
@@ -940,7 +940,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     doc.setFont("helvetica","bold"); doc.setFontSize(18);
     doc.text("Starlink Jewels — Business Report", 20, 22);
     doc.setFont("helvetica","normal"); doc.setFontSize(9);
-    doc.text(`Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}`, 20, 30);
+    doc.text(`Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
     if (hasFilters) {
       const filterDesc = [
         clientFilter !== "all" && `Client: ${clients.find(c=>c.id===clientFilter)?.companyName}`,

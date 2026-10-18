@@ -208,7 +208,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
   const liveTemp = draft.temp.filter(t => tempState(t) !== "ended");
   const multiCo = hasCompanies(db.settings);
   const opAmtNow = Number(openingPaid);
-  const day = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  const day = (iso: string) => new Date(iso).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
   const review: { label: string; value: ReactNode; edit?: StepKey }[] = [
     { label: "Name", value: f.name.trim() || "—", edit: "person" },
     { label: "Phone", value: f.phone.trim() || "—", edit: "person" },

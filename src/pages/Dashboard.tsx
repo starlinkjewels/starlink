@@ -119,7 +119,7 @@ export function Dashboard() {
   const monthlyData = useMemo(() => {
     const months = Array.from({ length: 6 }, (_, i) => {
       const d = new Date(); d.setMonth(d.getMonth() - (5 - i));
-      return { m: d.toLocaleDateString("en-IN", { month: "short" }), y: d.getFullYear(), month: d.getMonth() };
+      return { m: d.toLocaleDateString("en-IN", { month: "short" }).replace(/\bSept\b/, "Sep"), y: d.getFullYear(), month: d.getMonth() };
     });
     return months.map(({ m, y, month }) => ({
       name: m,

@@ -3322,7 +3322,7 @@ function OrderDetailPageBody() {
                 <div className={`p-3 rounded-xl border ${isActive ? "border-primary bg-primary/5" : isDone ? "border-success/30 bg-success/5" : "border-border"}`}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <p className={`font-medium text-sm ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{t.step}</p>
-                    {t.date && <span className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>}
+                    {t.date && <span className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}</span>}
                   </div>
                   {(emp || t.department || t.remarks) && (
                     <p className="text-xs text-muted-foreground mt-1">
@@ -4072,7 +4072,7 @@ function OrderDetailPageBody() {
                   <div className="p-3 rounded-xl border border-border">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                       <p className="font-medium text-sm text-foreground">{label}{factory ? ` — ${factory.name}` : ""}</p>
-                      <span className="text-xs text-muted-foreground">{new Date(entry.at).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</span>
+                      <span className="text-xs text-muted-foreground">{new Date(entry.at).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}</span>
                     </div>
                     <p className="text-xs text-muted-foreground mt-1">
                       {entry.amountMaterial !== undefined && `${entry.amountMaterial}${materialUnit(db.settings, entry.material ?? "gold")} ${entry.material ? (isOtherMaterial(entry.material) ? materialName(db.settings, entry.material) : entry.material) : ""}`}
