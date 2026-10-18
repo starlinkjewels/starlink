@@ -15,7 +15,7 @@ import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { exportAllowed } from "@/lib/access";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
@@ -38,14 +38,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import {
-  ArrowLeft, CheckCircle2, Circle, Loader2, Package, Printer,
-  DollarSign, Plus, TrendingUp, AlertCircle, Wallet,
-  ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw,
-  Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame,
-  CalendarClock, CalendarDays, Hash, UserRound,
-  Undo2, XCircle, type LucideIcon,
-} from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, type LucideIcon } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
@@ -194,12 +187,26 @@ async function compressImage(file: File): Promise<string> {
  * next crashed (React #310) whenever it was opened or refreshed directly.
  */
 /** One fact about the piece, as a tile; nothing at all when there is no value. */
+/** One detail of the order: a quiet label over its value — no box around it. */
 function OrderSpec({ label, value, wide }: { label: string; value?: string | number | null; wide?: boolean }) {
   if (value == null || value === "") return null;
   return (
-    <div className={`rounded-xl bg-secondary/40 px-3 py-2 min-w-0 ${wide ? "col-span-2" : ""}`}>
-      <p className="text-[11px] text-muted-foreground">{label}</p>
-      <p className="text-sm font-semibold text-brand-dark mt-0.5 break-words">{value}</p>
+    <div className={`min-w-0 ${wide ? "col-span-2" : ""}`}>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="text-[15px] font-medium text-foreground mt-0.5 break-words">{value}</p>
+    </div>
+  );
+}
+
+/** A fact in the order's header (due, placed, design, stones). */
+function HeaderFact({ label, value, note, noteTone }: { label: string; value: ReactNode; note?: string; noteTone?: string }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className="mt-0.5 text-[15px] font-medium text-foreground tabular-nums">
+        {value}
+        {note && <span className={`block sm:inline sm:ml-1.5 text-xs font-medium ${noteTone ?? "text-muted-foreground"}`}>{note}</span>}
+      </p>
     </div>
   );
 }
@@ -2227,8 +2234,8 @@ function OrderDetailPageBody() {
 
   return (
     <>
-    <div className="max-w-7xl mx-auto space-y-5">
-      <Link to="/orders" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />Back to Orders</Link>
+    <div className="max-w-7xl mx-auto space-y-4">
+      <Link to="/orders" className="inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
 
       <div className="card-luxe p-0 overflow-hidden">
       {/* Order Header — the piece at a glance: its picture, where it stands,
@@ -2243,21 +2250,32 @@ function OrderDetailPageBody() {
         const dayMs = 86400e3;
         const daysLeft = order.expectedDelivery ? Math.ceil((+new Date(order.expectedDelivery) - +new Date(todayLocal())) / dayMs) : null;
         const due = daysLeft === null || !open ? null
-          : daysLeft < 0 ? { text: `${-daysLeft} day${daysLeft !== -1 ? "s" : ""} late`, tone: "bg-destructive/10 text-destructive ring-destructive/30" }
-          : daysLeft <= 3 ? { text: daysLeft === 0 ? "due today" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} left`, tone: "bg-amber-500/10 text-amber-700 ring-amber-500/30" }
-          : { text: `${daysLeft} days left`, tone: "bg-secondary text-muted-foreground ring-border/60" };
+          : daysLeft < 0 ? { text: `${-daysLeft} day${daysLeft !== -1 ? "s" : ""} late`, tone: "text-destructive" }
+          : daysLeft <= 3 ? { text: daysLeft === 0 ? "due today" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} left`, tone: "text-amber-700" }
+          : { text: `${daysLeft} days left`, tone: "text-muted-foreground" };
+        // One main action as a button; the rest in the ⋯ menu beside it.
+        const mainAction = order.forReadyStock
+          ? (user!.role === "admin" && (
+              order.readyStockCreatedId
+                ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
+                : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
+            ))
+          : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button onClick={handlePrintInvoice} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>;
+        const closed = order.status === "Rejected";
         return (
-          <div className="relative p-5 sm:p-6 bg-gradient-to-br from-primary/[0.07] via-transparent to-brand-light/[0.09]">
-            <div className="flex flex-col lg:flex-row lg:items-start gap-5">
-              <div className="h-24 w-24 sm:h-28 sm:w-28 rounded-2xl overflow-hidden bg-white ring-1 ring-border/60 shadow-sm shrink-0 grid place-items-center">
-                {heroImg ? <img src={heroImg} alt={order.orderNumber} className="w-full h-full object-contain p-1" /> : <Package className="h-9 w-9 text-primary/40" />}
-              </div>
+          <div className="p-4 sm:p-6">
+            <div className="flex items-start gap-4 sm:gap-5">
+              {heroImg && (
+                <div className="h-[72px] w-[72px] sm:h-24 sm:w-24 rounded-xl overflow-hidden bg-white ring-1 ring-border/70 shrink-0">
+                  <img src={heroImg} alt={order.orderNumber} className="w-full h-full object-contain" />
+                </div>
+              )}
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-mono text-xs font-semibold tracking-wide text-muted-foreground">{order.orderNumber}</span>
+                <div className="flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+                  <span className="text-xs font-medium tracking-wide text-muted-foreground tabular-nums">{order.orderNumber}</span>
                   <StatusBadge status={order.status} />
                   {order.priority && order.priority !== "Normal" && (
-                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700">{order.priority} priority</span>
+                    <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-800">{order.priority}</span>
                   )}
                   {order.melted && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive inline-flex items-center gap-1"><Flame className="h-3 w-3" />Melted</span>}
                   {user!.role !== "client" && <CompanyBadge id={companyOfOrder(db, order)} />}
@@ -2266,86 +2284,74 @@ function OrderDetailPageBody() {
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
                   })()}
                 </div>
-                <h1 className="font-display text-[26px] sm:text-[30px] leading-[1.15] text-brand-dark mt-1.5 break-words">{order.jewelleryType} in {order.metal}</h1>
-                <p className="text-sm text-muted-foreground mt-1">
-                  {order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
+                <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{order.jewelleryType} in {order.metal}</h1>
+                <p className="text-sm text-muted-foreground mt-1 break-words">
+                  {order.forReadyStock ? "Ready Stock — in-house build" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
                   {order.materialSourcing === "readyStock" ? (() => {
                     const it = order.readyStockItemId ? db.readyStock.find(i => i.id === order.readyStockItemId) : undefined;
-                    return ` · 💎 Sold from Ready Stock${it && officeOf(it) ? ` — ${officeLabel(officeOf(it))}` : ""}`;
+                    return ` · Sold from Ready Stock${it && officeOf(it) ? ` — ${officeLabel(officeOf(it))}` : ""}`;
                   })() : ""}
                   {order.contactPerson ? ` · ${order.contactPerson}` : ""}
                 </p>
-                <div className="flex flex-wrap gap-2 mt-3">
-                  <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-card ring-1 ring-border/60 text-xs">
-                    <CalendarClock className="h-3.5 w-3.5 text-primary" /> Due <span className="font-semibold text-brand-dark">{fmtDate(order.expectedDelivery)}</span>
-                    {due && <span className={`ml-1 px-1.5 py-0.5 rounded-full ring-1 text-[10px] font-semibold ${due.tone}`}>{due.text}</span>}
-                  </span>
-                  {order.designNumber && (
-                    <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-card ring-1 ring-border/60 text-xs">
-                      <Hash className="h-3.5 w-3.5 text-primary" /> Design <span className="font-semibold text-brand-dark">{order.designNumber}</span>
-                    </span>
-                  )}
-                  {order.diamondWeight > 0 && (
-                    <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-card ring-1 ring-border/60 text-xs">
-                      <Gem className="h-3.5 w-3.5 text-sky-600" /> <span className="font-semibold text-brand-dark">{order.diamondWeight} ct</span> {order.diamondType}
-                    </span>
-                  )}
-                  <span className="inline-flex items-center gap-1.5 h-8 px-3 rounded-full bg-card ring-1 ring-border/60 text-xs">
-                    <CalendarDays className="h-3.5 w-3.5 text-primary" /> Placed <span className="font-semibold text-brand-dark">{fmtDate(order.createdAt)}</span>
-                  </span>
-                </div>
               </div>
-              {/* One main action as a button; the rest in the ⋯ menu beside it —
-                  the same sizes as every page header, one row on a phone. */}
-              <div className="flex items-center gap-2 lg:justify-end shrink-0 max-sm:w-full">
-                {order.forReadyStock
-                  ? (user!.role === "admin" && (
-                      order.readyStockCreatedId
-                        ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
-                        : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
-                    ))
-                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button onClick={handlePrintInvoice} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
+              <div className="hidden sm:flex items-center gap-2 shrink-0">
+                {mainAction}
                 <MoreMenu title="This order" actions={orderActions} />
               </div>
             </div>
+
+            {/* The facts people look for first, as plain label → value. */}
+            <div className="mt-5 pt-4 border-t border-border/60 grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
+              <HeaderFact label="Due" value={fmtDate(order.expectedDelivery)} note={due?.text} noteTone={due?.tone} />
+              <HeaderFact label="Placed" value={fmtDate(order.createdAt)} />
+              {order.designNumber && <HeaderFact label="Design" value={order.designNumber} />}
+              {order.diamondWeight > 0 && <HeaderFact label="Diamonds" value={`${order.diamondWeight} ct`} note={order.diamondType} />}
+            </div>
+
             <div className="mt-5">
-              <div className="flex items-center justify-between gap-3 text-xs mb-1.5">
-                {order.status === "Rejected"
-                  ? <span className="font-semibold text-destructive">Order closed — {order.melted ? "melted" : "rejected"}</span>
-                  : <span className="text-muted-foreground">Now: <span className="font-semibold text-brand-dark">{stage}</span></span>}
-                <span className="tabular-nums text-muted-foreground">
-                  {order.status === "Rejected"
-                    ? <>stopped at {doneSteps} of {order.timeline.length} stages</>
-                    : <><span className="font-semibold text-brand-dark">{pct}%</span> · {doneSteps} of {order.timeline.length} stages</>}
+              <div className="flex items-baseline justify-between gap-3">
+                {closed
+                  ? <span className="text-sm font-medium text-destructive">Order closed — {order.melted ? "melted" : "rejected"}</span>
+                  : <span className="text-sm font-medium text-foreground">{stage}</span>}
+                <span className="text-xs text-muted-foreground tabular-nums">
+                  {closed
+                    ? <>stopped at {doneSteps} of {order.timeline.length}</>
+                    : <>{doneSteps} of {order.timeline.length} steps done · {pct}%</>}
                 </span>
               </div>
-              <div className="h-2 rounded-full bg-secondary overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${order.status === "Rejected" ? "bg-destructive/45" : "bg-gradient-to-r from-primary to-brand-light"}`} style={{ width: `${pct}%` }} />
+              <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
+                <div className={`h-full rounded-full transition-all duration-500 ${closed ? "bg-destructive/50" : "bg-primary"}`} style={{ width: `${pct}%` }} />
               </div>
+            </div>
+
+            {/* On a phone the main action spans the width, under the facts. */}
+            <div className="sm:hidden mt-5 flex items-center gap-2">
+              {mainAction}
+              <MoreMenu title="This order" actions={orderActions} />
             </div>
           </div>
         );
       })()}
 
-        {/* Details, grouped: the piece · its stones and weight · people and dates. */}
-        <div className="p-5 sm:p-6 border-t border-border/60 grid gap-5 sm:gap-6 lg:grid-cols-3">
-          <div className="rounded-2xl border border-border/60 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3"><Package className="h-3.5 w-3.5 text-primary" /> The piece</p>
-            <div className="grid grid-cols-2 gap-2">
+        {/* Details, grouped: the piece · its stones and weight · design and team. */}
+        <div className="border-t border-border/60 grid lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border/60">
+          <div className="p-4 sm:p-6">
+            <p className="text-sm font-semibold text-foreground mb-3">The piece</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <OrderSpec label="Type" value={order.jewelleryType} />
               <OrderSpec label="Metal" value={order.metal} />
               <OrderSpec label="Karats" value={order.productKarats} />
               <OrderSpec label="Color" value={order.productColor} />
-              <OrderSpec label="Quantity" value={`${order.quantity} pcs`} />
+              <OrderSpec label="Quantity" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
               <OrderSpec label="Rhodium" value={order.rhodium} />
               <OrderSpec label="Product size" value={order.productSize} wide />
               <OrderSpec label="Stamping" value={order.stamping} wide />
               <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
             </div>
           </div>
-          <div className="rounded-2xl border border-border/60 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3"><Gem className="h-3.5 w-3.5 text-sky-600" /> Stones &amp; weight</p>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="p-4 sm:p-6">
+            <p className="text-sm font-semibold text-foreground mb-3">Stones &amp; weight</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <OrderSpec label="Est. diamonds" value={`${order.diamondWeight} ct`} />
               <OrderSpec label="Diamond type" value={order.diamondType} />
               <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : undefined} />
@@ -2354,12 +2360,12 @@ function OrderDetailPageBody() {
               <OrderSpec label="Actual diamonds" value={order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : undefined} />
             </div>
           </div>
-          <div className="rounded-2xl border border-border/60 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3"><UserRound className="h-3.5 w-3.5 text-primary" /> People &amp; dates</p>
-            <div className="grid grid-cols-2 gap-2">
+          <div className="p-4 sm:p-6">
+            <p className="text-sm font-semibold text-foreground mb-3">Design &amp; team</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               {/* Design Number — editable inline (staff), and addable when missing */}
-              <div className="col-span-2 rounded-xl bg-secondary/40 px-3 py-2">
-                <p className="text-[11px] text-muted-foreground">Design number</p>
+              <div className="col-span-2 min-w-0">
+                <p className="text-xs text-muted-foreground">Design number</p>
                 {editDesign !== null ? (
                   <div className="flex items-center gap-1.5 mt-1">
                     <Input
@@ -2370,11 +2376,11 @@ function OrderDetailPageBody() {
                       placeholder="e.g. LR-1418"
                       className="h-8 rounded-lg text-sm"
                     />
-                    <button onClick={saveDesignNumber} className="h-8 px-2.5 rounded-lg btn-hero text-xs font-medium shrink-0">Save</button>
+                    <button onClick={saveDesignNumber} className="h-8 px-2.5 rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 text-xs font-medium shrink-0">Save</button>
                     <button onClick={() => setEditDesign(null)} className="h-8 w-8 rounded-lg border border-border grid place-items-center text-muted-foreground shrink-0"><X className="h-3.5 w-3.5" /></button>
                   </div>
                 ) : (
-                  <p className="text-sm font-semibold text-brand-dark mt-0.5 flex items-center gap-1.5">
+                  <p className="text-[15px] font-medium text-foreground mt-0.5 flex items-center gap-1.5">
                     {order.designNumber || <span className="text-muted-foreground italic font-normal">—</span>}
                     {canEditStage() && (
                       <button
@@ -2389,7 +2395,6 @@ function OrderDetailPageBody() {
                 )}
               </div>
               <OrderSpec label="Priority" value={order.priority} />
-              <OrderSpec label="Delivery date" value={fmtDate(order.expectedDelivery)} />
             </div>
             <div className="mt-2"><AssignOrderField order={order} /></div>
           </div>
@@ -2405,7 +2410,7 @@ function OrderDetailPageBody() {
                 <div>
                   <p className="text-xs text-muted-foreground">Order Value</p>
                   <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                    <p className={`font-semibold text-lg tabular-nums ${order.amount ? "text-brand-dark" : "text-muted-foreground italic font-medium text-base"}`}>
+                    <p className={`font-semibold text-xl tabular-nums ${order.amount ? "text-foreground" : "text-muted-foreground italic font-medium text-base"}`}>
                       {order.amount ? fmtMoney(order.amount) : "Pricing pending"}
                     </p>
                     {returnedCredit(order) > 0 && <span className="text-xs font-medium text-amber-800">−{fmtMoney(returnedCredit(order))} returned</span>}
