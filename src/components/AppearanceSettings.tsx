@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { Palette, Check, RotateCcw, TrendingUp, Package } from "lucide-react";
 import { toast } from "sonner";
 import { loadDb, updateDb } from "@/lib/db";
@@ -98,13 +99,7 @@ export function AppearanceSettings() {
 
   return (
     <div className="card-luxe p-5 sm:p-6 space-y-5">
-      <div className="flex items-start gap-2">
-        <Palette className="h-4 w-4 text-primary mt-0.5" />
-        <div>
-          <h3 className="font-semibold">Appearance</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">The look of the whole software — on phones and computers. Every choice shows at once; Save keeps it for everyone.</p>
-        </div>
-      </div>
+      <SectionTitle icon={Palette} title="Appearance" sub="For everyone, once saved" />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {UI_LOOKS.map(l => {

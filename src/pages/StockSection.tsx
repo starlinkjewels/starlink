@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo } from "@/components/CompanyFields";
@@ -19,16 +20,16 @@ import { needsAccess } from "@/lib/actionHints";
 import { AsyncButton } from "@/components/AsyncButton";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { ExportDialog, inDateRange } from "@/components/ExportDialog";
+import { inDateRange } from "@/components/ExportDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Gem, Coins, BadgeCheck, Pencil, Trash2, Download, Layers, ExternalLink, Lock } from "lucide-react";
+import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
-import { IfExport } from "@/components/IfExport";
+import { PageHeader } from "@/components/PageHeader";
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
@@ -50,7 +51,6 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const navigate = useNavigate();
   const db = useDb();
   const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
-  const [showExport, setShowExport] = useState(false);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
@@ -92,7 +92,6 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
-  const filtersActive = !!filterFrom || !!filterTo;
   const filteredRows = rows.filter(m => inDateRange(m.createdAt, filterFromDate, filterToDate));
 
   const materialLabel = material === "gold" ? "Gold Reserve" : material === "diamond" ? "Loose Diamonds" : (def?.name ?? "Material");
@@ -322,35 +321,23 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <button onClick={() => navigate("/stock")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Stock
-      </button>
-
-      <div className="flex items-center gap-3">
-        <div className={`h-12 w-12 rounded-2xl grid place-items-center shrink-0 ${material === "gold" ? "bg-amber-500/15" : material === "diamond" ? "bg-cyan-500/15" : "bg-emerald-500/15"}`}>
-          {material === "gold" ? <Coins className="h-5 w-5 text-amber-600" /> : material === "diamond" ? <Gem className="h-5 w-5 text-cyan-600" /> : <Layers className="h-5 w-5 text-emerald-600" />}
-        </div>
-        <div>
-          <h1 className="font-display text-2xl text-brand-dark leading-tight">{materialLabel}</h1>
-          <p className="text-sm text-muted-foreground">{material === "gold" ? "By purity" : material === "diamond" ? "Pooled by shape" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`} · full movement history</p>
-        </div>
-        <div className="ml-auto"><CompanyFilter value={co} onChange={pickCo} /></div>
-      </div>
+      <PageHeader
+        back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
+        title={materialLabel}
+        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By shape" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
+        actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
+      />
 
       {user?.role === "admin" && material === "diamond" && badShapeCount > 0 && (
         <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
-          <span>{badShapeCount} diamond movement{badShapeCount !== 1 ? "s are" : " is"} filed by quality / "unspecified" instead of shape (bought before the shape fix). Re-file them under their real shape — balances are unaffected.</span>
+          <span>{badShapeCount} diamond movement{badShapeCount !== 1 ? "s are" : " is"} filed by quality, not shape. Re-file — balances don't change.</span>
           <AsyncButton onClick={fixDiamondShapes} className="btn-hero rounded-xl shrink-0">Fix shapes</AsyncButton>
         </div>
       )}
 
       <div className="card-luxe p-5">
-        <div className="flex items-center justify-between gap-2 mb-3">
-          <h3 className="font-display text-base text-brand-dark">Balances</h3>
-          {selectedBucket && (
-            <button onClick={() => setSelectedBucket(null)} className="text-xs text-primary hover:underline">Show all</button>
-          )}
-        </div>
+        <SectionTitle className="mb-3" title="Balances"
+          actions={selectedBucket && <button onClick={() => setSelectedBucket(null)} className="text-xs text-primary hover:underline">Show all</button>} />
         {entries.length === 0 ? (
           <p className="text-sm text-muted-foreground">Nothing in stock.</p>
         ) : (
@@ -373,36 +360,22 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       </div>
 
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="font-display text-xl text-brand-dark">Movement History{selectedBucket ? ` — ${selectedBucket}` : ""}</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{filteredRows.length} movement{filteredRows.length !== 1 ? "s" : ""}</p>
-          </div>
-          <IfExport>
-          <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-          </IfExport>
-          <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${materialLabel}${selectedBucket ? ` — ${selectedBucket}` : ""}`} options={[
-            { label: "Movement History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportPdf },
-            { label: "Movement History — Excel", sublabel: "Filterable by date range", kind: "excel", run: exportCsv },
-          ]} />
-        </div>
-        <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
-          <Input type="date" value={filterFrom} onChange={e => setFilterFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
-          <span className="text-xs text-muted-foreground">to</span>
-          <Input type="date" value={filterTo} onChange={e => setFilterTo(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
-          {filtersActive && (
-            <button onClick={() => { setFilterFrom(""); setFilterTo(""); }} className="text-xs text-primary hover:underline">
-              Reset
-            </button>
-          )}
-        </div>
-        {/* Where bought / where went, rate & amount. The date range above
-            narrows the rows; the balances were worked out over every movement. */}
+        <SectionTitle className="px-5 pt-4" title="Movement History" sub={selectedBucket ?? undefined} />
+        {/* Where bought / where went, rate & amount. The date range (in Filters)
+            narrows the rows and the downloads; the balances were worked out
+            over every movement. */}
         <div className="p-3 sm:p-4">
           <DataTable
             id="stock-movements"
             noun="movement"
             rows={filteredRows}
+            filters={[{ kind: "date", from: filterFrom, to: filterTo, onChange: (f, t) => { setFilterFrom(f); setFilterTo(t); } }]}
+            onClearFilters={() => { setFilterFrom(""); setFilterTo(""); }}
+            exports={[
+              { label: "Movement History — PDF", icon: FileText, hint: "For the dates in Filters", onSelect: () => exportPdf(filterFromDate, filterToDate) },
+              { label: "Movement History — Excel", icon: FileSpreadsheet, hint: "For the dates in Filters", onSelect: () => exportCsv(filterFromDate, filterToDate) },
+            ]}
+            resetKey={JSON.stringify([selectedBucket, filterFrom, filterTo])}
             columns={movementColumns}
             rowKey={m => m.id}
             defaultSort={{ key: "date", dir: "desc" }}
@@ -414,7 +387,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
               in: list => <span className="text-success">{sumQty(list.filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
               out: list => <span className="text-destructive">{sumQty(list.filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
             }}
-            emptyText={rows.length === 0 ? "No movements recorded." : "No movements match this date range."}
+            emptyText={rows.length === 0 ? "No movements yet." : "None in these dates."}
           />
         </div>
       </div>
@@ -436,7 +409,6 @@ function CertifiedSection() {
   const [savingPacket, setSavingPacket] = useState(false);
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
-  const [showExport, setShowExport] = useState(false);
 
   const [sp, setSp] = useSearchParams();
   const multiCo = useMultiCo();
@@ -457,7 +429,6 @@ function CertifiedSection() {
   const allPackets = [...(db.diamondPackets ?? [])].filter(inCo).sort((a, b) => +new Date(boughtDate(b)) - +new Date(boughtDate(a)));
   const histFromDate = histFrom ? new Date(histFrom + "T00:00:00") : null;
   const histToDate = histTo ? new Date(histTo + "T23:59:59.999") : null;
-  const histActive = !!histFrom || !!histTo;
   const histRows = allPackets.filter(p => inDateRange(boughtDate(p), histFromDate, histToDate));
 
   /**
@@ -812,22 +783,16 @@ function CertifiedSection() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <button onClick={() => navigate("/stock")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Stock
-      </button>
-
-      <div className="flex items-center gap-3">
-        <div className="h-12 w-12 rounded-2xl bg-violet-500/15 grid place-items-center shrink-0"><BadgeCheck className="h-5 w-5 text-violet-600" /></div>
-        <div>
-          <h1 className="font-display text-2xl text-brand-dark leading-tight">Certified Diamonds</h1>
-          <p className="text-sm text-muted-foreground">{allInStockPackets.length} packet{allInStockPackets.length !== 1 ? "s" : ""} in stock · each with its own certificate</p>
-        </div>
-        <div className="ml-auto"><CompanyFilter value={co} onChange={pickCo} /></div>
-      </div>
+      <PageHeader
+        back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
+        title="Certified Diamonds"
+        subtitle={`${allInStockPackets.length} packet${allInStockPackets.length !== 1 ? "s" : ""} in stock`}
+        actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
+      />
 
       {user?.role === "admin" && unnumberedCount > 0 && (
         <div className="card-luxe p-4 bg-amber-50 border border-amber-200 text-sm text-amber-800 flex items-center justify-between gap-3 flex-wrap">
-          <span>{unnumberedCount} diamond{unnumberedCount !== 1 ? "s" : ""} {unnumberedCount !== 1 ? "don't" : "doesn't"} have a stock number yet (from before this feature existed).</span>
+          <span>{unnumberedCount} diamond{unnumberedCount !== 1 ? "s have" : " has"} no stock number yet.</span>
           <Button size="sm" onClick={assignMissingStockNumbers} className="btn-hero rounded-xl shrink-0">Assign stock numbers</Button>
         </div>
       )}
@@ -852,31 +817,21 @@ function CertifiedSection() {
 
       {/* Full history — every certified diamond bought: supplier, rate & where it went */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-          <div>
-            <h2 className="font-display text-xl text-brand-dark">Purchase &amp; Movement History</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{histRows.length} packet{histRows.length !== 1 ? "s" : ""} · bought from which supplier &amp; where each went</p>
-          </div>
-          <IfExport>
-          <Button variant="outline" size="sm" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-          </IfExport>
-          <ExportDialog open={showExport} onClose={() => setShowExport(false)} title="Certified Diamonds — History" options={[
-            { label: "Full History — PDF", sublabel: "Filterable by date range", kind: "pdf", run: exportCertPdf },
-            { label: "Full History — Excel", sublabel: "Shape, size, colour, clarity, report no., $ + rate, INR, supplier, status", kind: "excel", run: exportCertCsv },
-          ]} />
-        </div>
-        <div className="px-5 py-3 border-b border-border/60 bg-secondary/20 flex items-center gap-2 flex-wrap">
-          <Input type="date" value={histFrom} onChange={e => setHistFrom(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
-          <span className="text-xs text-muted-foreground">to</span>
-          <Input type="date" value={histTo} onChange={e => setHistTo(e.target.value)} className="rounded-xl h-9 w-[9.5rem]" />
-          {histActive && <button onClick={() => { setHistFrom(""); setHistTo(""); }} className="text-xs text-primary hover:underline">Reset</button>}
-        </div>
+        <SectionTitle className="px-5 pt-4" title="Purchase & Movement History" />
 
+        {/* The date bought (in Filters) narrows the rows and the downloads. */}
         <div className="p-3 sm:p-4">
           <DataTable
             id="stock-certified-history"
             noun="packet"
             rows={histRows}
+            filters={[{ kind: "date", label: "Bought", from: histFrom, to: histTo, onChange: (f, t) => { setHistFrom(f); setHistTo(t); } }]}
+            onClearFilters={() => { setHistFrom(""); setHistTo(""); }}
+            exports={[
+              { label: "Full History — PDF", icon: FileText, hint: "For the dates in Filters", onSelect: () => exportCertPdf(histFromDate, histToDate) },
+              { label: "Full History — Excel", icon: FileSpreadsheet, hint: "Grading, report no., cost, supplier", onSelect: () => exportCertCsv(histFromDate, histToDate) },
+            ]}
+            resetKey={JSON.stringify([histFrom, histTo])}
             columns={historyColumns}
             rowKey={p => p.id}
             defaultSort={{ key: "bought", dir: "desc" }}
@@ -888,7 +843,7 @@ function CertifiedSection() {
               diamond: list => `${sumCarat(list)} ct`,
               cost: list => fmtMoneyInr(list.reduce((s, p) => s + (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : 0), 0)),
             }}
-            emptyText={allPackets.length === 0 ? "No certified diamonds purchased yet." : "None match this date range."}
+            emptyText={allPackets.length === 0 ? "None bought yet." : "None in these dates."}
           />
         </div>
       </div>

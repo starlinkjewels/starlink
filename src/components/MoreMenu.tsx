@@ -1,5 +1,5 @@
 import type { LucideIcon } from "lucide-react";
-import { MoreHorizontal } from "lucide-react";
+import { ChevronDown, MoreHorizontal } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -24,7 +24,7 @@ export type MoreAction = {
  * button beside it, everything else waits in here. Renders nothing when no
  * action applies, so a page never shows an empty menu.
  */
-export function MoreMenu({ actions, label = "More actions", title, className = "", size = "md", onOpen }: {
+export function MoreMenu({ actions, label = "More actions", title, className = "", size = "md", onOpen, button }: {
   actions: MoreAction[];
   label?: string;
   /** A heading inside the menu. */
@@ -35,6 +35,9 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
   /** Called as the menu opens — to load what its items need only when
    *  someone actually looks (they show "Checking…" until it is here). */
   onOpen?: () => void;
+  /** A labelled button ("Pay ▾") instead of the ⋯ — for a group of actions
+   *  that share a name, beside a page's main button. */
+  button?: { label: string; icon?: LucideIcon };
 }) {
   const shown = actions.filter(a => a.show !== false);
   if (!shown.length) return null;
@@ -48,21 +51,30 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
     <DropdownMenuItem key={a.label} disabled={a.disabled} onSelect={() => run(a)}
       className={`rounded-lg gap-2.5 py-2 cursor-pointer items-start ${a.danger ? "text-destructive focus:text-destructive focus:bg-destructive/10" : ""}`}>
       {a.icon && <a.icon className={`h-4 w-4 mt-0.5 shrink-0 ${a.danger ? "" : "text-muted-foreground"}`} />}
-      <span className="min-w-0">
+      <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium leading-snug">{a.label}</span>
-        {a.hint && <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5">{a.hint}</span>}
+        {/* At most two lines. A greyed item can't show a tooltip, so its reason
+            (and what to do instead) has to fit here. */}
+        {a.hint && <span className="block text-[11px] text-muted-foreground leading-snug mt-0.5 line-clamp-2" title={a.hint}>{a.hint}</span>}
       </span>
     </DropdownMenuItem>
   );
   return (
     <DropdownMenu modal={false} onOpenChange={o => { if (o) onOpen?.(); }}>
       <DropdownMenuTrigger asChild>
-        <Button type="button" variant="outline" aria-label={label} title={label}
-          className={`${size === "sm" ? "h-8 w-8 rounded-lg" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>
-          <MoreHorizontal className={size === "sm" ? "h-4 w-4" : "h-5 w-5"} />
-        </Button>
+        {button ? (
+          <Button type="button" variant="outline" aria-label={label === "More actions" ? button.label : label}
+            className={`h-10 rounded-xl px-3.5 gap-2 shrink-0 ${className}`}>
+            {button.icon && <button.icon className="h-4 w-4" />}<span>{button.label}</span><ChevronDown className="h-4 w-4 opacity-60" />
+          </Button>
+        ) : (
+          <Button type="button" variant="outline" aria-label={label} title={label}
+            className={`${size === "sm" ? "h-8 w-8 max-sm:h-10 max-sm:w-10 rounded-lg" : "h-10 w-10 rounded-xl"} p-0 shrink-0 ${className}`}>
+            <MoreHorizontal className={size === "sm" ? "h-4 w-4" : "h-5 w-5"} />
+          </Button>
+        )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-64 max-w-[calc(100vw-2rem)] rounded-xl p-1.5">
+      <DropdownMenuContent align={button ? "start" : "end"} collisionPadding={12} className="w-64 max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-xl p-1.5">
         {title && <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">{title}</DropdownMenuLabel>}
         {safe.map(item)}
         {safe.length > 0 && danger.length > 0 && <DropdownMenuSeparator />}

@@ -1,14 +1,15 @@
 import { expensesInUsd, inrOn } from "@/lib/orderCost";
+import { SectionTitle } from "@/components/SectionTitle";
+import { PageHeader } from "@/components/PageHeader";
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { motion } from "framer-motion";
-import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle } from "lucide-react";
+import { Package, Clock, CheckCircle2, Users, Briefcase, DollarSign, Factory, PackageCheck, TrendingUp, ArrowRight, Truck, Wallet, TrendingDown, Receipt, BadgeCheck, ClipboardCheck, Coins, Gem, Gift, AlertCircle, type LucideIcon } from "lucide-react";
 import { Link } from "react-router-dom";
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, LineChart, Line, Tooltip, PieChart, Pie, Cell } from "recharts";
-import { StatCard } from "@/components/StatCard";
 import { StatusBadge } from "@/components/StatusBadge";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import type { Order } from "@/lib/db";
@@ -16,6 +17,32 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { ccy, ccyOrder, fmtCcy, fmtCcyMix, fmtRate, rateText, sumByCcy, tableRate } from "@/lib/currency";
 import { subscribeStockLevelsByCompany, sumStockLevels, type StockLevels } from "@/lib/stock";
 import { companiesOf } from "@/lib/companies";
+
+type Tone = "in" | "out" | "warn" | "muted";
+const TONE: Record<Tone, string> = { in: "text-success", out: "text-destructive", warn: "text-amber-700", muted: "text-muted-foreground" };
+
+/**
+ * One figure on the dashboard, the same card for every one: a quiet label,
+ * the figure in tabular digits sized to fit (never cut), colour on the figure
+ * only. Opens what it counts when it has somewhere to go.
+ */
+function Kpi({ label, value, icon: Icon, tone, sub, to }: {
+  label: string; value: ReactNode; icon?: LucideIcon; tone?: Tone; sub?: ReactNode; to?: string;
+}) {
+  const body = (
+    <div className="h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-medium text-muted-foreground truncate" title={label}>{label}</p>
+        {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
+      </div>
+      <p className={`mt-1.5 text-[clamp(1.125rem,4.4vw,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight break-words ${tone ? TONE[tone] : "text-brand-dark"}`}>{value}</p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{sub}</p>}
+    </div>
+  );
+  return to
+    ? <Link to={to} className="block h-full rounded-2xl transition-shadow hover:shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">{body}</Link>
+    : body;
+}
 
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
 function lastTrackingStep(o: Order): string {
@@ -158,51 +185,41 @@ export function Dashboard() {
   }, [db.users, allExpenses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5th element = optional link target (clicking the card opens that filtered view).
-  const stats: [string, string | number, any, string, string?][] = user!.role === "admin"
+  const stats: [string, string | number, LucideIcon, Tone | undefined, string?][] = user!.role === "admin"
     ? [
-        ["Today's Orders", todayOrders, Clock, "text-primary", "/orders"],
-        ["For Approval", forApproval, ClipboardCheck, "text-warning", "/orders?status=Waiting"],
-        ["Pending", pending, Package, "text-warning", "/orders?status=Pending"],
-        ["In Production", inProd, Factory, "text-primary", "/orders?status=In%20Production"],
-        ["Ready", ready, PackageCheck, "text-brand-light", "/orders?status=Ready"],
-        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
-        ["Revenue", fmtMoney(revenue), DollarSign, "text-success", "/reports"],
-        ["Clients", db.clients.length, Users, "text-primary", "/clients"],
-        ["Employees", db.users.filter(u => u.role === "employee").length, Briefcase, "text-primary", "/employees"],
+        ["Today's orders", todayOrders, Clock, undefined, "/orders"],
+        ["For approval", forApproval, ClipboardCheck, "warn", "/orders?status=Waiting"],
+        ["Pending", pending, Package, "warn", "/orders?status=Pending"],
+        ["In production", inProd, Factory, undefined, "/orders?status=In%20Production"],
+        ["Ready", ready, PackageCheck, undefined, "/orders?status=Ready"],
+        ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
+        ["Revenue", fmtMoney(revenue), DollarSign, "in", "/reports"],
+        ["Clients", db.clients.length, Users, undefined, "/clients"],
+        ["Employees", db.users.filter(u => u.role === "employee").length, Briefcase, undefined, "/employees"],
       ]
     : user!.role === "employee"
     ? [
-        ["Assigned", orders.length, Package, "text-primary", "/orders"],
-        ["Pending", pending, Clock, "text-warning", "/orders?status=Pending"],
-        ["In Production", inProd, Factory, "text-primary", "/orders?status=In%20Production"],
-        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
+        ["Assigned", orders.length, Package, undefined, "/orders"],
+        ["Pending", pending, Clock, "warn", "/orders?status=Pending"],
+        ["In production", inProd, Factory, undefined, "/orders?status=In%20Production"],
+        ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
       ]
     : [
-        ["Current Orders", orders.filter(o => o.status !== "Delivered").length, Package, "text-primary", "/orders"],
-        ["Completed", completed, CheckCircle2, "text-success", "/orders?status=Delivered"],
-        ["Invoices", fmtMoney(orders.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, "text-primary", "/invoices"],
-        ["Pending Payment", fmtMoney(orders.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "text-warning", "/invoices"],
+        ["Current orders", orders.filter(o => o.status !== "Delivered").length, Package, undefined, "/orders"],
+        ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
+        ["Invoices", fmtMoney(orders.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, undefined, "/invoices"],
+        ["Pending payment", fmtMoney(orders.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "warn", "/invoices"],
       ];
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
       <PushPermissionBanner />
-      <div>
-        <p className="text-sm text-muted-foreground">Good day,</p>
-        <h1 className="font-display text-2xl md:text-4xl text-brand-dark leading-tight truncate">{client?.companyName || user?.name}</h1>
-        <p className="text-sm text-muted-foreground mt-1">Here is what is happening today.</p>
-      </div>
+      <PageHeader eyebrow={`Good day, ${client?.companyName || user?.name}`} title="Dashboard" />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
-        {stats.map(([label, val, Icon, color, to], i) => (
-          <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}>
-            {to ? (
-              <Link to={to} className="block h-full rounded-2xl transition-all hover:-translate-y-0.5 hover:shadow-soft active:scale-[0.98]">
-                <StatCard label={label} value={val} icon={Icon} colorClass={color} />
-              </Link>
-            ) : (
-              <StatCard label={label} value={val} icon={Icon} colorClass={color} />
-            )}
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+        {stats.map(([label, val, Icon, tone, to], i) => (
+          <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="h-full">
+            <Kpi label={label} value={val} icon={Icon} tone={tone} to={to} />
           </motion.div>
         ))}
       </div>
@@ -210,20 +227,16 @@ export function Dashboard() {
       {/* Gift Cards — all-time totals (staff). Issued = Redeemed + Pending + Expired. */}
       {user!.role !== "client" && gc.count > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="font-display text-lg text-brand-dark flex items-center gap-2"><Gift className="h-5 w-5 text-primary" /> Gift Cards</h2>
-            <Link to="/gift-cards" className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">View all <ArrowRight className="h-3 w-3" /></Link>
-          </div>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4">
+          <SectionTitle className="mb-3" icon={Gift} title="Gift Cards" sub="All time"
+            actions={<Link to="/gift-cards" className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">View all <ArrowRight className="h-3 w-3" /></Link>} />
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {([
-              ["Issued", fmtMoney(gc.issued), Gift, "text-primary"],
-              ["Redeemed", fmtMoney(gc.used), CheckCircle2, "text-success"],
-              ["Pending", fmtMoney(gc.pending), Clock, "text-warning"],
-              ["Expired", fmtMoney(gc.expired), AlertCircle, "text-muted-foreground"],
-            ] as [string, string, any, string][]).map(([label, val, Icon, color]) => (
-              <Link key={label} to="/gift-cards" className="block h-full rounded-2xl transition-all hover:-translate-y-0.5 hover:shadow-soft active:scale-[0.98]">
-                <StatCard label={label} value={val} icon={Icon} colorClass={color} />
-              </Link>
+              ["Issued", fmtMoney(gc.issued), Gift, undefined],
+              ["Redeemed", fmtMoney(gc.used), CheckCircle2, "in"],
+              ["Pending", fmtMoney(gc.pending), Clock, "warn"],
+              ["Expired", fmtMoney(gc.expired), AlertCircle, "muted"],
+            ] as [string, string, LucideIcon, Tone | undefined][]).map(([label, val, Icon, tone]) => (
+              <Kpi key={label} label={label} value={val} icon={Icon} tone={tone} to="/gift-cards" />
             ))}
           </div>
         </div>
@@ -232,39 +245,14 @@ export function Dashboard() {
       {/* ── Employee: My Profit Panel ── */}
       {user!.role === "employee" && (
         <div className="card-luxe p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-semibold">My Financial Summary</h3>
-            <Link to="/expenses" className="text-sm text-primary flex items-center gap-1 hover:underline">
-              Manage Expenses <ArrowRight className="h-3 w-3" />
-            </Link>
+          <SectionTitle className="mb-4" title="My Financial Summary"
+            actions={<Link to="/expenses" className="text-sm text-primary flex items-center gap-1 hover:underline">Manage Expenses <ArrowRight className="h-3 w-3" /></Link>} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            <Kpi label="Revenue" value={fmtMoney(myRevenue)} icon={TrendingUp} tone="in" sub="Delivered orders" />
+            <Kpi label="Expenses" value={fmtCcyMix(myExpenseMix, "USD")} icon={TrendingDown} tone="out" sub={`${myExpenses.length} entries`} />
+            <Kpi label="Net profit" value={`${myExpenseUsd.converted ? "≈ " : ""}${fmtMoney(myProfit)}`} icon={Wallet} tone={myProfit >= 0 ? "in" : "out"} sub="Revenue − expenses" />
           </div>
-          <div className="grid grid-cols-3 gap-3">
-            <div className="rounded-xl bg-emerald-50 border border-emerald-100 p-3.5">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
-                <p className="text-xs font-medium text-emerald-700">Revenue</p>
-              </div>
-              <p className="text-lg font-bold text-emerald-700">{fmtMoney(myRevenue)}</p>
-              <p className="text-[11px] text-emerald-600/70 mt-0.5">Delivered orders</p>
-            </div>
-            <div className="rounded-xl bg-rose-50 border border-rose-100 p-3.5">
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <TrendingDown className="h-3.5 w-3.5 text-rose-600" />
-                <p className="text-xs font-medium text-rose-700">Expenses</p>
-              </div>
-              <p className="text-lg font-bold text-rose-700">{fmtCcyMix(myExpenseMix, "USD")}</p>
-              <p className="text-[11px] text-rose-600/70 mt-0.5">{myExpenses.length} entries</p>
-            </div>
-            <div className={`rounded-xl border p-3.5 ${myProfit >= 0 ? "bg-emerald-50 border-emerald-100" : "bg-rose-50 border-rose-100"}`}>
-              <div className="flex items-center gap-1.5 mb-1.5">
-                <Wallet className={`h-3.5 w-3.5 ${myProfit >= 0 ? "text-emerald-600" : "text-rose-600"}`} />
-                <p className={`text-xs font-medium ${myProfit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>Net Profit</p>
-              </div>
-              <p className={`text-lg font-bold ${myProfit >= 0 ? "text-emerald-700" : "text-rose-700"}`}>{myExpenseUsd.converted ? "≈ " : ""}{fmtMoney(myProfit)}</p>
-              {myExpenseUsd.left.size > 0 && <p className="text-[11px] text-amber-700 mt-0.5">{fmtCcyMix(myExpenseUsd.left)} not counted — no exchange rate on file</p>}
-              <p className={`text-[11px] mt-0.5 ${myProfit >= 0 ? "text-emerald-600/70" : "text-rose-600/70"}`}>Revenue − Expenses</p>
-            </div>
-          </div>
+          {myExpenseUsd.left.size > 0 && <p className="text-[11px] text-amber-700 mt-2">{fmtCcyMix(myExpenseUsd.left)} not counted — no exchange rate on file</p>}
         </div>
       )}
 
@@ -272,26 +260,10 @@ export function Dashboard() {
       {user!.role === "admin" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
           className="card-luxe p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="h-9 w-9 rounded-xl bg-amber-50 grid place-items-center shrink-0">
-              <BadgeCheck className="h-5 w-5 text-amber-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-brand-dark">Certificate Summary</h3>
-              <p className="text-xs text-muted-foreground">Orders with diamond / jewellery certificates</p>
-            </div>
-          </div>
+          <SectionTitle className="mb-4" icon={BadgeCheck} title="Certificate Summary" />
           <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-center">
-              <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-1">Total Certificates</p>
-              <p className="text-3xl font-bold text-amber-800">{certCount}</p>
-              <p className="text-[11px] text-amber-600/80 mt-1">order{certCount !== 1 ? "s" : ""} issued</p>
-            </div>
-            <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-center">
-              <p className="text-xs font-medium text-amber-700 uppercase tracking-wide mb-1">Certificate Income</p>
-              <p className="text-3xl font-bold text-amber-800">{fmtMoney(certIncome)}</p>
-              <p className="text-[11px] text-amber-600/80 mt-1">$50 × {certCount} certificate{certCount !== 1 ? "s" : ""}</p>
-            </div>
+            <Kpi label="Certificates" value={certCount} sub={`order${certCount !== 1 ? "s" : ""} issued`} />
+            <Kpi label="Certificate income" value={fmtMoney(certIncome)} tone="in" sub={`$50 × ${certCount}`} />
           </div>
         </motion.div>
       )}
@@ -300,41 +272,13 @@ export function Dashboard() {
       {user!.role === "admin" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="card-luxe p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="h-9 w-9 rounded-xl bg-orange-50 grid place-items-center shrink-0">
-              <Factory className="h-5 w-5 text-orange-600" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-brand-dark">Manufacturing Overview</h3>
-              <p className="text-xs text-muted-foreground">Sourcing &amp; production at a glance — all figures in INR</p>
-            </div>
-          </div>
+          <SectionTitle className="mb-4" icon={Factory} title="Manufacturing Overview" sub="In INR" />
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <Link to="/orders?status=In%20Production" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-              <Package className="h-4 w-4 mx-auto mb-1.5 text-primary" />
-              <p className="text-xl font-bold text-brand-dark">{ordersInProduction}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Orders in Production</p>
-            </Link>
-            <Link to="/stock" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-              <Coins className="h-4 w-4 mx-auto mb-1.5 text-amber-600" />
-              <p className="text-xl font-bold text-brand-dark">{goldReserveGrams.toLocaleString()}g</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Gold Reserve</p>
-            </Link>
-            <Link to="/stock" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-              <Gem className="h-4 w-4 mx-auto mb-1.5 text-blue-500" />
-              <p className="text-xl font-bold text-brand-dark">{diamondReserveCarats.toLocaleString()}ct</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Diamond Reserve</p>
-            </Link>
-            <Link to="/factories" className={`rounded-xl p-4 text-center transition-colors ${makingChargesPending > 0 ? "bg-destructive/5 hover:bg-destructive/10" : "bg-secondary hover:bg-secondary/70"}`}>
-              <Gem className={`h-4 w-4 mx-auto mb-1.5 ${makingChargesPending > 0 ? "text-destructive" : "text-primary"}`} />
-              <p className={`text-xl font-bold ${makingChargesPending > 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtMoneyInr(makingChargesPending)}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Making Charges Pending</p>
-            </Link>
-            <Link to="/suppliers" className={`rounded-xl p-4 text-center transition-colors ${supplierPaymentsPending > 0 ? "bg-destructive/5 hover:bg-destructive/10" : "bg-secondary hover:bg-secondary/70"}`}>
-              <Wallet className={`h-4 w-4 mx-auto mb-1.5 ${supplierPaymentsPending > 0 ? "text-destructive" : "text-primary"}`} />
-              <p className={`text-xl font-bold ${supplierPaymentsPending > 0 ? "text-destructive" : "text-brand-dark"}`}>{fmtMoneyInr(supplierPaymentsPending)}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">Supplier Payments Pending</p>
-            </Link>
+            <Kpi label="In production" value={ordersInProduction} icon={Package} sub="Orders" to="/orders?status=In%20Production" />
+            <Kpi label="Gold reserve" value={`${goldReserveGrams.toLocaleString()} g`} icon={Coins} to="/stock" />
+            <Kpi label="Diamond reserve" value={`${diamondReserveCarats.toLocaleString()} ct`} icon={Gem} to="/stock" />
+            <Kpi label="Owed to factories" value={fmtMoneyInr(makingChargesPending)} icon={Factory} tone={makingChargesPending > 0 ? "out" : undefined} sub="Making charges" to="/factories" />
+            <Kpi label="Owed to suppliers" value={fmtMoneyInr(supplierPaymentsPending)} icon={Wallet} tone={supplierPaymentsPending > 0 ? "out" : undefined} to="/suppliers" />
           </div>
         </motion.div>
       )}
@@ -343,34 +287,16 @@ export function Dashboard() {
       {user!.role === "admin" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}
           className="card-luxe p-5">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="h-9 w-9 rounded-xl bg-success/10 grid place-items-center shrink-0">
-              <Wallet className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-brand-dark">Cash Position &amp; Profit</h3>
-              <p className="text-xs text-muted-foreground">Every payment tagged to a Locker — income minus expense, per currency</p>
-            </div>
-          </div>
+          <SectionTitle className="mb-4" icon={Wallet} title="Cash Position & Profit" sub="By currency"
+            info="Income minus expense, from every payment tagged to a locker." />
 
           <div className="grid grid-cols-2 gap-3">
-            <Link to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-              <p className={`text-xl font-bold ${usdProfit >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoney(usdProfit)}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">USD Profit ({usdLockers.length} locker{usdLockers.length !== 1 ? "s" : ""})</p>
-            </Link>
-            <Link to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-              <p className={`text-xl font-bold ${inrProfit >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(inrProfit)}</p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">INR Profit ({inrLockers.length} locker{inrLockers.length !== 1 ? "s" : ""})</p>
-            </Link>
+            <Kpi label="USD profit" value={fmtMoney(usdProfit)} tone={usdProfit >= 0 ? "in" : "out"} sub={`${usdLockers.length} locker${usdLockers.length !== 1 ? "s" : ""}`} to="/locker" />
+            <Kpi label="INR profit" value={fmtMoneyInr(inrProfit)} tone={inrProfit >= 0 ? "in" : "out"} sub={`${inrLockers.length} locker${inrLockers.length !== 1 ? "s" : ""}`} to="/locker" />
             {otherCodes.map(c => {
               const v = otherProfit.get(c) ?? 0;
               const n = otherLockers.filter(l => ccy(l.currency) === c).length;
-              return (
-                <Link key={c} to="/locker" className="rounded-xl bg-secondary p-4 text-center hover:bg-secondary/70 transition-colors">
-                  <p className={`text-xl font-bold ${v >= 0 ? "text-success" : "text-destructive"}`}>{fmtCcy(v, c)}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">{c} Profit ({n} locker{n !== 1 ? "s" : ""})</p>
-                </Link>
-              );
+              return <Kpi key={c} label={`${c} profit`} value={fmtCcy(v, c)} tone={v >= 0 ? "in" : "out"} sub={`${n} locker${n !== 1 ? "s" : ""}`} to="/locker" />;
             })}
           </div>
 
@@ -387,14 +313,8 @@ export function Dashboard() {
             </div>
             {combinedUsd !== null && combinedInr !== null ? (
               <div className="grid grid-cols-2 gap-3 mt-3">
-                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-center">
-                  <p className={`text-lg font-bold ${combinedUsd >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoney(combinedUsd)}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Total Profit (USD)</p>
-                </div>
-                <div className="rounded-xl bg-primary/5 border border-primary/20 p-3 text-center">
-                  <p className={`text-lg font-bold ${combinedInr >= 0 ? "text-success" : "text-destructive"}`}>{fmtMoneyInr(combinedInr)}</p>
-                  <p className="text-[11px] text-muted-foreground mt-0.5">Total Profit (INR)</p>
-                </div>
+                <Kpi label="Total profit (USD)" value={fmtMoney(combinedUsd)} tone={combinedUsd >= 0 ? "in" : "out"} />
+                <Kpi label="Total profit (INR)" value={fmtMoneyInr(combinedInr)} tone={combinedInr >= 0 ? "in" : "out"} />
                 {otherCodes.length > 0 && (
                   <p className="col-span-2 text-[11px] text-muted-foreground">
                     {otherInr.filter(x => x.perUnit).length > 0 && (
@@ -407,7 +327,7 @@ export function Dashboard() {
                 )}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground mt-2">Enter today's exchange rate to see one combined profit figure.</p>
+              <p className="text-xs text-muted-foreground mt-2">Add today's exchange rate for one combined profit.</p>
             )}
           </div>
         </motion.div>
@@ -416,15 +336,9 @@ export function Dashboard() {
       {/* ── Admin: Expenses Overview ── */}
       {user!.role === "admin" && (
         <div className="card-luxe p-5">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="font-semibold">Staff Expenses</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Total: <span className="font-semibold text-destructive">{fmtCcyMix(totalExpenseMix)}</span> across {allExpenses.length} entries</p>
-            </div>
-            <Link to="/expenses?tab=passbook" className="text-sm text-primary flex items-center gap-1 hover:underline">
-              Full Passbook <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
+          <SectionTitle className="mb-4" title="Staff Expenses"
+            sub={<><span className="font-semibold text-destructive">{fmtCcyMix(totalExpenseMix)}</span> · {allExpenses.length} entries</>}
+            actions={<Link to="/expenses?tab=passbook" className="text-sm text-primary flex items-center gap-1 hover:underline">Full Passbook <ArrowRight className="h-3 w-3" /></Link>} />
           {staffExpenseSummary.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">
               <Receipt className="h-8 w-8 text-muted-foreground/30" />
@@ -464,7 +378,7 @@ export function Dashboard() {
       {user!.role === "admin" && (
         <div className="grid lg:grid-cols-3 gap-4">
           <div className="card-luxe p-5 lg:col-span-2">
-            <h3 className="font-semibold mb-4">Monthly Orders</h3>
+            <SectionTitle className="mb-4" title="Monthly Orders" />
             <ResponsiveContainer width="100%" height={240}>
               <BarChart data={monthlyData}>
                 <XAxis dataKey="name" tickLine={false} axisLine={false} className="text-xs" />
@@ -475,7 +389,7 @@ export function Dashboard() {
             </ResponsiveContainer>
           </div>
           <div className="card-luxe p-5">
-            <h3 className="font-semibold mb-4">Production Status</h3>
+            <SectionTitle className="mb-4" title="Production Status" />
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
                 <Pie data={statusData} innerRadius={50} outerRadius={90} dataKey="value">
@@ -489,7 +403,7 @@ export function Dashboard() {
             </div>
           </div>
           <div className="card-luxe p-5 lg:col-span-3">
-            <h3 className="font-semibold mb-4">Revenue Trend</h3>
+            <SectionTitle className="mb-4" title="Revenue Trend" />
             <ResponsiveContainer width="100%" height={220}>
               <LineChart data={monthlyData}>
                 <XAxis dataKey="name" tickLine={false} axisLine={false} className="text-xs" />
@@ -503,10 +417,8 @@ export function Dashboard() {
       )}
 
       <div className="card-luxe p-4 md:p-5">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="font-semibold">Recent Orders</h3>
-          <Link to="/orders" className="text-sm text-primary flex items-center gap-1 hover:underline">View all <ArrowRight className="h-3 w-3" /></Link>
-        </div>
+        <SectionTitle className="mb-3" title="Recent Orders"
+          actions={<Link to="/orders" className="text-sm text-primary flex items-center gap-1 hover:underline">View all <ArrowRight className="h-3 w-3" /></Link>} />
         <div className="space-y-1">
           {recent.length === 0 && <p className="text-sm text-muted-foreground text-center py-6">No orders yet.</p>}
           {recent.map(o => {

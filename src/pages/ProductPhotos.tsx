@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { PageHeader, TabBar } from "@/components/PageHeader";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -71,7 +72,7 @@ function FolderCard({ label, sub, cover, onClick, onRename, onDelete }: {
           {cover ? <img src={cover} alt="" className="w-full h-full object-cover" /> : <div className="absolute inset-0 flex items-center justify-center"><Folder className="h-10 w-10 text-fuchsia-300" /></div>}
         </div>
         <div className="px-3 pt-2.5 pb-1 flex items-center gap-2">
-          <Folder className="h-3.5 w-3.5 text-fuchsia-500 shrink-0" />
+          {cover && <Folder className="h-3.5 w-3.5 text-fuchsia-500 shrink-0" />}
           <span className="text-sm font-medium text-foreground truncate">{label}</span>
         </div>
         {sub && <div className="px-3 pb-2.5 text-[11px] text-muted-foreground truncate">{sub}</div>}
@@ -130,7 +131,7 @@ function PhotoItemSheet({ item, mode, folders, onClose }: {
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} icon={mode === "rename" ? Pencil : FolderInput}
       title={mode === "rename" ? "Rename" : "Move to another folder"}
-      description={mode === "rename" ? "The name shown under it, and the file name it downloads as." : `Now in ${item.folderId ? folderPath(folders, item.folderId) : "the library"}. Share links already sent keep showing it where it was.`}
+      description={mode === "rename" ? "Also its download file name." : `Now in ${item.folderId ? folderPath(folders, item.folderId) : "the library"}. Links already sent keep the old place.`}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
@@ -240,7 +241,7 @@ function OrdersView({ isStaff }: { isStaff: boolean }) {
       </nav>
 
       {!category && (categories.length === 0
-        ? <div className="card-luxe p-12 text-center text-muted-foreground"><Camera className="h-10 w-10 mx-auto mb-3 opacity-20" /><p>No order photos yet. Photos uploaded on a dispatched order appear here automatically.</p></div>
+        ? <div className="card-luxe p-12 text-center text-muted-foreground"><Camera className="h-10 w-10 mx-auto mb-3 opacity-20" /><p>No order photos yet.</p></div>
         : <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
             {categories.map(cat => {
               const designCount = new Set(cat.orders.map(o => (o.designNumber || o.orderNumber || "Unlabelled").trim())).size;
@@ -571,8 +572,8 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
           <Camera className="h-10 w-10 mx-auto mb-3 opacity-20" />
           {canAdd
             ? atRoot
-              ? <p>No categories yet. Tap <span className="font-medium text-foreground">New Category</span> to create one (e.g. Rings), then add product folders and upload photos/videos inside.</p>
-              : <p>This folder is empty. Create a <span className="font-medium text-foreground">product folder</span> inside, or use <span className="font-medium text-foreground">Add Images</span> / <span className="font-medium text-foreground">Add Video</span> to upload here.</p>
+              ? <p>No categories yet — tap <span className="font-medium text-foreground">New Category</span> (e.g. Rings).</p>
+              : <p>Empty — add a product folder, images or a video.</p>
             : <p>No product photos here yet.</p>}
         </div>
       )}
@@ -606,21 +607,11 @@ export function ProductPhotosPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Product Photos</h1>
-      </div>
+      <PageHeader title="Product Photos" />
 
       {/* Tab switcher — auto order photos vs the manually-organised library */}
-      <div className="inline-flex items-center gap-0.5 p-0.5 rounded-xl bg-secondary border border-border/60">
-        <button onClick={() => setTab("orders")}
-          className={`flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium transition-colors ${tab === "orders" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-          <Package className="h-4 w-4" /> By Order
-        </button>
-        <button onClick={() => setTab("library")}
-          className={`flex items-center gap-1.5 h-9 px-3.5 rounded-lg text-sm font-medium transition-colors ${tab === "library" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-          <Folder className="h-4 w-4" /> Library
-        </button>
-      </div>
+      <TabBar label="Product Photos" value={tab} onChange={setTab} className="w-fit max-w-full"
+        tabs={[{ key: "orders", label: "By Order", icon: Package }, { key: "library", label: "Library", icon: Folder }]} />
 
       {tab === "orders" ? <OrdersView isStaff={isStaff} /> : <LibraryView isStaff={isStaff} />}
     </div>

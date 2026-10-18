@@ -49,7 +49,7 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
         </div>
       )}
 
-      <Panel title="Sales and money collected, by person" subtitle="Orders assigned to them or for clients they manage" icon={UserCog}>
+      <Panel title="Sales and money collected, by person" subtitle="Their orders and clients" icon={UserCog}>
         {active.some(r => r.salesUsd || r.collectedUsd) ? (
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
@@ -65,10 +65,10 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
               </BarChart>
             </ResponsiveContainer>
           </div>
-        ) : <Empty>No sales or collections by anyone in this period.</Empty>}
+        ) : <Empty>Nothing in this period.</Empty>}
       </Panel>
 
-      <Panel title="Team scorecard" subtitle="In the period · open orders and tasks as of today" icon={UserCog} actions={<ExportButton onClick={exportTeam} />}>
+      <Panel title="Team scorecard" subtitle="Results in the period · open work as of today" icon={UserCog} actions={<ExportButton onClick={exportTeam} />}>
         <DataTable
           id="reports-team"
           rows={active}

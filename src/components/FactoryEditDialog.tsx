@@ -47,7 +47,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
       open={!!factory}
       onOpenChange={o => { if (!o) onClose(); }}
       title="Edit Factory"
-      description="Its name and contact details. Material issued, charges, payments and opening balances stay as they are."
+      description="Name and contact details only"
       icon={FactoryIcon}
       size="md"
       footer={

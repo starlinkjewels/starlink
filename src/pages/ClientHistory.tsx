@@ -1,7 +1,10 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import type { MoreAction } from "@/components/MoreMenu";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTitle } from "@/components/SectionTitle";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -28,9 +31,9 @@ import type { Order } from "@/lib/db";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { pieceWeights } from "@/lib/weights";
 import {
-  ArrowLeft, Package, Mail, Phone, MapPin, Globe, Undo2,
-  FileText, TrendingUp, Clock, CheckCircle2, AlertCircle,
-  Download, Building2, Hash, Wallet, Plus, CreditCard, DollarSign,
+  Package, Mail, Phone, MapPin, Globe, Undo2,
+  FileText, Clock, AlertCircle,
+  Download, Hash, Wallet, Plus, CreditCard, DollarSign,
   Pencil, Trash2, Power, Eye, Printer, XCircle,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -41,7 +44,6 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
-import { IfExport } from "@/components/IfExport";
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -60,7 +62,7 @@ export function ClientHistoryPage() {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {forbidden ? "You don't have access to this client." : collectionLoaded("clients") ? "Client not found." : "Loading…"}{" "}
-        <Link to="/clients" className="text-primary underline">Back</Link>
+        <Link to="/clients" className="inline-block py-2.5 -my-2.5 text-primary underline">Back</Link>
       </div>
     );
   }
@@ -98,7 +100,7 @@ function ClientHistoryPageBody() {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {forbidden ? "You don't have access to this client." : "Client not found."}{" "}
-        <Link to="/clients" className="text-primary underline">Back to Clients</Link>
+        <Link to="/clients" className="inline-block py-2.5 -my-2.5 text-primary underline">Back to Clients</Link>
       </div>
     );
   }
@@ -197,8 +199,9 @@ function ClientHistoryPageBody() {
       if (!c) return;
       const now = at;
       const beforeIds = advanceIds(d, id!);
-      // Reclaim any over-payment, fold in existing credit + this amount, then
-      // re-allocate oldest-bill-first — tagging entries with the payment method.
+      // With an invoice named, settles that invoice (the client's held credit
+      // with it); without one, all of it is held as their credit — nothing is
+      // spread over the oldest bills (Apply credit does that, deliberately).
       settleClientAccount(d, id!, amt, user!.id, now, note, payInvoiceId || undefined);
       newAdvanceIds = [...advanceIds(d, id!)].filter(x => !beforeIds.has(x));
       // Cash-position tracking — separate from the USD billing allocation above:
@@ -220,7 +223,10 @@ function ClientHistoryPageBody() {
       if (clientUser) d.notifications.unshift({
         id: uid("n_"), userId: clientUser.id,
         title: "Payment Received",
-        body: `${fmtMoney(amt)} received via ${payMethod} and applied to your oldest pending orders.`,
+        // Says what happened: against the invoice named, or held as their credit.
+        body: payInvoiceId
+          ? `${fmtMoney(amt)} received via ${payMethod} against invoice ${d.invoices.find(i => i.id === payInvoiceId)?.number ?? ""}.`.replace(" .", ".")
+          : `${fmtMoney(amt)} received via ${payMethod} — held as credit on your account.`,
         type: "info", read: false, createdAt: now,
       });
     });
@@ -237,7 +243,7 @@ function ClientHistoryPageBody() {
         toast.error("Payment saved, but its receipt number could not be reserved");
       }
     }
-    toast.success(`Payment recorded${receiptNo} (${payMethod}) & allocated to oldest bills`);
+    toast.success(`Payment recorded${receiptNo} (${payMethod}) — ${payInvoiceId ? "against the invoice; anything over is held as credit" : "held as credit"}`);
     setPayAmount(""); setPayRemark(""); setPayLockerId(""); setPayExchangeRate(""); setPayInvoiceId(""); setShowPayForm(false);
   };
 
@@ -283,10 +289,10 @@ function ClientHistoryPageBody() {
     const rcpt = receiptNo(p.receiptId) ? `receipt ${receiptNo(p.receiptId)}` : "the receipt";
     return [
       { label: "Edit", icon: Pencil, disabled: !!lock || !mayPayEdit,
-        hint: lock ?? (mayPayEdit ? `Correct ${rcpt} — amount, date, account, mode` : needsAccess("payments", "edit")),
+        hint: lock ?? (mayPayEdit ? `Correct ${rcpt}` : needsAccess("payments", "edit")),
         onSelect: async () => { await loadReceipts(); setEditReceiptId(p.receiptId!); } },
       { label: "Delete", icon: Trash2, danger: true, disabled: !!lock || !mayPayDelete,
-        hint: lock ?? (mayPayDelete ? `Cancels ${rcpt} — off the bills, the account and any credit` : needsAccess("payments", "delete")),
+        hint: lock ?? (mayPayDelete ? `Cancels ${rcpt} — bills, account, credit` : needsAccess("payments", "delete")),
         onSelect: () => cancelReceiptFlow(p.receiptId!, user!.id) },
     ];
   };
@@ -295,12 +301,12 @@ function ClientHistoryPageBody() {
     return [
       { label: "Print credit note", icon: Printer, onSelect: () => printNote(c.id), show: mayExportInvoices },
       { label: "Cancel return", icon: XCircle, danger: true, disabled: !!why,
-        hint: why ?? "The pieces count as theirs again and the credit comes back off", onSelect: () => cancelCreditNoteFlow(c.id, user!) },
+        hint: why ?? "Pieces and credit go back", onSelect: () => cancelCreditNoteFlow(c.id, user!) },
     ];
   };
   const invoiceActions = (b: InvoiceBlock): MoreAction[] => [
     { label: "View invoice", icon: Eye, onSelect: () => navigate(`/invoices?q=${encodeURIComponent(b.number)}`),
-      disabled: !can("invoices"), hint: can("invoices") ? "Open it on the Invoices page" : needsAccess("invoices", "view") },
+      disabled: !can("invoices"), hint: can("invoices") ? "On the Invoices page" : needsAccess("invoices", "view") },
   ];
 
 
@@ -416,6 +422,11 @@ function ClientHistoryPageBody() {
 
   // The status filter narrows the rows; the table's own search box does the rest.
   const filtered = allOrders.filter(o => statusFilter === "all" || o.status === statusFilter);
+  // Behind the table's one Filters button; "All" is the page's own "all".
+  const orderFilters: TableFilter[] = [
+    { kind: "select", label: "Status", value: statusFilter === "all" ? "" : statusFilter, onChange: v => setStatusFilter(v || "all"),
+      options: ["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })), allLabel: "All Status" },
+  ];
 
   const progressOf = (o: Order) => (o.timeline.length ? Math.round(o.timeline.filter(t => t.status === "done").length / o.timeline.length * 100) : 0);
   const orderColumns: DataColumn<Order>[] = [
@@ -565,48 +576,40 @@ function ClientHistoryPageBody() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      {/* Back */}
-      <button onClick={() => navigate("/clients")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Clients
-      </button>
+      {/* The name row: taking a payment is what people come here to do; the
+          two downloads share one "Export" menu; the record itself and credit
+          wait in the ⋯ — greyed with the reason when access doesn't reach
+          them, or, for Delete, when anything is on record for them. */}
+      <PageHeader
+        back={{ label: "Back to Clients", to: "/clients" }}
+        title={client.companyName}
+        subtitle={[client.ownerName, `${allOrders.length} order${allOrders.length !== 1 ? "s" : ""}`, activeOrders ? `${activeOrders} active` : "", deliveredOrders ? `${deliveredOrders} delivered` : ""].filter(Boolean).join(" · ")}
+        primary={can("payments", "add") ? { label: "Record Payment", icon: Plus, onClick: () => setShowPayForm(true) } : null}
+        secondary={mayExport ? { label: "Export", icon: Download, items: [
+          { label: "Export Report", icon: Package, hint: "Every order, as a PDF", onSelect: downloadClientReport },
+          { label: "Export statement", icon: FileText, hint: "PDF or Excel, invoice by invoice", onSelect: () => setShowExport(true) },
+        ] } : null}
+        menu={[
+          { label: "Apply credit", icon: CreditCard, hint: `Use ${fmtMoney(account.credit)} on what's owed`, onSelect: applyCredit,
+            show: account.credit > 0 && account.outstanding > 0 && can("payments", "edit") },
+          { label: "Edit details", icon: Pencil, onSelect: () => setEditingClient(true), disabled: !mayEditClient,
+            hint: mayEditClient ? "Name, contact, address, opening balance" : needsAccess("clients", "edit") },
+          { label: client.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggleClientActive(client.id), disabled: !mayEditClient,
+            hint: !mayEditClient ? needsAccess("clients", "edit") : client.status === "active" ? "Stops sign-in; history stays" : "They can sign in again" },
+          { label: "Delete client", icon: Trash2, danger: true, onSelect: removeClient, disabled: !!clientDeleteWhy, hint: clientDeleteWhy },
+        ]}
+      >
+        <div className="mt-2"><StatusBadge status={client.status} /></div>
+      </PageHeader>
 
-      {/* Client Profile Card */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-6">
-        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
-          <div className="flex items-start gap-4 min-w-0">
-            <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0">
-              <Building2 className="h-7 w-7 text-primary" />
-            </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{client.companyName}</h1>
-                <StatusBadge status={client.status} />
-              </div>
-              <p className="text-muted-foreground mt-1 break-words">{client.ownerName}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto shrink-0">
-            <IfExport>
-            <Button onClick={downloadClientReport} variant="outline" className="rounded-xl gap-2 flex-1 sm:flex-none">
-              <Download className="h-4 w-4" /> Export Report
-            </Button>
-            </IfExport>
-            {/* The record itself. Greyed with the reason when access doesn't
-                reach it — or, for Delete, when anything is on record for them. */}
-            <MoreMenu title="Client" actions={[
-              { label: "Edit details", icon: Pencil, onSelect: () => setEditingClient(true), disabled: !mayEditClient,
-                hint: mayEditClient ? "Name, contact, address, opening balance" : needsAccess("clients", "edit") },
-              { label: client.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggleClientActive(client.id), disabled: !mayEditClient,
-                hint: !mayEditClient ? needsAccess("clients", "edit") : client.status === "active" ? "They can no longer sign in; their history stays" : "They can sign in again" },
-              { label: "Delete client", icon: Trash2, danger: true, onSelect: removeClient, disabled: !!clientDeleteWhy, hint: clientDeleteWhy },
-            ]} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <div className="flex items-start gap-2 min-w-0">
+      {/* Client Profile Card — who they are. */}
+      {/* Long values are cut with "…" and given whole on hover, never broken
+          mid-word; on a phone the email takes the whole row. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm min-w-0">
+          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{client.email || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={client.email || undefined}>{client.email || "—"}</p></div>
           </div>
           <div className="flex items-start gap-2">
             <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -632,85 +635,30 @@ function ClientHistoryPageBody() {
           </div>
           <div className="flex items-start gap-2 min-w-0">
             <FileText className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs break-all">{client.username}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs truncate" title={client.username}>{client.username}</p></div>
           </div>
         </div>
       </motion.div>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Total Orders", value: allOrders.length, icon: Package, color: "text-primary", bg: "from-primary/10 to-brand-light/10" },
-          { label: "Active Orders", value: activeOrders, icon: Clock, color: "text-warning-foreground", bg: "from-warning/10 to-orange-400/10" },
-          { label: "Delivered", value: deliveredOrders, icon: CheckCircle2, color: "text-success", bg: "from-success/10 to-emerald-400/10" },
-          { label: "Total Value", value: fmtMoney(totalValue), icon: TrendingUp, color: "text-brand-dark", bg: "from-brand-light/10 to-primary/10" },
-        ].map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className={`card-luxe p-4 bg-gradient-to-br ${s.bg}`}>
-            <div className={`h-9 w-9 rounded-xl bg-white/80 grid place-items-center mb-3 ${s.color}`}>
-              <s.icon className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-display font-bold text-brand-dark">{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
-          </motion.div>
-        ))}
-      </div>
+      {/* Where the account stands, once. Billed less received is exactly what
+          is still owed (received is worked out that way), so the strip shows
+          the signs; credit held stands on its own. (Total Value is not shown
+          beside it: billed is the same orders plus any balance brought forward.) */}
+      <StatStrip items={[
+        { label: "Total billed", value: fmtMoney(account.billed), icon: FileText,
+          sub: openingDebitAmt(client) > 0 ? "With balance brought forward" : undefined },
+        { label: "Received", value: fmtMoney(account.allocated), tone: "in", op: "−", sub: "Applied to bills" },
+        { label: "Outstanding", value: account.outstanding > 0 ? fmtMoney(account.outstanding) : "✓ Cleared", tone: account.outstanding > 0 ? "out" : "in", op: "=" },
+        { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet, sub: "Held for them" },
+      ]} />
+      <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
+        { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
+        { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
+      ]} />
 
       {/* ── Gift Card & Cashback (admin only) ── */}
       <GiftCardAdminPanel clientId={id!} />
 
-      {/* ── Account Ledger (payments apply oldest-bill-first) ── */}
-      <div className="card-luxe p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0">
-              <Wallet className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <h3 className="font-display text-lg text-brand-dark">Account Ledger</h3>
-              <p className="text-xs text-muted-foreground">Payments clear the oldest bill first; extra becomes credit</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
-              { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
-              { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
-            ]} />
-            {can("payments", "add") && (
-              <Button onClick={() => setShowPayForm(true)} className="btn-hero rounded-xl gap-2">
-                <Plus className="h-4 w-4" /> Record Payment
-              </Button>
-            )}
-            <MoreMenu title="Account" actions={[
-              { label: "Apply credit", icon: CreditCard, hint: `Use the ${fmtMoney(account.credit)} credit against what is owed`, onSelect: applyCredit,
-                show: account.credit > 0 && account.outstanding > 0 && can("payments", "edit") },
-              { label: "Export statement", icon: Download, hint: "PDF or Excel, invoice by invoice", onSelect: () => setShowExport(true), show: mayExport },
-            ]} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3 rounded-xl bg-secondary text-center">
-            <p className="text-xs text-muted-foreground mb-1">Total Billed</p>
-            <p className="font-semibold text-sm">{fmtMoney(account.billed)}</p>
-          </div>
-          <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Received</p>
-            <p className="font-semibold text-sm text-success">{fmtMoney(account.allocated)}</p>
-          </div>
-          <div className={`p-3 rounded-xl text-center border ${account.outstanding > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
-            <p className="text-xs text-muted-foreground mb-1">Outstanding</p>
-            <p className={`font-semibold text-sm ${account.outstanding > 0 ? "text-destructive" : "text-success"}`}>
-              {account.outstanding > 0 ? fmtMoney(account.outstanding) : "✓ Cleared"}
-            </p>
-          </div>
-          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center">
-            <p className="text-xs text-muted-foreground mb-1">Credit (Advance)</p>
-            <p className="font-semibold text-sm text-primary">{fmtMoney(account.credit)}</p>
-          </div>
-        </div>
-
-      </div>
       <ClientInvoiceLedger
         blocks={invoiceBlocks}
         client={client}
@@ -730,12 +678,8 @@ function ClientHistoryPageBody() {
 
       {/* Order History */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-4 flex-wrap">
-          <div>
-            <h2 className="font-display text-xl text-brand-dark">Order History</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">{filtered.length} of {allOrders.length} orders</p>
-          </div>
-        </div>
+        {/* How many is the table's own count; the status filter shows as a chip. */}
+        <SectionTitle title="Order History" className="px-5 py-4 border-b border-border/60" />
 
         <div className="p-3 sm:p-4">
           <DataTable
@@ -751,17 +695,9 @@ function ClientHistoryPageBody() {
             searchText={o => [o.orderNumber, o.jewelleryType, o.metal, o.diamondType, o.priority, o.status, findInvoiceForOrder(allInvoices, o.id)?.number].filter(Boolean).join(" ")}
             searchPlaceholder="Search orders"
             exportName={`Client-${client.companyName.replace(/\s+/g, "_")}-Orders`}
-            toolbarExtra={
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-40 h-8 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Status</SelectItem>
-                  {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            }
+            filters={orderFilters}
+            onClearFilters={() => setStatusFilter("all")}
+            resetKey={statusFilter}
             totals={{
               bill: list => fmtMoney(list.reduce((s, o) => s + orderTotal(o), 0)),
               advance: list => <span className="text-success">{fmtMoney(list.reduce((s, o) => s + totalAdvance(o), 0))}</span>,
@@ -788,7 +724,7 @@ function ClientHistoryPageBody() {
             open={showPayForm}
             onOpenChange={setShowPayForm}
             title="Record Client Payment"
-            description={<>From {client.companyName}. {account.credit > 0 && <>Includes {fmtMoney(account.credit)} existing credit. </>}Clears the oldest pending bills first; any extra is kept as credit for future orders.</>}
+            description={<>From {client.companyName} · pick an invoice to settle it, or it's held as credit{account.credit > 0 && <> · {fmtMoney(account.credit)} credit held</>}</>}
             icon={Wallet}
             footer={
               <div className="flex items-end justify-between gap-3 flex-wrap">
@@ -864,7 +800,7 @@ function ClientHistoryPageBody() {
 
               {db.lockers.filter(l => l.active !== false).length === 0 && (
                 <p className="text-xs text-amber-600">
-                  No lockers yet — <Link to="/locker" className="underline font-medium">create one first</Link> before recording a payment.
+                  No lockers yet — <Link to="/locker" className="inline-block py-2.5 -my-2.5 underline font-medium">create one first</Link> before recording a payment.
                 </p>
               )}
               <Select value={payLockerId} onValueChange={addNew("locker", pickPayLocker)}>

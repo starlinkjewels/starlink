@@ -1,10 +1,11 @@
 import { useMemo, useState } from "react";
 import { fmtDate } from "@/lib/db";
-import { Input } from "@/components/ui/input";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Search, Download } from "lucide-react";
+import { Search, Download, X } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import { ExportMenu, FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 
 /** One movement in one material — the shape a ledger line actually has. */
 export interface MovementRow {
@@ -68,46 +69,50 @@ export function FullLedgerTable({
   const { paged, page, setPage, totalPages, start, end } = usePagination(filtered, 15);
   const active = !!q.trim() || !!from || !!to || mat !== "all";
 
+  // The dates and (with more than one) the material, behind one Filters
+  // button; every change starts again from the first page.
+  const filters: TableFilter[] = [
+    { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); setPage(1); } },
+  ];
+  if (materials.length > 1) filters.push({
+    kind: "select", label: "Material", allLabel: "All", value: mat === "all" ? "" : mat,
+    onChange: v => { setMat(v || "all"); setPage(1); },
+    options: materials.map(m => ({ value: m, label: m })),
+  });
+  const clearFilters = () => { setFrom(""); setTo(""); setMat("all"); setPage(1); };
+  const searchLabel = "Search particular or order…";
+
   return (
     <div className="card-luxe overflow-hidden">
-      <div className="px-5 py-4 border-b border-border/60 flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-display text-xl text-brand-dark">{title}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{caption}</p>
-        </div>
-        {onExport && (
-          <IfExport>
-          <button onClick={onExport}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
-            <Download className="h-4 w-4" /> Export
-          </button>
-          </IfExport>
-        )}
+      <div className="px-5 py-4 border-b border-border/60">
+        <SectionTitle title={title} sub={caption} />
       </div>
 
-      <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }}
-            placeholder="Search particular or order…" className="rounded-xl h-9 pl-9" />
-        </div>
-        <Input type="date" value={from} onChange={e => { setFrom(e.target.value); setPage(1); }} className="rounded-xl h-9 w-auto" />
-        <span className="text-xs text-muted-foreground">to</span>
-        <Input type="date" value={to} onChange={e => { setTo(e.target.value); setPage(1); }} className="rounded-xl h-9 w-auto" />
-        {materials.length > 1 && (
-          <div className="inline-flex rounded-lg bg-secondary p-0.5 flex-wrap">
-            <button onClick={() => { setMat("all"); setPage(1); }}
-              className={`px-3 h-8 rounded-md text-xs font-medium ${mat === "all" ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>All</button>
-            {materials.map(m => (
-              <button key={m} onClick={() => { setMat(m); setPage(1); }}
-                className={`px-3 h-8 rounded-md text-xs font-medium ${mat === m ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>{m}</button>
-            ))}
+      {/* One toolbar row: search, Filters and the download; what is narrowing
+          the rows shows as chips under it. The count is in the pager below. */}
+      <div className="px-5 py-3 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder={searchLabel} aria-label={searchLabel}
+              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+            {q && (
+              <button type="button" onClick={() => { setQ(""); setPage(1); }} aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-        )}
-        {active && (
-          <button onClick={() => { setQ(""); setFrom(""); setTo(""); setMat("all"); setPage(1); }}
-            className="text-xs text-primary hover:underline">Reset</button>
-        )}
+          <FiltersButton filters={filters} onClear={clearFilters} count={`${filtered.length} ${filtered.length === 1 ? "line" : "lines"}`} />
+          {onExport && (
+            <div className="ml-auto">
+              <IfExport>
+                <ExportMenu scope={title} exports={[{ label: "PDF or Excel", icon: Download, hint: "Pick the dates, then the file", onSelect: onExport }]} />
+              </IfExport>
+            </div>
+          )}
+        </div>
+        <FilterChips filters={filters} onClear={clearFilters} />
       </div>
 
       <div className="overflow-x-auto">

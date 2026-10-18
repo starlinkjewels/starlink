@@ -104,10 +104,10 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} size="md" icon={Receipt}
       title="Edit expense"
-      description={!e.lockerId ? "Not paid from an account — only the expense itself changes."
-        : moneyLock ? `${moneyLock} The title, category, notes and the rest can still be changed here.`
-        : ready ? "Its entry in the account moves with it — the amount, the date and the account."
-        : "Paid from an account — checking its entry there…"}
+      description={!e.lockerId ? "Not paid from an account"
+        : moneyLock ? `${moneyLock} Other fields can still change.`
+        : ready ? "Its account entry moves with it"
+        : "Checking its account entry…"}
       footer={
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">

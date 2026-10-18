@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { Table2, Check, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { loadDb, updateDb } from "@/lib/db";
@@ -72,13 +73,7 @@ export function TableStyleSettings() {
 
   return (
     <div className="card-luxe p-6 space-y-5">
-      <div className="flex items-center gap-2">
-        <Table2 className="h-4 w-4 text-primary" />
-        <div>
-          <h3 className="font-semibold">Table Style</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">How every table in the software looks — ledgers, day book, reports, payments and the rest. Applies for everyone once saved.</p>
-        </div>
-      </div>
+      <SectionTitle icon={Table2} title="Table Style" sub="Every table, for everyone once saved" />
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {TABLE_STYLES.map(s => {

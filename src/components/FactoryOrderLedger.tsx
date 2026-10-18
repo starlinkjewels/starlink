@@ -3,10 +3,11 @@ import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
 import { fmtMoneyInr, diamondFlow, otherFlow } from "@/lib/manufacturing";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
-import { Input } from "@/components/ui/input";
-import { Search, Download } from "lucide-react";
+import { Search, Download, X, Coins, Gem, Hammer } from "lucide-react";
 import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
 import { IfExport } from "@/components/IfExport";
+import { ExportMenu, FilterChips, FiltersButton, type TableFilter, StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
 // data; "—" says plainly that nothing moved.
@@ -336,6 +337,18 @@ export function FactoryOrderLedger({
   const toggle = (id: string) =>
     setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
+  // The dates and the job's state, behind one Filters button — the same
+  // toolbar row as every other table, though this one draws its own rows.
+  const filters: TableFilter[] = [
+    { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); } },
+    { kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
+      onChange: v => setOnly((v || "all") as typeof only),
+      options: [{ value: "open", label: "Still with factory" }, { value: "done", label: "Done" }] },
+  ];
+  const clearFilters = () => { setFrom(""); setTo(""); setOnly("all"); };
+  const countText = `${filtered.length} ${filtered.length === 1 ? "order" : "orders"}`;
+  const searchLabel = "Search order no., item, or factory bill no…";
+
   // The shared DataTable's header and cell classes, so this table reads the
   // same — kept as its own table for the two-level header and opening rows.
   const th = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
@@ -344,82 +357,66 @@ export function FactoryOrderLedger({
 
   return (
     <div className="card-luxe overflow-hidden">
-      <div className="px-5 py-4 border-b border-border/60 flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-display text-xl text-brand-dark">Factory Ledger</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            Everything with {factoryName} on one row per order — gold, diamond, other metal and labour
-          </p>
-        </div>
-        {onExport && (
-          <IfExport>
-          <button onClick={onExport}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
-            <Download className="h-4 w-4" /> Export
-          </button>
-          </IfExport>
-        )}
+      {/* The reading guide that used to sit under the table lives behind the ⓘ. */}
+      <div className="px-5 py-4 border-b border-border/60">
+        <SectionTitle title="Factory Ledger" sub={factoryName} info={<>
+          Tap a row for every entry behind it. Gold is in fine (24K) grams; a negative gold balance means the
+          factory supplied it and is owed that much back. <span className="italic">~Like this</span> is an estimate
+          from order creation. A <span className="font-medium text-amber-700">Bulk delivery</span> is material given
+          without an order. &ldquo;Quoted&rdquo; is the USD making charge agreed at assignment; the ₹ labour columns
+          are what was billed. A dash means nothing moved.
+        </>} />
       </div>
 
-      <div className="px-5 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-        {hasGold && (
-          <div className="rounded-xl p-3 text-center bg-amber-500/10 text-amber-700">
-            <p className="text-[10px] uppercase tracking-wider opacity-80">{goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory"}</p>
-            <p className="text-base font-semibold mt-0.5">{Math.abs(goldAtFactory).toFixed(3)} g fine</p>
-            {openingFineGold > 0 && <p className="text-[10px] opacity-70">includes {openingFineGold.toFixed(3)} g opening</p>}
+      {/* One toolbar row: search, Filters, the count and the download; what is
+          narrowing the rows shows as chips under it. */}
+      <div className="px-5 pt-4 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchLabel} aria-label={searchLabel}
+              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+            {q && (
+              <button type="button" onClick={() => setQ("")} aria-label="Clear search"
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
-        )}
-        {hasDia && (
-          <div className="rounded-xl p-3 text-center bg-blue-500/10 text-blue-700">
-            <p className="text-[10px] uppercase tracking-wider opacity-80">Diamond not accounted</p>
-            <p className="text-base font-semibold mt-0.5">{(T.diaOut - T.diaIn).toFixed(2)} ct</p>
+          <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
+            {onExport && (
+              <IfExport>
+                <ExportMenu scope={`${factoryName} — the factory ledger or the movement sheet`}
+                  exports={[{ label: "PDF or Excel", icon: Download, hint: "Pick dates or one order", onSelect: onExport }]} />
+              </IfExport>
+            )}
           </div>
-        )}
-        <div className="rounded-xl p-3 text-center bg-secondary/60 text-brand-dark">
-          <p className="text-[10px] uppercase tracking-wider opacity-70">Labour billed</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoneyInr(T.labour)}</p>
         </div>
-        {(() => {
-          // The whole factory: the account's figure, same as the card above. A
-          // filtered view: what the rows shown still owe.
-          const whole = !active && account;
-          const pending = whole ? account.chargesPending : Math.max(0, T.labour - T.paid);
-          const credit = whole && account.chargesPending === 0 ? account.chargesOverpaid : 0;
-          return (
-            <div className={`rounded-xl p-3 text-center ${pending > 0 ? "bg-destructive/10 text-destructive" : credit > 0 ? "bg-primary/10 text-primary" : "bg-success/10 text-success"}`}>
-              <p className="text-[10px] uppercase tracking-wider opacity-80">{credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows"}</p>
-              <p className="text-base font-semibold mt-0.5">{fmtMoneyInr(credit > 0 ? credit : pending)}</p>
-              {whole && pending > 0 && Math.round(pending) !== Math.round(Math.max(0, T.labour - T.paid)) && (
-                <p className="text-[10px] opacity-70">after opening balance & advances</p>
-              )}
-            </div>
-          );
-        })()}
+        <FilterChips filters={filters} onClear={clearFilters} />
       </div>
 
-      <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search order no., item, or factory bill no…" className="rounded-xl h-9 pl-9" />
-        </div>
-        <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="rounded-xl h-9 w-auto" />
-        <span className="text-xs text-muted-foreground">to</span>
-        <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="rounded-xl h-9 w-auto" />
-        <div className="inline-flex rounded-lg bg-secondary p-0.5">
-          {(["all", "open", "done"] as const).map(k => (
-            <button key={k} onClick={() => setOnly(k)}
-              className={`px-3 h-8 rounded-md text-xs font-medium transition-colors ${only === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-              {k === "all" ? "All" : k === "open" ? "Still with factory" : "Done"}
-            </button>
-          ))}
-        </div>
-        {active && (
-          <button onClick={() => { setQ(""); setFrom(""); setTo(""); setOnly("all"); }}
-            className="text-xs text-primary hover:underline">Reset</button>
-        )}
-      </div>
+      {/* The whole factory's figures are the account card's above, so they show
+          here only for a narrowed view — what the rows shown hold and owe — or
+          where this ledger stands without that card. One quiet line. */}
+      {(active || !account) && (() => {
+        const whole = !active && account;
+        const pending = whole ? account.chargesPending : Math.max(0, T.labour - T.paid);
+        const credit = whole && account.chargesPending === 0 ? account.chargesOverpaid : 0;
+        return (
+          <div className="px-5 pt-3">
+            <StatStrip items={[
+              ...(hasGold ? [{ label: goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${Math.abs(goldAtFactory).toFixed(3)} g fine`, icon: Coins }] : []),
+              ...(hasDia ? [{ label: "Diamond not accounted", value: `${(T.diaOut - T.diaIn).toFixed(2)} ct`, icon: Gem }] : []),
+              { label: "Labour billed", value: fmtMoneyInr(T.labour), icon: Hammer },
+              { label: credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows", value: fmtMoneyInr(credit > 0 ? credit : pending), tone: pending > 0 ? "out" as const : undefined },
+            ]} note={active ? "For the rows shown" : hasGold && openingFineGold > 0 ? `Gold includes ${openingFineGold.toFixed(3)} g opening` : undefined} />
+          </div>
+        );
+      })()}
 
-      <div className="px-5 pb-4">
+      <div className="px-5 py-4">
       <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white">
         <table className="w-full text-xs">
           {/* The line under the header sits on the whole header, so it runs
@@ -501,7 +498,7 @@ export function FactoryOrderLedger({
                         owes nothing on its own — the draw belongs to the delivery
                         that supplied it, which is where it shows. Without this
                         every order read as a debt of exactly its own weight. */}
-                    <td className={`${num} font-semibold ${drawnFromPool ? "text-muted-foreground" : goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-success"}`}
+                    <td className={`${num} font-semibold ${drawnFromPool ? "text-muted-foreground" : goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-muted-foreground"}`}
                       title={drawnFromPool ? "Made from the gold already with this factory — counted against the delivery that supplied it"
                         : goldBal < 0 ? "The factory supplied this gold — we owe it back"
                         : goldBal > 0 ? "Our gold still with the factory" : ""}>
@@ -511,13 +508,14 @@ export function FactoryOrderLedger({
                   {hasDia && (<>
                     <td className={`${num} border-l border-border/60${r.diaEstimated ? " italic text-muted-foreground" : ""}`}>{r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : ""}</td>
                     <td className={num}>{r.diaIn ? r.diaIn.toFixed(2) : ""}</td>
-                    <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-success"}`}>{r.diaEstimated ? "—" : (diaBal > 0.005 ? diaBal.toFixed(2) : "0")}</td>
+                    <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-muted-foreground"}`}>{r.diaEstimated ? "—" : (diaBal > 0.005 ? diaBal.toFixed(2) : "0")}</td>
                   </>)}
                   {hasSilver && <td className={`${num} border-l border-border/60`}>{g3(r.silverIn)}</td>}
                   {hasOther && <td className={`${num} border-l border-border/60`}>{g3(r.otherIn)}</td>}
                   <td className={`${num} border-l border-border/60`}>{rs(r.labour)}</td>
-                  <td className={`${num} text-success`}>{rs(r.paid)}</td>
-                  <td className={`${num} font-semibold ${pending > 0.5 ? "text-destructive" : "text-success"}`}>{pending > 0.5 ? rs(pending) : "—"}</td>
+                  {/* Paid by us, not money received: plain. Nothing pending: grey. */}
+                  <td className={num}>{rs(r.paid)}</td>
+                  <td className={`${num} ${pending > 0.5 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{pending > 0.5 ? rs(pending) : "—"}</td>
                   {hasQuote && <td className={`${num} border-l border-border/60 text-muted-foreground`}>{r.quotedUsd ? `$${Math.round(r.quotedUsd).toLocaleString()}` : ""}</td>}
                   <td className="px-3 py-2.5 whitespace-nowrap border-l border-border/60">
                     <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
@@ -538,7 +536,7 @@ export function FactoryOrderLedger({
                 {isOpen && r.entries.length === 0 && (
                   <tr className="text-[11px] bg-secondary/20">
                     <td className="px-3 py-1.5 text-muted-foreground" colSpan={cols}>
-                      Nothing issued or paid on this order yet — the figures above are the estimate from order creation.
+                      Nothing issued or paid yet — the figures are estimates.
                     </td>
                   </tr>
                 )}
@@ -577,18 +575,6 @@ export function FactoryOrderLedger({
       </div>
       </div>
       <LoadOlder w={w} noun="orders" />
-      <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
-        Tap a row to see every entry behind it — gold and diamond given, what came back, labour billed and each
-        payment made against it.
-        A <span className="font-medium text-amber-700">Bulk delivery</span> is material handed over without an order;
-        the orders that draw from it consume it on their own rows, so the totals at the foot still net out.
-        Gold is in fine (24KT) grams so every karat compares. A gold balance is positive when the factory still
-        holds our metal and <span className="text-destructive">negative when they supplied it themselves</span> —
-        that much fine gold is owed back to them. A dash means nothing moved.
-        A figure written <span className="italic">~like this</span> is the estimate from order creation, because that
-        order has not reached Final Approval yet. &ldquo;Quoted&rdquo; is the making charge agreed in USD when the
-        factory was assigned; the rupee labour columns are what has actually been billed.
-      </p>
     </div>
   );
 }

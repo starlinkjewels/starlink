@@ -2,6 +2,7 @@ import { materialUnit } from "@/lib/materials";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
   updateDb, uid, fmtMoney,
@@ -15,7 +16,7 @@ import { ReceiptLedger } from "@/components/ReceiptLedger";
 import { MoneyLedger } from "@/components/MoneyLedger";
 import { DayBook } from "@/components/DayBook";
 import { ActionSheet } from "@/components/ActionSheet";
-import { MoreMenu } from "@/components/MoreMenu";
+import { PageHeader, ScrollRow, TabBar } from "@/components/PageHeader";
 import {
   supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
   factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
@@ -91,6 +92,16 @@ export function PaymentsPage() {
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
   const [book, setBook] = useState<Book>("daybook");
+  // "Open in Expenses →" on a row corrected elsewhere lands here with
+  // ?book=expense: that tab opens, and the address is tidied so the same
+  // link works again later.
+  const [params, setParams] = useSearchParams();
+  const wantBook = params.get("book");
+  useEffect(() => {
+    if (!wantBook) return;
+    if (BOOKS.some(b => b.key === wantBook)) setBook(wantBook as Book);
+    setParams(p => { p.delete("book"); return p; }, { replace: true });
+  }, [wantBook, setParams]);
   // Every payment is a panel over the page, so the ledger being read stays put
   // underneath it and shows the new entry the moment it is saved.
   const [task, setTask] = useState<Task | null>(null);
@@ -111,55 +122,49 @@ export function PaymentsPage() {
   const todays = (db.lockerTransactions ?? []).filter(t => activeIds.has(t.lockerId) && dayOf(t.createdAt) === today);
   const todayIn = sumByCcy(todays.filter(t => t.type === "income"), t => t.amountInr, t => t.currency ?? db.lockers.find(l => l.id === t.lockerId)?.currency);
   const todayOut = sumByCcy(todays.filter(t => t.type === "expense"), t => t.amountInr, t => t.currency ?? db.lockers.find(l => l.id === t.lockerId)?.currency);
+  const moved = (m: Map<string, number>) => [...m.values()].some(v => Math.abs(v) > 0.0001);
 
   const sheet = (t: Task): SheetProps => ({ open: task === t, onOpenChange: o => { if (!o) setTask(null); } });
   const openLocker = (a: LockerAction) => { setLockerAction(a); setTask("locker"); };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Payments</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">The day book, and every payment in or out — all in one place</p>
-          {!mayAdd && <p className="text-xs text-muted-foreground mt-1">Your role lets you look at these entries but not record new ones.</p>}
-        </div>
-        {mayAdd && (
-          // On a phone the main button sits on top at full width, the three
-          // payments share the row under it — the header never runs off the side.
-          // From a tablet up it is one row that wraps (main button last), so a
-          // narrow window between the breakpoints never pushes it off the side.
-          <div className="w-full sm:w-auto sm:ml-auto flex flex-col-reverse sm:flex-row sm:flex-wrap sm:justify-end sm:items-center gap-2">
-            <div className="grid grid-cols-3 sm:flex sm:flex-wrap sm:items-center gap-2">
-              <Button variant="outline" onClick={() => setTask("supplier")} className="rounded-xl h-10 px-2 sm:px-4"><Truck className="max-sm:hidden" />Pay supplier</Button>
-              <Button variant="outline" onClick={() => setTask("factory")} className="rounded-xl h-10 px-2 sm:px-4"><FactoryIcon className="max-sm:hidden" />Pay factory</Button>
-              <Button variant="outline" onClick={() => setTask("expense")} className="rounded-xl h-10 px-2 sm:px-4"><Receipt className="max-sm:hidden" />Pay expense</Button>
-            </div>
-            <div className="flex items-center gap-2">
-              <Button onClick={() => setTask("client")} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none"><CreditCard />Receive from Client</Button>
-              <MoreMenu title="Accounts" actions={[
-                { label: "Transfer between accounts", icon: ArrowLeftRight, hint: "From one locker to another, in any two currencies", onSelect: () => openLocker("transfer_out") },
-                { label: "Deposit to an account", icon: ArrowDownCircle, hint: "Money in that isn’t a client’s receipt", onSelect: () => openLocker("income") },
-                { label: "Withdraw from an account", icon: ArrowUpCircle, hint: "Money out that isn’t a bill or an expense", onSelect: () => openLocker("expense") },
-              ]} />
-            </div>
-          </div>
-        )}
-      </div>
+      {/* One main button (money in), one group for money out, the account
+          moves in the ⋯ — three controls, one row, on every screen. */}
+      <PageHeader
+        title="Payments"
+        subtitle="Every payment in or out"
+        primary={mayAdd ? { label: "Receive from Client", icon: CreditCard, onClick: () => setTask("client") } : null}
+        secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
+          { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => setTask("supplier") },
+          { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
+          { label: "Pay an expense", icon: Receipt, hint: "Rent, salary, courier…", onSelect: () => setTask("expense") },
+        ] } : null}
+        menuTitle="Accounts"
+        menu={mayAdd ? [
+          { label: "Transfer between accounts", icon: ArrowLeftRight, hint: "Any two accounts, any currencies", onSelect: () => openLocker("transfer_out") },
+          { label: "Deposit to an account", icon: ArrowDownCircle, hint: "Not a client's receipt", onSelect: () => openLocker("income") },
+          { label: "Withdraw from an account", icon: ArrowUpCircle, hint: "Not a bill or an expense", onSelect: () => openLocker("expense") },
+        ] : undefined}
+      >
+        {!mayAdd && <p className="text-xs text-muted-foreground mt-1">View only — your role can't record entries.</p>}
+      </PageHeader>
 
       {activeLockers.length === 0 && (
         <div className="card-luxe p-4 text-sm text-amber-700 bg-amber-50 border border-amber-200">
-          No lockers yet — create one on the Locker page first. Every payment here must go through a Locker.
+          No accounts yet — add one on the Locker page first. Every payment goes through one.
         </div>
       )}
 
       {/* Balances, one tile per account in its own currency. A tile opens that
           account's day book. On a phone the row scrolls sideways inside itself. */}
       {activeLockers.length > 0 && (
-        <div className="flex gap-2 overflow-x-auto no-scrollbar p-0.5 sm:p-0 sm:grid sm:grid-cols-[repeat(auto-fill,minmax(11rem,1fr))] sm:overflow-visible">
-          <div className="card-luxe shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3">
+        <ScrollRow className="flex gap-2 p-0.5 sm:p-0 sm:grid sm:grid-cols-[repeat(auto-fit,minmax(11rem,1fr))] sm:overflow-visible">
+          <div className="card-luxe snap-start shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3">
             <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Today</p>
-            <p className="mt-1 text-sm font-semibold text-success tabular-nums break-words"><span className="text-[11px] font-medium text-muted-foreground">In </span>{fmtCcyMix(todayIn)}</p>
-            <p className="text-sm font-semibold text-destructive tabular-nums break-words"><span className="text-[11px] font-medium text-muted-foreground">Out </span>{fmtCcyMix(todayOut)}</p>
+            {/* Nothing yet today reads grey, not as money in or out. */}
+            <p className={`mt-1 text-sm font-semibold tabular-nums break-words ${moved(todayIn) ? "text-success" : "text-muted-foreground"}`}><span className="text-[11px] font-medium text-muted-foreground">In </span>{fmtCcyMix(todayIn)}</p>
+            <p className={`text-sm font-semibold tabular-nums break-words ${moved(todayOut) ? "text-destructive" : "text-muted-foreground"}`}><span className="text-[11px] font-medium text-muted-foreground">Out </span>{fmtCcyMix(todayOut)}</p>
             <p className="text-[10px] text-muted-foreground mt-0.5">Transfers left out</p>
           </div>
           {activeLockers.map(l => {
@@ -169,7 +174,7 @@ export function PaymentsPage() {
             return (
               <button key={l.id} type="button" aria-pressed={on} title={`${l.name} — open its day book`}
                 onClick={() => { setBookPick(l.id); setBook("daybook"); }}
-                className={`card-luxe shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3 text-left transition-shadow ${on ? "ring-2 ring-primary" : "hover:shadow-md"}`}>
+                className={`card-luxe snap-start shrink-0 flex-1 min-w-[11.5rem] sm:min-w-0 px-4 py-3 text-left transition-shadow ${on ? "ring-2 ring-primary" : "hover:shadow-md"}`}>
                 <span className="flex items-start gap-1.5 text-[11px] text-muted-foreground leading-snug">
                   <Icon className="h-3.5 w-3.5 mt-px shrink-0" /><span className="line-clamp-2 break-words">{l.name}</span>
                 </span>
@@ -178,18 +183,11 @@ export function PaymentsPage() {
               </button>
             );
           })}
-        </div>
+        </ScrollRow>
       )}
 
       <div className="space-y-3">
-        <div role="tablist" aria-label="Ledgers" className="card-luxe p-1.5 flex gap-1 overflow-x-auto no-scrollbar">
-          {BOOKS.map(b => (
-            <button key={b.key} type="button" role="tab" aria-selected={book === b.key} onClick={() => setBook(b.key)}
-              className={`shrink-0 inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors ${book === b.key ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
-              <b.icon className="h-4 w-4" />{b.label}
-            </button>
-          ))}
-        </div>
+        <TabBar label="Ledgers" tabs={BOOKS} value={book} onChange={setBook} />
         <div role="tabpanel">
           {book === "daybook" && <DayBook lockerId={bookLockerId} />}
           {book === "received" && <ReceiptLedger />}
@@ -337,7 +335,10 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
         const clientUser = d.users.find(u => u.clientId === clientId);
         if (clientUser) d.notifications.unshift({
           id: uid("n_"), userId: clientUser.id, title: "Payment Received",
-          body: `${fmtMoney(amt)} received via ${method} and applied to your pending bills.`,
+          // Says what happened: against the invoice named, or held as their credit.
+          body: invoiceId
+            ? `${fmtMoney(amt)} received via ${method} against invoice ${d.invoices.find(i => i.id === invoiceId)?.number ?? ""}.`.replace(" .", ".")
+            : `${fmtMoney(amt)} received via ${method} — held as credit on your account.`,
           type: "info", read: false, createdAt: now,
         });
       });
@@ -353,7 +354,7 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={CreditCard}
       title="Receive payment"
-      description="From a client — saved as a numbered receipt that settles their bill and lands in the account you pick."
+      description="From a client, as a numbered receipt"
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={amount && lockerId ? (
           <div className="grid grid-cols-3 gap-3">
@@ -362,7 +363,8 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
               <p className="font-medium text-foreground tabular-nums break-words">{fmtMoney(Number(amount))}</p>
             </div>
             <div className="min-w-0">
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Applied to their bills</p>
+              {/* No invoice named: settleClientAccount holds it all as credit. */}
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{invoiceId ? "Against the invoice" : "Held as credit"}</p>
               <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(Number(amount))}</p>
             </div>
             {depositPreview != null && locker && (
@@ -445,16 +447,17 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
           <div className="sm:col-span-2 p-3 rounded-xl bg-secondary">
             <RateInput id="rcv-rate" from="USD" to={lockerCurrency} value={exchangeRate} onChange={setExchangeRate}
               amount={Number(amount) || undefined} at={date} />
-            <p className="text-xs text-muted-foreground mt-1">This locker holds {lockerCurrency}, not USD — enter the rate to convert what lands in it.</p>
+            <p className="text-xs text-muted-foreground mt-1">This locker holds {lockerCurrency} — enter the USD rate.</p>
           </div>
         )}
       </div>
 
       {clientId && openInvoices.length > 0 && (
         <p className="text-[11px] text-muted-foreground">
+          {/* What settleClientAccount does: the named invoice, the rest as credit. */}
           {invoiceId
-            ? "Clears that invoice first. Anything left over rolls on to their next invoice, then to credit."
-            : "Oldest bills first — pick an invoice if the client sent this for one in particular."}
+            ? "Settles that invoice; anything over is held as credit."
+            : "Held as credit — pick an invoice to settle one."}
         </p>
       )}
     </div>
@@ -575,7 +578,7 @@ function PaySupplier({ open, onOpenChange }: SheetProps) {
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Truck}
       title="Supplier payment"
-      description="Pay a supplier's bills from a rupee account — or record money they sent back."
+      description="Bills or refunds, in rupees"
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
           <MoveSummary label={dir === "pay" ? "Paying" : "Receiving"} value={fmtMoneyInr(typed)} tone={dir === "pay" ? "out" : "in"}
@@ -733,7 +736,7 @@ function PayFactory({ open, onOpenChange }: SheetProps) {
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={FactoryIcon}
       title="Factory payment"
-      description="Making charges, paid in rupees from a rupee account."
+      description="Making charges, in rupees"
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
           <MoveSummary label="Paying" value={fmtMoneyInr(typed)} tone="out" lockerId={lockerId} change={-typed} />
@@ -852,7 +855,7 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Receipt}
       title="Pay expense"
-      description="Paid from any account, in that account's own currency."
+      description="From any account, in its currency"
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && lockerId ? (
           <MoveSummary label={category === "Salary" ? "Salary" : "Expense"} value={fmtCcy(typed, curr)} tone="out" lockerId={lockerId} change={-typed} />
@@ -900,7 +903,7 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose team member" /></SelectTrigger>
             <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}<AddNewItem kind="employee" /></SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Shows on their salary ledger.</p>
         </div>
       )}
       {/* 5. Title + note */}
@@ -1033,8 +1036,8 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
       icon={action === "transfer_out" ? ArrowLeftRight : action === "income" ? ArrowDownCircle : ArrowUpCircle}
       title={action === "transfer_out" ? "Transfer between accounts" : action === "income" ? "Deposit to an account" : "Withdraw from an account"}
       description={action === "transfer_out"
-        ? "Out of one locker and into another, in any two currencies."
-        : "A plain entry on one locker, filed under a category."}
+        ? "Any two accounts, any currencies"
+        : "One account, under a category"}
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && selected ? (
           <div className="space-y-1">
@@ -1125,7 +1128,7 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
 
       {crossCurrency && !(Number(exchangeRate) > 0) && (
         <p className="text-xs text-muted-foreground">
-          {target?.name} holds {targetCcy}, {selected?.name} {cur} — enter the exchange rate; it is required before you can save this transfer.
+          {target?.name} holds {targetCcy} — enter the rate to save.
         </p>
       )}
 

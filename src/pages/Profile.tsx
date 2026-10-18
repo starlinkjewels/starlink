@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { useNavigate } from "react-router-dom";
+import { PageHeader } from "@/components/PageHeader";
 import { LogOut } from "lucide-react";
 
 export function ProfilePage() {
@@ -43,7 +44,7 @@ export function ProfilePage() {
 
   return (
     <div className="max-w-xl mx-auto space-y-4">
-      <h1 className="font-display text-2xl md:text-3xl text-brand-dark">My Profile</h1>
+      <PageHeader title="My Profile" />
       <div className="card-luxe p-6 text-center">
         <div className="h-24 w-24 mx-auto rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-4xl font-semibold grid place-items-center shadow-luxe">{user!.name.charAt(0)}</div>
         <p className="font-display text-2xl mt-3 text-brand-dark">{user!.name}</p>

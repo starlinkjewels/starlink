@@ -3,8 +3,8 @@ import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, currentUserOrders, type Notification } from "@/lib/db";
 import { filled, refLink, linkList, type Detail } from "@/components/rowDetails";
 import { Bell, Info, Package, AlertCircle, Trash2, Pencil, Mail, MailOpen } from "lucide-react";
-import { AsyncButton } from "@/components/AsyncButton";
-import { DataTable, CellMain, CellTag, CellDate, type DataColumn } from "@/components/DataTable";
+import { PageHeader } from "@/components/PageHeader";
+import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import { confirmBox } from "@/lib/confirm";
 
@@ -24,6 +24,18 @@ const when = (iso: string) => new Date(iso).toLocaleString("en-US", {
   month: "short", day: "numeric", year: "numeric",
   hour: "2-digit", minute: "2-digit",
 });
+
+/** The date and the time, each kept whole: where a phone has no room, the
+ *  time goes under the date instead of being cut off. */
+function WhenCell({ iso }: { iso: string }) {
+  const d = new Date(iso);
+  return (
+    <span className="text-muted-foreground tabular-nums">
+      <span className="whitespace-nowrap">{d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })},</span>{" "}
+      <span className="whitespace-nowrap">{d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
+    </span>
+  );
+}
 
 export function NotificationsPage() {
   const { user } = useAuth();
@@ -82,7 +94,7 @@ export function NotificationsPage() {
         </div>
       ) },
     { key: "type", header: "Type", sortValue: n => n.type, cell: n => typeTag(n.type) },
-    { key: "when", header: "When", kind: "date", sortValue: n => n.createdAt, cell: n => <CellDate>{when(n.createdAt)}</CellDate> },
+    { key: "when", header: "When", kind: "date", sortValue: n => n.createdAt, cell: n => <WhenCell iso={n.createdAt} /> },
   ];
 
   // An opened notification links the orders it names — only ones this person
@@ -97,23 +109,19 @@ export function NotificationsPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <PushPermissionBanner />
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Notifications</h1>
-          <p className="text-sm text-muted-foreground">{unread} unread · {total} total</p>
-        </div>
-        <div className="flex items-center gap-2">
-          {unread > 0 && (
-            <AsyncButton variant="outline" onClick={markAll} className="rounded-xl">Mark all read</AsyncButton>
-          )}
-          {total > 0 && (
-            <AsyncButton variant="outline" onClick={clearAll} className="rounded-xl text-destructive hover:text-destructive hover:bg-destructive/10 border-destructive/30">
-              <Trash2 className="h-4 w-4 mr-1.5" /> Clear all
-            </AsyncButton>
-          )}
-        </div>
-      </div>
+      {/* Marking them read is the one button; clearing them all can't be
+          undone, so it waits in the ⋯. The total is the table's own count. */}
+      <PageHeader
+        title="Notifications"
+        subtitle={unread > 0 ? `${unread} unread` : "All read"}
+        secondary={unread > 0 ? { label: "Mark all read", icon: MailOpen, onClick: markAll } : null}
+        menu={[
+          { label: "Clear all", icon: Trash2, danger: true, hint: "Can't be undone", onSelect: clearAll, show: total > 0 },
+        ]}
+      />
+      {/* One slim line under the title. Here its × only hides it for this
+          visit, so the ask can always be found again. */}
+      <PushPermissionBanner keepReachable />
 
       {/* A click on an unread one marks it read; read ones have nothing to open,
           so they don't look clickable. */}
@@ -133,10 +141,10 @@ export function NotificationsPage() {
           rowClassName={n => (n.read ? "opacity-75" : "bg-primary/[0.04]")}
           rowActions={n => [
             n.read
-              ? { label: "Mark unread", icon: Mail, hint: "Keep it in view as new", onSelect: () => markOne(n.id, false) }
+              ? { label: "Mark unread", icon: Mail, onSelect: () => markOne(n.id, false) }
               : { label: "Mark read", icon: MailOpen, onSelect: () => markOne(n.id) },
             // Written by the app itself, as a record of what happened.
-            { label: "Edit", icon: Pencil, hint: "System message — can't be edited", disabled: true, onSelect: () => undefined },
+            { label: "Edit", icon: Pencil, hint: "System messages can't be edited", disabled: true, onSelect: () => undefined },
             { label: "Delete", icon: Trash2, danger: true, onSelect: () => deleteOne(n) },
           ]}
           emptyText={

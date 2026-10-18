@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Send, ArrowLeft, Trash2 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { PageHeader } from "@/components/PageHeader";
 
 export function MessagesPage() {
   const { user } = useAuth();
@@ -79,22 +80,43 @@ export function MessagesPage() {
 
   const unreadCount = (contactId: string) =>
     db.messages.filter(m => m.fromUserId === contactId && m.toUserId === user!.id && !m.read).length;
+  const lastMessage = (contactId: string) => db.messages
+    .filter(m => (m.fromUserId === contactId && m.toUserId === user!.id) || (m.fromUserId === user!.id && m.toUserId === contactId))
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
 
   return (
-    <div className="max-w-7xl mx-auto h-full min-h-0">
-      {/* ── Desktop layout: side-by-side ── */}
-      <div className="hidden md:grid md:grid-cols-[280px_1fr] gap-4 h-full">
+    // The page is the height of the screen under the top bar, like any chat
+    // app: the list and the thread scroll inside it, the box to type in stays
+    // at the bottom. (Phone: the top bar and the bottom tabs; laptop: the top
+    // bar and the page's own padding.)
+    <div className="max-w-7xl mx-auto flex flex-col gap-4 min-h-[26rem] h-[calc(100dvh-11.5rem-env(safe-area-inset-top))] md:h-[calc(100dvh-7.5rem)]">
+      {/* On a phone the open conversation has its own header with the way back. */}
+      <div className={mobileView === "chat" ? "max-md:hidden" : undefined}>
+        <PageHeader title="Messages" />
+      </div>
+
+      {/* ── Laptop and tablet: the conversations beside the thread ── */}
+      <div className="hidden md:grid md:grid-cols-[minmax(16rem,22rem)_1fr] gap-4 flex-1 min-h-0">
         {/* Contact list */}
-        <div className="card-luxe p-3 overflow-y-auto">
-          <h2 className="font-display text-xl text-brand-dark px-2 mb-2">Messages</h2>
+        <div className="card-luxe p-2 overflow-y-auto min-h-0">
+          {contacts.length === 0 && (
+            <p className="text-center text-sm text-muted-foreground py-10">No contacts available.</p>
+          )}
           {contacts.map(c => {
             const unread = unreadCount(c.id);
+            const last = lastMessage(c.id);
             return (
-              <button key={c.id} onClick={() => setSelected(c.id)} className={`w-full flex items-center gap-3 p-2.5 rounded-xl transition ${selected === c.id ? "bg-primary/10" : "hover:bg-secondary"}`}>
-                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-sm grid place-items-center shrink-0">{c.name.charAt(0)}</div>
-                <div className="min-w-0 text-left flex-1">
-                  <p className="text-sm font-medium truncate">{c.name}</p>
-                  <p className="text-xs text-muted-foreground capitalize">{c.role}</p>
+              <button key={c.id} onClick={() => setSelected(c.id)} aria-current={selected === c.id ? "true" : undefined}
+                className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition ${selected === c.id ? "bg-primary/10" : "hover:bg-secondary"}`}>
+                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-sm grid place-items-center shrink-0">{c.name.charAt(0)}</div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium truncate">{c.name}</p>
+                    {last && <p className="text-[10px] text-muted-foreground shrink-0">{new Date(last.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>}
+                  </div>
+                  <p className="text-xs text-muted-foreground truncate">
+                    {last ? <>{last.fromUserId === user!.id ? "You: " : ""}{last.text}</> : <span className="capitalize">{c.role}</span>}
+                  </p>
                 </div>
                 {unread > 0 && (
                   <span className="h-5 min-w-[20px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold grid place-items-center shrink-0">{unread}</span>
@@ -104,7 +126,7 @@ export function MessagesPage() {
           })}
         </div>
         {/* Chat panel */}
-        <div className="card-luxe flex flex-col overflow-hidden">
+        <div className="card-luxe flex flex-col overflow-hidden min-h-0">
           {selectedContact && (
             <div className="px-4 py-3 border-b border-border/60 flex items-center gap-3">
               <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs grid place-items-center shrink-0">{selectedContact.name.charAt(0)}</div>
@@ -153,20 +175,17 @@ export function MessagesPage() {
         </div>
       </div>
 
-      {/* ── Mobile layout: toggle between contacts and chat ── */}
-      <div className="md:hidden flex flex-col h-full">
+      {/* ── Phone: one pane at a time — the conversations, or one thread ── */}
+      <div className="md:hidden flex flex-col flex-1 min-h-0">
         {mobileView === "contacts" ? (
           /* Contact list full screen */
           <div className="card-luxe p-3 flex-1 overflow-y-auto">
-            <h2 className="font-display text-xl text-brand-dark px-2 mb-3">Messages</h2>
             {contacts.length === 0 && (
               <p className="text-center text-sm text-muted-foreground py-10">No contacts available.</p>
             )}
             {contacts.map(c => {
               const unread = unreadCount(c.id);
-              const lastMsg = db.messages
-                .filter(m => (m.fromUserId === c.id && m.toUserId === user!.id) || (m.fromUserId === user!.id && m.toUserId === c.id))
-                .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
+              const lastMsg = lastMessage(c.id);
               return (
                 <button key={c.id} onClick={() => handleSelectContact(c.id)} className="w-full flex items-center gap-3 p-3 rounded-xl transition hover:bg-secondary active:bg-secondary/70 text-left">
                   <div className="relative">

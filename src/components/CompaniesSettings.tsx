@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { Building2, Plus, Pencil, ImagePlus, X, Loader2, Power, Trash2, Hash, Landmark } from "lucide-react";
 import { toast } from "sonner";
 import { updateDb, uid, type Company, type Settings } from "@/lib/db";
@@ -81,15 +82,8 @@ export function CompaniesSettings() {
   return (
     <div className="card-luxe p-6 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <Building2 className="h-4 w-4 text-primary" />
-          <div>
-            <h3 className="font-semibold">Companies</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Each company prints its own name, logo, address, bank details and invoice numbers on its clients' invoices, proformas and statements.
-            </p>
-          </div>
-        </div>
+        <SectionTitle icon={Building2} title="Companies"
+          info="Each company prints its own name, logo, address, bank details and invoice numbers on its clients' invoices, proformas and statements." />
         <Button size="sm" onClick={() => setEditing({ id: "", name: "", invoicePrefix: "", legalSuffix: "", active: true, createdAt: "" })} className="btn-hero rounded-xl gap-1.5">
           <Plus className="h-4 w-4" /> Add company
         </Button>

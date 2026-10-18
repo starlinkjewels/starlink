@@ -585,6 +585,50 @@
 .dt-details .truncate { overflow: visible; text-overflow: clip; white-space: normal; }
 .dt-details .whitespace-nowrap { white-space: normal; }
 .dt-details [class*="max-w-"] { max-width: none; }
+
+/* A data table wider than its box (DataTable + WideScroll). The first column
+   and the ⋯ column stay put while the rest slides under them, so they need a
+   solid background: the row's own tint laid over white, so a hovered, ticked
+   or striped row reads the same across the cells that stay and those that move. */
+.dt-row { --dt-tint: transparent; }
+.dt-row:hover, .dt-row.dt-open { --dt-tint: color-mix(in oklab, var(--color-secondary) 30%, transparent); }
+.dt-row.dt-on { --dt-tint: color-mix(in oklab, var(--color-primary) 5%, transparent); }
+.dt-row.dt-pin { --dt-tint: color-mix(in oklab, var(--color-secondary) 25%, transparent); }
+:root[data-tbl][data-tbl-zebra="on"] table:not(.tbl-plain) > tbody > tr.dt-row:nth-child(even) { --dt-tint: var(--tbl-zebra); }
+:root[data-tbl][data-tbl-hover="on"] table:not(.tbl-plain) > tbody > tr.dt-row:hover { --dt-tint: var(--tbl-hover); }
+.dt-stick { background: linear-gradient(var(--dt-tint, transparent), var(--dt-tint, transparent)), white; }
+th.dt-stick-head { background: linear-gradient(color-mix(in oklab, var(--color-secondary) 40%, transparent), color-mix(in oklab, var(--color-secondary) 40%, transparent)), white; }
+:root[data-tbl] table:not(.tbl-plain) > thead > tr > th.dt-stick-head { background: var(--tbl-head-bg); }
+:root[data-tbl="minimal"] table:not(.tbl-plain) > thead > tr > th.dt-stick-head,
+:root[data-tbl="cards"] table:not(.tbl-plain) > thead > tr > th.dt-stick-head { background: white; }
+td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-secondary) 30%, transparent), color-mix(in oklab, var(--color-secondary) 30%, transparent)), white; }
+/* An edge that has more under it says so with a soft shadow. */
+.dt-scrolled .dt-stick-l { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
+.dt-more .dt-stick-r { box-shadow: -8px 0 10px -8px rgb(15 23 42 / 0.22); }
+.dt-box { scroll-behavior: auto; overscroll-behavior-x: contain; }
+/* A card that clips its corners with overflow: hidden becomes a scroll box of
+   its own, and a table header inside it can no longer stay at the top of the
+   page. Clipping without becoming a scroll box looks the same and lets it. */
+.card-luxe.overflow-hidden { overflow: clip; }
+.dt-box.dt-dragging, .dt-box.dt-dragging * { cursor: grabbing !important; user-select: none; }
+/* A row that scrolls sideways (tabs, balance tiles) fades at the edge that has more. */
+.fade-l.fade-r { mask-image: linear-gradient(to right, transparent, black 28px, black calc(100% - 28px), transparent); }
+.fade-l:not(.fade-r) { mask-image: linear-gradient(to right, transparent, black 28px); }
+.fade-r:not(.fade-l) { mask-image: linear-gradient(to right, black calc(100% - 28px), transparent); }
+/* The copy of a wide table's scrollbar that waits at the bottom of the screen. */
+.dt-floatbar {
+  background: color-mix(in oklab, white 86%, transparent);
+  backdrop-filter: blur(8px);
+  border-top: 1px solid color-mix(in oklab, var(--color-border) 80%, transparent);
+  box-shadow: 0 -6px 16px -10px rgb(15 23 42 / 0.25);
+  touch-action: none;
+}
+.dt-floatthumb { background: color-mix(in oklab, var(--color-primary) 42%, transparent); transition: background-color .15s; }
+.dt-floatbar:hover .dt-floatthumb, .dt-floatthumb:active { background: color-mix(in oklab, var(--color-primary) 65%, transparent); }
+/* A table's own sideways scrollbar, slim and in the app's colour. */
+.dt-box { scrollbar-width: thin; scrollbar-color: color-mix(in oklab, var(--color-primary) 30%, transparent) transparent; }
+.dt-box::-webkit-scrollbar { height: 10px; width: 10px; }
+.dt-box::-webkit-scrollbar-thumb { background: color-mix(in oklab, var(--color-primary) 28%, transparent); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
 @utility grid-auto-tiles { grid-template-columns: repeat(auto-fill, minmax(min(14rem, 100%), 1fr)); }
 @utility grid-auto-photos { grid-template-columns: repeat(auto-fill, minmax(min(11rem, 100%), 1fr)); }
 

@@ -8,7 +8,9 @@ import {
   canEditPurchase, canVoidPurchase, editPurchase, purchaseLabel, voidImpact, purchaseEditScope,
   voidPurchase as voidPurchaseCascade, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
-import { ExternalLink, Pencil, Trash2 } from "lucide-react";
+import { ExternalLink, Gem, Pencil, ShoppingCart, Trash2 } from "lucide-react";
+import { StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
 import { IssuanceEditSheet } from "@/components/IssuanceEditSheet";
 import { OpeningStockEditSheet, openingStockActions } from "@/components/OpeningStockEditSheet";
@@ -20,12 +22,13 @@ import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
-const ISSUE_ADMIN_ONLY = "Only an admin can change what was issued to a factory";
+const ISSUE_ADMIN_ONLY = "Only an admin can change this";
 const STOCK_ADMIN_ONLY = "Only an admin can change stock";
 
 /** One thing this page did, whichever tab did it. */
@@ -279,10 +282,11 @@ export function StockActivityLedger() {
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
   const filtered = !!(ql || from || to || kind || material || billFilter || company);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setKind(""); setMaterial(""); setBillFilter(""); setCompany(""); };
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
+  const nBought = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").length;
+  const nSold = rows.filter(r => r.kind === "Diamond sold").length;
 
   const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Quantity", "Unit", "Amount (INR)", "Remark"];
   const body: (string | number)[][] = [];
@@ -346,11 +350,11 @@ export function StockActivityLedger() {
     const scope = purchaseEditScope(db, p);
     const voidable = canVoidPurchase(db, p);
     return [
-      ...(what === "purchase" ? [viewAction("View purchase", `On ${db.suppliers.find(x => x.id === p.supplierId)?.name ?? "the supplier"}'s page`, `/suppliers/${p.supplierId}`, "suppliers")] : []),
+      ...(what === "purchase" ? [viewAction("View purchase", db.suppliers.find(x => x.id === p.supplierId)?.name ?? "The supplier's page", `/suppliers/${p.supplierId}`, "suppliers")] : []),
       { label: `Edit ${what}`, icon: Pencil, onSelect: () => openEdit(id), disabled: !mayEdit || !edit.ok,
-        hint: !mayEdit ? needsAccess("buyAssign", "edit") : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : `Correct this ${what}` },
+        hint: !mayEdit ? needsAccess("buyAssign", "edit") : !edit.ok ? oneLine(edit.reason) : !scope.quantity ? oneLine(scope.reason) : undefined },
       { label: `Remove ${what}`, icon: Trash2, danger: true, onSelect: () => remove(id), disabled: !mayDelete || removingId === id || !voidable.ok,
-        hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? voidable.reason : "Reverses the supplier due, stock and factory issue" },
+        hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? oneLine(voidable.reason) : "Undoes due, stock and factory issue" },
     ];
   };
   const actionsFor = (r: Row): MoreAction[] => {
@@ -362,9 +366,9 @@ export function StockActivityLedger() {
       return [
         viewAction("View factory", r.party, `/factories/${mi.factoryId}`, "factories"),
         { label: "Edit assignment", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !!issueDenied || !edit.ok,
-          hint: issueDenied ?? (!edit.ok ? edit.reason : "Quantity, purity or grade, note — stock moves by the difference") },
+          hint: issueDenied ?? (!edit.ok ? oneLine(edit.reason) : "Stock moves by the difference") },
         { label: "Cancel assignment", icon: Trash2, danger: true, onSelect: () => removeAssignment(r.id), disabled: !!issueDenied || removingId === r.id || !cancel.ok,
-          hint: issueDenied ?? (!cancel.ok ? cancel.reason : "The material goes back into stock") },
+          hint: issueDenied ?? (!cancel.ok ? oneLine(cancel.reason) : "Material goes back to stock") },
       ];
     }
     if (r.kind === "Diamond sold") {
@@ -375,16 +379,16 @@ export function StockActivityLedger() {
         ...(sale.clientId ? [viewAction("View client", r.party, `/clients/${sale.clientId}`, "clients")] : []),
         // A sale moves a stone, a buyer and money at once; correcting one of
         // them alone is how they fall out of step.
-        { label: "Edit", icon: Pencil, disabled: true, onSelect: () => {}, hint: "Cancel the sale and enter it again" },
+        { label: "Edit", icon: Pencil, disabled: true, onSelect: () => {}, hint: "Cancel and re-enter the sale" },
         { label: "Cancel sale", icon: Trash2, danger: true, onSelect: () => removeSale(r.id), disabled: !mayDelete || removingId === r.id || !voidable.ok,
-          hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? voidable.reason : "Reverses the stone, the sale and the money" },
+          hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? oneLine(voidable.reason) : "Undoes stone, sale and money" },
       ];
     }
     if (r.kind === "Opening stock") {
       const m = (db.stockMovements ?? []).find(x => x.id === r.id);
       if (!m) return [];
       return [
-        viewAction("View in Stock", "Its ledger, with everything since", `/stock/${m.material}`, "stock"),
+        viewAction("View in Stock", "Its stock ledger", `/stock/${m.material}`, "stock"),
         ...openingStockActions(db, m, {
           onEdit: () => setEditingOpening(m),
           editDenied: stockDenied,
@@ -396,7 +400,7 @@ export function StockActivityLedger() {
     // own purchase with its own supplier due and factory issue — so its actions
     // sit on the lines, which open below.
     if ((r.items?.length ?? 0) > 1) return [
-      { label: "Edit each item", hint: "Open the bill to correct its lines one by one", disabled: true, onSelect: () => {} },
+      { label: "Edit each item", hint: "Open the bill to edit lines", disabled: true, onSelect: () => {} },
     ];
     return purchaseActions(r.items![0].id, "purchase");
   };
@@ -439,40 +443,34 @@ export function StockActivityLedger() {
 
   return (
     <div className="card-luxe p-5">
-      <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">Purchase &amp; Stock Ledger</p>
-        <p className="text-xs text-muted-foreground">
-          {rows.length} entr{rows.length !== 1 ? "ies" : "y"}{filtered ? ` of ${all.length}` : ""}
-          {totalIn > 0 && <> · bought in {fmtMoneyInr(totalIn)}</>}
-          {totalOut > 0 && <> · sold {fmtMoneyInr(totalOut)}</>}
-          {(from || to) && <> · {rangeLabel(from, to)}</>}
-        </p>
-      </div>
+      <SectionTitle className="mb-4" title="Purchase & stock ledger" />
 
-      <LedgerFilters
-        q={q} onQ={setQ}
-        placeholder="Search bill no., party, material, remark…"
-        from={from} to={to}
-        onFrom={setFrom} onTo={setTo}
-        selects={[
-          { label: "Entries", value: kind, onChange: setKind,
-            options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
-          { label: "Materials", value: material, onChange: setMaterial,
-            options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
-              ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
-          { label: "Bills", value: billFilter, onChange: setBillFilter,
-            options: [{ value: "none", label: "No bill number" }] },
-          ...(hasCompanies(db.settings) ? [{ label: "Companies", value: company, onChange: setCompany,
-            options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
-        ]}
-        active={filtered} onReset={reset}
-        onPdf={exportPdf} onCsv={exportCsv}
-      />
-
-      {/* The filters, search and downloads live in the bar above, so the table
-          brings no search or Excel of its own. A new filter (resetKey)
-          starts it again from the first page. */}
+      {/* Search, filters and downloads sit in the table's own toolbar, what was
+          bought in and sold under it (each only when there is any). A new
+          filter (resetKey) starts it again from the first page. */}
       <DataTable
+        summary={totalIn > 0 || totalOut > 0 ? (
+          <StatStrip items={[
+            ...(totalIn > 0 ? [{ label: "Bought in", value: fmtMoneyInr(totalIn), icon: ShoppingCart, sub: `${nBought} ${nBought === 1 ? "entry" : "entries"}` }] : []),
+            ...(totalOut > 0 ? [{ label: "Sold", value: fmtMoneyInr(totalOut), tone: "in" as const, icon: Gem, sub: `${nSold} ${nSold === 1 ? "sale" : "sales"}` }] : []),
+          ]} note={filtered ? `For what the filters show${from || to ? ` · ${rangeLabel(from, to)}` : ""}` : undefined} />
+        ) : undefined}
+        {...ledgerTable({
+          q, onQ: setQ, placeholder: "Search bill no., party, material, remark…",
+          from, to, onFrom: setFrom, onTo: setTo,
+          selects: [
+            { label: "Entry", value: kind, onChange: setKind,
+              options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
+            { label: "Material", value: material, onChange: setMaterial,
+              options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
+                ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },
+            { label: "Bill", value: billFilter, onChange: setBillFilter, allLabel: "Any bill",
+              options: [{ value: "none", label: "No bill number" }] },
+            ...(hasCompanies(db.settings) ? [{ label: "Company", value: company, onChange: setCompany,
+              options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
+          ],
+          onPdf: exportPdf, onCsv: exportCsv,
+        })}
         resetKey={JSON.stringify([ql, from, to, kind, material, billFilter, company])}
         id="stock-activity"
         noun="record"

@@ -2,6 +2,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { FileText, FileSpreadsheet, Search } from "lucide-react";
 import { IfExport } from "@/components/IfExport";
+import type { TableExport, TableFilter } from "@/components/TableToolbar";
 
 /** One dropdown in the bar — "Supplier", "Account", "Mode". "" means All. */
 export interface LedgerSelect {
@@ -9,6 +10,8 @@ export interface LedgerSelect {
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
+  /** What "none chosen" reads as; "All <label>" without it. */
+  allLabel?: string;
 }
 
 /** Is this row inside the chosen range? A blank end of the range is open. */
@@ -27,6 +30,39 @@ export function rangeLabel(from: string, to: string): string {
   if (from) return `From ${f(from)}`;
   if (to) return `Up to ${f(to)}`;
   return "All dates";
+}
+
+/**
+ * A ledger's search, date range, dropdowns and downloads, handed to its
+ * DataTable — they show in the table's one toolbar row (search, Filters,
+ * Export), not in a bar of their own above it. The ledger still narrows its
+ * rows itself, as it works out balances from them.
+ */
+export function ledgerTable(o: {
+  q: string;
+  onQ: (v: string) => void;
+  placeholder: string;
+  from: string;
+  to: string;
+  onFrom: (v: string) => void;
+  onTo: (v: string) => void;
+  selects?: LedgerSelect[];
+  onPdf?: () => void;
+  onCsv?: () => void;
+}): { search: { value: string; onChange: (v: string) => void; placeholder: string }; filters: TableFilter[]; onClearFilters: () => void; exports: TableExport[] } {
+  const selects = o.selects ?? [];
+  return {
+    search: { value: o.q, onChange: o.onQ, placeholder: o.placeholder },
+    filters: [
+      { kind: "date", from: o.from, to: o.to, onChange: (f, t) => { o.onFrom(f); o.onTo(t); } },
+      ...selects.map((s): TableFilter => ({ kind: "select", label: s.label, value: s.value, onChange: s.onChange, options: s.options, allLabel: s.allLabel })),
+    ],
+    onClearFilters: () => { o.onFrom(""); o.onTo(""); selects.forEach(s => s.onChange("")); },
+    exports: [
+      ...(o.onPdf ? [{ label: "PDF", icon: FileText, hint: "Ready to print or send, with the totals", onSelect: o.onPdf }] : []),
+      ...(o.onCsv ? [{ label: "Excel (.csv)", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: o.onCsv }] : []),
+    ],
+  };
 }
 
 /**

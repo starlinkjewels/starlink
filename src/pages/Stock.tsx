@@ -1,4 +1,4 @@
-import { MoreMenu } from "@/components/MoreMenu";
+import { PageHeader } from "@/components/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
@@ -6,8 +6,7 @@ import { loadDb } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances } from "@/lib/manufacturing";
-import { Button } from "@/components/ui/button";
-import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus } from "lucide-react";
+import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
 import { MaterialEditor } from "@/components/MaterialsSettings";
@@ -15,6 +14,27 @@ import { CompanyFilter, useMultiCo } from "@/components/CompanyFields";
 import { StockTransferDialog } from "@/components/StockTransfer";
 import { companiesOf, companyOf } from "@/lib/companies";
 import { ArrowRightLeft } from "lucide-react";
+
+/**
+ * One material's stock, in the app's one figure style: its name and how many
+ * grades, the amount in tabular digits, and the way to its history — the whole
+ * card opens it.
+ */
+function MaterialCard({ name, sub, value, icon: Icon, to, dim }: {
+  name: string; sub: string; value: string; icon: LucideIcon; to: string; dim?: boolean;
+}) {
+  return (
+    <Link to={to} className={`group h-full min-w-0 flex flex-col rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)] transition-shadow hover:shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${dim ? "opacity-70" : ""}`}>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-sm font-medium text-brand-dark truncate">{name}</p>
+        <Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" />
+      </div>
+      <p className="text-[11px] text-muted-foreground truncate">{sub}</p>
+      <p className="mt-2 text-[clamp(1.125rem,4.4vw,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight text-brand-dark break-words">{value}</p>
+      <span className="mt-auto pt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary"><History className="h-3.5 w-3.5" />View History</span>
+    </Link>
+  );
+}
 
 export function StockPage() {
   const { user } = useAuth();
@@ -104,102 +124,39 @@ export function StockPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Stock</h1>
-          <p className="text-sm text-muted-foreground">Gold, diamonds{others.length ? " and other materials" : ""} on hand</p>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <CompanyFilter value={co} onChange={pickCo} />
-          <MoreMenu title="Stock" actions={[
-            { label: "Move between companies", icon: ArrowRightLeft, hint: "Stock from one of our companies to another", onSelect: () => setMoving(true), show: multiCo && user?.role === "admin" },
-            { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild the stock counters from every movement", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
-          ]} />
-        </div>
-      </div>
+      {/* Whose stock is a choice about the whole page, so it sits in the header. */}
+      <PageHeader
+        title="Stock"
+        subtitle="On hand, by material"
+        actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
+        menuTitle="Stock"
+        menu={[
+          { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && user?.role === "admin" },
+          { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild counters from movements", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
+        ]}
+      />
       {moving && <StockTransferDialog onClose={() => setMoving(false)} />}
 
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <div className="card-luxe p-5 flex flex-col">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-amber-500/15 grid place-items-center shrink-0"><Coins className="h-5 w-5 text-amber-600" /></div>
-            <div className="min-w-0">
-              <p className="font-display text-lg text-brand-dark leading-tight">Gold Reserve</p>
-              <p className="text-xs text-muted-foreground">{goldPurities} purit{goldPurities === 1 ? "y" : "ies"} in stock</p>
-            </div>
-          </div>
-          <p className="text-2xl font-display font-bold text-brand-dark mt-4">{goldTotal.toLocaleString()} g</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Total across all purities</p>
-          <div className="mt-4 pt-3 border-t border-border/50">
-            <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
-            </Button>
-          </div>
-        </div>
-
-        <div className="card-luxe p-5 flex flex-col">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-cyan-500/15 grid place-items-center shrink-0"><Gem className="h-5 w-5 text-cyan-600" /></div>
-            <div className="min-w-0">
-              <p className="font-display text-lg text-brand-dark leading-tight">Loose Diamonds</p>
-              <p className="text-xs text-muted-foreground">{diamondShapes} shape{diamondShapes === 1 ? "" : "s"} in stock</p>
-            </div>
-          </div>
-          <p className="text-2xl font-display font-bold text-brand-dark mt-4">{diamondTotal.toLocaleString()} ct</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Pooled by shape, total carats</p>
-          <div className="mt-4 pt-3 border-t border-border/50">
-            <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
-            </Button>
-          </div>
-        </div>
-
-        <div className="card-luxe p-5 flex flex-col">
-          <div className="flex items-center gap-3">
-            <div className="h-12 w-12 rounded-2xl bg-violet-500/15 grid place-items-center shrink-0"><BadgeCheck className="h-5 w-5 text-violet-600" /></div>
-            <div className="min-w-0">
-              <p className="font-display text-lg text-brand-dark leading-tight">Certified Diamonds</p>
-              <p className="text-xs text-muted-foreground">Each with its own certificate</p>
-            </div>
-          </div>
-          <p className="text-2xl font-display font-bold text-brand-dark mt-4">{inStockPackets.length}</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Packet{inStockPackets.length !== 1 ? "s" : ""} in stock</p>
-          <div className="mt-4 pt-3 border-t border-border/50">
-            <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-              <Link to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
-            </Button>
-          </div>
-        </div>
-
-        {others.map(({ m, total, grades }) => {
-          const Icon = m.kind === "stone" ? Gem : m.kind === "finding" ? Link2 : Layers;
-          return (
-            <div key={m.id} className={`card-luxe p-5 flex flex-col ${m.active === false ? "opacity-70" : ""}`}>
-              <div className="flex items-center gap-3">
-                <div className="h-12 w-12 rounded-2xl bg-emerald-500/15 grid place-items-center shrink-0"><Icon className="h-5 w-5 text-emerald-600" /></div>
-                <div className="min-w-0">
-                  <p className="font-display text-lg text-brand-dark leading-tight truncate">{m.name}</p>
-                  <p className="text-xs text-muted-foreground">{KIND_LABEL[m.kind]} · {grades} grade{grades === 1 ? "" : "s"} in stock</p>
-                </div>
-              </div>
-              <p className="text-2xl font-display font-bold text-brand-dark mt-4">{fmtQty(total, m.unit)}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Total across all grades</p>
-              <div className="mt-4 pt-3 border-t border-border/50">
-                <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-                  <Link to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`}><History className="h-4 w-4 text-primary" />View History</Link>
-                </Button>
-              </div>
-            </div>
-          );
-        })}
+      <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
+        <MaterialCard name="Gold Reserve" icon={Coins} sub={`${goldPurities} purit${goldPurities === 1 ? "y" : "ies"} in stock`}
+          value={`${goldTotal.toLocaleString()} g`} to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`} />
+        <MaterialCard name="Loose Diamonds" icon={Gem} sub={`${diamondShapes} shape${diamondShapes === 1 ? "" : "s"} in stock`}
+          value={`${diamondTotal.toLocaleString()} ct`} to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`} />
+        <MaterialCard name="Certified Diamonds" icon={BadgeCheck} sub="One certificate each"
+          value={`${inStockPackets.length} packet${inStockPackets.length !== 1 ? "s" : ""}`} to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`} />
+        {others.map(({ m, total, grades }) => (
+          <MaterialCard key={m.id} name={m.name} icon={m.kind === "stone" ? Gem : m.kind === "finding" ? Link2 : Layers}
+            sub={`${KIND_LABEL[m.kind]} · ${grades} grade${grades === 1 ? "" : "s"} in stock`} value={fmtQty(total, m.unit)}
+            to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`} dim={m.active === false} />
+        ))}
 
         {user?.role === "admin" && (
           <button type="button" onClick={() => setAddingMaterial(true)}
-            className="rounded-2xl border-2 border-dashed border-border/80 p-5 flex flex-col items-center justify-center gap-2 text-center text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors min-h-[180px]">
+            className="rounded-2xl border-2 border-dashed border-border/80 p-4 flex flex-col items-center justify-center gap-1.5 text-center text-muted-foreground hover:border-primary/50 hover:text-primary transition-colors min-h-[8.5rem]">
             <Plus className="h-6 w-6" />
             <span className="font-semibold text-sm">Add another material</span>
-            <span className="text-xs max-w-[16rem]">Platinum, silver, gemstones, pearls, locks — anything a piece uses besides gold and diamonds</span>
+            <span className="text-xs max-w-[16rem]">Platinum, silver, gemstones, findings…</span>
           </button>
         )}
       </div>

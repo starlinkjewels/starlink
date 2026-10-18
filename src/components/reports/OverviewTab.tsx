@@ -65,7 +65,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
 
       {/* Trend */}
       <div className="grid lg:grid-cols-3 gap-4">
-        <Panel title={withProfit ? "Sales, cost & profit — month by month" : "Sales — month by month"} subtitle="By the month each piece was shipped" icon={Activity} className="lg:col-span-2">
+        <Panel title={withProfit ? "Sales, cost & profit — month by month" : "Sales — month by month"} subtitle="By month shipped" icon={Activity} className="lg:col-span-2">
           {data.months.some(m => m.salesUsd > 0) ? (
             <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
@@ -110,7 +110,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
       </div>
 
       <div className="grid lg:grid-cols-3 gap-4">
-        <Panel title="Work in hand" subtitle="Open orders by stage, right now" icon={Workflow}
+        <Panel title="Work in hand" subtitle="Open orders, right now" icon={Workflow}
           actions={<button type="button" onClick={() => goTo("production")} className="text-[11px] text-primary hover:underline">Production →</button>}>
           <div className="h-56">
             <ResponsiveContainer width="100%" height="100%">
@@ -127,7 +127,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
           <p className="text-[11px] text-muted-foreground">{usd(data.pipe.reduce((s, x) => s + x.value, 0), true)} of orders not yet delivered.</p>
         </Panel>
 
-        <Panel title="Sales by item" subtitle="Share of sales in the period" icon={PieIcon}>
+        <Panel title="Sales by item" subtitle="Share of sales" icon={PieIcon}>
           {data.byType.length ? (
             <div className="flex items-center gap-3">
               <div className="h-48 w-40 shrink-0">
@@ -153,7 +153,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
           ) : <Empty />}
         </Panel>
 
-        <Panel title="Top clients" subtitle="By sales in the period" icon={Users}
+        <Panel title="Top clients" subtitle="By sales" icon={Users}
           actions={<button type="button" onClick={() => goTo("clients")} className="text-[11px] text-primary hover:underline">All clients →</button>}>
           {data.top.length ? (
             <ul className="space-y-3">
@@ -172,7 +172,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
       </div>
 
       {/* What needs looking at */}
-      <Panel title="Needs attention" subtitle="Late work, old money owed and quiet clients" icon={AlertTriangle}>
+      <Panel title="Needs attention" subtitle="Late · overdue · quiet clients" icon={AlertTriangle}>
         <div className="grid md:grid-cols-3 gap-4 text-xs">
           <div>
             <p className="font-semibold text-brand-dark mb-2">Late orders <span className="text-destructive">({data.late.length})</span></p>

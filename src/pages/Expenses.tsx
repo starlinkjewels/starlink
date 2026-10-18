@@ -11,11 +11,14 @@ import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Plus, Receipt, X, Filter, Search, Wallet,
-  TrendingUp, TrendingDown, CalendarDays, Trash2, Pencil,
+  Plus, Receipt, X, Wallet,
+  TrendingUp, TrendingDown, Trash2, Pencil,
 } from "lucide-react";
 import { filled, linkList, lockerLabel, noteText, recorded, refLink, when } from "@/components/rowDetails";
 import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
+import { PageHeader, ScrollRow, TabBar } from "@/components/PageHeader";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 
@@ -80,7 +83,6 @@ export function ExpensesPage() {
     if (dateTo && t > +new Date(`${dateTo}T23:59:59`)) return false;
     return true;
   };
-  const clearDates = () => { setDateFrom(""); setDateTo(""); };
 
   // All admin + employee users for the passbook filter
   const staffUsers = useMemo(
@@ -110,15 +112,18 @@ export function ExpensesPage() {
     if (filterEmployee !== "all") list = list.filter(e => e.employeeId === filterEmployee);
     if (filterCategory !== "all") list = list.filter(e => e.category === filterCategory);
     if (search.trim()) {
+      // The one search box: everything the table shows about an expense —
+      // what, category, note, who it was paid to, the client, who recorded it.
       const q = search.toLowerCase();
-      list = list.filter(
-        e => e.title.toLowerCase().includes(q) || (e.note ?? "").toLowerCase().includes(q)
-      );
+      const person = (id?: string) => (id ? db.users.find(u => u.id === id)?.name : undefined) ?? "";
+      const client = (id?: string) => (id ? db.clients.find(c => c.id === id)?.companyName : undefined) ?? "";
+      list = list.filter(e => [e.title, e.category, e.note, person(e.paidToEmployeeId), client(e.clientId), person(e.employeeId)]
+        .some(t => (t ?? "").toLowerCase().includes(q)));
     }
     list = list.filter(e => inDateRange(e.createdAt));
     return list.sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.expenses, filterEmployee, filterCategory, search, dateFrom, dateTo]);
+  }, [db.expenses, db.users, db.clients, filterEmployee, filterCategory, search, dateFrom, dateTo]);
 
   const myTotals = totalsOf(myExpenses);
 
@@ -223,209 +228,101 @@ export function ExpensesPage() {
   const closeAdd = () => { setShowAdd(false); setError(""); setForm(EMPTY_FORM); };
   // The footer's preview of the amount; the save still reads the field itself.
   const previewAmount = Number(form.amount) > 0 ? Number(form.amount) : 0;
-  // The admin's open tab — for the count and total beside the switch.
-  const tabList = tab === "mine" ? myExpenses : passbookExpenses;
 
-  // Reusable date-range control (from → to) used on both the My Expenses and
-  // Passbook filter bars.
-  const dateFilter = (
-    <div className="flex items-center gap-1.5 bg-white border border-border/80 rounded-xl px-2.5 h-9 text-sm">
-      <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-      <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} aria-label="From date"
-        className="bg-transparent outline-none text-sm w-[115px] text-foreground" />
-      <span className="text-muted-foreground text-xs">→</span>
-      <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} aria-label="To date"
-        className="bg-transparent outline-none text-sm w-[115px] text-foreground" />
-      {(dateFrom || dateTo) && (
-        <button onClick={clearDates} className="text-muted-foreground hover:text-foreground shrink-0" title="Clear dates"><X className="h-3.5 w-3.5" /></button>
-      )}
-    </div>
-  );
+  // What narrows each tab's list, behind its table's one Filters button. The
+  // dates are shared by both tabs, as they always were.
+  const dateRange: TableFilter = { kind: "date", from: dateFrom, to: dateTo, onChange: (f, t) => { setDateFrom(f); setDateTo(t); } };
+  const mineFilters: TableFilter[] = [dateRange];
+  if (isAdmin) {
+    // Not narrowed ("") is this tab's own default: just my expenses.
+    mineFilters.push({
+      kind: "select", label: "Employee", allLabel: "My Expenses", value: mineFilter === "self" ? "" : mineFilter,
+      onChange: v => { setMineFilter(v || "self"); setMineClientFilter("all"); },
+      options: [
+        { value: "all", label: "All Employees" },
+        ...staffUsers.filter(u => u.id !== user!.id).map(u => ({ value: u.id, label: `${u.name} (${u.role})` })),
+      ],
+    });
+    // Client — only when viewing all or a specific employee.
+    if (mineFilter !== "self") mineFilters.push({
+      kind: "select", label: "Client", allLabel: "All Clients", value: mineClientFilter === "all" ? "" : mineClientFilter,
+      onChange: v => setMineClientFilter(v || "all"),
+      options: db.clients.map(c => ({ value: c.id, label: c.companyName })),
+    });
+  }
+  const clearMine = () => { setDateFrom(""); setDateTo(""); setMineFilter("self"); setMineClientFilter("all"); };
+  const passbookFilters: TableFilter[] = [
+    dateRange,
+    { kind: "select", label: "Staff", allLabel: "All Staff", value: filterEmployee === "all" ? "" : filterEmployee,
+      onChange: v => setFilterEmployee(v || "all"),
+      options: staffUsers.map(u => ({ value: u.id, label: `${u.name} (${u.role})` })) },
+    { kind: "select", label: "Category", allLabel: "All Categories", value: filterCategory === "all" ? "" : filterCategory,
+      onChange: v => setFilterCategory(v || "all"),
+      options: allCategoriesEverUsed.map(c => ({ value: c, label: c })) },
+  ];
+  const clearPassbook = () => { setDateFrom(""); setDateTo(""); setFilterEmployee("all"); setFilterCategory("all"); };
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto">
-      {/* ── Page header: what the page is, and its one action ── */}
-      <div className="flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark leading-tight">Expenses</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            {isAdmin
-              ? "Record your expenses and review all staff entries in the passbook."
-              : "Log your expenses and track your net profit."}
-          </p>
-        </div>
-        {can("expenses", "add") && (
-          <button
-            onClick={() => setShowAdd(true)}
-            className="btn-hero flex items-center gap-2 px-4 h-10 rounded-xl text-sm font-semibold shrink-0"
-          >
-            <Plus className="h-4 w-4" />
-            Add Expense
-          </button>
-        )}
-      </div>
+      <PageHeader
+        title="Expenses"
+        primary={can("expenses", "add") ? { label: "Add Expense", icon: Plus, onClick: () => setShowAdd(true) } : null}
+      />
 
-      {/* ── Employee profit summary — two across on a phone (net profit under them), three on a laptop ── */}
-      {isEmployee && (
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0 }}
-            className="card-luxe p-4 min-w-0"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-7 w-7 rounded-lg bg-emerald-500/10 grid place-items-center shrink-0">
-                <TrendingUp className="h-3.5 w-3.5 text-emerald-600" />
-              </div>
-              <p className="text-xs text-muted-foreground font-medium">Revenue</p>
-            </div>
-            <p className="text-lg sm:text-xl font-bold text-brand-dark tabular-nums break-words">{fmtMoney(myRevenue)}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">From delivered orders</p>
-          </motion.div>
+      {/* ── Employee profit summary. The signs only when the three really add
+          up: every expense in dollars, nothing converted or left out. ── */}
+      {isEmployee && (() => {
+        const sums = !!myNet && !myNet.converted && myNet.left.size === 0;
+        const net = myNet?.net ?? 0;
+        return (
+          <StatStrip items={[
+            { label: "Revenue", value: fmtMoney(myRevenue), icon: TrendingUp, sub: "Delivered orders" },
+            // Can read "₹84,910 + A$1,200" — it wraps rather than being cut off.
+            { label: "Expenses", value: <span className="whitespace-normal break-words">{fmtCcyMix(myTotals)}</span>, tone: "out", icon: TrendingDown, op: sums ? "−" : undefined },
+            { label: "Net profit", value: `${myNet?.converted ? "≈ " : ""}${fmtMoney(net)}`, tone: "strong", icon: Wallet,
+              op: sums ? "=" : undefined, sub: myNet?.converted ? "In $, at each day's rate" : undefined },
+          ]} note={myNet && myNet.left.size > 0 ? `${fmtCcyMix(myNet.left)} not counted — no exchange rate on file` : undefined} />
+        );
+      })()}
 
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 }}
-            className="card-luxe p-4 min-w-0"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-7 w-7 rounded-lg bg-destructive/10 grid place-items-center shrink-0">
-                <TrendingDown className="h-3.5 w-3.5 text-destructive" />
-              </div>
-              <p className="text-xs text-muted-foreground font-medium">Expenses</p>
-            </div>
-            {/* Can read "₹84,910 + A$1,200" — allowed to wrap rather than push the page sideways. */}
-            <p className="text-lg sm:text-xl font-bold text-destructive tabular-nums break-words">{fmtCcyMix(myTotals)}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">{myExpenses.length} entries</p>
-          </motion.div>
-
-          <motion.div
-            initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
-            className="card-luxe p-4 min-w-0 col-span-2 sm:col-span-1"
-          >
-            <div className="flex items-center gap-2 mb-2">
-              <div className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 ${(myNet?.net ?? 0) >= 0 ? "bg-emerald-500/10" : "bg-destructive/10"}`}>
-                <Wallet className={`h-3.5 w-3.5 ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`} />
-              </div>
-              <p className="text-xs text-muted-foreground font-medium">Net Profit</p>
-            </div>
-            <p className={`text-lg sm:text-xl font-bold tabular-nums break-words ${(myNet?.net ?? 0) >= 0 ? "text-emerald-600" : "text-destructive"}`}>
-              {myNet?.converted ? "≈ " : ""}{fmtMoney(myNet?.net ?? 0)}
-            </p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              Revenue − Expenses{myNet?.converted ? ", in $ at each day's rate" : ""}
-            </p>
-            {myNet && myNet.left.size > 0 && (
-              <p className="text-[11px] text-amber-700 mt-0.5">
-                {fmtCcyMix(myNet.left)} not counted — no exchange rate on file
-              </p>
-            )}
-          </motion.div>
-        </div>
-      )}
-
-      {/* ── Admin tab switcher, with what the list below adds up to ── */}
+      {/* ── Admin tabs. What the open list adds up to is under its table. ── */}
       {isAdmin && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          {/* Full width on a phone (two equal halves), its own size on a laptop. */}
-          <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl sm:inline-grid sm:w-fit">
-            {(["mine", "passbook"] as const).map(t => (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                aria-pressed={tab === t}
-                className={`px-5 py-2 rounded-lg text-sm font-medium whitespace-nowrap transition-all ${
-                  tab === t
-                    ? "bg-white shadow-soft text-brand-dark"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t === "mine" ? "My Expenses" : "All Passbook"}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {tabList.length} {tabList.length === 1 ? "entry" : "entries"}
-            {" · "}
-            <span className="font-semibold text-destructive tabular-nums">{fmtCcyMix(totalsOf(tabList))}</span>
-          </p>
-        </div>
+        <TabBar label="Expenses" value={tab} onChange={setTab}
+          tabs={[{ key: "mine", label: "My Expenses" }, { key: "passbook", label: "All Passbook" }]} />
       )}
 
-      {/* ── My Expenses list ── */}
+      {/* ── My Expenses list — date range for everyone, employee/client for an admin, in its table's Filters ── */}
       {(isEmployee || (isAdmin && tab === "mine")) && (
-        <div className="space-y-3">
-          {/* Filter row — date range for everyone, employee/client pickers for admin */}
-          <div className="flex items-center gap-2 flex-wrap">
-            {dateFilter}
-            {isAdmin && (
-              <>
-              {/* Employee picker */}
-              <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
-                <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                <Select value={mineFilter} onValueChange={v => { setMineFilter(v); setMineClientFilter("all"); }}>
-                  <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="self">My Expenses</SelectItem>
-                    <SelectItem value="all">All Employees</SelectItem>
-                    {staffUsers.filter(u => u.id !== user!.id).map(u => (
-                      <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Client picker — only when viewing all or a specific employee */}
-              {mineFilter !== "self" && (
-                <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
-                  <Select value={mineClientFilter} onValueChange={setMineClientFilter}>
-                    <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Clients</SelectItem>
-                      {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-
-              {/* Reset link */}
-              {(mineFilter !== "self" || mineClientFilter !== "all") && (
-                <button
-                  onClick={() => { setMineFilter("self"); setMineClientFilter("all"); }}
-                  className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X className="h-3 w-3" /> Reset
-                </button>
-              )}
-              </>
-            )}
-          </div>
-
-          <ExpenseList
-            expenses={myExpenses}
-            showEmployee={isAdmin && mineFilter !== "self"}
-            users={db.users}
-            clients={db.clients}
-            lockers={db.lockers}
-            orders={db.orders}
-            onDelete={handleDelete}
-            onEdit={setEditingId}
-            rights={expenseRight}
-          />
-        </div>
+        <ExpenseList
+          expenses={myExpenses}
+          showEmployee={isAdmin && mineFilter !== "self"}
+          users={db.users}
+          clients={db.clients}
+          lockers={db.lockers}
+          orders={db.orders}
+          onDelete={handleDelete}
+          onEdit={setEditingId}
+          rights={expenseRight}
+          filters={mineFilters}
+          onClearFilters={clearMine}
+          resetKey={JSON.stringify(["mine", dateFrom, dateTo, mineFilter, mineClientFilter])}
+        />
       )}
 
       {/* ── Admin passbook ── */}
       {isAdmin && tab === "passbook" && (
         <div className="space-y-4">
-          {/* Employee summary cards */}
+          {/* Employee summary cards — a tap narrows the list to that person. On a
+              phone the row scrolls sideways. */}
           {filterEmployee === "all" && employeeSummary.length > 0 && (
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            <ScrollRow className="flex gap-3 p-0.5 sm:p-0 sm:grid sm:grid-cols-3 md:grid-cols-4 sm:overflow-visible">
               {employeeSummary.map(({ user: u, totals, count }) => (
                 <motion.button
                   key={u.id}
                   initial={{ opacity: 0, scale: 0.97 }}
                   animate={{ opacity: 1, scale: 1 }}
                   onClick={() => setFilterEmployee(u.id)}
-                  className="card-luxe p-4 text-left hover:border-primary/30 hover:shadow-md transition-all active:scale-[0.98]"
+                  className="card-luxe p-4 text-left snap-start shrink-0 min-w-[10rem] sm:min-w-0 hover:border-primary/30 hover:shadow-md transition-all active:scale-[0.98]"
                 >
                   <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs font-bold grid place-items-center mb-2.5">
                     {u.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
@@ -436,61 +333,11 @@ export function ExpensesPage() {
                   <p className="text-[11px] text-muted-foreground">{count} {count === 1 ? "entry" : "entries"}</p>
                 </motion.button>
               ))}
-            </div>
+            </ScrollRow>
           )}
 
-          {/* Filters bar */}
-          <div className="flex flex-wrap gap-2">
-            {dateFilter}
-            {/* Employee filter */}
-            <div className="relative flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm min-w-[160px]">
-              <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <Select value={filterEmployee} onValueChange={setFilterEmployee}>
-                <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 flex-1 focus:ring-0"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Staff</SelectItem>
-                  {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {filterEmployee !== "all" && (
-                <button
-                  onClick={() => setFilterEmployee("all")}
-                  className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Category filter */}
-            <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl pl-3 pr-1.5 h-9 text-sm">
-              <Select value={filterCategory} onValueChange={setFilterCategory}>
-                <SelectTrigger className="h-7 border-none bg-transparent shadow-none px-1.5 gap-1 focus:ring-0"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Categories</SelectItem>
-                  {allCategoriesEverUsed.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Search */}
-            <div className="flex items-center gap-2 bg-white border border-border/80 rounded-xl px-3 h-9 flex-1 min-w-[150px]">
-              <Search className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <input
-                value={search}
-                onChange={e => setSearch(e.target.value)}
-                placeholder="Search by title or note…"
-                className="bg-transparent border-none outline-none text-sm flex-1 text-foreground placeholder:text-muted-foreground"
-              />
-              {search && (
-                <button onClick={() => setSearch("")} className="text-muted-foreground hover:text-foreground shrink-0">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Passbook list */}
+          {/* Passbook list — its search (title or note), dates, staff and
+              category sit in the table's own toolbar. */}
           <ExpenseList
             expenses={passbookExpenses}
             showEmployee={true}
@@ -501,6 +348,10 @@ export function ExpensesPage() {
             onDelete={handleDelete}
             onEdit={setEditingId}
             rights={expenseRight}
+            search={{ value: search, onChange: setSearch, placeholder: "Search expense, person or client…" }}
+            filters={passbookFilters}
+            onClearFilters={clearPassbook}
+            resetKey={JSON.stringify(["passbook", dateFrom, dateTo, filterEmployee, filterCategory, search])}
           />
         </div>
       )}
@@ -558,7 +409,7 @@ export function ExpensesPage() {
             <label className="text-sm font-medium text-foreground mb-1.5 block">Pay from Account <span className="text-destructive">*</span></label>
             {activeLockers.length === 0 && (
               <p className="text-xs text-amber-600 mb-1.5">
-                No accounts yet — <a href="/locker" className="underline font-medium">create one first</a> before recording an expense.
+                No accounts yet — <a href="/locker" className="underline font-medium">create one first</a>.
               </p>
             )}
             <Select value={expLockerId} onValueChange={setExpLockerId}>
@@ -612,7 +463,7 @@ export function ExpensesPage() {
                   {staffUsers.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
                 </SelectContent>
               </Select>
-              <p className="text-[11px] text-muted-foreground mt-1">Shows on this member's salary ledger (Employees → their page).</p>
+              <p className="text-[11px] text-muted-foreground mt-1">Shows on their salary ledger.</p>
             </div>
           )}
 
@@ -679,9 +530,16 @@ interface ExpenseListProps {
   onEdit: (id: string) => void;
   /** Why this person may not edit / delete an expense — nothing when they may. */
   rights: (e: Expense, action: "edit" | "delete") => string | undefined;
+  /** The page's own search, when the page narrows the list itself (the passbook). */
+  search?: { value: string; onChange: (v: string) => void; placeholder?: string };
+  /** What else narrows the list — the table's Filters button and chips. */
+  filters?: TableFilter[];
+  onClearFilters?: () => void;
+  /** Changes with the page's filters, so the table starts again from page 1. */
+  resetKey?: string;
 }
 
-function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, onEdit, rights }: ExpenseListProps) {
+function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, onEdit, rights, search, filters, onClearFilters, resetKey }: ExpenseListProps) {
   const can = useCan();
   // A nil total reads in the list's one currency ("$0"), else in rupees.
   const codes = new Set(expenses.map(e => ccy(e.currency)));
@@ -715,6 +573,10 @@ function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, 
         defaultSort={{ key: "date", dir: "desc" }}
         searchText={e => [e.title, e.category, e.note, userName(e.paidToEmployeeId), clientName(e.clientId), userName(e.employeeId)].filter(Boolean).join(" ")}
         searchPlaceholder="Search expenses"
+        search={search}
+        filters={filters}
+        onClearFilters={onClearFilters}
+        resetKey={resetKey}
         exportName="Expenses"
         // A total per currency ("₹84,910 + A$1,200") — rupees and dollars never added.
         totals={{ amount: rows => <span className="text-destructive">{fmtCcyMix(totalsOf(rows), nilCcy)}</span> }}
@@ -723,8 +585,8 @@ function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, 
         rowActions={e => {
           const editWhy = rights(e, "edit"), delWhy = rights(e, "delete");
           return [
-            { label: "Edit", icon: Pencil, onSelect: () => onEdit(e.id), disabled: !!editWhy, hint: editWhy ?? "Every field, and its account entry with it" },
-            { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), disabled: !!delWhy, hint: delWhy },
+            { label: "Edit", icon: Pencil, onSelect: () => onEdit(e.id), disabled: !!editWhy, hint: oneLine(editWhy) ?? "With its account entry" },
+            { label: "Delete", icon: Trash2, danger: true, onSelect: () => onDelete(e.id), disabled: !!delWhy, hint: oneLine(delWhy) },
           ];
         }}
         // Opened: the account it was paid from, who recorded it and when, the note
@@ -740,7 +602,7 @@ function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, 
           })) },
           { label: "Shipment", value: e.shipmentRef },
         ])}
-        emptyText={<span className="inline-flex flex-col items-center gap-1"><Receipt className="h-7 w-7 text-muted-foreground/40" /><span className="font-medium">No expenses found</span><span className="text-xs text-muted-foreground/70">Add your first expense using the button above.</span></span>}
+        emptyText="No expenses yet."
       />
     </div>
   );

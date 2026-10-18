@@ -1,7 +1,8 @@
 import { useState, type ReactNode } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
-  ArrowLeft, ArrowRightLeft, CircleX, Gem, History, Layers, Lock, Maximize2, Minus, PackagePlus, Pencil, Play, Plus,
+  ArrowRightLeft, CircleX, Gem, History, Layers, Lock, Maximize2, Minus, PackagePlus, Pencil, Play, Plus,
   RotateCcw, ShoppingBag, Split, Tag, Trash2, Undo2, type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -12,9 +13,9 @@ import {
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { Button } from "@/components/ui/button";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import type { MoreAction } from "@/components/MoreMenu";
+import { PageHeader, TabBar } from "@/components/PageHeader";
 import { StatusBadge } from "@/components/StatusBadge";
 import { CompanyBadge, useMultiCo } from "@/components/CompanyFields";
 import { MoveOfficeDialog, OfficeChip } from "@/components/ReadyStockOffices";
@@ -154,10 +155,10 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const actions: MoreAction[] = [
     // Edit is the button beside this menu; without the access it shows here, greyed.
     { label: "Edit", icon: Pencil, hint: editWhy, disabled: true, onSelect: () => undefined, show: !canEdit },
-    { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(office)}` : "Sold out — nothing here to move"),
+    { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(office)}` : "Sold out — nothing to move"),
       disabled: !canEdit || item.quantity <= 0, onSelect: () => setMoving(true) },
     { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
-    { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece chosen" : "Sold out — nothing left to sell",
+    { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece" : "Sold out — nothing left to sell",
       disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref) },
     { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: del },
   ];
@@ -228,39 +229,32 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
   return (
     <div className="max-w-6xl mx-auto space-y-5 min-w-0">
-      <Link to="/ready-stock" className="inline-flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Ready Stock
-      </Link>
-
-      {/* ── Header: what it is, where it is, what can be done ── */}
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark break-words">{item.name}</h1>
-          <div className="flex flex-wrap items-center gap-1.5 mt-2">
-            {stockPill(item.quantity, true)}
-            <OfficeChip office={office} />
-            {canManage && <CompanyBadge id={companyOf(item)} />}
-            {canManage && item.fromReturn && <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>}
-          </div>
+      {/* ── Header: what it is, where it is, what can be done. The ⋯ is named
+          for the piece, as on its card in the list. ── */}
+      <PageHeader
+        back={{ label: "Back to Ready Stock", to: "/ready-stock" }}
+        title={item.name}
+        primary={canManage
+          ? (canEdit ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null)
+          : (item.quantity > 0 ? { label: "Order this piece", icon: ShoppingBag, onClick: () => nav(sellHref) } : null)}
+        menu={canManage ? actions : undefined}
+        menuLabel={`Actions for ${item.name}`}
+      >
+        <div className="flex flex-wrap items-center gap-1.5 mt-2">
+          {stockPill(item.quantity, true)}
+          <OfficeChip office={office} />
+          {canManage && <CompanyBadge id={companyOf(item)} />}
+          {canManage && item.fromReturn && <span className="inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800">Returned by a client</span>}
         </div>
-        {canManage ? (
-          <div className="flex items-center gap-2 shrink-0">
-            {canEdit && <Button onClick={() => setEditing(true)} className="btn-hero h-10 rounded-xl"><Pencil className="h-4 w-4 mr-2" />Edit</Button>}
-            <MoreMenu label={`Actions for ${item.name}`} actions={actions} />
-          </div>
-        ) : item.quantity > 0 && (
-          <Button asChild className="btn-hero h-10 rounded-xl shrink-0">
-            <Link to={sellHref}><ShoppingBag className="h-4 w-4 mr-2" />Order this piece</Link>
-          </Button>
-        )}
-      </div>
+      </PageHeader>
 
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-start">
         {/* ── Gallery ── */}
         <div className="space-y-3 min-w-0">
-          <div className="relative aspect-square w-full rounded-2xl bg-white ring-1 ring-border/60 overflow-hidden grid place-items-center shadow-soft">
+          {/* No photo yet: a small tile, so the price is not pushed off the screen. */}
+          <div className={`relative w-full rounded-2xl bg-white ring-1 ring-border/60 overflow-hidden grid place-items-center shadow-soft ${cur ? "aspect-square" : "h-32 sm:h-40"}`}>
             {!cur ? (
-              <div className="w-full h-full grid place-items-center bg-secondary/50 text-muted-foreground/40"><Gem className="h-16 w-16" /></div>
+              <div className="w-full h-full grid place-items-center bg-secondary/50 text-muted-foreground/40"><Gem className="h-10 w-10" /></div>
             ) : cur.kind === "video" ? (
               <video key={cur.src} src={cur.src} controls playsInline preload="metadata" className="w-full h-full object-contain bg-black" />
             ) : (
@@ -332,7 +326,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
           </div>
 
           <div className="card-luxe p-4 sm:p-5">
-            <h2 className="font-display text-lg text-brand-dark">Specifications</h2>
+            <SectionTitle title="Specifications" />
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
               <Fact label="Type">{item.jewelleryType}</Fact>
               <Fact label="Metal">{item.metal}</Fact>
@@ -346,7 +340,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
           {/* Notes can name the client a piece came back from — staff only, as on the list. */}
           {canManage && item.notes && (
             <div className="card-luxe p-4 sm:p-5">
-              <h2 className="font-display text-lg text-brand-dark">Notes</h2>
+              <SectionTitle title="Notes" />
               <p className="mt-2 text-sm text-foreground/80 whitespace-pre-wrap break-words">{item.notes}</p>
             </div>
           )}
@@ -354,7 +348,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
           {/* A client: where else the same piece can be had. */}
           {!canManage && lots.length > 0 && (
             <div className="card-luxe p-4 sm:p-5">
-              <h2 className="font-display text-lg text-brand-dark">Also at</h2>
+              <SectionTitle title="Also at" />
               <div className="mt-2 flex flex-wrap gap-2">
                 {lots.map(l => (
                   <Link key={l.id} to={`/ready-stock/${l.id}`} className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-sm hover:bg-secondary/50">
@@ -369,74 +363,67 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
       {/* ── History, sales, other lots — staff only ── */}
       {canManage && (
-        <div className="card-luxe p-3 sm:p-4 space-y-4 min-w-0">
-          <div role="tablist" aria-label="About this piece" className="flex gap-1.5 overflow-x-auto no-scrollbar">
-            {tabs.map(t => (
-              <button key={t.key} type="button" role="tab" aria-selected={tab === t.key} onClick={() => setTab(t.key)}
-                className={`shrink-0 inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors ${tab === t.key ? "bg-primary text-primary-foreground shadow-soft" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
-                <t.icon className="h-3.5 w-3.5" />{t.label}
-                <span className={`min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold grid place-items-center tabular-nums ${tab === t.key ? "bg-white/20" : "bg-secondary"}`}>{t.n}</span>
-              </button>
-            ))}
-          </div>
-
-          {tab === "history" && (
-            timeline.length ? (
-              <ol className="px-1 sm:px-2">
-                {timeline.map((e, i) => {
-                  const k = KIND[e.kind] ?? KIND.edited;
-                  const who = nameOfUser(e.by) || e.byName;
-                  return (
-                    <li key={`${e.at}-${i}`} className="relative flex gap-3 pb-5 last:pb-0">
-                      {/* The line joining one event to the next. */}
-                      {i < timeline.length - 1 && <span aria-hidden className="absolute left-4 top-9 bottom-0 w-px -translate-x-1/2 bg-border" />}
-                      <span className={`relative h-8 w-8 shrink-0 rounded-full grid place-items-center ${k.tone}`}><k.icon className="h-4 w-4" /></span>
-                      <div className="min-w-0 flex-1 pt-0.5">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{k.label}</span>
-                          {e.kind === "cost" && <CellTag>Admin only</CellTag>}
+        <div className="space-y-3 min-w-0">
+          <TabBar label="About this piece" tabs={tabs.map(t => ({ key: t.key, label: t.label, icon: t.icon, count: t.n }))} value={tab} onChange={setTab} />
+          <div role="tabpanel" className="card-luxe p-3 sm:p-4 min-w-0">
+            {tab === "history" && (
+              timeline.length ? (
+                <ol className="px-1 sm:px-2">
+                  {timeline.map((e, i) => {
+                    const k = KIND[e.kind] ?? KIND.edited;
+                    const who = nameOfUser(e.by) || e.byName;
+                    return (
+                      <li key={`${e.at}-${i}`} className="relative flex gap-3 pb-5 last:pb-0">
+                        {/* The line joining one event to the next. */}
+                        {i < timeline.length - 1 && <span aria-hidden className="absolute left-4 top-9 bottom-0 w-px -translate-x-1/2 bg-border" />}
+                        <span className={`relative h-8 w-8 shrink-0 rounded-full grid place-items-center ${k.tone}`}><k.icon className="h-4 w-4" /></span>
+                        <div className="min-w-0 flex-1 pt-0.5">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{k.label}</span>
+                            {e.kind === "cost" && <CellTag>Admin only</CellTag>}
+                          </div>
+                          <p className="text-sm text-brand-dark break-words">{e.text}</p>
+                          {refOf(e)}
+                          <p className="text-[11px] text-muted-foreground mt-0.5">{who ? `${who} · ` : ""}{when(e.at)}</p>
                         </div>
-                        <p className="text-sm text-brand-dark break-words">{e.text}</p>
-                        {refOf(e)}
-                        <p className="text-[11px] text-muted-foreground mt-0.5">{who ? `${who} · ` : ""}{when(e.at)}</p>
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            ) : <p className="py-10 text-center text-sm text-muted-foreground">Nothing recorded for this piece yet.</p>
-          )}
+                      </li>
+                    );
+                  })}
+                </ol>
+              ) : <p className="py-10 text-center text-sm text-muted-foreground">Nothing recorded for this piece yet.</p>
+            )}
 
-          {tab === "sales" && (
-            <DataTable
-              id="ready-stock-sales"
-              controls="none"
-              noun="sale"
-              rows={sales}
-              columns={salesCols}
-              rowKey={o => o.id}
-              rowHref={o => `/orders/${o.id}`}
-              canClickRow={mine}
-              defaultSort={{ key: "date", dir: "desc" }}
-              emptyText="Not sold on any order yet."
-            />
-          )}
-
-          {tab === "lots" && (
-            <div className="space-y-2">
-              {lots.length > 0 && <p className="text-xs text-muted-foreground px-1">The same piece split across offices — <span className="font-semibold text-brand-dark">{familyPieces} piece{familyPieces !== 1 ? "s" : ""}</span> in stock in all, {item.quantity} of them here.</p>}
+            {tab === "sales" && (
               <DataTable
-                id="ready-stock-lots"
+                id="ready-stock-sales"
                 controls="none"
-                noun="lot"
-                rows={lots}
-                columns={lotCols}
-                rowKey={l => l.id}
-                rowHref={l => `/ready-stock/${l.id}`}
-                emptyText="This piece is all in one place — moving some of it to another office makes a lot there."
+                noun="sale"
+                rows={sales}
+                columns={salesCols}
+                rowKey={o => o.id}
+                rowHref={o => `/orders/${o.id}`}
+                canClickRow={mine}
+                defaultSort={{ key: "date", dir: "desc" }}
+                emptyText="Not sold on any order yet."
               />
-            </div>
-          )}
+            )}
+
+            {tab === "lots" && (
+              <div className="space-y-2">
+                {lots.length > 0 && <p className="text-xs text-muted-foreground px-1"><span className="font-semibold text-brand-dark">{familyPieces} piece{familyPieces !== 1 ? "s" : ""}</span> in all offices · {item.quantity} here</p>}
+                <DataTable
+                  id="ready-stock-lots"
+                  controls="none"
+                  noun="lot"
+                  rows={lots}
+                  columns={lotCols}
+                  rowKey={l => l.id}
+                  rowHref={l => `/ready-stock/${l.id}`}
+                  emptyText="All in one place."
+                />
+              </div>
+            )}
+          </div>
         </div>
       )}
 

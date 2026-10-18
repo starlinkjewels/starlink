@@ -1,4 +1,6 @@
 import { CurrencyRatesSettings } from "@/components/CurrencyRatesSettings";
+import { InfoTip, SectionTitle } from "@/components/SectionTitle";
+import { PageHeader, TabBar } from "@/components/PageHeader";
 import { materialUnit } from "@/lib/materials";
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
@@ -778,11 +780,13 @@ export function SettingsPage() {
 
   return (
     <div className="space-y-5">
-      <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Settings</h1>
+      <PageHeader title="Settings" />
 
       <div className="grid lg:grid-cols-[230px_1fr] gap-5 items-start">
-        {/* Section nav — vertical rail on desktop, scrollable pills on mobile */}
-        <nav className="lg:sticky lg:top-4 flex lg:flex-col gap-1 overflow-x-auto lg:overflow-visible -mx-1 px-1 pb-1 lg:pb-0 lg:pr-0">
+        {/* Section nav — the shared tab bar on a phone or tablet, a rail on a laptop. */}
+        <TabBar className="lg:hidden min-w-0" label="Settings" value={activeId ?? ""} onChange={setActive}
+          tabs={sections.map(s => ({ key: s.id, label: s.label, icon: s.icon }))} />
+        <nav className="max-lg:hidden lg:sticky lg:top-4 flex flex-col gap-1">
           {sections.map((s) => {
             const Icon = s.icon;
             const on = activeId === s.id;
@@ -807,7 +811,7 @@ export function SettingsPage() {
       {/* Company */}
       {activeId === "company" && (
       <div className="card-luxe p-6 space-y-4">
-        <h3 className="font-semibold">Company</h3>
+        <SectionTitle title="Company" />
         <div>
           <Label className="text-xs">Company Name</Label>
           <Input
@@ -827,7 +831,7 @@ export function SettingsPage() {
             }
           />
         </label>
-        <AsyncButton onClick={save} className="btn-hero rounded-xl w-full">
+        <AsyncButton onClick={save} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
           Save Settings
         </AsyncButton>
       </div>
@@ -840,9 +844,7 @@ export function SettingsPage() {
           <FileText className="h-4 w-4 text-primary" />
           <div>
             <h3 className="font-semibold">Invoice / Bill Settings</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Address, bank details, QR codes and stamp shown on every printed bill
-            </p>
+            <p className="text-xs text-muted-foreground mt-0.5">On every printed bill</p>
           </div>
         </div>
 
@@ -977,7 +979,7 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <AsyncButton onClick={saveInvoice} className="btn-hero rounded-xl w-full">
+        <AsyncButton onClick={saveInvoice} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
           Save Invoice Settings
         </AsyncButton>
       </div>
@@ -987,10 +989,7 @@ export function SettingsPage() {
       {activeId === "pricing" && (
         <div className="card-luxe p-6 space-y-5">
           <div>
-            <h3 className="font-semibold">Order Value Pricing Rates</h3>
-            <p className="text-xs text-muted-foreground mt-0.5">
-              Used to auto-estimate order value on new orders. Staff can override per order.
-            </p>
+            <h3 className="font-semibold flex items-center gap-1.5">Order Value Pricing Rates<InfoTip text="Estimates a new order's value. Staff can change it per order." /></h3>
           </div>
 
           <div className="grid grid-cols-2 gap-4">
@@ -1060,9 +1059,7 @@ export function SettingsPage() {
                   Exchange Rates for Profit (₹ per $1) — admin only
                 </Label>
                 <p className="text-[11px] text-muted-foreground">
-                  Each rate holds from its date until the next one. A sale is converted at the rate in force on
-                  the day it was dispatched — an order shipped in March is worth what the dollar fetched in March,
-                  not what it fetches today. Add a new rate whenever the bank rate moves enough to matter.
+                  A sale converts at the rate on its dispatch day.
                 </p>
                 {(() => {
                   const table = fxTableOf(liveDb);
@@ -1198,10 +1195,8 @@ export function SettingsPage() {
                   </p>
                   {!ready ? (
                     <p className="text-muted-foreground">
-                      The security update that keeps ready-stock costs and exchange rates admin-only is not live yet.
-                      Until it is deployed they stay where they are — rates readable by staff, and ready-stock costs
-                      readable by <span className="font-semibold text-destructive">clients too</span>, from the raw data even
-                      though the screens hide them.
+                      Security update not live yet — exchange rates are still readable by staff, and
+                      ready-stock costs by <span className="font-semibold text-destructive">clients too</span>, in the raw data.
                     </p>
                   ) : owed ? (
                     <>
@@ -1281,7 +1276,7 @@ export function SettingsPage() {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                default cashback for gift-card-enabled clients — this % of each delivered order becomes a gift card for their next order. Only applies to clients you turn on; override per client on their page. 0 = off.
+                Back as a gift card on each delivered order — clients you turn on only. 0 = off.
               </p>
             </div>
 
@@ -1312,7 +1307,7 @@ export function SettingsPage() {
                 />
               </div>
               <p className="text-[11px] text-muted-foreground">
-                default cap on how much of a single order a gift card can cover — the rest carries to the next order. Override per client on their page.
+                Most of one order a gift card can pay. Override per client.
               </p>
             </div>
           </div>
@@ -1330,7 +1325,7 @@ export function SettingsPage() {
             </span>
           </div>
 
-          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl w-full">
+          <AsyncButton onClick={saveRates} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
             Save Pricing Rates
           </AsyncButton>
         </div>
@@ -1343,7 +1338,6 @@ export function SettingsPage() {
             <Tag className="h-4 w-4 text-primary" />
             <div>
               <h3 className="font-semibold">Labels &amp; Barcode</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Jewellery band printing and label-printer profiles</p>
             </div>
           </div>
 
@@ -1411,7 +1405,7 @@ export function SettingsPage() {
                   <div className="h-8 w-8 rounded-lg bg-primary/10 text-primary grid place-items-center"><Tag className="h-4 w-4" /></div>
                   <div>
                     <h3 className="font-semibold text-brand-dark text-sm">Label printers &amp; bands</h3>
-                    <p className="text-[11px] text-muted-foreground">A size for each label printer / roll — chosen when you print a band.</p>
+                    <p className="text-[11px] text-muted-foreground">One size per printer or roll</p>
                   </div>
                 </div>
 
@@ -1460,13 +1454,13 @@ export function SettingsPage() {
                 </div>
 
                 <p className="text-[11px] text-muted-foreground mt-3 leading-relaxed">
-                  Printers connect through your device (USB · Bluetooth · Wi‑Fi) and appear in the print dialog — pick the printer there. Barcode scanners work automatically as keyboard input. Nothing else to set up.
+                  Pick the printer in the print dialog; scanners just work.
                 </p>
               </div>
             );
           })()}
 
-          <AsyncButton onClick={saveBand} className="btn-hero rounded-xl w-full">
+          <AsyncButton onClick={saveBand} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
             Save Label &amp; Barcode Settings
           </AsyncButton>
         </div>
@@ -1491,7 +1485,6 @@ export function SettingsPage() {
             <Tag className="h-4 w-4 text-primary" />
             <div>
               <h3 className="font-semibold">Expense Categories</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">Shown in the category picker when staff record an expense</p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -1515,8 +1508,7 @@ export function SettingsPage() {
             <Landmark className="h-4 w-4 text-primary" />
             <div>
               <h3 className="font-semibold">Account Categories</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                Required on every entry in and out of an account, on the Locker and Payments pages
+              <p className="text-xs text-muted-foreground mt-0.5">Required on every account entry
               </p>
             </div>
           </div>
@@ -1532,8 +1524,7 @@ export function SettingsPage() {
             <Button onClick={addLockerCategory} variant="outline" className="rounded-xl gap-2 shrink-0"><Plus className="h-4 w-4" /> Add</Button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            Removing one here does not change entries already filed under it — it only stops appearing for new ones.
-            Renaming one (the pencil) renames it on those entries too.
+            Removing hides it for new entries only; renaming renames old entries too.
           </p>
         </div>
       )}
@@ -1555,7 +1546,7 @@ export function SettingsPage() {
             Provision real Auth logins for them (uses their current password). After this, no
             passwords remain in the database.
           </p>
-          <Button onClick={syncLogins} disabled={syncing} className="btn-hero rounded-xl w-full">
+          <Button onClick={syncLogins} disabled={syncing} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
             {syncing
               ? "Provisioning…"
               : `Provision ${pendingLogins.length} login${pendingLogins.length !== 1 ? "s" : ""}`}
@@ -1589,9 +1580,7 @@ export function SettingsPage() {
               </div>
               <div>
                 <h3 className="font-semibold text-brand-dark text-sm">Duplicate Accounts</h3>
-                <p className="text-[11px] text-muted-foreground">
-                  The same e-mail appears on more than one account. Merge them so history stays under one person.
-                </p>
+                <p className="text-[11px] text-muted-foreground">Same e-mail on more than one account — merge them.</p>
               </div>
             </div>
 
@@ -1636,7 +1625,7 @@ export function SettingsPage() {
                 <h3 className="font-semibold text-brand-dark text-sm">Order Numbers</h3>
                 <p className="text-[11px] text-muted-foreground">
                   {duplicateGroups.length === 0
-                    ? "No duplicates — every order number is unique."
+                    ? "All unique."
                     : `${duplicateGroups.length} number${duplicateGroups.length !== 1 ? "s are" : " is"} used by more than one order.`}
                 </p>
               </div>
@@ -1645,8 +1634,7 @@ export function SettingsPage() {
             {duplicateGroups.length > 0 && (
               <div className="mt-3 space-y-3">
                 <p className="text-[11px] text-muted-foreground">
-                  The oldest order keeps the number; give the later one a fresh number. Nothing else changes —
-                  invoices, purchases and payments link to the order itself, not to the number.
+                  The oldest keeps the number. Links follow the order, not the number.
                 </p>
                 {duplicateGroups.map(g => (
                   <div key={g.number} className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
@@ -1696,10 +1684,10 @@ export function SettingsPage() {
                 <ReceiptText className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-semibold text-brand-dark text-sm">Receipt Numbers</h3>
+                <h3 className="font-semibold text-brand-dark text-sm flex items-center gap-1.5">Receipt Numbers<InfoTip text="Older payments live only on the orders they settled. Numbering links each to a receipt — existing deposits are linked, not recorded again — so it can be corrected or cancelled like any new one." /></h3>
                 <p className="text-[11px] text-muted-foreground">
                   {unnumberedPayments.length === 0
-                    ? "Every payment received has a receipt number."
+                    ? "All numbered."
                     : `${unnumberedPayments.length} payment${unnumberedPayments.length !== 1 ? "s were" : " was"} taken before receipts were numbered.`}
                 </p>
               </div>
@@ -1708,11 +1696,7 @@ export function SettingsPage() {
             {unnumberedPayments.length > 0 && (
               <>
                 <p className="mt-3 text-[11px] text-muted-foreground">
-                  Payments recorded earlier exist only as entries on the orders they settled, so they can&rsquo;t be
-                  looked up or corrected as one thing. Numbering them is pure labelling —
-                  <span className="font-medium text-foreground"> not one amount, date or balance changes</span>.
-                  Each payment keeps exactly the money it already put on the orders, an existing deposit is linked
-                  rather than recorded again, and afterwards they can be corrected or cancelled like any new receipt.
+                  Labels only — <span className="font-medium text-foreground">not one amount, date or balance changes</span>.
                 </p>
                 <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
                   {unnumberedPayments.slice(0, 8).map((g, i) => {
@@ -1749,7 +1733,7 @@ export function SettingsPage() {
                 <Boxes className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-semibold text-brand-dark text-sm">Stock Showing Less Than It Should</h3>
+                <h3 className="font-semibold text-brand-dark text-sm flex items-center gap-1.5">Stock Showing Less Than It Should<InfoTip text="Material bought for one order goes in and out as a pair. Removing such a purchase left its 'used' row behind. Clearing those rows puts the balance back; the cause is fixed." /></h3>
                 <p className="text-[11px] text-muted-foreground">
                   {widowedUses.length} movement{widowedUses.length !== 1 ? "s" : ""} record material leaving stock it was never added to.
                 </p>
@@ -1757,13 +1741,8 @@ export function SettingsPage() {
             </div>
 
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Material bought for one order and sent straight to the factory is written as a pair — bought in,
-              used out, netting to zero. Removing such a purchase had to move both, but it looked for the second
-              row by the exact instant it was written and that row carried its own clock, a few milliseconds later,
-              so it was never found. The &ldquo;bought&rdquo; row went and the &ldquo;used&rdquo; row stayed,
-              with nothing to cancel it. Clearing these puts the balance back;
+              Clears the leftover &ldquo;used&rdquo; rows —
               <span className="font-medium text-foreground"> no purchase, issue, order or payment is touched</span>.
-              The pairing itself is fixed, so this cannot happen again.
             </p>
 
             {widowedImpact.length > 0 && (
@@ -1798,7 +1777,7 @@ export function SettingsPage() {
                 <Truck className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-semibold text-brand-dark text-sm">Payments Missing From The Party's Books</h3>
+                <h3 className="font-semibold text-brand-dark text-sm flex items-center gap-1.5">Payments Missing From The Party's Books<InfoTip text="Paid to a supplier with no bills (a first advance, a loan), only the account side was written: the money left, but the supplier reads ₹0 and Settled. Restoring records where it went." /></h3>
                 <p className="text-[11px] text-muted-foreground">
                   {lostSupplierPayments.length} payment{lostSupplierPayments.length !== 1 ? "s" : ""} totalling {fmtMoneyInr(lostSupplierTotal)} left an account but never reached the supplier or factory.
                 </p>
@@ -1806,13 +1785,8 @@ export function SettingsPage() {
             </div>
 
             <p className="mt-3 text-[11px] text-muted-foreground">
-              A payment used to be written inside the bill it settled. When the supplier had no bills — a first
-              advance, or a supplier you only lend money to — there was nowhere to put it, so only the account
-              movement was written. The money shows as gone, while the supplier reads
-              <span className="font-medium text-foreground"> ₹0 and &ldquo;Settled&rdquo;</span>.
-              Restoring adds each one back as an advance on its own date, from its own account, for its own amount.
-              <span className="font-medium text-foreground"> No money moves</span> — it already left; this only
-              records where it went.
+              Adds each back as an advance on its own date —
+              <span className="font-medium text-foreground"> no money moves</span>.
             </p>
 
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
@@ -1846,11 +1820,11 @@ export function SettingsPage() {
                 <Banknote className="h-4 w-4" />
               </div>
               <div>
-                <h3 className="font-semibold text-brand-dark text-sm">Unapplied Money In</h3>
+                <h3 className="font-semibold text-brand-dark text-sm flex items-center gap-1.5">Unapplied Money In<InfoTip text="A plain locker entry counts as cash but never settles a bill, so the invoice stays pending. Applying it counts nothing twice; marking one as not a client payment moves no money and can be undone." /></h3>
                 <p className="text-[11px] text-muted-foreground">
                   {looseIncome.length === 0
-                    ? "Every deposit is accounted for."
-                    : `${looseIncome.length} deposit${looseIncome.length !== 1 ? "s are" : " is"} sitting in a locker without being applied to anyone.`}
+                    ? "All applied."
+                    : `${looseIncome.length} deposit${looseIncome.length !== 1 ? "s" : ""} not applied to anyone.`}
                 </p>
               </div>
             </div>
@@ -1858,13 +1832,8 @@ export function SettingsPage() {
             {looseIncome.length > 0 && (
               <>
                 <p className="mt-3 text-[11px] text-muted-foreground">
-                  Money typed into a locker as a plain entry is counted as cash but never settles a bill,
-                  so the client&rsquo;s invoice keeps reading as pending. Applying one runs only the missing
-                  allocation — the locker amount and its balance do not change, and nothing is counted twice.
-                  Anything that is genuinely not a client payment — capital put in, interest, profit from
-                  elsewhere — belongs here forever, so mark it
-                  <span className="font-medium text-foreground"> Not a client payment</span> and it stops being
-                  asked about. That moves no money and can be undone below.
+                  Applying adds only the missing allocation — the locker amount doesn&rsquo;t change. Capital or interest:
+                  mark it <span className="font-medium text-foreground">Not a client payment</span>.
                 </p>
                 <div className="mt-3 space-y-1.5">
                   {looseIncome.slice(0, 30).map(t => {
@@ -1990,7 +1959,7 @@ export function SettingsPage() {
                 <h3 className="font-semibold text-brand-dark text-sm">Invoice Numbers</h3>
                 <p className="text-[11px] text-muted-foreground">
                   {invoiceGaps.length === 0
-                    ? "The sequence runs straight through with no gaps."
+                    ? "No gaps."
                     : `Missing: ${invoiceGaps.map(n => String(n).padStart(4, "0")).join(", ")} — an invoice was cancelled.`}
                 </p>
               </div>
@@ -1998,14 +1967,7 @@ export function SettingsPage() {
             {invoiceGaps.length > 0 && (
               <>
                 <p className="mt-3 text-[11px] text-muted-foreground">
-                  Renumbering puts every invoice back in date order starting at 0001, so the book reads
-                  0001, 0002, 0003 with nothing missing. Only the numbers move — every amount, order link
-                  and payment stays exactly where it is, and the next invoice carries on from the end.
-                </p>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  Each invoice keeps the number it had before, so a client holding the old copy can still be
-                  found by searching for that number. You will see exactly which numbers change before anything
-                  is written.
+                  Date order from 0001 — only the numbers move, and old numbers stay searchable. You see every change first.
                 </p>
                 <Button size="sm" variant="outline" onClick={renumberInvoices} className="rounded-xl h-9 mt-3">
                   Renumber invoices in date order
@@ -2027,17 +1989,14 @@ export function SettingsPage() {
                 <h3 className="font-semibold text-brand-dark text-sm">Delete an Invoice</h3>
                 <p className="text-[11px] text-muted-foreground">
                   {undispatchedCount === 0
-                    ? "Every invoice belongs to a dispatched order."
+                    ? "All on dispatched orders."
                     : `${undispatchedCount} invoice${undispatchedCount !== 1 ? "s were" : " was"} raised for an order that isn't dispatched.`}
                 </p>
               </div>
             </div>
 
             <p className="mt-3 text-[11px] text-muted-foreground">
-              Deleting removes only the bill document. The order, its advances, the client
-              ledger and every report read from the order itself, so no figure changes — the
-              order simply becomes billable again once it is dispatched. Undispatched invoices
-              are listed below; search to find any other one.
+              Removes only the bill — no figure changes, and the order can be billed again.
             </p>
             <Input
               value={invQuery}
@@ -2092,7 +2051,7 @@ export function SettingsPage() {
                 <div className="h-8 w-8 rounded-lg bg-success/10 text-success grid place-items-center shrink-0"><Database className="h-4 w-4" /></div>
                 <div>
                   <h3 className="font-semibold text-brand-dark text-sm">Automatic Backups</h3>
-                  <p className="text-[11px] text-muted-foreground">A full snapshot is saved to the cloud once a day — last 14 kept.</p>
+                  <p className="text-[11px] text-muted-foreground">Daily, to the cloud · last 14 kept</p>
                 </div>
               </div>
               <AsyncButton variant="outline" onClick={backupNow} disabled={backingUp} className="rounded-lg gap-1.5 shrink-0">
@@ -2116,7 +2075,7 @@ export function SettingsPage() {
               ))}
               {backups.length === 0 && (
                 <p className="text-xs text-muted-foreground px-1 py-2">
-                  No cloud backups yet — one is taken automatically the first time an admin opens the app each day, or press “Back up now”.
+                  No cloud backups yet — one is taken daily, or press “Back up now”.
                 </p>
               )}
             </div>

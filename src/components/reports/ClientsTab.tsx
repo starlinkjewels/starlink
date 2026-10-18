@@ -83,7 +83,7 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
         <KpiCard icon={AlertOctagon} label="Owed over 90 days" value={usd(data.owed.d90, true)} sub={data.owed.total ? `${pct(Math.round((data.owed.d90 / data.owed.total) * 1000) / 10)} of what is owed` : "—"} tone="rose" />
       </div>
 
-      <Panel title="Money owed, by how long" subtitle="From the day each piece was shipped — as of today" icon={Hourglass}>
+      <Panel title="Money owed, by how long" subtitle="Since shipping, as of today" icon={Hourglass}>
         {data.owed.total > 0 ? (
           <div className="h-40">
             <ResponsiveContainer width="100%" height="100%">
@@ -100,7 +100,7 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
         ) : <Empty>Nothing is owed on shipped work.</Empty>}
       </Panel>
 
-      <Panel title="Every client" subtitle="Sales and margin in the period · money owed and last order as of today" icon={Table2}
+      <Panel title="Every client" subtitle="Sales in the period · owed as of today" icon={Table2}
         actions={<ExportButton onClick={exportClients} />}>
         <DataTable
           id="reports-clients"
