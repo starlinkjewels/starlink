@@ -4127,6 +4127,7 @@ function OrderDetailPageBody() {
           </button>
         </motion.div>
       )}
+    </AnimatePresence>
 
       {/* ── Delivery date popup (from the timeline "Mark complete") ── */}
       <Dialog open={deliverModalIdx !== null} onOpenChange={v => { if (!v) setDeliverModalIdx(null); }}>
@@ -4489,7 +4490,6 @@ function OrderDetailPageBody() {
           </Dialog>
         );
       })()}
-    </AnimatePresence>
 
     {rsOffice !== null && (
         <Dialog open onOpenChange={o => { if (!o) setRsOffice(null); }}>
