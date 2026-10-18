@@ -8,16 +8,31 @@ import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import {
   getFirestore, initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
-  terminate, clearIndexedDbPersistence, waitForPendingWrites, type Firestore,
+  terminate, clearIndexedDbPersistence, waitForPendingWrites, connectFirestoreEmulator, type Firestore,
 } from "firebase/firestore";
-import { getStorage, type FirebaseStorage } from "firebase/storage";
-import { getFunctions, type Functions } from "firebase/functions";
+import { getStorage, connectStorageEmulator, type FirebaseStorage } from "firebase/storage";
+import { getFunctions, connectFunctionsEmulator, type Functions } from "firebase/functions";
 import { getMessaging, isSupported as isMessagingSupported, type Messaging } from "firebase/messaging";
 import {
-  getAuth, createUserWithEmailAndPassword, signOut, type Auth,
+  getAuth, createUserWithEmailAndPassword, signOut, connectAuthEmulator, type Auth,
 } from "firebase/auth";
 
-const firebaseConfig = {
+/**
+ * LOCAL TEST MODE — only `VITE_EMULATORS=1` with the dev server (never a built
+ * app: import.meta.env.DEV is false there). The app then talks to the Firebase
+ * emulators on this computer under the offline "demo-starlink" project, so no
+ * request can reach the live project or its data.
+ */
+export const EMULATORS = !!import.meta.env?.DEV && import.meta.env?.VITE_EMULATORS === "1";
+
+const firebaseConfig = EMULATORS ? {
+  apiKey: "demo-key",
+  authDomain: "demo-starlink.firebaseapp.com",
+  projectId: "demo-starlink",
+  storageBucket: "demo-starlink.appspot.com",
+  messagingSenderId: "0",
+  appId: "1:0:web:0",
+} : {
   apiKey: "AIzaSyBse5vfsARbl8k6ub9Mir6qs-CsPdaNuGU",
   authDomain: "starlinkjewels109.firebaseapp.com",
   projectId: "starlinkjewels109",
@@ -100,6 +115,11 @@ if (APP_CHECK_ON && RECAPTCHA_SITE_KEY) {
  */
 let deviceCacheOn = false;
 function makeFirestore(): Firestore {
+  if (EMULATORS) {
+    const f = getFirestore(app, DATABASE_ID);
+    connectFirestoreEmulator(f, "127.0.0.1", 8085);
+    return f;
+  }
   let off = false;
   try { off = typeof localStorage !== "undefined" && localStorage.getItem("sl-no-device-cache") === "1"; } catch { /* no storage */ }
   if (!off && typeof indexedDB !== "undefined") {
@@ -146,6 +166,12 @@ export const auth: Auth = getAuth(app);
 // functions are deployed (see functions/src/index.ts).
 export const functions: Functions = getFunctions(app, "us-central1");
 
+if (EMULATORS) {
+  connectAuthEmulator(auth, "http://127.0.0.1:9099", { disableWarnings: true });
+  connectStorageEmulator(storage, "127.0.0.1", 9199);
+  connectFunctionsEmulator(functions, "127.0.0.1", 5001);
+}
+
 export const firebaseConfigPublic = firebaseConfig;
 
 // Messaging isn't available in every browser/context (e.g. no service worker
@@ -173,6 +199,7 @@ export async function createAuthUser(email: string, password: string): Promise<s
   const secondary = initializeApp(firebaseConfig, `secondary-${Date.now()}`);
   try {
     const secondaryAuth = getAuth(secondary);
+    if (EMULATORS) connectAuthEmulator(secondaryAuth, "http://127.0.0.1:9099", { disableWarnings: true });
     const cred = await createUserWithEmailAndPassword(secondaryAuth, email, password);
     await signOut(secondaryAuth).catch(() => { /* ignore */ });
     return cred.user.uid;
