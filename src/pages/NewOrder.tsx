@@ -796,7 +796,7 @@ export function NewOrderPage() {
 
           {/* Delivery — 2 cols always */}
           <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2 flex items-center gap-1.5">
+            <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
               <Clock className="h-3.5 w-3.5" /> Delivery Preference
             </p>
             <div className="grid grid-cols-2 gap-3">
@@ -817,7 +817,7 @@ export function NewOrderPage() {
             <>
               {/* Rhodium — 2 cols mobile, 4 cols desktop */}
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Rhodium *</p>
+                <p className="text-sm font-medium text-foreground mb-2.5">Rhodium *</p>
                 <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {["No Rhodium","Diamond Part White","Full White","Two Tone Casting","Other"].map(opt => (
@@ -833,7 +833,7 @@ export function NewOrderPage() {
 
               {/* Stamping — 2 cols mobile, 4 cols desktop */}
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2.5">Stamping *</p>
+                <p className="text-sm font-medium text-foreground mb-2.5">Stamping *</p>
                 <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
                   {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Special Stamp"].map(opt => (
@@ -1152,13 +1152,18 @@ export function NewOrderPage() {
         )}
 
         {/* ── Submit / Cancel — sticky so the action is always reachable on a long
-            form; solid, with a line above, so the form never shows through it. ── */}
-        <div className="sticky bottom-0 z-20 mt-2 -mx-4 sm:mx-0 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white border-t border-border shadow-[0_-8px_16px_-12px_rgb(15_23_42/0.18)] sm:rounded-xl sm:border sm:border-border/70">
-          <div className="flex items-center justify-end gap-2.5">
-            <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5">
+            form. The page keeps 6rem free at its foot on a phone (for the tab
+            bar) and a sticky bar stops above that space, so on a phone the bar
+            reaches down through it: solid to the screen's edge, the buttons
+            just above the tab bar, and no form showing between the two. ── */}
+        <div className="sticky z-20 mt-2 -mx-4 px-4 pt-3 bg-card border-t border-border/80
+                        max-md:-bottom-24 max-md:pb-[calc(6rem+0.75rem)]
+                        md:bottom-0 md:mx-0 md:pb-3 md:rounded-2xl md:border md:shadow-[0_8px_24px_-12px_rgb(15_23_42/0.18)]">
+          <div className="flex items-center justify-end gap-3">
+            <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5 shadow-none">
               Cancel
             </Button>
-            <Button type="submit" disabled={saving} className="btn-hero rounded-xl h-11 px-8 max-sm:flex-1">
+            <Button type="submit" disabled={saving} className="rounded-xl h-11 px-8 max-md:flex-1 text-[15px] font-semibold shadow-none">
               {saving ? "Submitting…" : "Submit Order"}
             </Button>
           </div>
@@ -1188,12 +1193,12 @@ function SectionCard({
             </div>
           )}
           <div>
-            <h2 className="font-semibold text-brand-dark text-sm md:text-base">{title}</h2>
+            <h2 className="font-semibold text-foreground text-base">{title}</h2>
             {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
           </div>
         </div>
       ) : (
-        <h2 className="font-semibold text-brand-dark text-sm md:text-base">{title}</h2>
+        <h2 className="font-semibold text-foreground text-base">{title}</h2>
       )}
       {children}
     </div>
@@ -1224,7 +1229,7 @@ function BalanceTile({
     : "text-brand-dark";
   return (
     <div className={`${bg} rounded-xl p-3 text-center`}>
-      <p className="text-[10px] text-muted-foreground mb-1 uppercase tracking-wide">{label}</p>
+      <p className="text-xs text-muted-foreground mb-1">{label}</p>
       <p className={`font-semibold text-sm ${textColor}`}>{value}</p>
     </div>
   );
@@ -1233,8 +1238,8 @@ function BalanceTile({
 /* ── Form field wrapper ── */
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
+    <div className="space-y-1.5 min-w-0">
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       {children}
     </div>
   );

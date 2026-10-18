@@ -178,6 +178,47 @@
     /* …and kept when a heading also asks for tabular-nums, which Tailwind builds from these parts. */
     --tw-numeric-figure: lining-nums;
   }
+
+  /* Date and time fields. A browser gives them a width of their own, wider
+     than half a phone screen, so two side by side (from–to, date–time) ran
+     out of their columns on iPhones. They now fit their column like any field. */
+  input:is([type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]) {
+    min-width: 0;
+    max-width: 100%;
+    position: relative;
+    padding-inline-end: 2.25rem;
+  }
+  /* Chrome/Android sets the calendar/clock icon after the text with a wide gap;
+     in a half-width phone column the two did not fit and the icon was cut off.
+     The icon now sits over the field's right end, inside its padding. */
+  input::-webkit-calendar-picker-indicator {
+    position: absolute;
+    inset-inline-end: 0.75rem;
+    top: 50%;
+    transform: translateY(-50%);
+    margin: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+}
+
+/* iPhone / iPad Safari only (the one browser with -webkit-touch-callout): drop
+   the native box so the field takes the width and height it is given, and keep
+   its text on the left like every other field instead of centred. In the base
+   layer, so a field that sets its own width or display keeps it. */
+@layer base {
+  @supports (-webkit-touch-callout: none) {
+    input:is([type="date"], [type="time"], [type="datetime-local"], [type="month"], [type="week"]) {
+      -webkit-appearance: none;
+      appearance: none;
+      line-height: normal;
+    }
+    input::-webkit-date-and-time-value {
+      text-align: left;
+      margin: 0;
+      min-height: 1.4em;
+    }
+  }
 }
 
 @utility glass {
@@ -243,9 +284,10 @@
 }
 
 @utility btn-hero {
-  background-image: var(--hero-bg, linear-gradient(135deg, var(--color-brand), var(--color-brand-dark)));
+  /* One solid colour, no gradient or glow — a look can still set its own. */
+  background-image: var(--hero-bg, linear-gradient(var(--color-primary), var(--color-primary)));
   color: white;
-  box-shadow: var(--hero-shadow, 0 10px 30px -10px color-mix(in oklab, var(--color-brand) 55%, transparent));
+  box-shadow: var(--hero-shadow, 0 1px 2px rgb(15 23 42 / 0.14));
 }
 
 /* ── Scrollbar ── */
@@ -442,8 +484,8 @@
   --glass-line: rgb(255 255 255 / 0.7);
   --glass-rim: inset 0 1px 0 rgb(255 255 255 / 0.75), inset 0 0 0 1px rgb(255 255 255 / 0.25);
   --glass-drop: 0 10px 34px -14px color-mix(in oklab, var(--color-brand-dark) 30%, transparent);
-  --hero-bg: linear-gradient(180deg, color-mix(in oklab, var(--color-primary) 82%, white), var(--color-primary));
-  --hero-shadow: inset 0 1px 0 rgb(255 255 255 / 0.35), 0 8px 20px -10px color-mix(in oklab, var(--color-primary) 70%, transparent);
+  --hero-bg: linear-gradient(var(--color-primary), var(--color-primary));
+  --hero-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 1px 2px rgb(15 23 42 / 0.14);
 }
 /* The ambient wash the glass picks up colour from. */
 :root[data-ui="glass"] .app-shell {
