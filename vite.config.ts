@@ -13,7 +13,7 @@ export default defineConfig({
     VitePWA({
       registerType: "autoUpdate",
       injectRegister: "auto",
-      includeAssets: ["favicon.ico", "favicon.png", "icon.png", "logo.png"],
+      includeAssets: ["favicon.png", "icon.png", "icon-192.png", "apple-touch-icon.png", "logo.png"],
       // Custom service worker (src/sw.ts) instead of the auto-generated one —
       // it needs to also handle Firebase Cloud Messaging background push,
       // and two separate service workers can't both control the root scope.
@@ -21,17 +21,17 @@ export default defineConfig({
       srcDir: "src",
       filename: "sw.ts",
       manifest: {
-        name: "Starlink Jewels",
-        short_name: "Starlink",
-        description: "Starlink Jewels — B2B Diamond Jewelry Order Management",
-        theme_color: "#2F5DAA",
-        background_color: "#F7F9FC",
+        name: "Shree Suktam Diamond",
+        short_name: "Shree Suktam",
+        description: "Shree Suktam Diamond — orders, stock and accounts",
+        theme_color: "#2B2A29",
+        background_color: "#FAFAF9",
         display: "standalone",
         start_url: "/",
         scope: "/",
         icons: [
           { src: "/icon.png", sizes: "512x512", type: "image/png", purpose: "any maskable" },
-          { src: "/icon.png", sizes: "192x192", type: "image/png", purpose: "any" },
+          { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
         ],
       },
       injectManifest: {

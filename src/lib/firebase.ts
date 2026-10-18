@@ -1,28 +1,17 @@
-// Firebase initialisation for Starlink Jewels / Diamond Flow.
+// Firebase initialisation for Shree Suktam Diamond (SS Diam).
 //
-// ⚠️  DEMO BRANCH (ssdiamdemo) — NOT PRODUCTION.
+// ⚠️  THIS BRANCH (ssdiamdemo) IS SS DIAM'S LIVE APP — its own company, its own
+//     Firebase project (diamondflow-35f6e). Nothing here may point at Starlink
+//     Jewels' project (starlinkjewels109), which is served from main.
 //
-// This branch exists to show the app to a prospective client without touching
-// the live business. It shares the Firebase PROJECT with production, because
-// that project already hosts several apps as separate named databases, but it
-// reads and writes its own database and its own Storage folder. Production
-// data is never read and never written from here.
+// Everything this build uses is SS Diam's own: Firestore database
+// "diamondflow" (asia-south1), the project's Storage bucket, its Auth users and
+// its Cloud Functions (deployed from this branch, region asia-south1).
 //
-// What is shared, and why it is safe:
-//   • Firestore — NOT shared. "ssdiamdemo", its own database, its own rules.
-//   • Storage   — same bucket, but every demo file goes under STORAGE_PREFIX,
-//                  so nothing lands in a folder production reads.
-//   • Auth      — shared user pool. A demo login is a real auth account; the
-//                  app's own user records live in the demo database, so the
-//                  live app never sees them.
-//   • Functions — shared and DEPLOYED FROM MAIN ONLY. They are bound to the
-//                  production database by name, so anything here that would
-//                  call one is switched off instead (see IS_DEMO). Deploying
-//                  functions from this branch would overwrite production's.
-//
-// Uses a named Firestore database (created in the Firebase console) rather
-// than the project's "(default)" database — see getFirestore below. The web API key/config below is public by design (client SDK config);
-// access is governed by Firestore/Storage security rules, not by hiding this.
+// Uses a named Firestore database rather than the project's "(default)"
+// database — see getFirestore below. The web API key/config below is public by
+// design (client SDK config); access is governed by Firestore/Storage security
+// rules, not by hiding this.
 import { initializeApp, deleteApp, type FirebaseApp } from "firebase/app";
 import { initializeAppCheck, ReCaptchaV3Provider } from "firebase/app-check";
 import {
@@ -37,53 +26,43 @@ import {
 } from "firebase/auth";
 
 const firebaseConfig = {
-  apiKey: "AIzaSyBse5vfsARbl8k6ub9Mir6qs-CsPdaNuGU",
-  authDomain: "starlinkjewels109.firebaseapp.com",
-  projectId: "starlinkjewels109",
-  storageBucket: "starlinkjewels109.firebasestorage.app",
-  messagingSenderId: "192385163202",
-  appId: "1:192385163202:web:6499e21aa7c34cd9e7c05b",
-  measurementId: "G-FFTQZDHDDM",
+  apiKey: "AIzaSyA1Dz2AQD64atmV4WP20rBvNL6IH3tNG4A",
+  authDomain: "diamondflow-35f6e.firebaseapp.com",
+  projectId: "diamondflow-35f6e",
+  storageBucket: "diamondflow-35f6e.firebasestorage.app",
+  messagingSenderId: "619733591596",
+  appId: "1:619733591596:web:d8564b89b8bf8b795e1389",
+  measurementId: "G-RMFL67RF9V",
 };
 
 /** The Firestore named database id this app reads/writes. */
-export const DATABASE_ID = "ssdiamdemo";
+export const DATABASE_ID = "diamondflow";
+
+/** The demo-only tools (sample data in Settings) — off: this is a live business. */
+export const IS_DEMO = false;
 
 /**
- * This build is the demo, not the live business.
- *
- * Read by anything that would otherwise reach a shared, production-bound
- * resource — chiefly the Cloud Functions, which are deployed from main and
- * talk to the production database whatever this build points at.
+ * The assistant (/ai). Off: it runs on a paid AI provider key that belongs to
+ * another company, and SS Diam has none of its own yet. Turning it on needs
+ * that key as a secret plus the function deployed — see SSDIAM.md.
  */
-export const IS_DEMO = true;
+export const AI_ENABLED = false;
 
-/**
- * Every file this build uploads goes under this folder.
- *
- * The Storage bucket is shared with production, so without a prefix a demo
- * photo would land beside a real one and be indistinguishable later. With it,
- * the demo's files are one folder that can be deleted whole when the demo is
- * over, and nothing production reads is ever written to.
- */
-export const STORAGE_PREFIX = "ssdiamdemo";
+/** Uploads go straight into this project's own bucket — no folder prefix. */
+export const STORAGE_PREFIX = "";
+
+/** The region every Cloud Function of this project runs in (next to the database). */
+export const FUNCTIONS_REGION = "asia-south1";
 
 /**
  * Admin accounts, identified by their Firebase Auth email. Anyone signing in
  * with one of these emails is treated as the admin (full access).
  *
- * ⚠️ KEEP THIS IN SYNC with the `isAdmin()` allowlist in firestore.rules — both
- *    must list the same email(s), or the admin will be blocked by the rules.
+ * ⚠️ KEEP THIS IN SYNC with the `isOwner()` allowlist in firestore.rules, the
+ *    `isAdmin()` one in storage.rules and OWNER_EMAILS in functions/src/summaries.ts.
  */
 export const ADMIN_EMAILS = [
-  "marketing.starlinkjewels@gmail.com",
-  "admin@starlinkjewels.com",
-  // DEMO ONLY — the account the demo is shown from, so nobody has to hand a
-  // prospective client the real administrator's password. It is an admin of
-  // the ssdiamdemo database and nothing else: production's rules, which are
-  // deployed from main, do not list it, so signing in with it against the live
-  // app gets "no access" and is signed straight back out.
-  "test@gmail.com",
+  "online@ssdiam.in",
 ].map(e => e.toLowerCase());
 
 export function isAdminEmail(email?: string | null): boolean {
@@ -104,9 +83,8 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  * failed attempts — opening offline most of all.
  *
  * TO TURN IT ON PROPERLY
- *  1. Google reCAPTCHA admin console → this site key → Domains: add every
- *     address the app is served from (the production domain(s) and
- *     ssdiamdemo.web.app). Or create a new reCAPTCHA v3 key with them.
+ *  1. Create a reCAPTCHA v3 key for SS Diam with every address the app is
+ *     served from (diamondflow-35f6e.web.app and any custom domain).
  *  2. Firebase Console → App Check → Apps → this web app → reCAPTCHA v3 with
  *     that key (and its secret).
  *  3. Build with VITE_APP_CHECK=on (and VITE_RECAPTCHA_SITE_KEY if the key is
@@ -115,10 +93,9 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  *     "Enforced". Enforcing before step 3 shows verified traffic would lock
  *     every user out.
  */
-// reCAPTCHA v3 SITE key (public — safe to commit). Overridable via env var.
+// reCAPTCHA v3 SITE key — SS Diam has none yet, so it comes only from the env var.
 const RECAPTCHA_SITE_KEY =
-  (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined)
-  || "6Le2pFwtAAAAALa3qinV6qPapcFGgYiSgp1VeP1Z";
+  (import.meta.env?.VITE_RECAPTCHA_SITE_KEY as string | undefined) || "";
 const APP_CHECK_ON = (import.meta.env?.VITE_APP_CHECK as string | undefined) === "on";
 if (APP_CHECK_ON && RECAPTCHA_SITE_KEY) {
   try {
@@ -186,9 +163,9 @@ export const storage: FirebaseStorage = getStorage(app);
 // Firebase Authentication — every user (admin, employee, client) signs in here.
 export const auth: Auth = getAuth(app);
 
-// Cloud Functions callables (e.g. Starlink AI) — region must match where the
+// Cloud Functions callables (mail, server totals) — region must match where the
 // functions are deployed (see functions/src/index.ts).
-export const functions: Functions = getFunctions(app, "us-central1");
+export const functions: Functions = getFunctions(app, FUNCTIONS_REGION);
 
 export const firebaseConfigPublic = firebaseConfig;
 

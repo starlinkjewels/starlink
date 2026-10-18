@@ -90,7 +90,7 @@ export const UI_LOOKS: { key: UiLook; name: string; hint: string }[] = [
 
 /** Each accent's colour, for the swatches (the real values are in styles.css). */
 export const UI_ACCENTS: { key: UiAccent; name: string; swatch: string }[] = [
-  { key: "royal", name: "Royal blue", swatch: "oklch(0.475 0.13 264)" },
+  { key: "royal", name: "Onyx", swatch: "oklch(0.29 0.005 75)" },
   { key: "sapphire", name: "Sapphire", swatch: "oklch(0.5 0.14 235)" },
   { key: "emerald", name: "Emerald", swatch: "oklch(0.5 0.12 160)" },
   { key: "gold", name: "Gold", swatch: "oklch(0.52 0.1 72)" },

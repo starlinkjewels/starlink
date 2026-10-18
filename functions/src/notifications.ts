@@ -15,7 +15,7 @@ export const sendNotificationPush = onDocumentCreated(
   {
     document: "notifications/{notifId}",
     database: "diamondflow",
-    region: "us-central1",
+    region: "asia-south1",
     memory: "256MiB",
     minInstances: 0,
     maxInstances: 3,

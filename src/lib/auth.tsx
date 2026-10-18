@@ -35,16 +35,15 @@ function Splash({ label = "Loading…" }: { label?: string }) {
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{ background: "radial-gradient(circle at 30% 25%, oklch(0.34 0.12 265) 0%, oklch(0.16 0.05 265) 55%, oklch(0.11 0.03 265) 100%)" }}
+      style={{ background: "radial-gradient(circle at 30% 25%, oklch(0.34 0.006 75) 0%, oklch(0.17 0.004 75) 55%, oklch(0.11 0.003 75) 100%)" }}
     >
       <div className="flex flex-col items-center gap-6">
         <img
-          src="/starlink-logo.png"
-          alt="Starlink Jewels"
-          className="h-16 w-auto object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.4)] animate-pulse"
+          src="/brand-logo-white.png"
+          alt="Shree Suktam Diamond"
+          className="h-24 w-auto object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.4)] animate-pulse"
           onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
         />
-        <div className="text-white/90 font-display tracking-[0.3em] text-sm">STARLINK JEWELS</div>
         <div className="flex items-center gap-2 text-white/60 text-xs">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           <span>{label}</span>

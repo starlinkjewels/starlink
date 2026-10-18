@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { httpsCallable, type HttpsCallableResult, type FunctionsError } from "firebase/functions";
 import { motion, AnimatePresence } from "framer-motion";
-import { functions, IS_DEMO } from "@/lib/firebase";
+import { functions, AI_ENABLED } from "@/lib/firebase";
 import { useAuth } from "@/lib/auth";
 import { Textarea } from "@/components/ui/textarea";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -114,15 +114,12 @@ export function StarlinkAiPage() {
   const send = async (text?: string) => {
     const content = (text ?? input).trim();
     if (!content || sending) return;
-    // The assistant runs in a Cloud Function that is deployed from main and
-    // reads the PRODUCTION database whatever this build points at. Answering
-    // here would read one business’s books out to another, so on the demo it
-    // does not run at all. Re-deploying the function against the demo database
-    // is not an option either: it would replace production’s.
-    if (IS_DEMO) {
+    // The assistant needs its AI provider key and Cloud Function set up in this
+    // project; until then it does not run (see AI_ENABLED in lib/firebase).
+    if (!AI_ENABLED) {
       setMessages(m => [...m, { role: "user", content }, {
         role: "assistant",
-        content: "The assistant is switched off in this demo — it answers from the live business’s own records, which this demo has no access to. Everything else on the app works against the demo’s own data.",
+        content: "The assistant isn’t switched on for this account yet.",
       }]);
       setInput("");
       return;
@@ -138,8 +135,8 @@ export function StarlinkAiPage() {
       const fe = err as FunctionsError;
       const msg =
         fe.code === "functions/resource-exhausted" ? fe.message :
-        fe.code === "functions/failed-precondition" ? "Starlink AI is temporarily unavailable." :
-        "Starlink AI couldn't answer that — please try again.";
+        fe.code === "functions/failed-precondition" ? "The assistant is temporarily unavailable." :
+        "The assistant couldn’t answer that — please try again.";
       toast.error(msg);
       setMessages(m => [...m, { role: "assistant", content: msg }]);
     } finally {
@@ -156,7 +153,7 @@ export function StarlinkAiPage() {
             <Sparkles className="h-5 w-5 text-white" />
           </div>
           <div className="min-w-0">
-            <p className="font-display text-lg text-brand-dark">Starlink AI</p>
+            <p className="font-display text-lg text-brand-dark">Assistant</p>
             <p className="text-xs text-muted-foreground truncate">{copy.subtitle}</p>
           </div>
         </div>
@@ -172,7 +169,7 @@ export function StarlinkAiPage() {
                 <Sparkles className="h-7 w-7 text-primary" />
               </div>
               <div>
-                <p className="font-display text-xl text-brand-dark">Ask Starlink AI</p>
+                <p className="font-display text-xl text-brand-dark">Ask the assistant</p>
                 <p className="text-sm text-muted-foreground mt-1">{copy.empty}</p>
               </div>
               <div className="flex flex-col gap-2 w-full max-w-sm">

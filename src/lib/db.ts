@@ -1,4 +1,4 @@
-// Firebase-backed database for Starlink Jewels / Diamond Flow.
+// Firebase-backed database for Shree Suktam Diamond (Diamond Flow).
 //
 // The whole app is written against a synchronous store (loadDb / saveDb /
 // updateDb) plus a "starlink-db-updated" DOM event that triggers re-renders.
@@ -896,8 +896,8 @@ export interface Settings {
   /** Settings → Appearance: the look of the whole app (see lib/appearance.ts). Absent = Classic. */
   appearance?: { look: string; accent: string; corners: string; headings: string; motion: string; width?: string; theme?: string };
   /** The first company's extras, alongside its Invoice & Bill details. */
-  companyLegalSuffix?: string; // default "INC"
-  companyLogoUrl?: string;     // default the Starlink logo
+  companyLegalSuffix?: string; // printed after the name on invoices, e.g. "PVT LTD"
+  companyLogoUrl?: string;     // default the Shree Suktam logo
   companyCountry?: string;
   invoiceTaxLabel?: string;
   invoiceTaxId?: string;
@@ -1496,19 +1496,20 @@ const LEGACY_KEY = "starlink_db_v2"; // pre-Firebase localStorage blob (migrated
 
 function defaultSettings(): Settings {
   return {
-    companyName: "Starlink Jewels",
+    companyName: "Shree Suktam Diamond",
     currency: "USD",
     language: "English",
     notifications: true,
     diamondRate: 3500,
     metalRate: 65,
     defaultShippingCharge: 0,
-    invoiceAddress1: "55 JOHN ST",
-    invoiceAddress2: "EAST RUTHERFORD",
-    invoiceAddress3: "NEW JERSEY 07073",
-    invoiceTel: "+91 83472 78188",
-    invoicePrimary: "+1 201 554 4824",
-    invoiceEmail: "Starlinkjewels@gmail.com",
+    // The address and phone lines are set in Settings → Company.
+    invoiceAddress1: "",
+    invoiceAddress2: "",
+    invoiceAddress3: "",
+    invoiceTel: "",
+    invoicePrimary: "",
+    invoiceEmail: "online@ssdiam.in",
     invoiceTerms: "COD",
   };
 }

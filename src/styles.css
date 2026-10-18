@@ -54,25 +54,28 @@
   --color-brand-light: var(--brand-light);
   --font-display: "Cormorant Garamond", serif;
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --shadow-luxe: 0 10px 40px -12px rgb(23 59 120 / 0.18), 0 4px 12px -4px rgb(23 59 120 / 0.08);
-  --shadow-soft: 0 2px 8px -2px rgb(23 59 120 / 0.08);
+  --shadow-luxe: 0 10px 40px -12px rgb(30 28 25 / 0.18), 0 4px 12px -4px rgb(30 28 25 / 0.08);
+  --shadow-soft: 0 2px 8px -2px rgb(30 28 25 / 0.08);
 }
 
+/* Shree Suktam Diamond — the logo's charcoal (#2B2A29) on warm white, with a
+   soft champagne for accents. Lightness of every token matches the old theme,
+   so contrast everywhere stays what it was. */
 :root {
   --radius: 1rem;
-  --background: oklch(0.984 0.006 240);
-  --foreground: oklch(0.18 0.04 260);
+  --background: oklch(0.984 0.003 85);
+  --foreground: oklch(0.2 0.006 75);
   --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.04 260);
+  --card-foreground: oklch(0.2 0.006 75);
   --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.04 260);
-  --primary: oklch(0.475 0.13 264);
+  --popover-foreground: oklch(0.2 0.006 75);
+  --primary: oklch(0.29 0.005 75);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.955 0.015 250);
-  --secondary-foreground: oklch(0.28 0.08 262);
-  --muted: oklch(0.955 0.012 250);
-  --muted-foreground: oklch(0.5 0.03 260);
-  --accent: oklch(0.68 0.11 262);
+  --secondary: oklch(0.958 0.004 85);
+  --secondary-foreground: oklch(0.27 0.006 75);
+  --muted: oklch(0.958 0.003 85);
+  --muted-foreground: oklch(0.5 0.008 75);
+  --accent: oklch(0.62 0.035 78);
   --accent-foreground: oklch(0.99 0 0);
   --destructive: oklch(0.63 0.22 25);
   --destructive-foreground: oklch(0.99 0 0);
@@ -80,25 +83,25 @@
   --success-foreground: oklch(0.99 0 0);
   --warning: oklch(0.78 0.16 70);
   --warning-foreground: oklch(0.2 0.02 60);
-  --brand: oklch(0.475 0.13 264);
-  --brand-dark: oklch(0.34 0.12 265);
-  --brand-light: oklch(0.68 0.11 262);
-  --border: oklch(0.92 0.012 250);
-  --input: oklch(0.92 0.012 250);
-  --ring: oklch(0.6 0.11 262);
+  --brand: oklch(0.29 0.005 75);
+  --brand-dark: oklch(0.2 0.004 75);
+  --brand-light: oklch(0.62 0.035 78);
+  --border: oklch(0.915 0.004 85);
+  --input: oklch(0.915 0.004 85);
+  --ring: oklch(0.5 0.012 75);
   --chart-1: oklch(0.646 0.222 41.116);
   --chart-2: oklch(0.6 0.118 184.704);
   --chart-3: oklch(0.398 0.07 227.392);
   --chart-4: oklch(0.828 0.189 84.429);
   --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.99 0.005 250);
-  --sidebar-foreground: oklch(0.18 0.04 260);
-  --sidebar-primary: oklch(0.475 0.13 264);
+  --sidebar: oklch(0.99 0.002 85);
+  --sidebar-foreground: oklch(0.2 0.006 75);
+  --sidebar-primary: oklch(0.29 0.005 75);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.955 0.015 250);
-  --sidebar-accent-foreground: oklch(0.28 0.08 262);
-  --sidebar-border: oklch(0.92 0.012 250);
-  --sidebar-ring: oklch(0.6 0.11 262);
+  --sidebar-accent: oklch(0.958 0.004 85);
+  --sidebar-accent-foreground: oklch(0.27 0.006 75);
+  --sidebar-border: oklch(0.915 0.004 85);
+  --sidebar-ring: oklch(0.5 0.012 75);
 }
 
 .dark {
@@ -202,7 +205,7 @@
 @utility card-hover {
   &:hover {
     transform: var(--card-lift, translateY(-2px));
-    box-shadow: var(--card-hover-shadow, 0 18px 50px -16px rgb(23 59 120 / 0.28), 0 6px 16px -6px rgb(23 59 120 / 0.12));
+    box-shadow: var(--card-hover-shadow, 0 18px 50px -16px rgb(30 28 25 / 0.28), 0 6px 16px -6px rgb(30 28 25 / 0.12));
     border-color: color-mix(in oklab, var(--color-primary) 35%, transparent);
   }
 }
@@ -688,36 +691,36 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
    ══════════════════════════════════════════════════════════════════════ */
 :root.dark {
   color-scheme: dark;
-  --background: oklch(0.17 0.03 262);
-  --foreground: oklch(0.95 0.012 255);
-  --card: oklch(0.215 0.034 262);
-  --card-foreground: oklch(0.95 0.012 255);
-  --popover: oklch(0.235 0.036 262);
-  --popover-foreground: oklch(0.95 0.012 255);
-  --primary: oklch(0.6 0.15 262);
+  --background: oklch(0.17 0.004 75);
+  --foreground: oklch(0.95 0.004 85);
+  --card: oklch(0.215 0.005 75);
+  --card-foreground: oklch(0.95 0.004 85);
+  --popover: oklch(0.235 0.005 75);
+  --popover-foreground: oklch(0.95 0.004 85);
+  --primary: oklch(0.6 0.035 78);
   --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.27 0.035 262);
-  --secondary-foreground: oklch(0.92 0.02 255);
-  --muted: oklch(0.27 0.03 262);
-  --muted-foreground: oklch(0.72 0.03 258);
-  --accent: oklch(0.31 0.05 262);
-  --accent-foreground: oklch(0.96 0.01 255);
+  --secondary: oklch(0.27 0.005 75);
+  --secondary-foreground: oklch(0.92 0.004 85);
+  --muted: oklch(0.27 0.004 75);
+  --muted-foreground: oklch(0.72 0.006 80);
+  --accent: oklch(0.31 0.008 75);
+  --accent-foreground: oklch(0.96 0.004 85);
   --destructive: oklch(0.68 0.19 22);
   --destructive-foreground: oklch(0.99 0 0);
   --success: oklch(0.74 0.16 148);
   --warning: oklch(0.8 0.15 75);
-  --brand: oklch(0.6 0.15 262);
-  --brand-dark: oklch(0.44 0.14 265);
-  --brand-light: oklch(0.76 0.11 262);
+  --brand: oklch(0.6 0.035 78);
+  --brand-dark: oklch(0.44 0.02 78);
+  --brand-light: oklch(0.76 0.03 80);
   --border: oklch(1 0 0 / 11%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.64 0.12 262);
-  --sidebar: oklch(0.19 0.032 262);
-  --sidebar-foreground: oklch(0.95 0.012 255);
-  --sidebar-primary: oklch(0.6 0.15 262);
+  --ring: oklch(0.64 0.03 78);
+  --sidebar: oklch(0.19 0.004 75);
+  --sidebar-foreground: oklch(0.95 0.004 85);
+  --sidebar-primary: oklch(0.6 0.035 78);
   --sidebar-primary-foreground: oklch(0.99 0 0);
-  --sidebar-accent: oklch(0.27 0.035 262);
-  --sidebar-accent-foreground: oklch(0.95 0.012 255);
+  --sidebar-accent: oklch(0.27 0.005 75);
+  --sidebar-accent-foreground: oklch(0.95 0.004 85);
   --sidebar-border: oklch(1 0 0 / 10%);
   --card-bg: var(--color-card);
   --card-line: oklch(1 0 0 / 9%);
@@ -727,16 +730,16 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
   --glass-line: oklch(1 0 0 / 10%);
   --dlg-bg: var(--color-background);
 }
-/* Headings and figures written in the brand navy. */
-:root.dark .text-brand-dark { color: oklch(0.93 0.025 262); }
+/* Headings and figures written in the brand charcoal. */
+:root.dark .text-brand-dark { color: oklch(0.93 0.006 85); }
 :root.dark .text-foreground { color: var(--color-foreground); }
 /* White boxes, inputs and buttons. Translucent white on dark photos (10–30%) is left alone. */
 :root.dark :is(.bg-white, .bg-white\/60, .bg-white\/70, .bg-white\/80, .bg-white\/90, .bg-white\/92, .bg-white\/95) { background-color: var(--color-card); }
 :root.dark .hover\:bg-white:hover { background-color: var(--color-secondary); }
-:root.dark .bg-\[\#F7F9FC\] { background-color: var(--color-background); }
+:root.dark .bg-\[\#FAFAF9\] { background-color: var(--color-background); }
 :root.dark .bg-background { background-color: var(--color-background); }
-/* The logo is navy on white; lift it so it reads on dark. */
-:root.dark img[src*="starlink-logo"], :root.dark img[src*="/logo.png"] { filter: brightness(1.6) saturate(0.9); }
+/* The logo is charcoal on white; on dark it shows as its negative. */
+:root.dark img[src*="/brand-logo"]:not([src*="-white"]) { filter: invert(1); }
 
 :root.dark :is(.bg-amber-50, .bg-amber-100, [class*="bg-amber-50/"], [class*="bg-amber-100/"]) { background-color: oklch(0.7 0.188 70.08 / 0.14); }
 :root.dark :is(.border-amber-100, .border-amber-200, .border-amber-300) { border-color: oklch(0.7 0.188 70.08 / 0.32); }

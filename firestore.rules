@@ -1,7 +1,7 @@
 rules_version = '2';
 
 // ─────────────────────────────────────────────────────────────────────────
-// Starlink Jewels / Diamond Flow — role-enforced, client-isolated rules.
+// Shree Suktam Diamond (Diamond Flow) — role-enforced, client-isolated rules.
 //
 // Every user (admin, employee, client) signs in via Firebase Authentication.
 // Roles/links are read from the `userByAuth/{uid}` index the app maintains
@@ -22,12 +22,10 @@ service cloud.firestore {
     // 👇 The OWNERS — permanent admins, by email. MUST match ADMIN_EMAILS in
     //    src/lib/firebase.ts. An owner can never be demoted or locked out: no
     //    record anywhere can take this away, so the business always has a way in.
-    //    'test@gmail.com' is the DEMO administrator and belongs to this branch
-    //    only. These rules are released to the ssdiamdemo database; production's
-    //    come from main and do not include it. Never deploy this file to
-    //    diamondflow — see DEMO.md.
+    //    Shree Suktam Diamond — released to database "diamondflow" of project
+    //    diamondflow-35f6e only (see SSDIAM.md).
     function isOwner() {
-      return signedIn() && request.auth.token.email in ['marketing.starlinkjewels@gmail.com', 'admin@starlinkjewels.com', 'test@gmail.com'];
+      return signedIn() && request.auth.token.email in ['online@ssdiam.in'];
     }
 
     // An admin: an owner, or a staff member made an admin in the app — their

@@ -10,8 +10,8 @@
  * still lands on the right figure. Each recompute runs in a transaction, so
  * two saves a moment apart cannot leave the older figure standing.
  *
- * Built once per database (makeSummaries): the demo set is deployed and proven
- * before production's is.
+ * Built once per database (makeSummaries). Shree Suktam Diamond has one:
+ * "diamondflow" in project diamondflow-35f6e (asia-south1).
  */
 import { onDocumentWritten } from "firebase-functions/v2/firestore";
 import { onCall, HttpsError } from "firebase-functions/v2/https";
@@ -20,19 +20,20 @@ import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAcc
 import type { MaterialIssuance, FactoryPayment, Purchase, SupplierReceipt, SupplierPayment, OpeningBalanceInfo } from "./shared/types";
 import { app } from "./lib/firestoreAdmin";
 
-type DbName = "ssdiamdemo" | "diamondflow";
+type DbName = "diamondflow";
 const SUM = "summaries";
 /** Bumped when what a summary holds changes, so old ones can be told apart.
  *  2: a factory's summary also carries its pool stock (goldPool, diaPool).
  *  3: other materials (Settings → Materials) are kept out of the diamond figures.
  *  4: a locker's balance keeps its cents (accounts in any currency). */
 const VERSION = 4;
-const REGION = "us-central1";
+/** Firestore triggers must run where the database is (asia-south1). */
+const REGION = "asia-south1";
 
-/** Owners recognised by email, as each database's rules recognise them. */
-const OWNER_EMAILS: Record<DbName, string[]> = {
-  diamondflow: ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com"],
-  ssdiamdemo: ["marketing.starlinkjewels@gmail.com", "admin@starlinkjewels.com", "test@gmail.com"],
+/** Owners recognised by email, as each database's rules recognise them
+ *  (ADMIN_EMAILS in src/lib/firebase.ts, isOwner() in firestore.rules). */
+export const OWNER_EMAILS: Record<DbName, string[]> = {
+  diamondflow: ["online@ssdiam.in"],
 };
 
 const fsFor = (db: DbName): Firestore => getFirestore(app, db);

@@ -1,19 +1,21 @@
-// Transactional email via the marketing send-mail API.
+// Transactional email, sent by this project's own Cloud Function (sendMail in
+// functions/src/mail.ts) from SS Diam's mailbox — never through another
+// company's mail service.
 // Fire-and-forget: an email failure must NEVER block or fail the order action,
 // so every call is wrapped and returns a boolean instead of throwing.
+import { httpsCallable } from "firebase/functions";
+import { functions } from "./firebase";
 
-const ENDPOINT = "https://emailmarketing-iota.vercel.app/send-mail";
-export const MARKETING_EMAIL = "marketing.starlinkjewels@gmail.com";
+/** The company inbox that gets the internal alerts (new order, client login). */
+export const MARKETING_EMAIL = "online@ssdiam.in";
+
+const sendMailFn = httpsCallable<{ to: string; subject: string; html: string }, { ok: boolean }>(functions, "sendMail");
 
 export async function sendMail(to: string, subject: string, html: string): Promise<boolean> {
   if (!to || !to.includes("@")) return false;
   try {
-    const res = await fetch(ENDPOINT, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, subject, html }),
-    });
-    return res.ok;
+    const res = await sendMailFn({ to, subject, html });
+    return !!res.data?.ok;
   } catch {
     return false;
   }
@@ -21,11 +23,12 @@ export async function sendMail(to: string, subject: string, html: string): Promi
 
 /* ───────────────────────── Branded template shell ───────────────────────── */
 
-const BRAND = "#2F5DAA";
-const GOLD = "#C8A24B";
-const INK = "#1B2A4A";
-const MUTED = "#6b7280";
-const BG = "#F4F6FB";
+const BRAND = "#2B2A29";
+const INK = "#2B2A29";
+const MUTED = "#6b6862";
+const BG = "#F6F5F3";
+/** Absolute, so mail clients can load it. */
+const LOGO_URL = "https://diamondflow-35f6e.web.app/brand-logo-wide-white.png";
 
 /** Wrap body content in a consistent, email-client-safe branded layout. */
 function shell(opts: { preheader: string; accent?: string; heading: string; intro: string; body: string; cta?: { label: string; url: string } }): string {
@@ -38,8 +41,7 @@ function shell(opts: { preheader: string; accent?: string; heading: string; intr
         <table role="presentation" width="600" cellpadding="0" cellspacing="0" style="max-width:600px;width:100%;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 1px 3px rgba(16,24,40,.08);">
           <!-- Header -->
           <tr><td style="background:${INK};padding:22px 28px;">
-            <div style="font-size:20px;font-weight:800;letter-spacing:3px;color:#ffffff;">STARLINK <span style="color:${GOLD};">JEWELS</span></div>
-            <div style="font-size:11px;letter-spacing:2px;color:#9fb0d0;margin-top:2px;">FINE DIAMOND JEWELRY</div>
+            <img src="${LOGO_URL}" alt="SHREE SUKTAM DIAMOND" height="44" style="display:block;height:44px;width:auto;border:0;color:#ffffff;font-size:16px;font-weight:700;letter-spacing:3px;" />
           </td></tr>
           <!-- Accent bar -->
           <tr><td style="height:4px;background:${accent};font-size:0;line-height:0;">&nbsp;</td></tr>
@@ -54,9 +56,9 @@ function shell(opts: { preheader: string; accent?: string; heading: string; intr
             </div>` : ""}
           </td></tr>
           <!-- Footer -->
-          <tr><td style="padding:20px 28px;border-top:1px solid #eef1f6;">
-            <p style="margin:0;font-size:12px;line-height:1.6;color:#9aa3b2;">This is an automated message from Starlink Jewels. Please do not reply directly to this email.</p>
-            <p style="margin:6px 0 0;font-size:12px;color:#9aa3b2;">© ${brandYear()} Starlink Jewels · Fine Diamond Jewelry</p>
+          <tr><td style="padding:20px 28px;border-top:1px solid #eeece8;">
+            <p style="margin:0;font-size:12px;line-height:1.6;color:#9aa3b2;">This is an automated message from Shree Suktam Diamond. Please do not reply directly to this email.</p>
+            <p style="margin:6px 0 0;font-size:12px;color:#9aa3b2;">© ${brandYear()} Shree Suktam Diamond</p>
           </td></tr>
         </table>
       </td></tr>
@@ -81,7 +83,7 @@ function detailRows(rows: [string, string][]): string {
         </tr>`,
     )
     .join("");
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eef1f6;border-radius:12px;padding:6px 16px;background:#fbfcfe;">${cells}</table>`;
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #eeece8;border-radius:12px;padding:6px 16px;background:#fbfaf8;">${cells}</table>`;
 }
 
 const esc = (s: unknown) => String(s ?? "").replace(/[<>&]/g, c => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" }[c]!));
@@ -158,7 +160,7 @@ export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; ht
     html: shell({
       preheader: `${o.companyName} just logged into the portal`,
       heading: "Client Logged In",
-      intro: `${esc(o.companyName)} just signed into the Starlink Jewels portal.`,
+      intro: `${esc(o.companyName)} just signed into the Shree Suktam Diamond portal.`,
       body: detailRows([
         ["Client", esc(o.companyName)],
         ["Login Email", esc(o.email)],
@@ -173,7 +175,7 @@ export function orderDispatchedEmail(o: DispatchEmailInfo): { subject: string; h
   return {
     subject: `Your Order ${o.orderNumber} has been Dispatched`,
     html: shell({
-      accent: "#2F5DAA",
+      accent: BRAND,
       preheader: `Order ${o.orderNumber} is on its way`,
       heading: "Your Order is on its Way 🚚",
       intro: `Dear ${esc(o.clientName)},<br/>Your order has been <b>dispatched</b> and is on its way to you. Use the details below to track your shipment.`,

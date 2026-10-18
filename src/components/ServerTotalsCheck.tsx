@@ -9,7 +9,7 @@ import { factoryAccount, factoryFineGoldBalance, factoryPoolBuckets, supplierAcc
 import { Button } from "@/components/ui/button";
 
 /** Databases whose server totals are running (functions/src/summaries.ts). */
-const LIVE: Record<string, string> = { ssdiamdemo: "sumDemo-rebuild", diamondflow: "sumProd-rebuild" };
+const LIVE: Record<string, string> = { diamondflow: "sumProd-rebuild" };
 export const serverTotalsLive = () => DATABASE_ID in LIVE;
 
 interface Row { party: string; field: string; app: number; server: number | null }

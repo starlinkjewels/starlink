@@ -85,7 +85,7 @@ export function downloadLedgerPdf(opts: {
   const pageHeader = () => {
     brand();
     doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text((opts.company || "STARLINK JEWELS").toUpperCase(), L, 12);
+    doc.text((opts.company || "SHREE SUKTAM DIAMOND").toUpperCase(), L, 12);
     doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.text(opts.title, L, 20);
     doc.setTextColor(30);
@@ -188,7 +188,7 @@ export function downloadLedgerPdfMulti(opts: {
   const pageHeader = () => {
     doc.setFillColor(47, 93, 170); doc.rect(0, 0, PAGE_W, 26, "F");
     doc.setTextColor(255); doc.setFont("helvetica", "bold"); doc.setFontSize(16);
-    doc.text((opts.company || "STARLINK JEWELS").toUpperCase(), L, 12);
+    doc.text((opts.company || "SHREE SUKTAM DIAMOND").toUpperCase(), L, 12);
     doc.setFont("helvetica", "normal"); doc.setFontSize(10);
     doc.text(opts.title, L, 20);
     doc.setTextColor(30);

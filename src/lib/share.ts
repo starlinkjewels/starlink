@@ -13,7 +13,7 @@ export const SHARE_PAGE_SIZE = 800;
 export const MAX_SHARE_ITEMS = 20000;
 
 // Where an EXPIRED public share link sends visitors (the company's main site).
-export const SHARE_MAIN_SITE = "https://starlinkjewels.com";
+export const SHARE_MAIN_SITE = "https://ssdiam.in";
 
 /** True when a share has an expiry that is already in the past. */
 export function shareIsExpired(s: { expiresAt?: string } | null | undefined): boolean {

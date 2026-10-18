@@ -7,14 +7,14 @@ import { PRESETS, presetOf, presetPeriod, type Period } from "@/lib/analytics";
 
 /** Chart colours, in the app's palette. */
 export const C = {
-  primary: "oklch(0.475 0.13 264)",
-  primarySoft: "oklch(0.72 0.08 264)",
+  primary: "oklch(0.32 0.005 75)",
+  primarySoft: "oklch(0.68 0.035 78)",
   gold: "oklch(0.74 0.13 80)",
   success: "oklch(0.6 0.14 152)",
   rose: "oklch(0.62 0.19 22)",
   sky: "oklch(0.66 0.12 230)",
   violet: "oklch(0.58 0.15 300)",
-  slate: "oklch(0.6 0.02 260)",
+  slate: "oklch(0.6 0.006 75)",
   amber: "oklch(0.72 0.15 60)",
 };
 export const SERIES = [C.primary, C.gold, C.success, C.sky, C.violet, C.rose, C.amber, C.slate];

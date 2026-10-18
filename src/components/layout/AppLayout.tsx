@@ -17,6 +17,7 @@ import { GiftCardPopup } from "@/components/GiftCardPopup";
 import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
+import { AI_ENABLED } from "@/lib/firebase";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
@@ -37,7 +38,7 @@ const NAV: NavItem[] = [
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
-  { to: "/ai", label: "Starlink AI", icon: Sparkles },
+  { to: "/ai", label: "Assistant", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
   { to: "/reports", label: "Reports", icon: BarChart3 },
@@ -75,7 +76,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Workspace", items: [
     { to: "/messages", label: "Messages", icon: MessageSquare },
     { to: "/notifications", label: "Alerts", icon: Bell },
-    { to: "/ai", label: "Starlink AI", icon: Sparkles },
+    { to: "/ai", label: "Assistant", icon: Sparkles },
     { to: "/reports", label: "Reports", icon: BarChart3 },
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
@@ -97,7 +98,7 @@ const MORE_NAV: NavItem[] = [
   { to: "/catalog",  label: "Catalog",  icon: FolderOpen },
   { to: "/product-photos", label: "Product Photos", icon: Camera },
   { to: "/income",   label: "Passbook", icon: BookOpen },
-  { to: "/ai",       label: "Starlink AI", icon: Sparkles },
+  { to: "/ai",       label: "Assistant", icon: Sparkles },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
   { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
@@ -131,7 +132,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/income":   "Passbook",
   "/catalog":  "Catalog",
   "/product-photos": "Product Photos",
-  "/ai":       "Starlink AI",
+  "/ai":       "Assistant",
   "/expenses": "Expenses",
   "/messages": "Messages",
   "/notifications": "Notifications",
@@ -287,6 +288,7 @@ export function AppLayout() {
     (!n.roles || n.roles.includes(user!.role))
     && (n.to !== "/product-photos" || canSeeProductPhotos)
     && (n.to !== "/giftcard" || canSeeGiftCard)
+    && (n.to !== "/ai" || AI_ENABLED)
     && roleAllows(n.to);
 
   const nav = NAV.filter(navFilter);
@@ -328,8 +330,8 @@ export function AppLayout() {
       {/* A tablet or small laptop gets a rail of icons (names on hover), so the
           page keeps its width; from 1280px the full list with its names. */}
       <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen w-[4.5rem] xl:w-60">
-        <div className="px-3 xl:px-5 py-5 flex items-center justify-center xl:justify-start">
-          <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-10 object-cover object-left xl:w-auto xl:object-contain" />
+        <div className="px-3 xl:px-5 py-5 xl:py-4 flex items-center justify-center xl:justify-start">
+          <img src="/brand-logo-wide.png" alt="Shree Suktam Diamond" className="h-10 w-10 object-cover object-left xl:h-12 xl:w-auto xl:object-contain" />
         </div>
         <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
@@ -396,7 +398,7 @@ export function AppLayout() {
 
           {/* Mobile logo */}
           <div className="md:hidden flex items-center shrink-0">
-            <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-8 w-auto object-contain" />
+            <img src="/brand-logo-wide.png" alt="Shree Suktam Diamond" className="h-9 w-auto object-contain" />
           </div>
 
           {/* Search bar */}

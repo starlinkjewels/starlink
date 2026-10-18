@@ -355,9 +355,9 @@ function buildInvoiceDoc(opts: {
   <!-- Header -->
   <div class="hdr">
     ${settings.companyLogoUrl || isMain
-      ? `<img src="${settings.companyLogoUrl || "/starlink-logo.png"}" alt="${esc(settings.companyName || "Starlink Jewels")}" class="logo" />`
+      ? `<img src="${settings.companyLogoUrl || "/brand-logo-wide.png"}" alt="${esc(settings.companyName || "Shree Suktam Diamond")}" class="logo" />`
       // Another company with no logo yet prints its name — never the first company's logo.
-      : `<div style="font-size:22px;font-weight:800;letter-spacing:1.5px;color:#1e3a8a;line-height:1.1;max-width:60%;">${esc((settings.companyName || "").toUpperCase())}</div>`}
+      : `<div style="font-size:22px;font-weight:800;letter-spacing:1.5px;color:#2B2A29;line-height:1.1;max-width:60%;">${esc((settings.companyName || "").toUpperCase())}</div>`}
     <div class="addr">
       ${isMain
         ? `${settings.invoiceAddress1 || "55 JOHN ST"}<br/>${settings.invoiceAddress2 || "EAST RUTHERFORD"}<br/>${settings.invoiceAddress3 || "NEW JERSEY 07073"}<br/>`
@@ -444,7 +444,7 @@ function buildInvoiceDoc(opts: {
     </div>
 
     <div class="f-right">
-      <div class="for-co">${esc(`${(settings.companyName || "STARLINK JEWELS").toUpperCase()} ${(settings.companyLegalSuffix ?? "INC").toUpperCase()}`.trim())}</div>
+      <div class="for-co">${esc(`${(settings.companyName || "SHREE SUKTAM DIAMOND").toUpperCase()} ${(settings.companyLegalSuffix ?? "").toUpperCase()}`.trim())}</div>
       ${stampHtml}
       <div class="auth">Chop &amp; Authorized Signature</div>
     </div>

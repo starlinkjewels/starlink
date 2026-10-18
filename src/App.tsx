@@ -149,7 +149,7 @@ export function App() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         {/* Public, no-login shared folder gallery */}
-        <Route path="/s/:id" element={<Suspense fallback={<div className="min-h-screen grid place-items-center bg-[#F7F9FC] text-muted-foreground">Loading…</div>}><SharedGalleryPage /></Suspense>} />
+        <Route path="/s/:id" element={<Suspense fallback={<div className="min-h-screen grid place-items-center bg-[#FAFAF9] text-muted-foreground">Loading…</div>}><SharedGalleryPage /></Suspense>} />
         <Route element={<Protected><AppLayout /></Protected>}>
           <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersPage />} />

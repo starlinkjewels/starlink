@@ -112,7 +112,7 @@ export function generateBand(order: Order, settings: Settings, opts: BandOpts): 
   runBand({
     code: order.orderNumber,
     label: order.designNumber ? `#${order.designNumber}` : "",
-    company: seller.companyName || "STARLINK JEWELS",
+    company: seller.companyName || "SHREE SUKTAM DIAMOND",
     jewelleryType: order.jewelleryType,
     metalLine: `${order.metal}${order.productKarats ? ` ${order.productKarats}` : ""}`,
     gross, net, less: lessWeight(gross, net, diaCt), diaCt, price: orderTotal(order),
@@ -127,7 +127,7 @@ export function generateStockBand(item: ReadyStockItem, settings: Settings, opts
   runBand({
     code: item.sku || item.id,
     label: item.sku ? `#${item.sku}` : item.name.slice(0, 14),
-    company: owner.companyName || "STARLINK JEWELS",
+    company: owner.companyName || "SHREE SUKTAM DIAMOND",
     jewelleryType: item.jewelleryType,
     metalLine: `${item.metal}${item.productKarats ? ` ${item.productKarats}` : ""}`,
     gross, net, less: lessWeight(gross, net, diaCt), diaCt, price: item.price,

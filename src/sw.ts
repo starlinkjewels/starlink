@@ -66,19 +66,20 @@ registerRoute(
 );
 
 // ── Firebase Cloud Messaging — background push (tab/app not focused) ──
+// Shree Suktam Diamond's own project — must match src/lib/firebase.ts.
 const firebaseConfig = {
-  apiKey: "AIzaSyBse5vfsARbl8k6ub9Mir6qs-CsPdaNuGU",
-  authDomain: "starlinkjewels109.firebaseapp.com",
-  projectId: "starlinkjewels109",
-  storageBucket: "starlinkjewels109.firebasestorage.app",
-  messagingSenderId: "192385163202",
-  appId: "1:192385163202:web:6499e21aa7c34cd9e7c05b",
+  apiKey: "AIzaSyA1Dz2AQD64atmV4WP20rBvNL6IH3tNG4A",
+  authDomain: "diamondflow-35f6e.firebaseapp.com",
+  projectId: "diamondflow-35f6e",
+  storageBucket: "diamondflow-35f6e.firebasestorage.app",
+  messagingSenderId: "619733591596",
+  appId: "1:619733591596:web:d8564b89b8bf8b795e1389",
 };
 const firebaseApp = initializeApp(firebaseConfig);
 const messaging = getMessaging(firebaseApp);
 
 onBackgroundMessage(messaging, payload => {
-  const title = payload.notification?.title || "Starlink Jewels";
+  const title = payload.notification?.title || "Shree Suktam Diamond";
   const body = payload.notification?.body;
   self.registration.showNotification(title, {
     body,

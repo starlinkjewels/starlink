@@ -95,7 +95,7 @@ export function CompaniesSettings() {
             <div className="flex items-start gap-3">
               <div className="h-12 w-12 rounded-xl border border-border/60 bg-white grid place-items-center overflow-hidden shrink-0">
                 {c.logoUrl || c.id === MAIN_COMPANY_ID
-                  ? <img src={c.logoUrl || "/starlink-logo.png"} alt="" className="max-h-full max-w-full object-contain" />
+                  ? <img src={c.logoUrl || "/brand-logo-wide.png"} alt="" className="max-h-full max-w-full object-contain" />
                   : <Building2 className="h-5 w-5 text-muted-foreground" />}
               </div>
               <div className="min-w-0 flex-1">
@@ -192,7 +192,7 @@ export function CompanyEditor({ company, all, invoices, onClose, onSaved }: { co
         <section className="space-y-3">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">The company</p>
           <div className="grid sm:grid-cols-3 gap-3">
-            <div className="sm:col-span-2">{field("name", "Name *", "e.g. Starlink Diamonds")}</div>
+            <div className="sm:col-span-2">{field("name", "Name *", "e.g. Shree Suktam Diamond")}</div>
             {field("legalSuffix", "Legal form", "INC, LLC, LTD, DMCC")}
             {field("country", "Country", "e.g. UAE")}
             {!isMain && field("currency", "Currency shown", "e.g. USD, AED")}

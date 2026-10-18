@@ -16,8 +16,8 @@ export const MAIN_COMPANY_ID = "main";
 export function mainCompany(s: Settings): Company {
   return {
     id: MAIN_COMPANY_ID,
-    name: s.companyName || "Starlink Jewels",
-    legalSuffix: s.companyLegalSuffix ?? "INC",
+    name: s.companyName || "Shree Suktam Diamond",
+    legalSuffix: s.companyLegalSuffix ?? "",
     country: s.companyCountry,
     currency: s.currency,
     invoicePrefix: "",

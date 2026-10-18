@@ -241,7 +241,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const doc = new jsPDF();
       const money = (n: number) => "Rs " + Math.round(n).toLocaleString("en-IN");
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Material Purchase Report", 20, 22);
+      doc.text("Shree Suktam Diamond — Material Purchase Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${matPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       let y = 44;
@@ -288,8 +288,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       }
       doc.setFont("helvetica", "bold"); doc.text(`Grand Total: ${money(r.grand)}`, 152, y + 3);
       if (!exportAllowed()) return;
-      logEvent("export", `Downloaded ${`Starlink-Material-Purchase-${matFrom || "all"}.pdf`}`);
-      doc.save(`Starlink-Material-Purchase-${matFrom || "all"}.pdf`);
+      logEvent("export", `Downloaded ${`ShreeSuktam-Material-Purchase-${matFrom || "all"}.pdf`}`);
+      doc.save(`ShreeSuktam-Material-Purchase-${matFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
@@ -321,9 +321,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const blob = new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8;" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url; a.download = `Starlink-Material-Purchase-${matFrom || "all"}.csv`;
+      a.href = url; a.download = `ShreeSuktam-Material-Purchase-${matFrom || "all"}.csv`;
       if (!exportAllowed()) return;
-      logEvent("export", `Downloaded ${`Starlink-Material-Purchase-${matFrom || "all"}.csv`}`);
+      logEvent("export", `Downloaded ${`ShreeSuktam-Material-Purchase-${matFrom || "all"}.csv`}`);
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
     } catch { toast.error("Couldn't generate the Excel file."); }
@@ -434,7 +434,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const r = paymentsReport;
       const doc = new jsPDF();
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Payments Made Report", 20, 22);
+      doc.text("Shree Suktam Diamond — Payments Made Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${payPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       doc.setFontSize(11);
@@ -454,15 +454,15 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         if (y > 280) { doc.addPage(); y = 20; }
       });
       if (!exportAllowed()) return;
-      logEvent("export", `Downloaded ${`Starlink-Payments-${payFrom || "all"}.pdf`}`);
-      doc.save(`Starlink-Payments-${payFrom || "all"}.pdf`);
+      logEvent("export", `Downloaded ${`ShreeSuktam-Payments-${payFrom || "all"}.pdf`}`);
+      doc.save(`ShreeSuktam-Payments-${payFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportPaymentsExcel() {
     if (!paymentsReport) return;
     try {
       csvDownload(
-        `Starlink-Payments-${payFrom || "all"}.csv`,
+        `ShreeSuktam-Payments-${payFrom || "all"}.csv`,
         ["Date", "Party", "Type", "Reference", "Amount (Rs)"],
         paymentsReport.rows.map(r => [fmtDate(r.date), r.party, r.kind, r.ref, Math.round(r.amount)]),
       );
@@ -476,7 +476,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       const r = salesReport;
       const doc = new jsPDF();
       doc.setFont("helvetica", "bold"); doc.setFontSize(18);
-      doc.text("Starlink Jewels — Sales / Billing Report", 20, 22);
+      doc.text("Shree Suktam Diamond — Sales / Billing Report", 20, 22);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`Period: ${salesPeriodLabel}    Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
       doc.setFontSize(11);
@@ -515,15 +515,15 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         y += 5; if (y > 285) { doc.addPage(); y = 20; }
       }
       if (!exportAllowed()) return;
-      logEvent("export", `Downloaded ${`Starlink-Sales-${salesFrom || "all"}.pdf`}`);
-      doc.save(`Starlink-Sales-${salesFrom || "all"}.pdf`);
+      logEvent("export", `Downloaded ${`ShreeSuktam-Sales-${salesFrom || "all"}.pdf`}`);
+      doc.save(`ShreeSuktam-Sales-${salesFrom || "all"}.pdf`);
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
   function exportSalesExcel() {
     if (!salesReport) return;
     try {
       csvDownload(
-        `Starlink-Sales-${salesFrom || "all"}.csv`,
+        `ShreeSuktam-Sales-${salesFrom || "all"}.csv`,
         ["Order #", "Client", "Type", "Status", "Date", "Billed", "Gift Card", "Received", "Outstanding"],
         salesReport.orders.map(o => [
           o.orderNumber, clients.find(c => c.id === o.clientId)?.companyName ?? "", o.jewelleryType, o.status,
@@ -580,7 +580,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       if (cat === "gold" || cat === "diamond") {
         const led = movementLedger(cat);
         csvDownload(
-          `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
+          `ShreeSuktam-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`,
           ["Date", "Invoice #", "Particulars", m.detail, `In (${m.unit})`, `Out (${m.unit})`, `Balance (${m.unit})`, "Rate (Rs)", "Amount (Rs)"],
           led.map(r => [
             fmtDate(r.createdAt), r.invoiceNumber || "", r.link.label, r.purityOrQuality,
@@ -594,7 +594,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         let run = 0;
         const sup = db.suppliers ?? [];
         csvDownload(
-          `Starlink-Other-Materials-Ledger-${matFrom || "all"}.csv`,
+          `ShreeSuktam-Other-Materials-Ledger-${matFrom || "all"}.csv`,
           ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Material", "Grade", "Quantity", "Unit", "Rate (Rs)", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"],
           catRows("other").map(p => {
             run += p.totalInr;
@@ -642,7 +642,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
           p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];
       });
-      csvDownload(`Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
+      csvDownload(`ShreeSuktam-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}.csv`, headers, data);
     } catch { toast.error("Couldn't generate the Excel file."); }
   }
 
@@ -683,7 +683,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             r.amountInr ? rs(r.amountInr) : "—",
           ]),
           totalsRow: ["", "", "Totals", `${totalIn}${m.unit}`, `${totalOut}${m.unit}`, `${closing}${m.unit}`, "", rs(totalAmt)],
-          filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+          filename: `ShreeSuktam-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
         });
         return;
       }
@@ -739,7 +739,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         align: ["left", "left", "left", "left", "left", "right", "right", "right"],
         rows: dataRows,
         totalsRow: ["", "", "", "", "", "", "Total", rs(b.amount)],
-        filename: `Starlink-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
+        filename: `ShreeSuktam-${m.label.replace(/\s+/g, "_")}-Ledger-${matFrom || "all"}`,
       });
     } catch { toast.error("Couldn't generate the PDF file."); }
   }
@@ -938,7 +938,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
    try {
     const doc = new jsPDF();
     doc.setFont("helvetica","bold"); doc.setFontSize(18);
-    doc.text("Starlink Jewels — Business Report", 20, 22);
+    doc.text("Shree Suktam Diamond — Business Report", 20, 22);
     doc.setFont("helvetica","normal"); doc.setFontSize(9);
     doc.text(`Generated: ${new Date().toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}`, 20, 30);
     if (hasFilters) {
@@ -974,8 +974,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       });
     }
     if (!exportAllowed()) return;
-    logEvent("export", `Downloaded ${"Starlink-Report.pdf"}`);
-    doc.save("Starlink-Report.pdf");
+    logEvent("export", `Downloaded ${"ShreeSuktam-Report.pdf"}`);
+    doc.save("ShreeSuktam-Report.pdf");
    } catch { toast.error("Couldn't generate the PDF file."); }
   }
 
@@ -1006,9 +1006,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `ShreeSuktam-Orders-${new Date().toISOString().slice(0, 10)}.csv`;
     if (!exportAllowed()) return;
-    logEvent("export", `Downloaded ${`Starlink-Orders-${new Date().toISOString().slice(0, 10)}.csv`}`);
+    logEvent("export", `Downloaded ${`ShreeSuktam-Orders-${new Date().toISOString().slice(0, 10)}.csv`}`);
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -1302,7 +1302,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             <SectionTitle icon={TrendingUp} title="Profit & Loss" sub="Admin only · orders dispatched" />
             {/* Nothing shipped in the period: nothing to download, so no Export. */}
             <SectionTools what={`Profit & Loss · ${profitPeriodLabel}`} from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo}
-              exports={profit.rows.length ? [xlsx(() => exportProfitCsv(db, profit.rows.map(r => r.order), `Starlink-Profit-${profitFrom || "all"}`))] : []} />
+              exports={profit.rows.length ? [xlsx(() => exportProfitCsv(db, profit.rows.map(r => r.order), `ShreeSuktam-Profit-${profitFrom || "all"}`))] : []} />
           </div>
 
           {profit.unconverted > 0 && (
@@ -1533,7 +1533,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 formatter={(v: number, _: string, p: any) => [v, p.payload.fullName]}
                 contentStyle={{ borderRadius: 12, border: "1px solid var(--border)", fontSize: 12 }}
               />
-              <Bar dataKey="count" name="Orders" fill="oklch(0.475 0.13 264)" radius={[6,6,0,0]} />
+              <Bar dataKey="count" name="Orders" fill="oklch(0.32 0.005 75)" radius={[6,6,0,0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

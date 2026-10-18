@@ -321,7 +321,7 @@ export function buildDemoData(): Partial<DB> {
   // Each stock issue takes material out of the pool, on the day it went.
   for (const m of materialIssuances) {
     if (m.source !== "stock" || m.diamondKind === "certified") continue;
-    stockMovements.push(mv(`demo_mv_${m.id}`, m.material, "issuance_out", m.purityOrQuality, m.quantityIssued,
+    stockMovements.push(mv(`demo_mv_${m.id}`, m.material as "gold" | "diamond", "issuance_out", m.purityOrQuality, m.quantityIssued,
       Math.round((Date.now() - +new Date(m.issuedAt)) / 86400000), { refType: "materialIssuance", refId: m.id }));
   }
 

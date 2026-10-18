@@ -19,7 +19,7 @@ import { loadDb, ensureAllCollections } from "./db";
 // connected — without it the userinfo call is refused and it reads "Google
 // account". Both are needed for the consent screen to list them.
 const SCOPE = "https://www.googleapis.com/auth/drive.file email";
-const FOLDER_NAME = "Starlink Jewels Backups";
+const FOLDER_NAME = "Shree Suktam Diamond Backups";
 const GIS_SRC = "https://accounts.google.com/gsi/client";
 
 const K_TOKEN = "starlink-gdrive-token";
@@ -232,7 +232,7 @@ export async function backupToDrive(interactive = false): Promise<string> {
   const token = await getToken(interactive);
   const parent = await folderId(token);
   const stamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const name = `starlink-backup-${stamp}.json`;
+  const name = `ssdiam-backup-${stamp}.json`;
   // Every record loaded first — see createBackup() in backup.ts.
   await ensureAllCollections();
 

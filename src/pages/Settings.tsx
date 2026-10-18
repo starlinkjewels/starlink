@@ -290,11 +290,11 @@ export function SettingsPage() {
     const blob = new Blob([JSON.stringify(db, null, 2)], { type: "application/json" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = "starlink-backup.json";
+    a.download = "ssdiam-backup.json";
     a.click();
     // A full copy of every record leaving the building — the one download most
     // worth knowing about.
-    logEvent("export", "Downloaded a full backup of all data", { file: "starlink-backup.json" });
+    logEvent("export", "Downloaded a full backup of all data", { file: "ssdiam-backup.json" });
   };
   const imp = (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
@@ -964,7 +964,7 @@ export function SettingsPage() {
                 onChange={(e) =>
                   setDb({ ...db, settings: { ...db.settings, invoiceEmail: e.target.value } })
                 }
-                placeholder="Starlinkjewels@gmail.com"
+                placeholder="online@ssdiam.in"
                 className="rounded-xl"
               />
             </div>

@@ -22,17 +22,15 @@ export async function requestPushPermission(userId: string): Promise<PushPermiss
   if (typeof Notification === "undefined") return "unsupported";
   const messaging = await getMessagingIfSupported();
   if (!messaging) return "unsupported";
-  if (!VAPID_KEY) {
-    toast.error("Push notifications aren't configured yet (missing VAPID key) — ask an admin to finish setup.");
-    return "unsupported";
-  }
+  // No key of the project's own configured → Firebase's built-in web-push key
+  // is used, which works with this project's messaging as well.
 
   const permission = await Notification.requestPermission();
   if (permission !== "granted") return permission === "denied" ? "denied" : "unsupported";
 
   try {
     const registration = await navigator.serviceWorker.ready;
-    const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
+    const token = await getToken(messaging, { ...(VAPID_KEY ? { vapidKey: VAPID_KEY } : {}), serviceWorkerRegistration: registration });
     if (!token) return "unsupported";
     updateDb(d => {
       const u = d.users.find(x => x.id === userId);

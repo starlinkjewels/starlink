@@ -138,13 +138,12 @@ export function SharedGalleryPage() {
   return (
     // The app shell locks html/body/#root to height:100% overflow:hidden, so this
     // public page must be its OWN full-viewport scroll container or it can't scroll.
-    <div className="fixed inset-0 overflow-y-auto overscroll-contain bg-[#F7F9FC]">
+    <div className="fixed inset-0 overflow-y-auto overscroll-contain bg-[#FAFAF9]">
       {/* Branded header */}
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-border/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-7 w-auto object-contain" onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
-            <span className="font-display text-brand-dark text-lg truncate">Starlink Jewels</span>
+            <img src="/brand-logo-wide.png" alt="Shree Suktam Diamond" className="h-8 w-auto object-contain" />
           </div>
           {status === "ok" && items.length > 0 && (
             <button onClick={downloadAll} disabled={downloading}
@@ -164,7 +163,7 @@ export function SharedGalleryPage() {
           <div className="py-24 text-center text-muted-foreground max-w-md mx-auto">
             <Camera className="h-12 w-12 mx-auto mb-3 opacity-20" />
             <p className="font-semibold text-brand-dark">Link not available</p>
-            <p className="text-sm mt-1">This shared link has expired or was removed. Please ask Starlink for a new one.</p>
+            <p className="text-sm mt-1">This shared link has expired or was removed. Please ask Shree Suktam Diamond for a new one.</p>
           </div>
         )}
 
@@ -204,7 +203,7 @@ export function SharedGalleryPage() {
                 {subFolders.length > 0 && `${subFolders.length} folder${subFolders.length !== 1 ? "s" : ""} · `}
                 {items.length} item{items.length !== 1 ? "s" : ""}
                 {browsable && !path.length && allItems.length !== items.length ? ` · ${allItems.length} in total` : ""}
-                {" · shared by Starlink Jewels"}
+                {" · shared by Shree Suktam Diamond"}
               </p>
             </div>
 
