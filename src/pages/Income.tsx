@@ -329,7 +329,7 @@ export function IncomePage() {
       subjectLines: [
         `Currency: ${tab}`,
         hasActiveFilter ? "Filters applied — see on-screen view for details" : "All entries",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
         { label: "Money In", value: pdfTotal(totalIn) },

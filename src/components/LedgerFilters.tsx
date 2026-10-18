@@ -25,7 +25,7 @@ export function inDateRange(date: string, from: string, to: string): boolean {
 
 /** "1 Aug 2026 – 31 Aug 2026", for the heading of a printed copy. */
 export function rangeLabel(from: string, to: string): string {
-  const f = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+  const f = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
   if (from && to) return `${f(from)} – ${f(to)}`;
   if (from) return `From ${f(from)}`;
   if (to) return `Up to ${f(to)}`;

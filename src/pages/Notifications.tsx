@@ -20,7 +20,7 @@ const typeTag = (type: string) => (
   </CellTag>
 );
 
-const when = (iso: string) => new Date(iso).toLocaleString("en-US", {
+const when = (iso: string) => new Date(iso).toLocaleString("en-IN", {
   month: "short", day: "numeric", year: "numeric",
   hour: "2-digit", minute: "2-digit",
 });
@@ -31,8 +31,8 @@ function WhenCell({ iso }: { iso: string }) {
   const d = new Date(iso);
   return (
     <span className="text-muted-foreground tabular-nums">
-      <span className="whitespace-nowrap">{d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })},</span>{" "}
-      <span className="whitespace-nowrap">{d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })}</span>
+      <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { month: "short", day: "numeric", year: "numeric" })},</span>{" "}
+      <span className="whitespace-nowrap">{d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
     </span>
   );
 }

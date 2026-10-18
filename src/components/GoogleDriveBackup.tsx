@@ -172,7 +172,7 @@ export function GoogleDriveBackup() {
             <h3 className="font-semibold text-brand-dark text-sm">Google Drive Backup</h3>
             <p className="text-[11px] text-muted-foreground">
               {status.connected
-                ? <>Connected to <span className="font-medium text-foreground">{status.email}</span>{status.lastAt ? ` · last backup ${new Date(status.lastAt).toLocaleString()}` : " · no backup yet"}</>
+                ? <>Connected to <span className="font-medium text-foreground">{status.email}</span>{status.lastAt ? ` · last backup ${new Date(status.lastAt).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}` : " · no backup yet"}</>
                 : "A second copy of the whole database, kept outside this project."}
             </p>
           </div>
@@ -218,7 +218,7 @@ export function GoogleDriveBackup() {
               {files.map(f => (
                 <div key={f.id} className="flex items-center justify-between gap-2 rounded-lg border border-border/60 px-3 py-2">
                   <div className="min-w-0">
-                    <p className="text-xs font-medium truncate">{new Date(f.createdTime).toLocaleString()}</p>
+                    <p className="text-xs font-medium truncate">{new Date(f.createdTime).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}</p>
                     <p className="text-[10px] text-muted-foreground">{mb(f.size)}</p>
                   </div>
                   <a href={`https://drive.google.com/file/d/${f.id}/view`} target="_blank" rel="noreferrer"

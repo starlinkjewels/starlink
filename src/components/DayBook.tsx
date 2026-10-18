@@ -131,7 +131,7 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
     subjectLines: [
       `${matching.length} entr${matching.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)} · oldest first`,
       `Opening ${pdfMoney(locker?.openingBalance || 0)} · Closing ${pdfMoney(closing)}`,
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Money in", value: pdfMoney(totalIn) },

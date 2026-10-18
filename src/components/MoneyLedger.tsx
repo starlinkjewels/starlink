@@ -134,7 +134,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         acct && `Account: ${db.lockers.find(l => l.id === acct)?.name ?? acct}`,
         dir && (dir === "out" ? "Money out only" : "Money in only"),
         ql && `Search: "${q.trim()}"`].filter(Boolean).join(" · ") || "All entries",
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Total out", value: fmtMixPdf(totalOut) },

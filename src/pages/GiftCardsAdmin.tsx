@@ -64,7 +64,7 @@ export function GiftCardsAdminPage() {
       title: "Gift Cards — Tracking Report",
       subjectLines: [
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} - ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
         { label: "Issued", value: "$" + money0(s.issued) },

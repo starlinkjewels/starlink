@@ -145,7 +145,7 @@ export function downloadLedgerPdf(opts: {
 
   // Footer with page numbers on every page.
   const pages = doc.getNumberOfPages();
-  const stamp = `Generated: ${new Date().toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  const stamp = `Generated: ${new Date().toLocaleString("en-IN", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140);
@@ -252,7 +252,7 @@ export function downloadLedgerPdfMulti(opts: {
   }
 
   const pages = doc.getNumberOfPages();
-  const stamp = `Generated: ${new Date().toLocaleString("en-US", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
+  const stamp = `Generated: ${new Date().toLocaleString("en-IN", { month: "long", day: "numeric", year: "numeric", hour: "2-digit", minute: "2-digit" })}`;
   for (let p = 1; p <= pages; p++) {
     doc.setPage(p);
     doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(140);

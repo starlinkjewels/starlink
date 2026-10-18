@@ -1059,7 +1059,7 @@ export function CatalogPage() {
     // that carries a path. A browser that reports no paths at all still gets a
     // folder of its own rather than spilling into the current one.
     const firstRel = files.map(relOf).find((r) => r.includes("/")) || "";
-    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString()}`;
+    const rootName = firstRel.split("/")[0] || `Uploaded ${new Date().toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
 
     const byPath = new Map<string, string>();
     updateDb((db) => {

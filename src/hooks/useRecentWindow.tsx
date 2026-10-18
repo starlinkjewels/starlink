@@ -74,7 +74,7 @@ export function LoadOlder({ w, noun = "entries" }: { w: Pick<RecentWindow, "visi
       <div ref={w.sentinelRef} className="flex items-center gap-1.5">
         <History className="h-3.5 w-3.5" />
         {w.hasMore
-          ? <span>{w.filtered ? `Showing ${shown} of ${w.total} matching ${noun}` : `Showing ${shown} of ${w.total} ${noun} — since ${w.since?.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`}. Scroll for older.</span>
+          ? <span>{w.filtered ? `Showing ${shown} of ${w.total} matching ${noun}` : `Showing ${shown} of ${w.total} ${noun} — since ${w.since?.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`}. Scroll for older.</span>
           : <span>All {w.total} {noun} shown.</span>}
       </div>
       {w.hasMore && (

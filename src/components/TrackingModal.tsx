@@ -64,7 +64,7 @@ export function TrackingModal({ order, onClose }: Props) {
                   {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : isActive ? <Loader2 className="h-3 w-3 animate-spin" /> : <Circle className="h-2 w-2" />}
                 </div>
                 <p className={`text-sm ${isDone || isActive ? "text-foreground font-medium" : "text-muted-foreground"}`}>{t.step}</p>
-                {t.date && <p className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-US", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>}
+                {t.date && <p className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}</p>}
               </div>
             );
           })}

@@ -112,7 +112,7 @@ export function MessagesPage() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium truncate">{c.name}</p>
-                    {last && <p className="text-[10px] text-muted-foreground shrink-0">{new Date(last.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>}
+                    {last && <p className="text-[10px] text-muted-foreground shrink-0">{new Date(last.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</p>}
                   </div>
                   <p className="text-xs text-muted-foreground truncate">
                     {last ? <>{last.fromUserId === user!.id ? "You: " : ""}{last.text}</> : <span className="capitalize">{c.role}</span>}
@@ -154,7 +154,7 @@ export function MessagesPage() {
                       onClick={() => deletable && setMenuMsg(menuMsg === m.id ? null : m.id)}
                       className={`px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"} ${deletable ? "cursor-pointer" : ""}`}>
                       <p>{m.text}</p>
-                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                      <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</p>
                     </div>
                     {menuMsg === m.id && deletable && (
                       <button onClick={() => deleteMessage(m.id)}
@@ -197,7 +197,7 @@ export function MessagesPage() {
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-sm font-semibold truncate">{c.name}</p>
-                      {lastMsg && <p className="text-[10px] text-muted-foreground shrink-0">{new Date(lastMsg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>}
+                      {lastMsg && <p className="text-[10px] text-muted-foreground shrink-0">{new Date(lastMsg.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</p>}
                     </div>
                     <p className="text-xs text-muted-foreground capitalize">{c.role}</p>
                     {lastMsg && <p className="text-xs text-muted-foreground truncate mt-0.5">{lastMsg.fromUserId === user!.id ? "You: " : ""}{lastMsg.text}</p>}
@@ -242,7 +242,7 @@ export function MessagesPage() {
                         onClick={() => deletable && setMenuMsg(menuMsg === m.id ? null : m.id)}
                         className={`px-3 py-2 rounded-2xl text-sm ${mine ? "bg-primary text-primary-foreground rounded-br-md" : "bg-secondary rounded-bl-md"} ${deletable ? "cursor-pointer" : ""}`}>
                         <p>{m.text}</p>
-                        <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</p>
+                        <p className={`text-[10px] mt-1 ${mine ? "text-white/70" : "text-muted-foreground"}`}>{new Date(m.createdAt).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</p>
                       </div>
                       {menuMsg === m.id && deletable && (
                         <button onClick={() => deleteMessage(m.id)}
