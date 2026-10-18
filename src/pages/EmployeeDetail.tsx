@@ -1,5 +1,5 @@
 import { useMayExport } from "@/hooks/useCan";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import type { MoreAction } from "@/components/MoreMenu";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
 import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
@@ -10,15 +10,17 @@ import { filled, when, userName, refLink, refNo, type Detail } from "@/component
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useDb } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTitle } from "@/components/SectionTitle";
+import { StatStrip } from "@/components/TableToolbar";
 import { TasksPanel } from "@/components/TasksPanel";
 import {
-  ArrowLeft, Mail, Phone, Building2, Users,
+  Mail, Phone, Building2, Users,
   CheckCircle2, Clock, ListTodo, Wallet, Receipt, FileSpreadsheet, FileText, Pencil, Trash2,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { ccy, ccyOrder, fmtCcyMix, fmtCcyPdf, sumByCcy } from "@/lib/currency";
+import { ccy, ccyOrder, fmtCcyPdf, sumByCcy } from "@/lib/currency";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 
 export function EmployeeDetailPage() {
@@ -38,7 +40,7 @@ export function EmployeeDetailPage() {
     return (
       <div className="text-center py-20 text-muted-foreground">
         Employee not found.{" "}
-        <Link to="/employees" className="text-primary underline">Back to Employees</Link>
+        <Link to="/employees" className="inline-block py-2.5 -my-2.5 text-primary underline">Back to Employees</Link>
       </div>
     );
   }
@@ -191,7 +193,7 @@ export function EmployeeDetailPage() {
     if (!x) return [];
     const editWhy = expenseRight(x, "edit"), delWhy = expenseRight(x, "delete");
     return [
-      { label: "Edit", icon: Pencil, hint: editWhy ?? "The expense, and its account entry with it", disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
+      { label: "Edit", icon: Pencil, hint: editWhy ?? "Its account entry moves with it", disabled: !!editWhy, onSelect: () => setEditingExpense(x.id) },
       { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => confirmDeleteExpense(x) },
     ];
   };
@@ -201,7 +203,7 @@ export function EmployeeDetailPage() {
   const delBlock = employeeDeleteBlock(db, employee);
   const profileActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingSelf(true) },
-    { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login — asks first", disabled: !!delBlock,
+    { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login", disabled: !!delBlock,
       onSelect: async () => { if (await confirmDeleteEmployee(employee)) navigate("/employees"); } },
   ];
 
@@ -233,39 +235,43 @@ export function EmployeeDetailPage() {
     filename: `Salary-${employee.name.replace(/\s+/g, "_")}`,
   });
 
+  // The salary sheet's downloads and the opening amount sit in the page's ⋯
+  // with the rest — the opening line is pinned, and a pinned line has no ⋯ of
+  // its own.
+  const hasSalary = salaryLedger.length > 0 || opening > 0;
+  const salaryMenu: MoreAction[] = [
+    { label: opening > 0 ? "Edit opening amount" : "Add opening amount", icon: Wallet, hint: "Paid before this app", onSelect: () => setEditingSelf(true) },
+    { label: "Salary sheet — PDF", icon: FileText, hint: "Every payment, with the total", onSelect: exportSalaryPdf, show: hasSalary && mayExport },
+    { label: "Salary sheet — Excel", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: exportSalaryCsv, show: hasSalary && mayExport },
+  ];
+
+  const taskBar = tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0;
+
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <button onClick={() => navigate("/employees")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Employees
-      </button>
+      {/* The name row and what can be done to them; their facts in the card below. */}
+      <PageHeader
+        back={{ label: "Back to Employees", to: "/employees" }}
+        title={employee.name}
+        subtitle={employee.department || undefined}
+        primary={{ label: "Assign / View Tasks", icon: ListTodo, onClick: () => setTasksOpen(true) }}
+        menu={[...profileActions, ...salaryMenu]}
+      >
+        <div className="mt-2"><StatusBadge status={employee.status} /></div>
+      </PageHeader>
 
       {/* Employee Profile Card */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-6">
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="flex items-start gap-4">
-            <div className="h-14 w-14 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white font-semibold grid place-items-center shrink-0 text-xl">
-              {employee.name.charAt(0)}
-            </div>
-            <div>
-              <div className="flex items-center gap-3 flex-wrap">
-                <h1 className="font-display text-2xl md:text-3xl text-brand-dark">{employee.name}</h1>
-                <StatusBadge status={employee.status} />
-              </div>
-              <p className="text-muted-foreground mt-1">{employee.department || "—"}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => setTasksOpen(true)} className="btn-hero rounded-xl gap-2">
-              <ListTodo className="h-4 w-4" /> Assign / View Tasks
-            </Button>
-            <MoreMenu label={`Actions for ${employee.name}`} actions={profileActions} />
-          </div>
+      {/* On a phone the facts get the card's whole width (no avatar) and the
+          email and username a row each; long values are cut with "…" and
+          given whole on hover, never broken mid-word. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6 flex items-start gap-4">
+        <div className="hidden sm:grid h-14 w-14 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white font-semibold place-items-center shrink-0 text-xl">
+          {employee.name.charAt(0)}
         </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <div className="flex items-start gap-2">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm flex-1 min-w-0">
+          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{employee.email || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={employee.email || undefined}>{employee.email || "—"}</p></div>
           </div>
           <div className="flex items-start gap-2">
             <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -275,134 +281,68 @@ export function EmployeeDetailPage() {
             <Clock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div><p className="text-xs text-muted-foreground">Joined</p><p className="font-medium">{fmtDate(employee.createdAt)}</p></div>
           </div>
-          <div className="flex items-start gap-2">
+          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Building2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs">{employee.username}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs truncate" title={employee.username}>{employee.username}</p></div>
           </div>
         </div>
       </motion.div>
 
-      {/* Summary Stats */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Assigned Clients", value: clients.length, icon: Users, color: "text-primary", bg: "from-primary/10 to-brand-light/10" },
-          { label: "Active Orders", value: activeOrders, icon: Clock, color: "text-warning-foreground", bg: "from-warning/10 to-orange-400/10" },
-          { label: "Tasks Pending", value: pendingTasks, icon: ListTodo, color: "text-destructive", bg: "from-destructive/10 to-red-400/10" },
-          { label: "Tasks Done", value: doneTasks, icon: CheckCircle2, color: "text-success", bg: "from-success/10 to-emerald-400/10" },
-        ].map((s, i) => (
-          <motion.div key={s.label} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
-            className={`card-luxe p-4 bg-gradient-to-br ${s.bg}`}>
-            <div className={`h-9 w-9 rounded-xl bg-white/80 grid place-items-center mb-3 ${s.color}`}>
-              <s.icon className="h-5 w-5" />
-            </div>
-            <p className="text-2xl font-display font-bold text-brand-dark">{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
-          </motion.div>
-        ))}
-      </div>
+      {/* Their work at a glance; how far the tasks have got is under Tasks done. */}
+      <StatStrip items={[
+        { label: "Assigned clients", value: String(clients.length), icon: Users, sub: `${orders.length} order${orders.length !== 1 ? "s" : ""}` },
+        { label: "Active orders", value: String(activeOrders), icon: Clock, sub: `${deliveredOrders} delivered` },
+        { label: "Tasks pending", value: String(pendingTasks), icon: ListTodo, tone: pendingTasks > 0 ? "out" : undefined },
+        { label: "Tasks done", value: String(doneTasks), icon: CheckCircle2, tone: "in", sub: tasks.length ? `${taskBar}% of ${tasks.length}` : undefined },
+      ]} />
 
-      {/* Salary & Payments ledger — total paid to this team member */}
-      <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-emerald-500/10 grid place-items-center shrink-0">
-              <Wallet className="h-5 w-5 text-emerald-600" />
-            </div>
-            <div>
-              <h2 className="font-display text-xl text-brand-dark">Salary &amp; Payments</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {salaryTotals.count} payment{salaryTotals.count !== 1 ? "s" : ""}{opening > 0 ? " (incl. opening)" : ""}
-                {/* The opening line is pinned, and a pinned line has no ⋯ of
-                    its own — so its edit sits here too. */}
-                {" · "}
-                <button type="button" onClick={() => setEditingSelf(true)} className="text-primary hover:underline font-medium">
-                  {opening > 0 ? "Edit opening amount" : "Add opening amount"}
-                </button>
-              </p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="text-right">
-              <p className="text-[11px] text-muted-foreground">This year</p>
-              <p className="font-semibold text-sm text-brand-dark">{fmtCcyMix(salaryTotals.thisYear, nilCcy)}</p>
-            </div>
-            <div className="text-right pl-3 border-l border-border/60">
-              <p className="text-[11px] text-muted-foreground">Total paid to date</p>
-              <p className="font-display text-lg font-bold text-emerald-600">{fmtCcyMix(salaryTotals.total, nilCcy)}</p>
-            </div>
-            {(salaryLedger.length > 0 || opening > 0) && mayExport && (
-              <div className="pl-3 border-l border-border/60">
-                <MoreMenu size="sm" label="Download salary sheet" title="Salary sheet" actions={[
-                  { label: "Download PDF", icon: FileText, onSelect: exportSalaryPdf },
-                  { label: "Download Excel", icon: FileSpreadsheet, onSelect: exportSalaryCsv },
-                ]} />
-              </div>
-            )}
-          </div>
-        </div>
-        {salaryLedger.length === 0 && opening === 0 ? (
-          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+      {/* Salary & Payments: the ledgers carry their own totals and title. */}
+      {!hasSalary ? (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Salary & Payments" className="px-5 py-4 border-b border-border/60"
+            info={<>Record one from <span className="font-medium">Payments → Pay Expense</span> or the Expenses page, tagged to this member.</>} />
+          <div className="flex flex-col items-center justify-center py-12 text-muted-foreground px-5 text-center">
             <Wallet className="h-10 w-10 mb-2 opacity-20" />
-            <p className="text-sm">No salary or payments recorded yet.</p>
-            <p className="text-xs mt-1">Record one from <span className="font-medium">Payments → Pay Expense</span> or the Expenses page, and tag it to this member.</p>
-          </div>
-        ) : (
-          /* Same ledger shape as every other account: search, a date range, a
-             type filter and a running total paid. One ledger per currency paid
-             in — almost always just the one, exactly as before. */
-          salaryCcys.map(code => {
-            const rows = statementIn(code);
-            const n = rows.length;
-            const single = salaryCcys.length === 1;
-            return (
-              <StatementLedger
-                key={code}
-                title={single ? "Salary & Payments" : `Salary & Payments — ${code}`}
-                caption={`${n} payment${n !== 1 ? "s" : ""}${single ? "" : ` in ${code}`}${opening > 0 && openingCur === code ? " (incl. opening)" : ""} · running total paid`}
-                rows={rows}
-                fmt={(v: number) => fmtExpenseAmount(v, code)}
-                debitLabel="Paid"
-                creditLabel=""
-                // Edit / Delete the expense behind each payment.
-                rowActions={salaryRowActions}
-                summary={[
-                  { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear.get(code) ?? 0, code) },
-                  { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total.get(code) ?? 0, code), tone: "in" },
-                  { label: "Payments", value: String(n) },
-                ]}
-              />
-            );
-          })
-        )}
-      </div>
-
-
-      {/* Task progress bar */}
-      {tasks.length > 0 && (
-        <div className="card-luxe p-5">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-sm font-medium">Task Completion</p>
-            <p className="text-xs text-muted-foreground">{doneTasks} of {tasks.length} done</p>
-          </div>
-          <div className="h-2 rounded-full bg-secondary overflow-hidden">
-            <div
-              className="h-full bg-gradient-to-r from-success to-emerald-400"
-              style={{ width: `${tasks.length ? Math.round((doneTasks / tasks.length) * 100) : 0}%` }}
-            />
+            <p className="text-sm">No salary paid yet.</p>
+            <button type="button" onClick={() => setEditingSelf(true)} className="mt-3 text-xs text-primary hover:underline font-medium">Add opening amount</button>
           </div>
         </div>
+      ) : (
+        /* Same ledger shape as every other account: search, a date range, a
+           type filter and a running total paid. One ledger per currency paid
+           in — almost always just the one, exactly as before. */
+        salaryCcys.map(code => {
+          const rows = statementIn(code);
+          const n = rows.length;
+          const single = salaryCcys.length === 1;
+          return (
+            <StatementLedger
+              key={code}
+              title={single ? "Salary & Payments" : `Salary & Payments — ${code}`}
+              caption={`${n} payment${n !== 1 ? "s" : ""}${single ? "" : ` in ${code}`}${opening > 0 && openingCur === code ? " (incl. opening)" : ""}`}
+              rows={rows}
+              fmt={(v: number) => fmtExpenseAmount(v, code)}
+              debitLabel="Paid"
+              creditLabel=""
+              // Edit / Delete the expense behind each payment.
+              rowActions={salaryRowActions}
+              summary={[
+                { label: "Paid this year", value: fmtExpenseAmount(salaryTotals.thisYear.get(code) ?? 0, code) },
+                { label: "Paid to date", value: fmtExpenseAmount(salaryTotals.total.get(code) ?? 0, code), tone: "in" },
+                { label: "Payments", value: String(n) },
+              ]}
+            />
+          );
+        })
       )}
 
-      {/* Assigned Clients */}
+      {/* Assigned Clients — how many, and their orders, are the strip's above. */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Assigned Clients</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{clients.length} client{clients.length !== 1 ? "s" : ""} · {orders.length} total orders · {fmtMoney(totalValue)}</p>
-        </div>
+        <SectionTitle title="Assigned Clients" sub={orders.length ? `${fmtMoney(totalValue)} in orders` : undefined} className="px-5 py-4 border-b border-border/60" />
         {clients.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-14 text-muted-foreground">
             <Users className="h-10 w-10 mb-2 opacity-20" />
-            <p className="text-sm">No clients assigned to this employee yet.</p>
+            <p className="text-sm">No clients assigned yet.</p>
           </div>
         ) : (
           <div className="p-3 sm:p-4">
@@ -428,12 +368,8 @@ export function EmployeeDetailPage() {
       {/* Recent orders across all assigned clients */}
       {orders.length > 0 && (
         <div className="card-luxe overflow-hidden">
-          <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between">
-            <div>
-              <h2 className="font-display text-xl text-brand-dark">Order Activity</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">{deliveredOrders} delivered · {activeOrders} active</p>
-            </div>
-          </div>
+          {/* What the list holds; the counts are the strip's above. */}
+          <SectionTitle title="Order Activity" sub={`Newest ${Math.min(12, orders.length)} of ${orders.length}`} className="px-5 py-4 border-b border-border/60" />
           <div className="p-3 sm:p-4">
             <DataTable
               id="employee-orders"

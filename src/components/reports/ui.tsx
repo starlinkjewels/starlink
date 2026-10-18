@@ -1,5 +1,9 @@
-import type { ReactNode } from "react";
-import { ArrowDownRight, ArrowUpRight, Minus, Download, type LucideIcon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { ArrowDownRight, ArrowUpRight, CalendarDays, Check, ChevronDown, Minus, Download, type LucideIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { SectionTitle } from "@/components/SectionTitle";
+import { dateRangeText } from "@/components/TableToolbar";
+import { PRESETS, presetOf, presetPeriod, type Period } from "@/lib/analytics";
 
 /** Chart colours, in the app's palette. */
 export const C = {
@@ -68,30 +72,68 @@ export function KpiCard({ icon: Icon, label, value, sub, delta, goodWhenDown, to
       <p className="font-display text-2xl text-brand-dark leading-none truncate">{value}</p>
       {/* Stacked on a phone, side by side when there is room. */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 min-h-[14px]">
-        {sub ? <p className="text-[10px] text-muted-foreground truncate min-w-0">{sub}</p> : <span />}
+        {sub ? <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2 min-w-0">{sub}</p> : <span />}
         <span className="shrink-0"><Delta value={delta} goodWhenDown={goodWhenDown} /></span>
       </div>
     </div>
   );
 }
 
-export function Panel({ title, subtitle, icon: Icon, actions, children, className = "" }: {
-  title: string; subtitle?: string; icon?: LucideIcon; actions?: ReactNode; children: ReactNode; className?: string;
+export function Panel({ title, subtitle, info, icon, actions, children, className = "" }: {
+  title: string; subtitle?: string; info?: ReactNode; icon?: LucideIcon; actions?: ReactNode; children: ReactNode; className?: string;
 }) {
   return (
     <section className={`card-luxe p-4 sm:p-5 min-w-0 ${className}`}>
-      <div className="flex items-start justify-between gap-3 mb-3">
-        <div className="flex items-start gap-2.5 min-w-0">
-          {Icon && <span className="h-8 w-8 rounded-xl bg-primary/10 text-primary grid place-items-center shrink-0"><Icon className="h-4 w-4" /></span>}
-          <div className="min-w-0">
-            <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">{title}</h3>
-            {subtitle && <p className="text-[11px] text-muted-foreground mt-0.5">{subtitle}</p>}
-          </div>
-        </div>
-        {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
-      </div>
+      <SectionTitle className="mb-4" title={title} sub={subtitle} info={info} icon={icon} actions={actions} />
       {children}
     </section>
+  );
+}
+
+/**
+ * The reports' one period control — the page's and every report's own: the
+ * same presets as pills and a from–to range, behind one button that says
+ * what is chosen. `allTime` offers the open range ("All time").
+ */
+export function PeriodPicker({ value, onChange, allTime = false, label = "Period" }: {
+  value: Period; onChange: (p: Period) => void; allTime?: boolean; label?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const key = presetOf(value);
+  const text = !value.from && !value.to ? "All time" : key ? PRESETS.find(p => p.key === key)!.label : dateRangeText(value.from, value.to);
+  const pill = (on: boolean, children: ReactNode, onClick: () => void, k: string) => (
+    <button key={k} type="button" onClick={onClick} aria-pressed={on}
+      className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors inline-flex items-center gap-1.5 ${on ? "bg-primary text-primary-foreground border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary/70"}`}>
+      {on && <Check className="h-3 w-3" />}{children}
+    </button>
+  );
+  const box = "w-full h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-brand-dark focus:outline-none focus:ring-2 focus:ring-primary/30";
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" aria-label={`${label}: ${text}`}
+          className="h-9 px-3 inline-flex items-center gap-2 rounded-xl border border-border bg-white text-[13px] font-medium text-brand-dark hover:bg-secondary/70 transition-colors min-w-0 max-w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30">
+          <CalendarDays className="h-4 w-4 text-primary shrink-0" /><span className="truncate">{text}</span><ChevronDown className="h-3.5 w-3.5 opacity-60 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[26rem] max-w-[calc(100vw-2rem)] p-4 rounded-2xl space-y-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {allTime && pill(!value.from && !value.to, "All time", () => { onChange({ from: "", to: "" }); setOpen(false); }, "all")}
+          {PRESETS.map(p => pill(key === p.key, p.label, () => { onChange(presetPeriod(p.key)); setOpen(false); }, p.key))}
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-[11px] text-muted-foreground space-y-1">
+            <span>From</span>
+            <input type="date" aria-label="From date" value={value.from} max={value.to || undefined} onChange={e => onChange({ ...value, from: e.target.value })} className={box} />
+          </label>
+          <label className="text-[11px] text-muted-foreground space-y-1">
+            <span>To</span>
+            <input type="date" aria-label="To date" value={value.to} min={value.from || undefined} onChange={e => onChange({ ...value, to: e.target.value })} className={box} />
+          </label>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 

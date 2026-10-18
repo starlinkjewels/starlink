@@ -9,21 +9,21 @@ import { filled, when, userName, refLink, linkList, noteText, type Detail } from
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Rows3, LayoutGrid, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye } from "lucide-react";
+import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX } from "lucide-react";
 import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { ReturnsComingPanel } from "@/components/SalesReturn";
-import { CompanyFilter, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
-import { companyOf, companyIdOfClient } from "@/lib/companies";
+import { CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
+import { companiesOf, companyOf, companyIdOfClient } from "@/lib/companies";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
+import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
@@ -186,9 +186,9 @@ export function ReadyStockPage() {
     const editWhy = can("readyStock", "edit") ? undefined : needsAccess("readyStock", "edit");
     const delWhy = !can("readyStock", "delete") ? needsAccess("readyStock", "delete") : readyStockDeleteBlocker(db, item);
     return [
-      { label: "View", icon: Eye, hint: "Its page — photos, history, sales", onSelect: () => nav(pieceHref(item)) },
+      { label: "View", icon: Eye, onSelect: () => nav(pieceHref(item)) },
       { label: "Edit", icon: Pencil, hint: editWhy, disabled: !!editWhy, onSelect: () => openEdit(item) },
-      { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(officeOf(item))}` : "Sold out — nothing here to move"),
+      { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(officeOf(item))}` : "Sold out — nothing to move"),
         disabled: !!editWhy || item.quantity <= 0, onSelect: () => setMoving([item]) },
       { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandItem(item), show: db.settings.barcodeBandEnabled !== false },
       { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => del(item) },
@@ -294,102 +294,109 @@ export function ReadyStockPage() {
     </span>
   );
 
+  // Company and availability narrow the shelf behind one Filters button; the
+  // downloads hold what is ticked, else what the filters left.
+  const filters: TableFilter[] = [
+    ...(canManage && multiCo ? [{ kind: "select" as const, label: "Company", value: coSel === "all" ? "" : coSel, onChange: (v: string) => { setCoSel(v || "all"); setPage(1); },
+      allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
+    { kind: "select", label: "Availability", value: avail === "all" ? "" : avail, onChange: v => { setAvail((v || "all") as "all" | "available" | "sold"); setPage(1); },
+      allLabel: "All items", options: [{ value: "available", label: "Available" }, { value: "sold", label: "Sold out" }] },
+  ];
+  const clearFilters = () => { setCoSel("all"); setAvail("all"); setPage(1); };
+  const onSearch = (v: string) => { setQ(v); setPage(1); };
+  const searchHint = "Search name or SKU — SKU-1, SKU-2";
+  const which = chosen.length ? `The ${chosen.length} selected` : `The ${items.length} shown`;
+  const exports: TableExport[] = canManage && items.length ? [
+    { label: "PDF", icon: FileText, hint: which, onSelect: () => exportReadyStockPdf(exportItems, exportName(), exportSubject()) },
+    { label: "Excel", icon: FileSpreadsheet, hint: which, onSelect: () => exportReadyStockCsv(exportItems, exportName(), isAdmin, i => stockCostOf(db, i)) },
+  ] : [];
+  // Lots on the shelf ("items", as the pages count them) — the pieces in them are the figures below.
+  const countText = `${total} item${total !== 1 ? "s" : ""}`;
+
+  // What the office (or all of them) holds — over the pieces, in either view.
+  const summary = (
+    <>
+      <StatStrip
+        items={[
+          { label: "In stock", value: `${piecesInStock} piece${piecesInStock !== 1 ? "s" : ""}`, tone: "strong" as const, icon: Gem,
+            sub: officeName ? `At the ${officeName}` : "All offices" },
+          ...(piecesInStock > 0 ? [{ label: "Worth", value: fmtMoney(worth), icon: Wallet, sub: "At selling price" }] : []),
+          ...(isAdmin && costed.length > 0 ? [{ label: "Cost", value: fmtMoney(costWorth), icon: Lock,
+            sub: costed.length < inStock.length ? `${inStock.length - costed.length} without a cost` : "Admin only" }] : []),
+          ...(soldOut > 0 ? [{ label: "Sold out", value: soldOut, icon: PackageX, sub: `item${soldOut !== 1 ? "s" : ""}` }] : []),
+        ]} />
+      {officeSel === NO_OFFICE && canManage && <p className="px-1 text-xs text-amber-700">Give each an office: ⋯ → Move to another office</p>}
+    </>
+  );
+
+  const selectionBar = canManage && sel.size > 0 ? (
+    <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+      <span className="font-semibold text-brand-dark">{chosen.length} selected</span>
+      {chosen.length !== sel.size && (
+        <span className="text-xs text-muted-foreground">
+          ({sel.size - chosen.length} hidden by filters, left out)
+        </span>
+      )}
+      {mayExport && <span className="text-xs text-muted-foreground">Downloads hold just these.</span>}
+      <div className="ml-auto flex items-center gap-2">
+        {can("readyStock", "edit") && chosen.length > 0 && (
+          <Button size="sm" variant="outline" onClick={() => setMoving(chosen)} className="h-8 rounded-lg gap-1.5"><ArrowRightLeft className="h-3.5 w-3.5" />Move to office</Button>
+        )}
+        {!allShown && (
+          <button onClick={() => setSel(new Set(items.map(i => i.id)))}
+            className="text-xs font-medium text-primary hover:underline">
+            Select all {items.length}
+          </button>
+        )}
+        <button onClick={() => setSel(new Set())}
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+          <X className="h-3.5 w-3.5" /> Clear
+        </button>
+      </div>
+    </div>
+  ) : null;
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-start justify-between gap-4 flex-wrap">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Ready Stock</h1>
-          <p className="text-sm text-muted-foreground">{canManage ? "Finished jewelry available to sell directly, office by office" : "Finished jewelry available to buy"}</p>
-        </div>
-        {canManage && (
-          <div className="flex items-center gap-2">
-            {can("readyStock", "add") && (
-              <Button onClick={openAdd} className="btn-hero h-10 rounded-xl"><Plus className="h-4 w-4 mr-2" />Add Item</Button>
-            )}
-            <MoreMenu actions={[
-              { label: "Download PDF", icon: FileText, hint: chosen.length ? `The ${chosen.length} selected` : `The ${items.length} shown`, onSelect: () => exportReadyStockPdf(exportItems, exportName(), exportSubject()), show: mayExport, disabled: !items.length },
-              { label: "Download Excel", icon: FileSpreadsheet, hint: chosen.length ? `The ${chosen.length} selected` : `The ${items.length} shown`, onSelect: () => exportReadyStockCsv(exportItems, exportName(), isAdmin, i => stockCostOf(db, i)), show: mayExport, disabled: !items.length },
-              { label: "Our offices", icon: Building2, hint: "Add an office, or change their order", onSelect: () => setOfficesOpen(true), show: isAdmin },
-            ]} />
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Ready Stock"
+        subtitle={canManage ? "Finished pieces, by office" : "Finished pieces to buy"}
+        primary={canManage && can("readyStock", "add") ? { label: "Add Item", icon: Plus, onClick: openAdd } : null}
+        menu={canManage ? [
+          { label: "Our offices", icon: Building2, hint: "Add or reorder offices", onSelect: () => setOfficesOpen(true), show: isAdmin },
+        ] : undefined}
+        actions={<ViewSwitch view={view} onChange={saveView} />}
+      />
 
       {canManage && <ReturnsComingPanel />}
 
       {/* Office tabs: where the pieces are. */}
-      <div className="card-luxe p-2 sm:p-3 space-y-2">
-        <div role="tablist" aria-label="Office" className="flex gap-1.5 overflow-x-auto no-scrollbar">
-          {[{ key: "all", label: "All offices", pieces: tabs.reduce((s, t) => s + t.pieces, 0), warn: false },
-            ...tabs.map(t => ({ key: tabKey(t.office), label: officeLabel(t.office), pieces: t.pieces, warn: !t.office }))].map(t => (
-            <button key={t.key} type="button" role="tab" aria-selected={officeSel === t.key} onClick={() => setOffice(t.key)}
-              className={`shrink-0 inline-flex items-center gap-2 h-9 px-3 rounded-lg text-sm font-medium transition-colors ${officeSel === t.key ? "bg-primary text-primary-foreground shadow-soft" : t.warn ? "text-amber-800 hover:bg-amber-500/10" : "text-muted-foreground hover:bg-secondary hover:text-foreground"}`}>
-              {t.key !== "all" && <MapPin className="h-3.5 w-3.5" />}
-              {t.label}
-              <span className={`min-w-5 h-5 px-1.5 rounded-full text-[11px] font-semibold grid place-items-center tabular-nums ${officeSel === t.key ? "bg-white/20" : "bg-secondary"}`}>{t.pieces}</span>
-            </button>
-          ))}
-        </div>
-        <p className="px-1 text-xs text-muted-foreground">
-          <span className="font-semibold text-brand-dark">{piecesInStock} piece{piecesInStock !== 1 ? "s" : ""} in stock</span>
-          {officeName ? ` at the ${officeName}` : " across all offices"}
-          {piecesInStock > 0 && <> · worth <span className="font-semibold text-brand-dark">{fmtMoney(worth)}</span></>}
-          {isAdmin && costed.length > 0 && <> · cost {fmtMoney(costWorth)}{costed.length < inStock.length ? ` (${inStock.length - costed.length} without a cost)` : ""}</>}
-          {soldOut > 0 && ` · ${soldOut} sold out`}
-          {officeSel === NO_OFFICE && canManage && <span className="text-amber-700"> — give each an office: ⋯ → Move to another office</span>}
-        </p>
-      </div>
+      <TabBar label="Office" value={officeSel} onChange={setOffice}
+        tabs={[{ key: "all", label: "All offices", count: tabs.reduce((s, t) => s + t.pieces, 0) },
+          ...tabs.map(t => ({ key: tabKey(t.office), label: officeLabel(t.office), icon: MapPin, count: t.pieces }))]} />
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative flex-1 min-w-[160px] sm:w-64 sm:flex-none">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder="Search name or SKU — SKU-1, SKU-2" className="pl-9 h-10 rounded-xl" />
-        </div>
-        {canManage && <CompanyFilter value={coSel} onChange={v => { setCoSel(v); setPage(1); }} className="flex-1 sm:flex-none sm:w-52 h-10 rounded-xl" />}
-        <Select value={avail} onValueChange={v => { setAvail(v as "all" | "available" | "sold"); setPage(1); }}>
-          <SelectTrigger aria-label="Availability" className="flex-1 sm:flex-none sm:w-40 h-10 rounded-xl"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All items</SelectItem>
-            <SelectItem value="available">Available</SelectItem>
-            <SelectItem value="sold">Sold out</SelectItem>
-          </SelectContent>
-        </Select>
-        <div className="shrink-0 ml-auto inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
-          <button onClick={() => saveView("list")} aria-label="List view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
-          </button>
-          <button onClick={() => saveView("grid")} aria-label="Grid view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
-          </button>
-        </div>
-      </div>
-
-      {canManage && sel.size > 0 && (
-        <div className="card-luxe px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-          <span className="font-semibold text-brand-dark">{chosen.length} selected</span>
-          {chosen.length !== sel.size && (
-            <span className="text-xs text-muted-foreground">
-              ({sel.size - chosen.length} more hidden by the filters — not included)
-            </span>
-          )}
-          {mayExport && <span className="text-xs text-muted-foreground">PDF and Excel will hold just these.</span>}
-          <div className="ml-auto flex items-center gap-2">
-            {can("readyStock", "edit") && chosen.length > 0 && (
-              <Button size="sm" variant="outline" onClick={() => setMoving(chosen)} className="h-8 rounded-lg gap-1.5"><ArrowRightLeft className="h-3.5 w-3.5" />Move to office</Button>
-            )}
-            {!allShown && (
-              <button onClick={() => setSel(new Set(items.map(i => i.id)))}
-                className="text-xs font-medium text-primary hover:underline">
-                Select all {items.length}
-              </button>
-            )}
-            <button onClick={() => setSel(new Set())}
-              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <X className="h-3.5 w-3.5" /> Clear
-            </button>
+      {/* Grid: the table's one toolbar row, without the table (the list has its own). */}
+      {view === "grid" && (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input value={q} onChange={e => onSearch(e.target.value)} placeholder={searchHint} aria-label={searchHint}
+                className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+              {q && (
+                <button type="button" onClick={() => onSearch("")} aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+              )}
+            </div>
+            <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{chosen.length ? ` · ${chosen.length} ticked` : ""}</span>
+              {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || coSel !== "all" || avail !== "all" ? ", as filtered" : "")}`} />}
+            </div>
           </div>
+          <FilterChips filters={filters} onClear={clearFilters} />
+          {summary}
+          {selectionBar}
         </div>
       )}
 
@@ -398,18 +405,20 @@ export function ReadyStockPage() {
         {paged.map((item, idx) => (
           <Fragment key={item.id}>
           {groupHead(item, idx)}
-          <div onClick={openCard(item)} className={`card-luxe card-hover overflow-hidden flex flex-col min-w-0 cursor-pointer ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
-            {/* Tick box, office and menu sit above the photo, never on it. */}
+          <div onClick={openCard(item)} className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 cursor-pointer ${sel.has(item.id) ? "ring-2 ring-primary" : ""}`}>
+            {/* Tick box and menu sit above the photo, never on it. The office is
+                the heading over its group or the tab, so the card doesn't repeat it. */}
             <div className="flex items-center gap-1.5 px-2.5 sm:px-3 pt-2.5 sm:pt-3 pb-2 min-w-0">
-              {canManage && <SelectBox checked={sel.has(item.id)} onToggle={() => toggleSel(item.id)} />}
-              <OfficeChip office={officeOf(item)} className="min-w-0" />
+              {canManage && <SelectBox checked={sel.has(item.id)} onToggle={() => toggleSel(item.id)}
+                className={sel.size ? "" : "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"} />}
               {canManage && <div className="ml-auto"><MoreMenu size="sm" label={`Actions for ${item.name}`} actions={itemActions(item)} /></div>}
             </div>
-            <div className="relative mx-2.5 sm:mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 bg-white">
+            {/* No photo: a small tile rather than an empty square half the card high. */}
+            <div className={`relative mx-2.5 sm:mx-3 rounded-xl overflow-hidden ring-1 ring-border/60 ${item.images?.[0] ? "aspect-square bg-white" : "h-24 bg-secondary/50"}`}>
               {item.images?.[0] ? (
                 <img src={item.images[0]} alt={item.name} loading="lazy" className="w-full h-full object-contain p-1" />
               ) : (
-                <div className="w-full h-full grid place-items-center bg-secondary/50 text-muted-foreground/40"><Gem className="h-10 w-10" /></div>
+                <div className="w-full h-full grid place-items-center text-muted-foreground/40"><Gem className="h-7 w-7" /></div>
               )}
               {item.quantity === 0 && (
                 <div className="absolute inset-0 bg-black/50 grid place-items-center">
@@ -463,7 +472,7 @@ export function ReadyStockPage() {
           </div>
           </Fragment>
         ))}
-        {total === 0 && <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">{shelf.length ? "Nothing here matches — try another office or filter." : "No ready stock items yet — add your first finished piece."}</div>}
+        {total === 0 && <div className="col-span-full card-luxe p-12 text-center text-muted-foreground">{shelf.length ? "Nothing matches." : "No ready stock yet."}</div>}
       </div>
       )}
 
@@ -472,8 +481,14 @@ export function ReadyStockPage() {
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="ready-stock"
-            noun="piece"
+            noun="item"
             rows={items}
+            search={{ value: q, onChange: onSearch, placeholder: searchHint }}
+            filters={filters}
+            onClearFilters={clearFilters}
+            exports={exports}
+            summary={<>{summary}{selectionBar}</>}
+            resetKey={JSON.stringify([officeSel, q, coSel, avail])}
             columns={listColumns}
             rowKey={i => i.id}
             rowHref={pieceHref}
@@ -484,7 +499,7 @@ export function ReadyStockPage() {
             rowActions={canManage ? itemActions : undefined}
             totals={{ qty: rows => rows.reduce((s, i) => s + Math.max(0, i.quantity), 0), price: rows => fmtMoney(rows.reduce((s, i) => s + i.price * Math.max(0, i.quantity), 0)) }}
             totalsLabel="In stock"
-            emptyText={shelf.length ? "Nothing here matches — try another office or filter." : "No ready stock items yet — add your first finished piece."}
+            emptyText={shelf.length ? "Nothing matches." : "No ready stock yet."}
           />
         </div>
       )}

@@ -10,12 +10,23 @@ import { ENTRY_COLS, listEntries, type EntryKind, type MoneyEntry } from "@/lib/
 import { needsAccess } from "@/lib/actionHints";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
-import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
+import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions, oneLine } from "@/components/MoneyEntryEditor";
 import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
 import { filled, linkList, lockerTxnDetails, recorded, refLink, type Detail } from "@/components/rowDetails";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
+import { StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 
+/** The section's heading — the tab's own name, in the same words. */
+const HEADINGS: Record<EntryKind, string> = {
+  supplier: "Supplier payments",
+  factory: "Factory payments",
+  expense: "Expenses",
+  locker: "Account entries",
+};
+
+/** The PDF's title and the file name. */
 const TITLES: Record<EntryKind, string> = {
   supplier: "Supplier Payments",
   factory: "Factory Payments",
@@ -88,12 +99,14 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       || (e.note ?? "").toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || party || acct || dir);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setParty(""); setAcct(""); setDir(""); };
 
   // Each currency totalled on its own — rupees and dollars are never added up.
   const totalOut = sumByCcy(rows.filter(r => r.direction === "out"), r => r.amount, r => r.currency);
   const totalIn = sumByCcy(rows.filter(r => r.direction === "in"), r => r.amount, r => r.currency);
   const anyOf = (m: Map<CurrencyCode, number>) => [...m.values()].some(v => v > 0);
+  const nOut = rows.filter(r => r.direction === "out").length, nIn = rows.length - nOut;
+  const entries = (n: number) => `${n} ${n === 1 ? "entry" : "entries"}`;
+  const showIn = anyOf(totalIn) || kind === "locker";
 
   // Both downloads carry exactly what is on screen — the same filter, the same
   // order — so a printed copy can be checked against the page it came from.
@@ -177,8 +190,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       const delWhy = x ? expenseRight(x, "delete") : "That expense is no longer on file";
       return [
         ...(view ? [view] : []),
-        { label: "Edit", icon: Pencil, onSelect: () => setEditingExpense(e.id), disabled: !!editWhy, hint: editWhy },
-        { label: "Delete", icon: Trash2, danger: true, onSelect: () => { if (x) void confirmDeleteExpense(x); }, disabled: !!delWhy, hint: delWhy },
+        { label: "Edit", icon: Pencil, onSelect: () => setEditingExpense(e.id), disabled: !!editWhy, hint: oneLine(editWhy) },
+        { label: "Delete", icon: Trash2, danger: true, onSelect: () => { if (x) void confirmDeleteExpense(x); }, disabled: !!delWhy, hint: oneLine(delWhy) },
       ];
     }
     return [
@@ -188,6 +201,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
         onEdit: setEditing,
         onDelete: x => { void confirmDeleteEntry(db, x); },
+        go: navigate, mayOpen: m => can(m),
       }),
     ];
   };
@@ -256,7 +270,7 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
       cell: e => <CellMain title={e.party || "—"} className="max-w-[180px]" /> },
     { key: "date", header: "Date", kind: "date", sortValue: e => +new Date(e.date), csv: e => fmtDate(e.date),
       cell: e => <CellDate>{fmtDate(e.date)}</CellDate> },
-    { key: "voucher", header: "Voucher", sortValue: e => e.voucherNo ?? "",
+    { key: "voucher", header: "Voucher", hideIfEmpty: true, sortValue: e => e.voucherNo ?? "",
       cell: e => <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">{e.voucherNo ?? "—"}</span> },
     { key: "against", header: "Against", sortValue: e => e.against ?? "",
       cell: e => <span className="block text-xs text-muted-foreground max-w-[150px] truncate" title={e.against ?? ""}>{e.against ?? "—"}</span> },
@@ -272,37 +286,33 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
 
   return (
     <div className="card-luxe p-5">
-      <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">{TITLES[kind]}</p>
-        <p className="text-xs text-muted-foreground">
-          {rows.length} entr{rows.length !== 1 ? "ies" : "y"}{filtered ? ` of ${all.length}` : ""}
-          {anyOf(totalOut) && <> · out {fmtCcyMix(totalOut)}</>}
-          {anyOf(totalIn) && <> · in {fmtCcyMix(totalIn)}</>}
-          {(from || to) && <> · {rangeLabel(from, to)}</>}
-        </p>
-      </div>
+      <SectionTitle className="mb-4" title={HEADINGS[kind]} />
 
-      <LedgerFilters
-        q={q} onQ={setQ}
-        placeholder="Search party, voucher, bill, remark…"
-        from={from} to={to}
-        onFrom={setFrom} onTo={setTo}
-        selects={[
-          { label: PARTY_LABEL[kind], value: party, onChange: setParty,
-            options: parties.map(p => ({ value: p, label: p })) },
-          { label: "Accounts", value: acct, onChange: setAcct,
-            options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
-          { label: "Directions", value: dir, onChange: setDir,
-            options: [{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }] },
-        ]}
-        active={filtered} onReset={reset}
-        onPdf={exportPdf} onCsv={exportCsv}
-      />
-
-      {/* The filters, search and downloads live in the bar above, so the table
-          brings no search or Excel of its own. A new filter (resetKey)
-          starts it again from the first page. */}
+      {/* Search, filters and downloads sit in the table's own toolbar, the
+          money out and in under it — each currency kept apart. A new filter
+          (resetKey) starts it again from the first page. */}
       <DataTable
+        summary={
+          <StatStrip items={[
+            // The count under each only when there are both — alone, it is the table's own count.
+            { label: "Money out", value: fmtCcyMix(totalOut), tone: "out", sub: showIn ? entries(nOut) : undefined },
+            // Money in only where it happens: refunds, deposits, transfers in.
+            ...(showIn ? [{ label: "Money in", value: fmtCcyMix(totalIn), tone: "in" as const, sub: entries(nIn) }] : []),
+          ]} note={filtered ? `For what the filters show${from || to ? ` · ${rangeLabel(from, to)}` : ""}` : undefined} />
+        }
+        {...ledgerTable({
+          q, onQ: setQ, placeholder: "Search party, voucher, bill, remark…",
+          from, to, onFrom: setFrom, onTo: setTo,
+          selects: [
+            { label: PARTY_LABEL[kind], value: party, onChange: setParty,
+              options: parties.map(p => ({ value: p, label: p })) },
+            { label: "Account", value: acct, onChange: setAcct,
+              options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
+            { label: "Direction", value: dir, onChange: setDir,
+              options: [{ value: "out", label: "Money out" }, { value: "in", label: "Money in" }] },
+          ],
+          onPdf: exportPdf, onCsv: exportCsv,
+        })}
         resetKey={JSON.stringify([kind, ql, from, to, party, acct, dir])}
         id={`money-ledger-${kind}`}
         noun={NOUN[kind]}
@@ -310,7 +320,8 @@ export function MoneyLedger({ kind }: { kind: EntryKind }) {
         columns={columns}
         rowKey={e => e.id}
         defaultSort={{ key: "date", dir: "desc" }}
-        emptyText={filtered ? "Nothing matches these filters." : ready ? "No entries yet." : "Loading entries…"}
+        loading={!ready}
+        emptyText={filtered ? "Nothing matches these filters." : "No entries yet."}
         details={entryDetails}
         // View, Edit, Delete — greyed with the reason where they can't be used.
         rowActions={rowActions}

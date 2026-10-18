@@ -1,22 +1,19 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
-import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+import { PageHeader } from "@/components/PageHeader";
+import { ExportMenu, FilterChips, FiltersButton, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { OrderBoard } from "@/components/OrderBoard";
 import { pieceWeights } from "@/lib/weights";
-import { useCan } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Filter, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, Download, ChevronDown, UserCog, Building2, Users, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2 } from "lucide-react";
+import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2 } from "lucide-react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
@@ -34,7 +31,6 @@ import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order, MaterialIssuance } from "@/lib/db";
-import { IfExport } from "@/components/IfExport";
 
 const PAGE_SIZE = 12;
 
@@ -55,10 +51,10 @@ function SelectBox({ checked, onToggle, className = "" }: { checked: boolean; on
 
 /** The factory has reported back: net weight, purity and the finished piece are
  *  recorded, so the job itself is done even if the order has not shipped. */
-/** "RETURNED", or "2 OF 4 RETURNED" when the client kept some. */
+/** "Returned", or "2 of 4 returned" when the client kept some. */
 function returnTag(o: Order): string {
   const back = returnedQty(o), of = o.quantity || 1;
-  return back >= of ? "RETURNED" : `${back} OF ${of} RETURNED`;
+  return back >= of ? "Returned" : `${back} of ${of} returned`;
 }
 
 function jobFinished(o: Order): boolean {
@@ -98,6 +94,8 @@ export function OrdersPage() {
   const isStaff = user!.role !== "client";
   const can = useCan();
   const [trackingOrder, setTrackingOrder] = useState<Order | null>(null);
+  // Pictures that would not load show the small icon tile instead of a blank square.
+  const [brokenImg, setBrokenImg] = useState<Set<string>>(new Set());
   // List, Grid (image) or Board (stage columns) — remembered per device. The
   // board moves orders between stages, so it is for staff; a client who had it
   // remembered on a shared device sees the grid.
@@ -191,9 +189,9 @@ export function OrdersPage() {
     const editWhy = orderEditAccess(db, user, can, o) ?? orderSpecLocks(db, o).all;
     const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, o);
     return [
-      { label: "View", icon: Eye, hint: "Open the order", onSelect: () => nav(`/orders/${o.id}`) },
-      { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
-      { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
+      { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
+      { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
+      { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Closes it; can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
       { label: "Delete", icon: Trash2, danger: true, hint: "Orders are never deleted — cancel instead", disabled: true, onSelect: () => undefined, show: isStaff },
     ];
   };
@@ -237,7 +235,7 @@ export function OrdersPage() {
               </p>
               {(o.melted || jobFinished(o) || !!o.returns?.length) && (
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  {o.melted ? <CellTag tone="red">MELTED</CellTag> : jobFinished(o) && <CellTag tone="red">JOB FINISH</CellTag>}
+                  {o.melted ? <CellTag tone="red">Melted</CellTag> : jobFinished(o) && <CellTag tone="red">Job finish</CellTag>}
                   {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
                 </div>
               )}
@@ -371,201 +369,158 @@ export function OrdersPage() {
         q.trim() ? `Search: "${q.trim()}"` : "",
       ]).filter(Boolean).join(" · ");
 
+  // The same narrowing as ever — status, client, company, person — behind one
+  // Filters button in whichever view is open. "" in a filter means "all".
+  const pick = (set: (v: string) => void) => (v: string) => set(v || "all");
+  const filters: TableFilter[] = [
+    { kind: "select", label: "Status", value: status === "all" ? "" : status, onChange: pick(setStatus), allLabel: "All status",
+      options: [
+        { value: "Pending", label: "Pending (Waiting + Approved)" },
+        ...(isStaff ? [{ value: "uninvoiced", label: "Not invoiced (shipped)" }] : []),
+        { value: "returned", label: "Returned by client" },
+        ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })),
+      ] },
+    ...(isStaff ? [{ kind: "select" as const, label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
+      options: [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),
+    ...(isStaff && multiCo ? [{ kind: "select" as const, label: "Company", value: companyFilter === "all" ? "" : companyFilter, onChange: pick(setCompanyFilter), allLabel: "All companies",
+      options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
+    ...(user!.role === "admin" ? [{ kind: "select" as const, label: "Employee", value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",
+      options: db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive")
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` })) }] : []),
+  ];
+  const clearFilters = () => { setStatus("all"); setClientFilter("all"); setCompanyFilter("all"); setEmployeeFilter("all"); };
+  // The product sheet: what is ticked, else what the filters left. The profit
+  // sheet says it is the admin's own — the others go to customers for a bulk
+  // sale, and cost must never be one forward away from one.
+  const exports: TableExport[] = isStaff && orders.length > 0 ? [
+    { label: "PDF", icon: FileText, hint: "Product sheet, for a customer", onSelect: () => exportProductsPdf(db, exportRows, exportName(), exportSubject()) },
+    { label: "Excel", icon: FileSpreadsheet, hint: "The same sheet, to edit", onSelect: () => exportProductsCsv(db, exportRows, exportName()) },
+    ...(user!.role === "admin" ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — never send out", onSelect: () => exportProfitCsv(db, exportRows, exportName()) }] : []),
+  ] : [];
+  const mayExport = useMayExport();
+  const countText = `${total} order${total !== 1 ? "s" : ""}`;
+  const searchHint = "Search — or 1090, 1091, LR-528";
+
+  // Bulk work on the ticked pieces.
+  const selectionBar = isStaff && sel.size > 0 ? (
+    <div className="rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+      <span className="font-semibold text-brand-dark">
+        {chosen.length} selected
+      </span>
+      {chosen.length !== sel.size && (
+        <span className="text-xs text-muted-foreground">
+          ({sel.size - chosen.length} hidden by filters, left out)
+        </span>
+      )}
+      <span className="text-xs text-muted-foreground">Downloads hold just these.</span>
+      <div className="ml-auto flex items-center gap-2">
+        {chosen.length > 0 && (
+          <>
+            {can("orders", "edit") && (<>
+            <button onClick={() => setBulkDispatch(true)}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-semibold text-blue-700 hover:bg-blue-500/20">
+              <Truck className="h-3.5 w-3.5" /> Dispatch
+            </button>
+            <button onClick={() => setBulkDeliver(true)}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/10 border border-success/30 text-xs font-semibold text-success hover:bg-success/20">
+              <PackageCheck className="h-3.5 w-3.5" /> Delivered
+            </button>
+            </>)}
+            {user!.role === "admin" && (
+              <button onClick={() => setBulkAssign(true)}
+                className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-500/10 border border-violet-500/30 text-xs font-semibold text-violet-700 hover:bg-violet-500/20">
+                <UserCog className="h-3.5 w-3.5" /> Assign
+              </button>
+            )}
+            {/* An invoice covers one client, so this stays out of reach until
+                the selection is down to one — with the reason said, not just
+                a dead button. */}
+            {can("invoices", "add") && <button onClick={() => setBulkInvoice(true)} disabled={!oneClient}
+              title={oneClient ? "Bill these orders on one invoice" : "Select orders from a single client"}
+              className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-primary/10 border border-primary/30 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed">
+              <FileText className="h-3.5 w-3.5" /> Invoice
+            </button>}
+          </>
+        )}
+        {!allShown && (
+          <button onClick={() => setSel(new Set(orders.map(o => o.id)))}
+            className="text-xs font-medium text-primary hover:underline">
+            Select all {orders.length}
+          </button>
+        )}
+        <button onClick={() => setSel(new Set())}
+          className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
+          <X className="h-3.5 w-3.5" /> Clear
+        </button>
+      </div>
+    </div>
+  ) : null;
+  const emptyBody = user!.role === "employee" && currentUserOrders(db, user!).length === 0 ? (
+    <>
+      <span className="block font-medium text-brand-dark">No orders are yours yet.</span>
+      <span className="block text-xs mt-1 max-w-md mx-auto">
+        {reachOf(user, db.roles ?? []) === "all" ? "There are no orders yet." : "Ask the admin to assign you orders or clients."}
+      </span>
+    </>
+  ) : "No orders match."
+
   return (
     <div className="max-w-7xl mx-auto space-y-4">
 
-      {/* ── Page header ── */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Orders</h1>
-          <p className="text-sm text-muted-foreground">{total} order{total !== 1 ? "s" : ""}</p>
-        </div>
-        {(user!.role === "client" || user!.role === "admin" || (user!.role === "employee" && can("orders", "add"))) && (
-          <Button asChild className="btn-hero h-10 rounded-xl px-4 text-sm">
-            <Link to="/orders/new"><Plus className="h-4 w-4 mr-1.5" />New Order</Link>
-          </Button>
-        )}
-      </div>
-
-      {/* ── Toolbar — one tidy row on desktop, wraps neatly on phone ── */}
-      <div className="card-luxe p-2 flex flex-wrap items-center gap-2">
-        {/* Search grows to fill whatever space is left (own full row on mobile) */}
-        <div className="relative flex-1 basis-full sm:basis-0 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search — or 1090, 1091, LR-528" className="pl-9 h-10 rounded-lg text-sm" />
-        </div>
-
-        <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger className="flex-1 sm:flex-none sm:w-40 h-10 rounded-lg text-sm">
-            <Filter className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All status</SelectItem>
-            <SelectItem value="Pending">Pending (Waiting + Approved)</SelectItem>
-            {isStaff && <SelectItem value="uninvoiced">Not invoiced (shipped)</SelectItem>}
-            <SelectItem value="returned">Returned by client</SelectItem>
-            {["Waiting","Approved","In Production","Ready","Dispatched","Delivered","Rejected"].map(s =>
-              <SelectItem key={s} value={s}>{s}</SelectItem>)}
-          </SelectContent>
-        </Select>
-
-        {isStaff && (
-          <Select value={clientFilter} onValueChange={setClientFilter}>
-            <SelectTrigger className="flex-1 sm:flex-none sm:w-52 h-10 rounded-lg text-sm">
-              <Users className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
+      {/* ── Page header: the view switch, and the one main button ── */}
+      <PageHeader
+        title="Orders"
+        primary={(user!.role === "client" || user!.role === "admin" || (user!.role === "employee" && can("orders", "add")))
+          ? { label: "New Order", icon: Plus, onClick: () => nav("/orders/new") } : null}
+        actions={
+          <Select value={view} onValueChange={v => saveView(v as "list" | "grid" | "board")}>
+            <SelectTrigger className="shrink-0 w-[7.5rem] h-10 rounded-xl text-sm bg-white" aria-label="View">
+              {view === "list" ? <Rows3 className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : view === "grid" ? <LayoutGrid className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : <Columns3 className="h-3.5 w-3.5 mr-1.5 shrink-0" />}
+              <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All clients</SelectItem>
-              {[...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c =>
-                <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              <SelectItem value="list">List</SelectItem>
+              <SelectItem value="grid">Grid</SelectItem>
+              {isStaff && <SelectItem value="board">Board</SelectItem>}
             </SelectContent>
           </Select>
-        )}
+        }
+      />
 
-        {isStaff && multiCo && (
-          <Select value={companyFilter} onValueChange={setCompanyFilter}>
-            <SelectTrigger className="flex-1 sm:flex-none sm:w-48 h-10 rounded-lg text-sm" aria-label="Company">
-              <Building2 className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All companies</SelectItem>
-              {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-
-        {user!.role === "admin" && (
-          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-            <SelectTrigger className="flex-1 sm:flex-none sm:w-48 h-10 rounded-lg text-sm" aria-label="Employee">
-              <UserCog className="h-3.5 w-3.5 mr-1.5 shrink-0" /><SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All employees</SelectItem>
-              {db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive")
-                .sort((a, b) => a.name.localeCompare(b.name))
-                .map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.role === "admin" ? " (admin)" : ""}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-
-        {isStaff && orders.length > 0 && (
-          <IfExport>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" aria-label="Export"
-                className="shrink-0 flex items-center gap-1.5 h-10 px-3 rounded-lg border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark data-[state=open]:border-primary/50 data-[state=open]:text-primary">
-                <Download className="h-4 w-4" /> Export{chosen.length ? ` (${chosen.length})` : ""} <ChevronDown className="h-3.5 w-3.5" />
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-64 rounded-xl p-1.5">
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2 py-1">
-                Product sheet · {chosen.length ? `${chosen.length} selected` : `${orders.length} shown`}
-              </DropdownMenuLabel>
-              <DropdownMenuItem onSelect={() => exportProductsPdf(db, exportRows, exportName(), exportSubject())} className="rounded-lg px-2 py-2 cursor-pointer gap-2">
-                <FileText className="h-4 w-4 text-primary" />
-                <span><span className="block text-xs font-medium">PDF</span><span className="block text-[10px] text-muted-foreground">Weights, diamonds and value — for a customer</span></span>
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => exportProductsCsv(db, exportRows, exportName())} className="rounded-lg px-2 py-2 cursor-pointer gap-2">
-                <FileSpreadsheet className="h-4 w-4 text-primary" />
-                <span><span className="block text-xs font-medium">Excel</span><span className="block text-[10px] text-muted-foreground">The same sheet, to edit or send</span></span>
-              </DropdownMenuItem>
-              {/* Kept apart and marked: the sheets above go to customers for a
-                  bulk sale, and cost must never be one forward away from one. */}
-              {user!.role === "admin" && (
-                <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-amber-700 font-semibold px-2 py-1">Admin only — never send to a customer</DropdownMenuLabel>
-                  <DropdownMenuItem onSelect={() => exportProfitCsv(db, exportRows, exportName())} className="rounded-lg px-2 py-2 cursor-pointer gap-2 bg-amber-500/5 focus:bg-amber-500/15">
-                    <TrendingUp className="h-4 w-4 text-amber-700" />
-                    <span><span className="block text-xs font-semibold text-amber-800">Profit — Excel</span><span className="block text-[10px] text-muted-foreground">Cost and profit per order</span></span>
-                  </DropdownMenuItem>
-                </>
+      {/* ── Grid and Board: the table's one toolbar row, without the table —
+          search, Filters, the count and Export (the list has its own). ── */}
+      {view !== "list" && (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchHint} aria-label={searchHint}
+                className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+              {q && (
+                <button type="button" onClick={() => setQ("")} aria-label="Clear search"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
               )}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          </IfExport>
-        )}
-
-        <Select value={view} onValueChange={v => saveView(v as "list" | "grid" | "board")}>
-          <SelectTrigger className="shrink-0 w-[7.5rem] h-10 rounded-lg text-sm" aria-label="View">
-            {view === "list" ? <Rows3 className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : view === "grid" ? <LayoutGrid className="h-3.5 w-3.5 mr-1.5 shrink-0" /> : <Columns3 className="h-3.5 w-3.5 mr-1.5 shrink-0" />}
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="list">List</SelectItem>
-            <SelectItem value="grid">Grid</SelectItem>
-            {isStaff && <SelectItem value="board">Board</SelectItem>}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* ── What is ticked, and what the download will hold ── */}
-      {isStaff && sel.size > 0 && (
-        <div className="card-luxe px-3 py-2 flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
-          <span className="font-semibold text-brand-dark">
-            {chosen.length} selected
-          </span>
-          {chosen.length !== sel.size && (
-            <span className="text-xs text-muted-foreground">
-              ({sel.size - chosen.length} more hidden by the filters — not included)
-            </span>
-          )}
-          <span className="text-xs text-muted-foreground">PDF and Excel will hold just these.</span>
-          <div className="ml-auto flex items-center gap-2">
-            {chosen.length > 0 && (
-              <>
-                {can("orders", "edit") && (<>
-                <button onClick={() => setBulkDispatch(true)}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-blue-500/10 border border-blue-500/30 text-xs font-semibold text-blue-700 hover:bg-blue-500/20">
-                  <Truck className="h-3.5 w-3.5" /> Dispatch
-                </button>
-                <button onClick={() => setBulkDeliver(true)}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-success/10 border border-success/30 text-xs font-semibold text-success hover:bg-success/20">
-                  <PackageCheck className="h-3.5 w-3.5" /> Delivered
-                </button>
-                </>)}
-                {user!.role === "admin" && (
-                  <button onClick={() => setBulkAssign(true)}
-                    className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-violet-500/10 border border-violet-500/30 text-xs font-semibold text-violet-700 hover:bg-violet-500/20">
-                    <UserCog className="h-3.5 w-3.5" /> Assign
-                  </button>
-                )}
-                {/* An invoice covers one client, so this stays out of reach until
-                    the selection is down to one — with the reason said, not just
-                    a dead button. */}
-                {can("invoices", "add") && <button onClick={() => setBulkInvoice(true)} disabled={!oneClient}
-                  title={oneClient ? "Bill these orders on one invoice" : "Select orders from a single client"}
-                  className="flex items-center gap-1.5 h-8 px-3 rounded-lg bg-primary/10 border border-primary/30 text-xs font-semibold text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed">
-                  <FileText className="h-3.5 w-3.5" /> Invoice
-                </button>}
-              </>
-            )}
-            {!allShown && (
-              <button onClick={() => setSel(new Set(orders.map(o => o.id)))}
-                className="text-xs font-medium text-primary hover:underline">
-                Select all {orders.length}
-              </button>
-            )}
-            <button onClick={() => setSel(new Set())}
-              className="flex items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground">
-              <X className="h-3.5 w-3.5" /> Clear
-            </button>
+            </div>
+            <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
+            <div className="ml-auto flex items-center gap-2">
+              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{chosen.length ? ` · ${chosen.length} ticked` : ""}</span>
+              {mayExport && <ExportMenu exports={exports} scope={`Product sheet · ${chosen.length ? `${chosen.length} ticked` : `${orders.length} shown`}`} />}
+            </div>
           </div>
+          <FilterChips filters={filters} onClear={clearFilters} />
         </div>
       )}
 
-      {/* ── Empty state ── */}
-      {total === 0 && (
+      {/* ── What is ticked, and what the download will hold (in the list, it
+          sits between the table's toolbar and its rows) ── */}
+      {view !== "list" && selectionBar}
+
+      {/* ── Empty state (the list says it in its table, under its toolbar) ── */}
+      {total === 0 && view !== "list" && (
         <div className="card-luxe p-12 text-center text-muted-foreground">
           <Package className="h-10 w-10 mx-auto mb-3 opacity-20" />
-          {user!.role === "employee" && currentUserOrders(db, user!).length === 0 ? (
-            <>
-              <p className="font-medium text-brand-dark">No orders are yours yet.</p>
-              <p className="text-xs mt-1 max-w-md mx-auto">
-                {reachOf(user, db.roles ?? []) === "all" ? "There are no orders yet." : "You see the orders assigned to you and the orders of clients you manage. Ask the admin to assign orders to you, make you a client's account manager, or give you a role that sees every order."}
-              </p>
-            </>
-          ) : <p>No orders match your filters.</p>}
+          <p>{emptyBody}</p>
         </div>
       )}
 
@@ -585,7 +540,8 @@ export function OrdersPage() {
                 <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
                   <StatusBadge status={o.status} />
                   <span className="flex items-center gap-1.5">
-                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)} />}
+                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)}
+                      className={sel.size ? "" : "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"} />}
                     {/* Inside the card's link: a click on the menu (or in it — React
                         events travel up from the menu's portal) must not open the order. */}
                     {isStaff && (
@@ -596,21 +552,23 @@ export function OrdersPage() {
                   </span>
                 </div>
                 {/* The whole sheet, on white: shown in full, never cropped. */}
-                <div className={`relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 ${img ? "bg-secondary/60 animate-pulse" : "bg-secondary/50"}`}>
-                  {img ? (
+                {img && !brokenImg.has(o.id) ? (
+                  <div className="relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 bg-secondary/60 animate-pulse">
                     <img
                       src={img}
                       alt={o.orderNumber}
                       loading="lazy"
                       decoding="async"
                       onLoad={e => { const box = e.currentTarget.parentElement; box?.classList.remove("animate-pulse", "bg-secondary/60"); box?.classList.add("bg-white"); }}
-                      onError={e => { e.currentTarget.parentElement?.classList.remove("animate-pulse"); e.currentTarget.style.display = "none"; }}
+                      onError={() => setBrokenImg(prev => new Set(prev).add(o.id))}
                       className="relative z-10 w-full h-full object-contain p-1 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                     />
-                  ) : (
-                    <div className="w-full h-full grid place-items-center">{isDiamondOnlyOrder(o) ? <Gem className="h-8 w-8 text-sky-500/40" /> : <Package className="h-8 w-8 text-primary/30" />}</div>
-                  )}
-                </div>
+                  </div>
+                ) : (
+                  <div className="mx-3 h-24 rounded-xl bg-secondary/50 ring-1 ring-border/60 grid place-items-center">
+                    {isDiamondOnlyOrder(o) ? <Gem className="h-7 w-7 text-sky-500/45" /> : <Package className="h-7 w-7 text-primary/35" />}
+                  </div>
+                )}
                 <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-w-0">
                   <p className="font-semibold text-[15px] leading-tight tracking-tight truncate">{o.orderNumber}</p>
                   <p className="text-xs text-muted-foreground truncate mt-1">
@@ -619,13 +577,11 @@ export function OrdersPage() {
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-xs font-medium text-primary truncate mt-1">🏭 Ready Stock</p>
                     : client && <p className="text-xs font-semibold text-foreground/70 truncate mt-1">{client.companyName}</p>)}
-                  {(o.melted || jobFinished(o)) && (
-                    <span className="self-start mt-1.5 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-md bg-destructive/10 text-destructive">
-                      {o.melted ? "MELTED" : "JOB FINISH"}
-                    </span>
-                  )}
-                  {!!o.returns?.length && (
-                    <span className="self-start mt-1.5 text-[10px] font-bold tracking-wide px-1.5 py-0.5 rounded-md bg-amber-500/10 text-amber-800">{returnTag(o)}</span>
+                  {(o.melted || jobFinished(o) || !!o.returns?.length) && (
+                    <div className="flex flex-wrap gap-1 mt-1.5">
+                      {(o.melted || jobFinished(o)) && <CellTag tone="red">{o.melted ? "Melted" : "Job finish"}</CellTag>}
+                      {!!o.returns?.length && <CellTag tone="amber">{returnTag(o)}</CellTag>}
+                    </div>
                   )}
                   {user!.role === "admin" && <OrderProfitBadge db={db} order={o} className="mt-1.5 text-xs" />}
                   {isStaff && (() => {
@@ -654,13 +610,22 @@ export function OrdersPage() {
         </div>
       )}
 
-      {/* ── List view: the orders as a table — the same table as every list ── */}
-      {view === "list" && total > 0 && (
+      {/* ── List view: the orders as a table — the same table as every list,
+          with the search, Filters and Export in its own toolbar. Shown with no
+          rows too, so the filters that emptied it can be undone right there. ── */}
+      {view === "list" && (
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="orders-list"
             noun="order"
             rows={orders}
+            search={{ value: q, onChange: setQ, placeholder: searchHint }}
+            filters={filters}
+            onClearFilters={clearFilters}
+            exports={exports}
+            summary={selectionBar}
+            emptyText={emptyBody}
+            resetKey={JSON.stringify([q, status, clientFilter, employeeFilter, companyFilter])}
             columns={listColumns}
             rowKey={o => o.id}
             rowHref={o => `/orders/${o.id}`}

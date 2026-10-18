@@ -86,7 +86,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       open={!!clientId && !!client}
       onOpenChange={v => { if (!v) onClose(); }}
       title="Edit Client"
-      description={<>Login email and password aren't editable here — use &ldquo;Reset Password&rdquo; for credentials.</>}
+      description="The login stays — use Send password reset for it"
       icon={Pencil}
       size="lg"
       footer={
@@ -124,7 +124,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
           onDate={v => setEf({ ...ef, openingDate: v || undefined })}
           debitLabel="Client owes us (Debit)"
           creditLabel="We owe client / advance (Credit)"
-          hint="Adjust the balance carried in from your previous system. Shown as the first line of their ledger."
+          hint="Carried in from your previous system."
         />
       </div>
       {user!.role === "admin" && multiCo && (
@@ -137,7 +137,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
             <AddNewItem kind="company" /></SelectContent>
           </Select>
           {client && ef.companyId !== companyIdOfClient(client) && (
-            <p className="text-[11px] text-amber-700 mt-1">From now on their new invoices come from this company. Invoices already raised keep the company that issued them.</p>
+            <p className="text-[11px] text-amber-700 mt-1">New invoices only — raised ones keep their company.</p>
           )}
         </div>
       )}

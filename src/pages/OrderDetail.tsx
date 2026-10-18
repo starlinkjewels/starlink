@@ -1,5 +1,6 @@
 
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
@@ -2227,7 +2228,7 @@ function OrderDetailPageBody() {
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-5">
-      <button onClick={() => nav(-1)} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="h-4 w-4" /> Back</button>
+      <Link to="/orders" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />Back to Orders</Link>
 
       <div className="card-luxe p-0 overflow-hidden">
       {/* Order Header — the piece at a glance: its picture, where it stands,
@@ -2265,7 +2266,7 @@ function OrderDetailPageBody() {
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
                   })()}
                 </div>
-                <h1 className="font-display text-3xl md:text-4xl text-brand-dark mt-1.5 leading-tight">{order.jewelleryType} in {order.metal}</h1>
+                <h1 className="font-display text-[26px] sm:text-[30px] leading-[1.15] text-brand-dark mt-1.5 break-words">{order.jewelleryType} in {order.metal}</h1>
                 <p className="text-sm text-muted-foreground mt-1">
                   {order.forReadyStock ? "🏭 Ready Stock (in-house build)" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
                   {order.materialSourcing === "readyStock" ? (() => {
@@ -2294,15 +2295,16 @@ function OrderDetailPageBody() {
                   </span>
                 </div>
               </div>
-              {/* One main action as a button; the rest in the ⋯ menu beside it. */}
-              <div className="flex items-center gap-2 lg:justify-end shrink-0">
+              {/* One main action as a button; the rest in the ⋯ menu beside it —
+                  the same sizes as every page header, one row on a phone. */}
+              <div className="flex items-center gap-2 lg:justify-end shrink-0 max-sm:w-full">
                 {order.forReadyStock
                   ? (user!.role === "admin" && (
                       order.readyStockCreatedId
-                        ? <Button variant="outline" onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />In Ready Stock ✓</Button>
-                        : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero rounded-xl h-10"><PackageCheck className="h-4 w-4 mr-2" />Add to Ready Stock</Button>
+                        ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
+                        : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
                     ))
-                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button variant="outline" onClick={handlePrintInvoice} className="rounded-xl h-10"><Printer className="h-4 w-4 mr-2" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
+                  : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button onClick={handlePrintInvoice} className="btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>}
                 <MoreMenu title="This order" actions={orderActions} />
               </div>
             </div>
@@ -2326,7 +2328,7 @@ function OrderDetailPageBody() {
       })()}
 
         {/* Details, grouped: the piece · its stones and weight · people and dates. */}
-        <div className="px-5 sm:px-6 py-5 border-t border-border/60 grid gap-4 lg:grid-cols-3">
+        <div className="p-5 sm:p-6 border-t border-border/60 grid gap-5 sm:gap-6 lg:grid-cols-3">
           <div className="rounded-2xl border border-border/60 p-4">
             <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3"><Package className="h-3.5 w-3.5 text-primary" /> The piece</p>
             <div className="grid grid-cols-2 gap-2">
@@ -2352,8 +2354,8 @@ function OrderDetailPageBody() {
               <OrderSpec label="Actual diamonds" value={order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : undefined} />
             </div>
           </div>
-          <div className="rounded-2xl border border-border/60 p-4 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5"><UserRound className="h-3.5 w-3.5 text-primary" /> People &amp; dates</p>
+          <div className="rounded-2xl border border-border/60 p-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1.5 mb-3"><UserRound className="h-3.5 w-3.5 text-primary" /> People &amp; dates</p>
             <div className="grid grid-cols-2 gap-2">
               {/* Design Number — editable inline (staff), and addable when missing */}
               <div className="col-span-2 rounded-xl bg-secondary/40 px-3 py-2">
@@ -2389,7 +2391,7 @@ function OrderDetailPageBody() {
               <OrderSpec label="Priority" value={order.priority} />
               <OrderSpec label="Delivery date" value={fmtDate(order.expectedDelivery)} />
             </div>
-            <AssignOrderField order={order} />
+            <div className="mt-2"><AssignOrderField order={order} /></div>
           </div>
         </div>
 
@@ -2549,7 +2551,7 @@ function OrderDetailPageBody() {
                 {m.chargeInr ? ` · melting charge ₹${m.chargeInr.toLocaleString("en-IN")} owed to ${db.factories.find(f => f.id === m.meltedBy)?.name ?? "the factory"}` : ""}
                 {m.advanceToCredit ? ` · ${fmtMoney(m.advanceToCredit)} advance moved to the client's credit` : ""}
               </p>
-              <p className="text-[11px] text-muted-foreground">The piece no longer exists, so this order can't be re-opened. Place a new order to make it again.</p>
+              <p className="text-[11px] text-muted-foreground">It can't be re-opened — place a new order to make it again.</p>
             </div>
           );
         })()}
@@ -2783,17 +2785,7 @@ function OrderDetailPageBody() {
       {showCadSection && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-primary/10 grid place-items-center">
-                <ImagePlus className="h-5 w-5 text-primary" />
-              </div>
-              <div>
-                <h3 className="font-display text-lg text-brand-dark">CAD Design</h3>
-                <p className="text-xs text-muted-foreground">
-                  {order.cadImage ? "CAD image on file — visible to client" : "No CAD image uploaded yet"}
-                </p>
-              </div>
-            </div>
+            <SectionTitle icon={ImagePlus} title="CAD Design" sub={order.cadImage ? "On file · the client sees it" : "Not uploaded yet"} />
             <div className="flex items-center gap-2 flex-wrap">
               {/* Visible to everyone (incl. client) once a 3D model is on file. */}
               {order.cad3dmUrl && (
@@ -2868,15 +2860,7 @@ function OrderDetailPageBody() {
       {showDispSection && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-blue-500/10 grid place-items-center">
-                <Truck className="h-5 w-5 text-blue-500" />
-              </div>
-              <div>
-                <h3 className="font-display text-lg text-brand-dark">Dispatch Details</h3>
-                <p className="text-xs text-muted-foreground">Courier and tracking information</p>
-              </div>
-            </div>
+            <SectionTitle icon={Truck} title="Dispatch Details" />
             {canEditStage() && (
               <Button size="sm" variant="outline" onClick={() => {
                 setCourierName(order.courierName ?? "");
@@ -2991,19 +2975,8 @@ function OrderDetailPageBody() {
       {showPhotographySection && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-xl bg-fuchsia-500/10 grid place-items-center">
-                <Camera className="h-5 w-5 text-fuchsia-500" />
-              </div>
-              <div>
-                <h3 className="font-display text-lg text-brand-dark">Product Photography</h3>
-                <p className="text-xs text-muted-foreground">
-                  {hasProductMedia
-                    ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""} · download anytime`
-                    : "Upload 4–5 photos and a short video of the finished piece"}
-                </p>
-              </div>
-            </div>
+            <SectionTitle icon={Camera} title="Product Photography"
+              sub={hasProductMedia ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""}` : "None yet"} />
             <div className="flex items-center gap-2 flex-wrap">
               {hasProductMedia && (
                 <AsyncButton size="sm" variant="outline" onClick={downloadAllMedia} disabled={downloadingAll} className="rounded-xl gap-2">
@@ -3083,7 +3056,7 @@ function OrderDetailPageBody() {
           {/* Empty state — staff, nothing uploaded yet */}
           {!hasProductMedia && canEditStage() && (
             <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-              No product photos yet. Tap <span className="font-medium text-foreground">Add Photos</span> for 4–5 pictures and <span className="font-medium text-foreground">Add Video</span> for a short clip — the client can then view and download them from the Product Photos page under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
+              Add 4–5 photos and a short video. The client finds them under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
             </div>
           )}
         </div>
@@ -3097,18 +3070,8 @@ function OrderDetailPageBody() {
       {/* ── Advance Payment Card ── */}
       <div className="card-luxe p-6 space-y-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center">
-              <Wallet className="h-5 w-5 text-success" />
-            </div>
-            <div>
-              <h3 className="font-display text-lg text-brand-dark">Payments</h3>
-              <p className="text-xs text-muted-foreground">
-                {advances.length} payment{advances.length !== 1 ? "s" : ""} recorded
-                {advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}
-              </p>
-            </div>
-          </div>
+          <SectionTitle icon={Wallet} title="Payments"
+            sub={<>{advances.length} payment{advances.length !== 1 ? "s" : ""}{advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}</>} />
           {canEditStage() && balance > 0 && (user!.role === "admin" || can("payments", "add")) && (
             <Button size="sm" onClick={() => setShowAdvForm(v => !v)} className="btn-hero rounded-xl gap-2">
               <Plus className="h-4 w-4" /> {advances.length === 0 ? "Add Advance" : "Collect Payment"}
@@ -3339,7 +3302,7 @@ function OrderDetailPageBody() {
       {/* Production Timeline. A diamond-only order is not produced, so it shows
           only the stages it really has — order, dispatch, delivery. */}
       <div className="card-luxe p-6">
-        <h3 className="font-display text-xl text-brand-dark mb-5">{diamondOnly ? "Order Progress" : "Production Timeline"}</h3>
+        <SectionTitle className="mb-5" title={diamondOnly ? "Order Progress" : "Production Timeline"} />
         <div className="relative pl-8 space-y-4">
           <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
           {shownSteps.map(({ t, i: idx }, n) => {
@@ -3410,15 +3373,11 @@ function OrderDetailPageBody() {
       {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <h3 className="font-display text-xl text-brand-dark">{diamondOnly ? "Diamond" : "Manufacturing"}</h3>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {diamondOnly ? "Bought for this order and dispatched — no factory, nothing is made"
-                  : order.materialSourcing === "stock" ? "Sourcing plan: Use from Stock"
-                  : order.materialSourcing === "purchase" ? "Sourcing plan: Buy New for this order"
-                  : "No sourcing plan set at order creation"}
-              </p>
-            </div>
+            <SectionTitle title={diamondOnly ? "Diamond" : "Manufacturing"}
+              sub={diamondOnly ? "Bought for this order — nothing is made"
+                : order.materialSourcing === "stock" ? "Plan: use from stock"
+                : order.materialSourcing === "purchase" ? "Plan: buy new for this order"
+                : "No sourcing plan"} />
           </div>
 
           {/* Diamond-only: nothing to assign, estimate or approve — just buy
@@ -3515,7 +3474,7 @@ function OrderDetailPageBody() {
                     )}
                   </div>
                   {hasActuals && (
-                    <p className="font-bold text-destructive pt-1">JOB FINISH — the factory’s actual details are recorded</p>
+                    <p className="font-bold text-destructive pt-1">Job finish — the factory’s actual details are recorded</p>
                   )}
                 </div>
               );
@@ -3664,14 +3623,19 @@ function OrderDetailPageBody() {
                       )}
                       <p className="text-xs font-medium text-muted-foreground">Diamond {idx + 1}</p>
                       {line.material === "gold" ? (
-                        <div className="grid grid-cols-3 gap-2.5">
-                          <Input type="number" min={0} value={line.goldWeight} onChange={e => updateBuyLine(bi, idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
-                          <Select value={line.goldPurity} onValueChange={v => updateBuyLine(bi, idx, { goldPurity: v })}>
-                            <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                            <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                          </Select>
-                          <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(bi, idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
-                          <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="Discount % (minus adds)" />
+                        // Two to a row on a phone, each named above it, so nothing is cut short.
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Weight (g)</span>
+                            <Input type="number" min={0} value={line.goldWeight} onChange={e => updateBuyLine(bi, idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
+                          <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Purity</span>
+                            <Select value={line.goldPurity} onValueChange={v => updateBuyLine(bi, idx, { goldPurity: v })}>
+                              <SelectTrigger className="h-10 rounded-xl" aria-label="Purity"><SelectValue /></SelectTrigger>
+                              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                            </Select></div>
+                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate/g (${line.currency})`}</span>
+                            <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(bi, idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
+                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Discount %</span>
+                            <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
                         </div>
                       ) : (
                         <div className="space-y-2.5">
@@ -3684,17 +3648,22 @@ function OrderDetailPageBody() {
                               </button>
                             ))}
                           </div>
-                          <div className="grid grid-cols-3 gap-2.5">
-                            <Select value={line.diaShape} onValueChange={v => updateBuyLine(bi, idx, { diaShape: v })}>
-                              <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                            </Select>
-                            <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(bi, idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder={line.diaKind === "certified" ? "Size (ct)" : "Carat"} />
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                            <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Shape</span>
+                              <Select value={line.diaShape} onValueChange={v => updateBuyLine(bi, idx, { diaShape: v })}>
+                                <SelectTrigger className="h-10 rounded-xl" aria-label="Shape"><SelectValue placeholder="Shape" /></SelectTrigger>
+                                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
+                              </Select></div>
+                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{line.diaKind === "certified" ? "Size (ct)" : "Carat"}</span>
+                              <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(bi, idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
                             {line.diaKind === "loose" && (
-                              <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updateBuyLine(bi, idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs" />
+                              <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Pcs</span>
+                                <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updateBuyLine(bi, idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Optional" /></label>
                             )}
-                            <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(bi, idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
-                            <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="Discount % (minus adds)" />
+                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate/ct (${line.currency})`}</span>
+                              <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(bi, idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
+                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Discount %</span>
+                              <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
                           </div>
                           {line.diaKind === "loose" ? (
                             <Input value={line.diaQuality} onChange={e => updateBuyLine(bi, idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
@@ -4001,7 +3970,7 @@ function OrderDetailPageBody() {
                     <p className="text-sm font-semibold text-brand-dark">Rework / Alteration</p>
                     <button onClick={() => setShowRework(false)} className="text-xs text-muted-foreground underline">cancel</button>
                   </div>
-                  <p className="text-xs text-muted-foreground">Add or remove gold/diamond and record the factory’s rework charge. Added gold normally comes out of the gold the factory already holds of ours; removed material returns to stock — the factory ledger &amp; stock update automatically.</p>
+                  <p className="text-xs text-muted-foreground">Added gold comes from what the factory holds of ours; removed material goes back to stock.</p>
                   <div>
                     <Label className="text-xs">Factory</Label>
                     <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={addNew("factory", setRwFactoryId)}>
@@ -4078,7 +4047,7 @@ function OrderDetailPageBody() {
           style so it reads as one continuous story. */}
       {user!.role !== "client" && !!order.manufacturingLog?.length && (
         <div className="card-luxe p-6">
-          <h3 className="font-display text-xl text-brand-dark mb-5">Manufacturing Log</h3>
+          <SectionTitle className="mb-5" title="Manufacturing Log" />
           <div className="relative pl-8 space-y-4">
             <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
             {[...order.manufacturingLog].sort((a, b) => +new Date(a.at) - +new Date(b.at)).map((entry, idx) => {
@@ -4261,7 +4230,7 @@ function OrderDetailPageBody() {
                 <Input value={faBillNo} onChange={e => setFaBillNo(e.target.value)}
                   className="rounded-lg h-9 mt-1" placeholder="e.g. JS4677 — from the factory's bill" />
                 <p className="text-[10px] text-muted-foreground mt-1">
-                  Put the same number on every piece from one bill; the factory ledger then totals them together.
+                  The same number on every piece of one bill.
                 </p>
               </div>
 
@@ -4303,8 +4272,8 @@ function OrderDetailPageBody() {
               {/* Other metal — two-tone pieces (platinum bezel on gold, gold + silver, …) */}
               <div className="mb-4">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Other metal (optional)</p>
-                <div className="grid grid-cols-3 gap-2.5">
-                  <div>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <div className="col-span-2 sm:col-span-1">
                     <Label className="text-[11px]">Metal</Label>
                     <Select value={faOtherMetal || "__none"} onValueChange={v => setFaOtherMetal(v === "__none" ? "" : v)}>
                       <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue placeholder="None" /></SelectTrigger>
@@ -4328,7 +4297,7 @@ function OrderDetailPageBody() {
                   </div>
                 </div>
                 <p className="text-[11px] text-muted-foreground mt-1">
-                  For a two-tone piece — the second metal used alongside the gold. It is added into the gross weight below.
+                  Two-tone pieces only — added to the gross weight.
                 </p>
               </div>
 
@@ -4386,7 +4355,7 @@ function OrderDetailPageBody() {
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">For a loose diamond, enter how many carats came back (e.g. issued 1ct, 0.50ct returned) and how many stones (pcs). Returned carats go back to stock; the rest is used in the piece.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Carats that came back go to stock; the rest is used in the piece.</p>
                   {/* The factory weighs on its own scale and bills handling on ITS
                       figure. Without a way to match it, our ledger and their bill
                       can never agree over a 0.02ct difference. */}
@@ -4402,9 +4371,7 @@ function OrderDetailPageBody() {
                         className="rounded-xl mt-1 h-9" placeholder="stones on the bill" />
                     </div>
                     <p className="text-[11px] text-muted-foreground col-span-2 -mt-1">
-                      Use the adjustment when the factory’s scale reads differently from ours — issued 6.58ct, their
-                      bill says 6.60ct, so enter 0.02. It goes into the total diamond weight, which is what their
-                      handling charge is calculated on, so both ledgers land on the same figure.
+                      When their scale differs (issued 6.58ct, billed 6.60ct), enter 0.02 so both ledgers match.
                     </p>
                   </div>
                 </div>
@@ -4436,7 +4403,7 @@ function OrderDetailPageBody() {
                       );
                     })}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1">What is used counts in the piece&rsquo;s weight below (metal by the gram, stones at 0.2 g a carat); what came back goes back to stock.</p>
+                  <p className="text-[11px] text-muted-foreground mt-1">Used counts in the weight below; returned goes back to stock.</p>
                 </div>
               )}
 

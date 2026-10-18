@@ -41,7 +41,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
       open={open}
       onOpenChange={onOpenChange}
       title="Add Factory"
-      description="A workshop or karigar that makes pieces — their details, and the labour and gold already with them."
+      description="Their details, and labour or gold already with them"
       icon={FactoryIcon}
       size="md"
       footer={
@@ -74,7 +74,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
           debitLabel="Factory owes us (Debit)"
           creditLabel="We owe factory (Credit)"
           title="Opening Making-Charge Balance"
-          hint="Unpaid labour / making charges with this factory when you started using this app (₹)."
+          hint="Unpaid making charges when you started using the app (₹)."
         />
         <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
           <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
@@ -92,7 +92,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
                 className="rounded-lg mt-1 h-9" />
             </div>
           </div>
-          <p className="text-[11px] text-muted-foreground">Pure (24KT) gold already lying with this factory. Added onto their Fine Gold balance.</p>
+          <p className="text-[11px] text-muted-foreground">24KT gold already with them — added to their fine gold.</p>
         </div>
       </div>
     </ActionSheet>

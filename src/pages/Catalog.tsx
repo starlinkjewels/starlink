@@ -17,7 +17,7 @@ import {
   Image as ImageIcon,
   Video,
   Download,
-  MoreVertical,
+  MoreHorizontal,
   ChevronLeft,
   Heart,
   ImagePlus,
@@ -25,6 +25,7 @@ import {
   FolderInput,
 } from "lucide-react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { PageHeader } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -307,9 +308,10 @@ function FolderMenu({ onRename, onDelete }: { onRename?(): void; onDelete?(): vo
           e.stopPropagation();
           setOpen((v) => !v);
         }}
+        aria-label="More actions"
         className="h-8 w-8 rounded-xl bg-white/90 border border-border/60 grid place-items-center shadow-sm text-muted-foreground hover:text-foreground active:bg-secondary transition-colors"
       >
-        <MoreVertical className="h-4 w-4" />
+        <MoreHorizontal className="h-4 w-4" />
       </button>
       <AnimatePresence>
         {open && (
@@ -577,7 +579,7 @@ function CatalogItemSheet({ item, mode, folders, onClose, onSaved }: {
   return (
     <ActionSheet open onOpenChange={(o) => { if (!o) onClose(); }} icon={mode === "rename" ? Edit2 : FolderInput}
       title={mode === "rename" ? "Rename item" : "Move to another folder"}
-      description={mode === "rename" ? "The name shown under it, and the file name it downloads as." : `Now in ${folderPath(folders, item.folderId) || "a folder"}. Share links already sent keep showing it where it was.`}
+      description={mode === "rename" ? "Also its download file name." : `Now in ${folderPath(folders, item.folderId) || "a folder"}. Links already sent keep the old place.`}
       footer={
         <div className="flex justify-end gap-2">
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
@@ -639,7 +641,7 @@ function FavoritesGallery({
         <div>
           <p className="font-semibold text-brand-dark">No favourites yet</p>
           <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-            Tap the ♥ on any image or video to save it here.
+            Tap ♥ on any image to keep it here.
           </p>
         </div>
       </div>
@@ -1234,31 +1236,22 @@ export function CatalogPage() {
   }
 
   /* ─────────────── Breadcrumb ─────────────── */
+  /** The way up from here — the folder itself is the page's title. */
   function Breadcrumb() {
-    const atRoot = folderPath.length === 0 && !viewingFavorites;
     return (
-      <nav className="flex items-center gap-1 flex-wrap text-sm min-w-0">
+      <nav aria-label="Folders" className="flex items-center gap-1 flex-wrap text-sm min-w-0">
         <button
           onClick={goToRoot}
-          className={`font-medium shrink-0 ${atRoot ? "text-brand-dark" : "text-primary active:underline"}`}
+          className="font-medium shrink-0 text-primary active:underline"
         >
           Catalog
         </button>
-        {viewingFavorites && folderPath.length === 0 && (
-          <span className="flex items-center gap-1 min-w-0">
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-            <span className="font-medium text-brand-dark flex items-center gap-1">
-              <Heart className="h-3.5 w-3.5 fill-rose-500 text-rose-500" /> Favourites
-            </span>
-          </span>
-        )}
-        {breadcrumb.map((f, i) => (
+        {breadcrumb.slice(0, -1).map((f, i) => (
           <span key={f.id} className="flex items-center gap-1 min-w-0">
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <button
               onClick={() => navigateTo(i)}
-              className={`font-medium truncate max-w-[120px] sm:max-w-[200px]
-                ${i === breadcrumb.length - 1 ? "text-brand-dark" : "text-primary active:underline"}`}
+              className="font-medium truncate max-w-[120px] sm:max-w-[200px] text-primary active:underline"
             >
               {f.name}
             </button>
@@ -1301,7 +1294,7 @@ export function CatalogPage() {
                     )}
                   </div>
                   <div className="px-3 pt-2.5 pb-1 flex items-center gap-2">
-                    <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                    {coverUrl && <Folder className="h-3.5 w-3.5 text-amber-500 shrink-0" />}
                     {isRenaming ? (
                       <input
                         autoFocus
@@ -1494,28 +1487,29 @@ export function CatalogPage() {
   /* ─────────────── Render ─────────────── */
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div className="min-w-0">
-          <Breadcrumb />
-          <p className="text-xs text-muted-foreground mt-1">
-            {viewingFavorites
-              ? `${favoriteItems.length} favourited item${favoriteItems.length !== 1 ? "s" : ""}`
-              : [
-                  subfolders.length > 0 &&
-                    `${subfolders.length} folder${subfolders.length !== 1 ? "s" : ""}`,
-                  items.length > 0 &&
-                    `${items.length}${itemsHasMore ? "+" : ""} file${items.length !== 1 ? "s" : ""}`,
-                  isRoot &&
-                    favoriteItems.length > 0 &&
-                    `${favoriteItems.length} favourite${favoriteItems.length !== 1 ? "s" : ""}`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "Empty"}
-          </p>
-        </div>
-        {(canAdd || canShare) && (
-          <div className="flex items-center gap-2 shrink-0">
+      {/* Header: where you are, the way up, and what can be done here. The two
+          uploads stay in view (icons only on a phone); New Folder is the main button. */}
+      <PageHeader
+        eyebrow={isRoot ? undefined : <Breadcrumb />}
+        title={viewingFavorites && folderPath.length === 0
+          ? <span className="inline-flex items-center gap-2"><Heart className="h-6 w-6 fill-rose-500 text-rose-500" />Favourites</span>
+          : breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "Catalog"}
+        subtitle={viewingFavorites
+          ? `${favoriteItems.length} favourited item${favoriteItems.length !== 1 ? "s" : ""}`
+          : [
+              subfolders.length > 0 &&
+                `${subfolders.length} folder${subfolders.length !== 1 ? "s" : ""}`,
+              items.length > 0 &&
+                `${items.length}${itemsHasMore ? "+" : ""} file${items.length !== 1 ? "s" : ""}`,
+              isRoot &&
+                favoriteItems.length > 0 &&
+                `${favoriteItems.length} favourite${favoriteItems.length !== 1 ? "s" : ""}`,
+            ]
+              .filter(Boolean)
+              .join(" · ") || "Empty"}
+        primary={canAdd ? { label: "New Folder", icon: Plus, onClick: () => { setShowNewFolder((v) => !v); setNewFolderName(""); } } : null}
+        actions={(canAdd || canShare) ? (
+          <>
             {/* Upload — only shown when inside a folder */}
             {canAdd && currentFolderId && (
               <>
@@ -1533,7 +1527,8 @@ export function CatalogPage() {
                 <button
                   onClick={() => document.getElementById("catalog-upload-input")?.click()}
                   disabled={uploading}
-                  className="flex items-center gap-2 px-4 h-10 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
+                  aria-label={uploading ? undefined : "Upload"}
+                  className="flex items-center gap-2 px-3 sm:px-3.5 h-10 shrink-0 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
                 >
                   {uploading ? (
                     <span className="h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
@@ -1542,9 +1537,12 @@ export function CatalogPage() {
                   )}
                   {uploading
                     ? (uploadProgress
-                        ? `Uploading ${uploadProgress.done + 1}/${uploadProgress.total}${uploadProgress.pct ? ` · ${uploadProgress.pct}%` : ""}…`
-                        : "Uploading…")
-                    : "Upload"}
+                        ? <>
+                            <span className="sm:hidden tabular-nums">{uploadProgress.done + 1}/{uploadProgress.total}</span>
+                            <span className="max-sm:hidden">{`Uploading ${uploadProgress.done + 1}/${uploadProgress.total}${uploadProgress.pct ? ` · ${uploadProgress.pct}%` : ""}…`}</span>
+                          </>
+                        : <span className="max-sm:hidden">Uploading…</span>)
+                    : <span className="max-sm:hidden">Upload</span>}
                 </button>
               </>
             )}
@@ -1567,11 +1565,12 @@ export function CatalogPage() {
             <button
               onClick={() => document.getElementById("catalog-upload-folder-input")?.click()}
               disabled={uploading}
+              aria-label="Upload Folder"
               title="Pick a folder on your computer — the folder and everything inside it is uploaded in one go, keeping its sub-folders"
-              className="flex items-center gap-2 px-4 h-10 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
+              className="flex items-center gap-2 px-3 sm:px-3.5 h-10 shrink-0 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary disabled:opacity-60 transition-colors"
             >
               <FolderPlus className="h-4 w-4" />
-              Upload Folder
+              <span className="max-sm:hidden">Upload Folder</span>
             </button>
             </>)}
             {canShare && currentFolderId && (
@@ -1581,20 +1580,9 @@ export function CatalogPage() {
                 folderName={folders.find((f) => f.id === currentFolderId)?.name ?? "Folder"}
               />
             )}
-            {canAdd && (
-              <button
-                onClick={() => {
-                  setShowNewFolder((v) => !v);
-                  setNewFolderName("");
-                }}
-                className="flex items-center gap-2 px-4 h-10 rounded-xl btn-hero text-sm font-medium"
-              >
-                <Plus className="h-4 w-4" /> New Folder
-              </button>
-            )}
-          </div>
-        )}
-      </div>
+          </>
+        ) : undefined}
+      />
 
       {/* New folder input (no height animation — avoids full-screen bug) */}
       {showNewFolder && (
@@ -1766,20 +1754,7 @@ export function CatalogPage() {
               </div>
               <div>
                 <p className="font-semibold text-brand-dark">No folders yet</p>
-                <p className="text-sm text-muted-foreground mt-1 max-w-xs mx-auto">
-                  {canAdd
-                    ? "Create a folder to start organising your product catalog."
-                    : "No catalog folders have been created yet."}
-                </p>
               </div>
-              {canAdd && (
-                <button
-                  onClick={() => setShowNewFolder(true)}
-                  className="flex items-center gap-2 px-5 h-11 rounded-xl btn-hero text-sm font-medium"
-                >
-                  <Plus className="h-4 w-4" /> New Folder
-                </button>
-              )}
             </div>
           )}
 
@@ -1795,9 +1770,7 @@ export function CatalogPage() {
                 </div>
                 <div>
                   <p className="font-semibold text-brand-dark">This folder is empty</p>
-                  <p className="text-sm text-muted-foreground mt-0.5">
-                    {canAdd ? "Create a subfolder or upload files below." : "No items here yet."}
-                  </p>
+                  {canAdd && <p className="text-sm text-muted-foreground mt-0.5">Add a subfolder or upload below.</p>}
                 </div>
               </div>
             )}

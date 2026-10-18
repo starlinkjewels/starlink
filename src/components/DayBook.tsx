@@ -4,12 +4,15 @@ import { fmtDate, type LockerTransaction } from "@/lib/db";
 import { lockerBalance } from "@/lib/manufacturing";
 import { ccy, fmtCcy, fmtCcyPdf } from "@/lib/currency";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
+import { StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { lockerTxnDetails } from "@/components/rowDetails";
 import { useCan } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
-import { HandCoins } from "lucide-react";
+import { HandCoins, History, Wallet } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
 import { needsAccess } from "@/lib/actionHints";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -44,6 +47,7 @@ function isIn(t: LockerTransaction) {
 export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const db = useDb();
   const can = useCan();
+  const navigate = useNavigate();
   const lockers = db.lockers.filter(l => l.active !== false);
   // The account picked, or the first one. Taking the first one ONCE, when the
   // page drew, left the book on "no account" whenever the accounts arrived a
@@ -103,9 +107,9 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const rows = [...matching].reverse();
 
   const filtered = !!(ql || from || to || dir);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setDir(""); };
 
   const totalIn = rows.filter(r => isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
+  const nIn = rows.filter(r => isIn(r.t)).length, nOut = rows.length - nIn;
   const totalOut = rows.filter(r => !isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
   const closing = withBalance.length ? withBalance[withBalance.length - 1].balance : (locker?.openingBalance || 0);
 
@@ -152,7 +156,7 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
       cell: ({ t }) => <div title={particulars(t)} className="max-w-[340px]"><CellMain title={t.category || t.type} sub={t.note} /></div> },
     { key: "date", header: "Date", kind: "date", sortValue: ({ t }) => +new Date(t.createdAt), csv: ({ t }) => fmtDate(t.createdAt),
       cell: ({ t }) => <CellDate>{fmtDate(t.createdAt)}</CellDate> },
-    { key: "voucher", header: "Voucher", sortValue: ({ t }) => t.voucherNo ?? "",
+    { key: "voucher", header: "Voucher", hideIfEmpty: true, sortValue: ({ t }) => t.voucherNo ?? "",
       cell: ({ t }) => <span className="font-mono text-[11px] text-muted-foreground whitespace-nowrap">{t.voucherNo ?? "—"}</span> },
     { key: "in", header: "In", align: "right", kind: "number", sortValue: ({ t }) => (isIn(t) ? t.amountInr : null),
       cell: ({ t }) => (isIn(t) ? <CellAmount tone="in">{money(t.amountInr)}</CellAmount> : null) },
@@ -178,6 +182,8 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
         editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
         onEdit: setEditing,
         onDelete: x => { void confirmDeleteEntry(db, x); },
+        // A movement corrected on another page links there.
+        go: navigate, mayOpen: m => can(m),
       }),
     ];
   };
@@ -188,13 +194,8 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
 
   return (
     <div className="card-luxe p-5">
-      <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">Day Book{chosen !== undefined && locker ? ` — ${locker.name}` : ""}</p>
-        <p className="text-xs text-muted-foreground">
-          Every movement on one account, newest first — the balance on each line is the balance after it
-          {chosen !== undefined && lockers.length > 1 ? ". Pick another account from the balances above." : ""}
-        </p>
-      </div>
+      <SectionTitle className="mb-4" title="Day book" sub={locker?.name}
+        info={<>Every movement on one account, newest first. The balance on each line is the balance after it.{chosen !== undefined && lockers.length > 1 ? " Pick another account from the balances above." : ""}</>} />
 
       {/* One account at a time — a running balance across mixed accounts, some in
           rupees and some in dollars, would not mean anything. */}
@@ -214,32 +215,27 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
         })}
       </div>}
 
-      <LedgerFilters
-        q={q} onQ={setQ}
-        placeholder="Search particulars or voucher…"
-        from={from} to={to}
-        onFrom={setFrom} onTo={setTo}
-        selects={[
-          { label: "Directions", value: dir, onChange: setDir,
-            options: [{ value: "in", label: "Money in" }, { value: "out", label: "Money out" }] },
-        ]}
-        active={filtered} onReset={reset}
-        onPdf={exportPdf} onCsv={exportCsv}
-      />
-
-      <div className="flex items-center gap-4 flex-wrap text-xs text-muted-foreground mb-2">
-        <span>Opening <span className="font-semibold text-foreground">{money(locker?.openingBalance || 0)}</span></span>
-        <span className="text-success">In <span className="font-semibold">{money(totalIn)}</span></span>
-        <span className="text-destructive">Out <span className="font-semibold">{money(totalOut)}</span></span>
-        <span>Closing <span className="font-semibold text-brand-dark">{money(closing)}</span></span>
-        {(from || to) && <span>· {rangeLabel(from, to)}</span>}
-      </div>
-
-      {/* The filters, search and downloads live in the bar above, so the table
-          brings no search or Excel of its own. A new account or filter
-          (resetKey) starts it again from the first page. Newest
-          first by default; sorted oldest first, the balance reads downwards. */}
+      {/* Search, filters and downloads sit in the table's own toolbar. A new
+          account or filter (resetKey) starts it again from the first page.
+          Newest first by default; sorted oldest first, the balance reads downwards. */}
       <DataTable
+        {...ledgerTable({
+          q, onQ: setQ, placeholder: "Search particulars or voucher…",
+          from, to, onFrom: setFrom, onTo: setTo,
+          selects: [{ label: "Direction", value: dir, onChange: setDir,
+            options: [{ value: "in", label: "Money in" }, { value: "out", label: "Money out" }] }],
+          onPdf: exportPdf, onCsv: exportCsv,
+        })}
+        summary={
+          <StatStrip items={[
+            { label: "Opening balance", value: money(locker?.openingBalance || 0), icon: History, sub: "At the start" },
+            // The signs only when the figures do add up: filtered, in and out
+            // are the rows shown, the balances the whole account.
+            { label: "Money in", value: money(totalIn), tone: "in", op: filtered ? undefined : "+", sub: `${nIn} ${nIn === 1 ? "entry" : "entries"}${filtered ? " shown" : ""}` },
+            { label: "Money out", value: money(totalOut), tone: "out", op: filtered ? undefined : "−", sub: `${nOut} ${nOut === 1 ? "entry" : "entries"}${filtered ? " shown" : ""}` },
+            { label: "Closing balance", value: money(closing), tone: "strong", op: filtered ? undefined : "=", icon: Wallet, sub: "Now" },
+          ]} note={filtered ? `Money in and out for what the filters show${from || to ? ` (${rangeLabel(from, to)})` : ""} — the balances are the whole account's` : undefined} />
+        }
         resetKey={JSON.stringify([lockerId, ql, from, to, dir])}
         id="day-book"
         noun="movement"

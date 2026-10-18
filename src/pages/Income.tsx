@@ -5,20 +5,18 @@ import { fmtMoney, fmtDate, orderTotal } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useNavigate } from "react-router-dom";
 import {
-  TrendingUp, TrendingDown, Download, Filter, X, Wallet,
-  CreditCard, Receipt, Calendar, Trash2, Pencil, FileText, FileSpreadsheet, Eye,
+  CreditCard, Receipt, Trash2, Pencil, FileText, FileSpreadsheet, Eye,
 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { ccy, ccyOrder, fmtCcy, fmtCcyPdf, type CurrencyCode } from "@/lib/currency";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
-import { IfExport } from "@/components/IfExport";
 import type { MoreAction } from "@/components/MoreMenu";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
 import { needsAccess } from "@/lib/actionHints";
 import { useCan } from "@/hooks/useCan";
 import { filled, linkList, lockerLabel, lockerTxnDetails, noteText, recorded, refLink, refNo, userName, when, type Detail } from "@/components/rowDetails";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
 /* ─── Types ─────────────────────────────────────────────────── */
 type PassbookRowType =
@@ -193,6 +191,7 @@ export function IncomePage() {
   const totalIn = filtered.filter(r => r.direction === "in").reduce((s, r) => s + r.amount, 0);
   const totalOut = filtered.filter(r => r.direction === "out").reduce((s, r) => s + r.amount, 0);
   const net = totalIn - totalOut;
+  const nIn = filtered.filter(r => r.direction === "in").length, nOut = filtered.length - nIn;
 
   /* Clients list for filter dropdown */
   const clients = isClient
@@ -200,6 +199,17 @@ export function IncomePage() {
     : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
 
   const hasActiveFilter = dateFrom || dateTo || clientFilter !== "all";
+  const clearFilters = () => { setDateFrom(""); setDateTo(""); setClientFilter("all"); };
+
+  // The dates, and (for staff) the client — behind the table's one Filters button.
+  const filters: TableFilter[] = [
+    { kind: "date", from: dateFrom, to: dateTo, onChange: (f, t) => { setDateFrom(f); setDateTo(t); } },
+  ];
+  if (!isClient) filters.push({
+    kind: "select", label: "Client", allLabel: "All Clients", value: clientFilter === "all" ? "" : clientFilter,
+    onChange: v => setClientFilter(v || "all"),
+    options: clients.map(c => ({ value: c.id, label: c.companyName })),
+  });
 
   /* The table — every filtered row, paged by the table itself; totals count them all. */
   const signed = (r: PassbookRow) => (r.direction === "in" ? r.amount : -r.amount);
@@ -279,9 +289,9 @@ export function IncomePage() {
         { label: "View order", icon: Eye, onSelect: () => navigate(`/orders/${r.editable!.orderId}`),
           disabled: !can("orders"), hint: can("orders") ? r.link?.label : needsAccess("orders", "view") },
         { label: "Edit", icon: Pencil, onSelect: () => openEdit(r), disabled: !!lock || !mayPayEdit,
-          hint: lock ?? (mayPayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit")) },
+          hint: oneLine(lock) ?? (mayPayEdit ? "Amount, date, account, mode" : needsAccess("payments", "edit")) },
         { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.editable!.receiptId!, user!.id), disabled: !!lock || !mayPayDelete,
-          hint: lock ?? (mayPayDelete ? "Cancels the receipt — off the bills, the account and any credit" : needsAccess("payments", "delete")) },
+          hint: oneLine(lock) ?? (mayPayDelete ? "Off the bills, account and credit" : needsAccess("payments", "delete")) },
       ];
     }
     const where = correctedIn(r);
@@ -344,128 +354,38 @@ export function IncomePage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Passbook</h1>
-        <IfExport>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button disabled={filtered.length === 0} className="btn-hero rounded-xl gap-2">
-              <Download className="h-4 w-4" /> Export
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={exportPdf}><FileText className="h-4 w-4 mr-2" /> Download PDF</DropdownMenuItem>
-            <DropdownMenuItem onClick={exportCsv}><FileSpreadsheet className="h-4 w-4 mr-2" /> Download Excel (CSV)</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-        </IfExport>
-      </div>
+      <PageHeader title="Passbook" />
 
       {/* ── Currency tabs — never blend USD client billing with INR sourcing/cost, or either with any other account's currency ── */}
       {!isClient && (
-        <div className="flex flex-wrap gap-1 p-1 bg-secondary rounded-xl w-fit max-w-full">
-          {tabs.map(c => (
-            <button
-              key={c}
-              onClick={() => setCurTab(c)}
-              className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
-                tab === c ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {tabLabel(c)}
-            </button>
-          ))}
-        </div>
+        <TabBar label="Currency" value={tab} onChange={setCurTab} tabs={tabs.map(c => ({ key: c, label: tabLabel(c) }))} />
       )}
 
-      {/* ── Summary Cards ── */}
-      <div className="grid grid-cols-3 gap-3">
-        {[
-          { label: "Money In",  value: fmt(totalIn),  icon: TrendingUp,  color: "text-success",    bg: "bg-success/10" },
-          { label: "Money Out", value: fmt(totalOut), icon: TrendingDown, color: "text-destructive", bg: "bg-destructive/10" },
-          { label: "Net",       value: fmt(net),      icon: Wallet,      color: net >= 0 ? "text-success" : "text-destructive", bg: "bg-primary/10" },
-        ].map(s => (
-          <div key={s.label} className="card-luxe p-4">
-            <div className={`h-8 w-8 rounded-lg ${s.bg} grid place-items-center mb-3`}>
-              <s.icon className={`h-4 w-4 ${s.color}`} />
-            </div>
-            <p className="text-lg font-display font-bold text-brand-dark truncate">{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Filters ── */}
-      <div className="card-luxe p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Filter className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium text-brand-dark">Filter</span>
-          {hasActiveFilter && (
-            <button
-              onClick={() => { setDateFrom(""); setDateTo(""); setClientFilter("all"); }}
-              className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors"
-            >
-              <X className="h-3 w-3" /> Clear
-            </button>
-          )}
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          {/* Date From */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground flex items-center gap-1">
-              <Calendar className="h-3 w-3" /> From Date
-            </label>
-            <input
-              type="date"
-              value={dateFrom}
-              onChange={e => setDateFrom(e.target.value)}
-              max={dateTo || undefined}
-              className="w-full h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-
-          {/* Date To */}
-          <div className="space-y-1">
-            <label className="text-xs text-muted-foreground flex items-center gap-1">
-              <Calendar className="h-3 w-3" /> To Date
-            </label>
-            <input
-              type="date"
-              value={dateTo}
-              onChange={e => setDateTo(e.target.value)}
-              min={dateFrom || undefined}
-              className="w-full h-9 rounded-xl border border-border/80 bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-            />
-          </div>
-
-          {/* Client Filter — hidden for client role */}
-          {!isClient && (
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground">Client</label>
-              <Select value={clientFilter} onValueChange={setClientFilter}>
-                <SelectTrigger className="h-9 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clients</SelectItem>
-                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* ── Table ── */}
+      {/* ── Table — the page title and the tab already say what it holds ── */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-2 flex-wrap">
-          <h2 className="font-semibold text-brand-dark">All Transactions</h2>
-        </div>
-
         {/* A client payment with a receipt opens its correction on a click; the
             rest open their details, and their ⋯ says where they are corrected.
-            Keyed on the tab and filters so a new view starts from its newest entry. */}
+            Keyed on the tab and filters so a new view starts from its newest entry.
+            The downloads and the figures carry what the filters leave, as they
+            always did — the search narrows only the table. */}
         <div className="p-3 sm:p-4">
           <DataTable
+            filters={filters}
+            onClearFilters={clearFilters}
+            exports={[
+              { label: "PDF", icon: FileText, hint: "With the totals", onSelect: exportPdf },
+              { label: "Excel (.csv)", icon: FileSpreadsheet, hint: "Opens in Excel or Sheets", onSelect: exportCsv },
+            ]}
+            exportScope={`${filtered.length} ${filtered.length === 1 ? "entry" : "entries"} the filters leave (not the search)`}
+            summary={
+              // Money in − money out = net, for what the filters leave.
+              <StatStrip items={[
+                { label: "Money in", value: fmt(totalIn), tone: "in", sub: `${nIn} ${nIn === 1 ? "entry" : "entries"}` },
+                { label: "Money out", value: fmt(totalOut), tone: "out", op: "−", sub: `${nOut} ${nOut === 1 ? "entry" : "entries"}` },
+                // A result, not money received or owed: plain, its sign says which way.
+                { label: "Net", value: fmt(net), tone: "strong", op: "=" },
+              ]} />
+            }
             resetKey={`${tab}|${dateFrom}|${dateTo}|${clientFilter}`}
             id="passbook"
             noun="transaction"
@@ -476,17 +396,17 @@ export function IncomePage() {
             searchText={r => [r.party, r.link?.label, r.type, r.description].filter(Boolean).join(" ")}
             searchPlaceholder="Search party, reference, description"
             totalsLabel="Net"
-            totals={{ amount: rows => { const n = rows.reduce((s, r) => s + signed(r), 0); return <span className={n >= 0 ? "text-success" : "text-destructive"}>{fmt(n)}</span>; } }}
+            totals={{ amount: rows => { const n = rows.reduce((s, r) => s + signed(r), 0); return <span>{fmt(n)}</span>; } }}
             onRowClick={mayPayEdit ? openEdit : undefined}
             canClickRow={r => !!r.editable && !payLock(r)}
             details={rowDetails}
             rowActions={isClient ? undefined : r => rowActions(r)}
             emptyText={
               <span className="inline-flex flex-col items-center gap-2">
-                No transactions found.
+                {hasActiveFilter ? "Nothing matches these filters." : "No transactions yet."}
                 {hasActiveFilter && (
                   <button
-                    onClick={() => { setDateFrom(""); setDateTo(""); setClientFilter("all"); }}
+                    onClick={clearFilters}
                     className="text-xs text-primary hover:underline"
                   >
                     Clear filters

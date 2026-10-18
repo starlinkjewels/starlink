@@ -1,4 +1,7 @@
 import { companyOf } from "@/lib/companies";
+import { PeriodPicker } from "./ui";
+import { StatusBadge } from "@/components/StatusBadge";
+import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
 import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
@@ -21,13 +24,15 @@ import {
 } from "recharts";
 import {
   Download, Package, Truck, CheckCircle2, DollarSign,
-  Clock, TrendingUp, Users, X, BarChart3, Filter,
-  Coins, Gem, Award, Boxes, ShoppingCart, CalendarDays,
+  Clock, TrendingUp, BarChart3,
+  Coins, Gem, Award, Boxes, ShoppingCart, FileSpreadsheet, FileText, Factory, Gift,
 } from "lucide-react";
 import jsPDF from "jspdf";
 import { toast } from "sonner";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { IfExport } from "@/components/IfExport";
+import { PageHeader } from "@/components/PageHeader";
+import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableExport, type TableFilter } from "@/components/TableToolbar";
+import { useMayExport } from "@/hooks/useCan";
 
 /* Local YYYY-MM-DD key (matches how the rest of the app displays dates) so a
    purchase near midnight IST lands on the calendar day staff expect. */
@@ -82,45 +87,26 @@ function SummaryCard({
   );
 }
 
-/** Quick-preset date range → { from, to } as YYYY-MM-DD. */
-function rangePreset(which: "this" | "last" | "year" | "all"): { from: string; to: string } {
-  if (which === "all") return { from: "", to: "" };
-  const now = new Date();
-  const pad = (n: number) => String(n).padStart(2, "0");
-  if (which === "year") return { from: `${now.getFullYear()}-01-01`, to: ymd(now.toISOString()) };
-  const base = which === "this" ? now : new Date(now.getFullYear(), now.getMonth() - 1, 1);
-  const y = base.getFullYear(), m = base.getMonth();
-  const last = new Date(y, m + 1, 0);
-  return { from: `${y}-${pad(m + 1)}-01`, to: `${y}-${pad(m + 1)}-${pad(last.getDate())}` };
-}
 function periodLabel(from: string, to: string): string {
   return from || to ? `${from || "start"} → ${to || "today"}` : "All time";
 }
 
-/** Reusable per-report period control: quick presets + custom From→To range. */
-function PeriodBar({ from, to, setFrom, setTo }: {
-  from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void;
+const xlsx = (onSelect: () => void): TableExport => ({ label: "Excel", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect });
+const pdf = (onSelect: () => void): TableExport => ({ label: "PDF", icon: FileText, hint: "Ready to print or send", onSelect });
+
+/**
+ * A report's own controls, beside its title: its period (each report can be
+ * narrowed on its own — Purchases for January, Sales for March), on the same
+ * picker as the page's, and its downloads in one Export menu.
+ */
+function SectionTools({ what, from, to, setFrom, setTo, exports }: {
+  what: string; from: string; to: string; setFrom: (v: string) => void; setTo: (v: string) => void; exports: TableExport[];
 }) {
-  const apply = (w: "this" | "last" | "year" | "all") => { const r = rangePreset(w); setFrom(r.from); setTo(r.to); };
+  const mayExport = useMayExport();
   return (
-    <div className="flex flex-wrap items-center gap-2">
-      {([["this", "This month"], ["last", "Last month"], ["year", "This year"], ["all", "All time"]] as const).map(([k, lbl]) => {
-        const active = k === "all" && !from && !to;
-        return (
-          <button key={k} onClick={() => apply(k)}
-            className={`px-3 h-8 rounded-lg text-xs font-medium border transition-colors ${active ? "bg-primary text-white border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary"}`}>
-            {lbl}
-          </button>
-        );
-      })}
-      <div className="flex items-center gap-1.5 sm:ml-auto">
-        <CalendarDays className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-        <input type="date" value={from} onChange={e => setFrom(e.target.value)}
-          className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-        <span className="text-muted-foreground text-xs">→</span>
-        <input type="date" value={to} onChange={e => setTo(e.target.value)}
-          className="h-8 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-      </div>
+    <div className="flex items-center gap-2 min-w-0">
+      <PeriodPicker allTime value={{ from, to }} onChange={p => { setFrom(p.from); setTo(p.to); }} />
+      {mayExport && <ExportMenu exports={exports} scope={what} />}
     </div>
   );
 }
@@ -172,6 +158,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     setClientFilter("all"); setDateFrom(""); setDateTo("");
   };
   const hasFilters = clientFilter !== "all" || !!dateFrom || !!dateTo;
+  const pageFilters: TableFilter[] = [
+    { kind: "select", label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: v => setClientFilter(v || "all"),
+      allLabel: "All Clients", options: clients.map(c => ({ value: c.id, label: c.companyName })) },
+    { kind: "date", from: dateFrom, to: dateTo, onChange: (f, t) => { setDateFrom(f); setDateTo(t); } },
+  ];
+  const mayExport = useMayExport();
 
   /* ── Financial reports — each has its OWN date range so staff can generate
      them separately (e.g. Purchases for Jan, Sales for Mar) ── */
@@ -941,15 +933,6 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     ]);
   };
 
-  const statusColors: Record<string, string> = {
-    "Waiting": "bg-slate-100 text-slate-600",
-    "Approved": "bg-blue-100 text-blue-700",
-    "In Production": "bg-amber-100 text-amber-700",
-    "Ready": "bg-purple-100 text-purple-700",
-    "Dispatched": "bg-primary/10 text-primary",
-    "Delivered": "bg-success/10 text-success",
-  };
-
   /* ── PDF export ── */
   function exportPdf() {
    try {
@@ -1039,106 +1022,21 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
 
       {/* Header */}
       {!embedded && (
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display text-2xl sm:text-3xl text-brand-dark leading-tight">
-            {isClient ? "My Reports" : "Reports"}
-          </h1>
-          <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-            {isClient
-              ? "Overview of your orders and delivery performance"
-              : `${total} order${total !== 1 ? "s" : ""}${hasFilters ? " (filtered)" : " · all time"}`}
-          </p>
-        </div>
-        <IfExport>
-        <div className="flex items-center gap-2 shrink-0">
-          <button onClick={exportExcel}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs sm:text-sm font-medium text-brand-dark">
-            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            <span className="hidden sm:inline">Export Excel</span>
-            <span className="sm:hidden">Excel</span>
-          </button>
-          <button onClick={exportPdf}
-            className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 h-9 sm:h-10 rounded-xl btn-hero text-xs sm:text-sm font-medium">
-            <Download className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-            <span className="hidden sm:inline">Download PDF</span>
-            <span className="sm:hidden">PDF</span>
-          </button>
-        </div>
-        </IfExport>
-      </div>
+        <PageHeader
+          title={isClient ? "My Reports" : "Reports"}
+          subtitle={isClient
+            ? "Overview of your orders and delivery performance"
+            : `${total} order${total !== 1 ? "s" : ""}${hasFilters ? " (filtered)" : " · all time"}`}
+          primary={mayExport ? { label: "Download PDF", icon: Download, onClick: exportPdf } : null}
+          secondary={mayExport ? { label: "Export Excel", icon: FileSpreadsheet, onClick: exportExcel } : null}
+        />
       )}
 
-      {/* ── Filters (admin / employee) ── */}
+      {/* ── Filters (admin / employee) — one Filters button, what is on as chips ── */}
       {!embedded && canSeeAll && (
-        <div className="card-luxe p-3 sm:p-4">
-          <div className="flex items-center gap-2 mb-3">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <p className="text-xs sm:text-sm font-semibold text-brand-dark tracking-wide uppercase">Filters</p>
-            {hasFilters && (
-              <button onClick={clearFilters}
-                className="ml-auto flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive transition-colors">
-                <X className="h-3 w-3" /> Clear
-              </button>
-            )}
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-            {/* Client */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">Client</label>
-              <Select value={clientFilter} onValueChange={setClientFilter}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clients</SelectItem>
-                  {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            {/* Date From */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">From Date</label>
-              <input
-                type="date"
-                value={dateFrom}
-                onChange={e => setDateFrom(e.target.value)}
-                className="w-full h-10 rounded-xl border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-            {/* Date To */}
-            <div className="space-y-1">
-              <label className="text-xs text-muted-foreground font-medium">To Date</label>
-              <input
-                type="date"
-                value={dateTo}
-                onChange={e => setDateTo(e.target.value)}
-                className="w-full h-10 rounded-xl border border-border bg-white px-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30"
-              />
-            </div>
-          </div>
-          {/* Active filter chips */}
-          {hasFilters && (
-            <div className="flex flex-wrap gap-2 mt-3">
-              {clientFilter !== "all" && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                  <Users className="h-3 w-3" />
-                  {clients.find(c => c.id === clientFilter)?.companyName}
-                  <button onClick={() => setClientFilter("all")} className="ml-0.5 hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
-                </span>
-              )}
-              {dateFrom && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                  From {dateFrom}
-                  <button onClick={() => setDateFrom("")} className="ml-0.5 hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
-                </span>
-              )}
-              {dateTo && (
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-primary/10 text-primary text-xs font-medium">
-                  To {dateTo}
-                  <button onClick={() => setDateTo("")} className="ml-0.5 hover:text-destructive"><X className="h-2.5 w-2.5" /></button>
-                </span>
-              )}
-            </div>
-          )}
+        <div className="flex flex-wrap items-center gap-2">
+          <FiltersButton filters={pageFilters} onClear={clearFilters} count={`${total} order${total !== 1 ? "s" : ""}`} />
+          <FilterChips filters={pageFilters} onClear={clearFilters} />
         </div>
       )}
 
@@ -1161,29 +1059,11 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
         <div className="card-luxe p-4 sm:p-5 space-y-4">
           {/* Header + export */}
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-amber-500/10 grid place-items-center shrink-0"><Coins className="h-5 w-5 text-amber-600" /></div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Purchases</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Material Purchase Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Gold · diamond · certified — stock + order buys · {matPeriodLabel}</p>
-              </div>
-            </div>
-            <IfExport>
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={exportMaterialExcel}
-                className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark">
-                <Download className="h-3.5 w-3.5" /> Excel
-              </button>
-              <button onClick={exportMaterialPdf}
-                className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium">
-                <Download className="h-3.5 w-3.5" /> PDF
-              </button>
-            </div>
-            </IfExport>
+            <SectionTitle icon={Coins} title="Material Purchase Report"
+              info="Gold, loose and certified diamonds and other materials — bought for stock and for orders." />
+            <SectionTools what={`Material purchases · ${matPeriodLabel}`} from={matFrom} to={matTo} setFrom={setMatFrom} setTo={setMatTo}
+              exports={[xlsx(exportMaterialExcel), pdf(exportMaterialPdf)]} />
           </div>
-
-          <PeriodBar from={matFrom} to={matTo} setFrom={setMatFrom} setTo={setMatTo} />
 
           {/* Category cards */}
           <div className={`grid gap-3 sm:grid-cols-2 ${materialReport.ot.count ? "lg:grid-cols-4" : "lg:grid-cols-3"}`}>
@@ -1325,38 +1205,16 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {vis("payments") && canSeeAll && paymentsReport && (
         <div className="card-luxe p-4 sm:p-5 space-y-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-rose-500/10 grid place-items-center shrink-0"><DollarSign className="h-5 w-5 text-rose-600" /></div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money Out</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Payments Made Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Paid to suppliers &amp; factories · {payPeriodLabel}</p>
-              </div>
-            </div>
-            <IfExport>
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={exportPaymentsExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
-              <button onClick={exportPaymentsPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
-            </div>
-            </IfExport>
+            <SectionTitle icon={DollarSign} title="Payments Made Report" sub="To suppliers & factories" />
+            <SectionTools what={`Payments made · ${payPeriodLabel}`} from={payFrom} to={payTo} setFrom={setPayFrom} setTo={setPayTo}
+              exports={[xlsx(exportPaymentsExcel), pdf(exportPaymentsPdf)]} />
           </div>
 
-          <PeriodBar from={payFrom} to={payTo} setFrom={setPayFrom} setTo={setPayTo} />
-
-          <div className="grid gap-3 grid-cols-3">
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5"><Truck className="h-3.5 w-3.5" /> Suppliers</p>
-              <p className="font-display text-lg sm:text-xl text-brand-dark mt-1">{fmtMoneyInr(paymentsReport.supTotal)}</p>
-            </div>
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground flex items-center gap-1.5"><Coins className="h-3.5 w-3.5" /> Factories</p>
-              <p className="font-display text-lg sm:text-xl text-brand-dark mt-1">{fmtMoneyInr(paymentsReport.facTotal)}</p>
-            </div>
-            <div className="rounded-2xl bg-gradient-to-br from-rose-500/8 to-rose-400/10 border border-rose-500/15 p-4">
-              <p className="text-[11px] text-rose-700/80 font-semibold uppercase tracking-wider">Total paid</p>
-              <p className="font-display text-lg sm:text-xl text-rose-600 mt-1">{fmtMoneyInr(paymentsReport.grand)}</p>
-            </div>
-          </div>
+          <StatStrip items={[
+            { label: "Suppliers", value: fmtMoneyInr(paymentsReport.supTotal), icon: Truck },
+            { label: "Factories", value: fmtMoneyInr(paymentsReport.facTotal), icon: Factory, op: "+" },
+            { label: "Total paid", value: fmtMoneyInr(paymentsReport.grand), tone: "out", op: "=", sub: `${paymentsReport.rows.length} payment${paymentsReport.rows.length !== 1 ? "s" : ""}` },
+          ]} />
 
           {paymentsReport.rows.length > 0 ? (
             <DataTable
@@ -1390,49 +1248,18 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {vis("sales") && canSeeAll && salesReport && (
         <div className="card-luxe p-4 sm:p-5 space-y-4">
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-success/10 grid place-items-center shrink-0"><TrendingUp className="h-5 w-5 text-success" /></div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Money In</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Sales / Billing Report</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Orders placed in period · {salesPeriodLabel}</p>
-              </div>
-            </div>
-            <IfExport>
-            <div className="flex items-center gap-2 shrink-0">
-              <button onClick={exportSalesExcel} className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark"><Download className="h-3.5 w-3.5" /> Excel</button>
-              <button onClick={exportSalesPdf} className="flex items-center gap-1.5 px-3 h-9 rounded-xl btn-hero text-xs font-medium"><Download className="h-3.5 w-3.5" /> PDF</button>
-            </div>
-            </IfExport>
+            <SectionTitle icon={TrendingUp} title="Sales / Billing Report" sub="Orders placed in the period" />
+            <SectionTools what={`Sales / billing · ${salesPeriodLabel}`} from={salesFrom} to={salesTo} setFrom={setSalesFrom} setTo={setSalesTo}
+              exports={[xlsx(exportSalesExcel), pdf(exportSalesPdf)]} />
           </div>
 
-          <PeriodBar from={salesFrom} to={salesTo} setFrom={setSalesFrom} setTo={setSalesTo} />
-
-          <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground">Orders</p>
-              <p className="font-display text-xl text-brand-dark mt-1">{salesReport.orders.length}</p>
-            </div>
-            <div className="rounded-2xl border border-border/70 bg-secondary/30 p-4">
-              <p className="text-[11px] text-muted-foreground">Billed</p>
-              <p className="font-display text-xl text-brand-dark mt-1">{fmtMoney(salesReport.billed)}</p>
-            </div>
-            <div className="rounded-2xl border border-success/20 bg-success/5 p-4">
-              <p className="text-[11px] text-muted-foreground">Received</p>
-              <p className="font-display text-xl text-success mt-1">{fmtMoney(salesReport.received)}</p>
-            </div>
-            <div className="rounded-2xl border border-destructive/20 bg-destructive/5 p-4">
-              <p className="text-[11px] text-muted-foreground">Outstanding</p>
-              <p className="font-display text-xl text-destructive mt-1">{fmtMoney(salesReport.outstanding)}</p>
-            </div>
-            {salesReport.giftRedeemed > 0 && (
-              <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
-                <p className="text-[11px] text-muted-foreground">Gift cards redeemed</p>
-                <p className="font-display text-xl text-primary mt-1">{fmtMoney(salesReport.giftRedeemed)}</p>
-                <p className="text-[10px] text-muted-foreground mt-0.5">already deducted from Billed</p>
-              </div>
-            )}
-          </div>
+          <StatStrip items={[
+            { label: "Orders", value: salesReport.orders.length, icon: Package },
+            { label: "Billed", value: fmtMoney(salesReport.billed), icon: FileText },
+            { label: "Received", value: fmtMoney(salesReport.received), tone: "in" },
+            { label: "Outstanding", value: fmtMoney(salesReport.outstanding), tone: "out" },
+            ...(salesReport.giftRedeemed > 0 ? [{ label: "Gift cards redeemed", value: fmtMoney(salesReport.giftRedeemed), icon: Gift, sub: "Already off Billed" }] : []),
+          ]} />
 
           {salesReport.byClient.length > 0 ? (
             <DataTable
@@ -1472,25 +1299,11 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {vis("profit") && isAdmin && profit && costDataReady() && (
         <div className="card-luxe p-4 sm:p-5 space-y-4 border-amber-500/30">
           <div className="flex items-start justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-3">
-              <div className="h-10 w-10 rounded-2xl bg-amber-500/10 grid place-items-center shrink-0"><TrendingUp className="h-5 w-5 text-amber-600" /></div>
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Admin only</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Profit &amp; Loss</h3>
-                <p className="text-[11px] text-muted-foreground mt-0.5">Orders dispatched in period · {profitPeriodLabel}</p>
-              </div>
-            </div>
-            <IfExport>
-            <button
-              onClick={() => exportProfitCsv(db, profit.rows.map(r => r.order), `Starlink-Profit-${profitFrom || "all"}`)}
-              disabled={!profit.rows.length}
-              className="flex items-center gap-1.5 px-3 h-9 rounded-xl border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark disabled:opacity-40">
-              <Download className="h-3.5 w-3.5" /> Excel
-            </button>
-            </IfExport>
+            <SectionTitle icon={TrendingUp} title="Profit & Loss" sub="Admin only · orders dispatched" />
+            {/* Nothing shipped in the period: nothing to download, so no Export. */}
+            <SectionTools what={`Profit & Loss · ${profitPeriodLabel}`} from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo}
+              exports={profit.rows.length ? [xlsx(() => exportProfitCsv(db, profit.rows.map(r => r.order), `Starlink-Profit-${profitFrom || "all"}`))] : []} />
           </div>
-
-          <PeriodBar from={profitFrom} to={profitTo} setFrom={setProfitFrom} setTo={setProfitTo} />
 
           {profit.unconverted > 0 && (
             <p className="text-xs rounded-xl bg-amber-500/10 border border-amber-500/30 p-3 text-amber-800">
@@ -1630,15 +1443,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {/* ── Dispatch Speed Card ── */}
       {vis("speed") && (
       <div className="card-luxe p-4 sm:p-5">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-xl sm:rounded-2xl bg-blue-500/10 grid place-items-center shrink-0">
-            <Clock className="h-4.5 w-4.5 sm:h-5 sm:w-5 h-[18px] w-[18px] text-blue-600" />
-          </div>
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Dispatch Speed</p>
-            <h3 className="font-semibold text-brand-dark text-sm sm:text-base leading-tight">Days from order to dispatch</h3>
-          </div>
-        </div>
+        <SectionTitle className="mb-4" icon={Clock} title="Dispatch Speed" sub="Days from order to dispatch" />
 
         {speedRows.length === 0 ? (
           <div className="py-8 text-center">
@@ -1719,11 +1524,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {/* ── Orders by Production Stage (admin / employee) ── */}
       {vis("stages") && canSeeAll && byStage.length > 0 && (
         <div className="card-luxe p-4 sm:p-5">
-          <div className="mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Analytics</p>
-            <h3 className="font-semibold text-brand-dark text-sm sm:text-base">Orders by Production Stage</h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">How many orders are currently at each stage</p>
-          </div>
+          <SectionTitle className="mb-4" title="Orders by Production Stage" sub="Where orders are now" />
           <ResponsiveContainer width="100%" height={220}>
             <BarChart data={byStage} margin={{ left: -16, right: 4, top: 4, bottom: 30 }}>
               <XAxis dataKey="name" tick={{ fontSize: 9 }} tickLine={false} axisLine={false} interval={0} angle={-30} textAnchor="end" height={50} />
@@ -1741,12 +1542,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {/* ── Client-wise breakdown (admin / employee) ── */}
       {vis("clients") && canSeeAll && byClient.length > 0 && (
         <div className="card-luxe p-4 sm:p-5">
-          <div className="mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Breakdown</p>
-            <h3 className="font-semibold text-brand-dark text-sm sm:text-base">
-              {clientFilter === "all" ? "Client-wise Summary" : `Orders — ${clients.find(c=>c.id===clientFilter)?.companyName}`}
-            </h3>
-          </div>
+          <SectionTitle className="mb-4" title={clientFilter === "all" ? "Client-wise Summary" : `Orders — ${clients.find(c=>c.id===clientFilter)?.companyName}`} />
 
           {/* One table at every size — on a phone it scrolls sideways with the
               client held in view. */}
@@ -1779,18 +1575,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {/* ── All Orders table (admin / employee) ── */}
       {vis("orders") && canSeeAll && filtered.length > 0 && (
         <div className="card-luxe p-4 sm:p-5">
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Detail</p>
-              <h3 className="font-semibold text-brand-dark text-sm sm:text-base">All Orders ({filtered.length})</h3>
-            </div>
-            <IfExport>
-            <button onClick={exportExcel}
-              className="flex items-center gap-1.5 px-3 h-8 rounded-lg border border-border bg-white hover:bg-secondary transition-colors text-xs font-medium text-brand-dark shrink-0">
-              <Download className="h-3.5 w-3.5" /> Excel
-            </button>
-            </IfExport>
-          </div>
+          <SectionTitle className="mb-4" title="All Orders" />
 
           {/* Sortable, searchable, columns to choose — at every size; on a phone
               it scrolls sideways with the order number held in view. */}
@@ -1798,6 +1583,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             id="reports-all-orders"
             noun="order"
             rows={filtered}
+            exports={[xlsx(exportExcel)]}
             rowKey={o => o.id}
             // Every row is one of this person's own orders: it opens the order.
             rowHref={mayOpen("orders") ? o => `/orders/${o.id}` : undefined}
@@ -1811,7 +1597,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
               { key: "client", header: "Client", sortValue: o => clients.find(cl => cl.id === o.clientId)?.companyName ?? "", cell: o => <span className="whitespace-nowrap">{clients.find(cl => cl.id === o.clientId)?.companyName ?? "—"}</span> },
               { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
               { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{o.metal}</span> },
-              { key: "status", header: "Status", sortValue: o => o.status, cell: o => <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>{o.status}</span> },
+              { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
               { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => o.quantity },
               { key: "value", header: "Order Value", align: "right", kind: "number", sortValue: o => o.amount || 0, cell: o => <span className="font-semibold text-brand-dark tabular-nums whitespace-nowrap">{fmtMoney(o.amount)}</span> },
               { key: "adv", header: "Advance", align: "right", kind: "number", sortValue: o => totalAdvance(o), cell: o => <span className="text-success tabular-nums whitespace-nowrap">{totalAdvance(o) > 0 ? fmtMoney(totalAdvance(o)) : "—"}</span> },
@@ -1826,18 +1612,15 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       {isClient && (
         <>
           <div className="card-luxe p-4 sm:p-5">
-            <div className="mb-4">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Overview</p>
-              <h3 className="font-semibold text-brand-dark text-sm sm:text-base">Order Status Breakdown</h3>
-            </div>
+            <SectionTitle className="mb-4" title="Order Status Breakdown" />
             <div className="space-y-2.5">
               {STATUS_LIST.map(s => {
                 const cnt = filtered.filter(o => o.status === s).length;
                 const pct = total > 0 ? (cnt / total) * 100 : 0;
                 return (
                   <div key={s} className="flex items-center gap-2 sm:gap-3">
-                    <div className="w-24 sm:w-28 shrink-0">
-                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[s]}`}>{s}</span>
+                    <div className="w-32 shrink-0">
+                      <StatusBadge status={s} />
                     </div>
                     <div className="flex-1 h-2 rounded-full bg-secondary overflow-hidden">
                       <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${pct}%` }} />
@@ -1852,10 +1635,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           {/* My recent orders */}
           {filtered.length > 0 && (
             <div className="card-luxe p-4 sm:p-5">
-              <div className="mb-3">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">History</p>
-                <h3 className="font-semibold text-brand-dark text-sm sm:text-base">My Orders</h3>
-              </div>
+              <SectionTitle className="mb-3" title="My Orders" />
               <div className="space-y-2">
                 {filtered.slice(0,20).map(o => {
                   const d = dispatchDays(o);
@@ -1866,9 +1646,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                         <p className="text-[11px] text-muted-foreground mt-0.5 truncate">{o.jewelleryType} · {fmtDate(o.createdAt)}</p>
                       </div>
                       <div className="flex flex-col items-end gap-1 shrink-0">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold ${statusColors[o.status] ?? "bg-secondary text-foreground"}`}>
-                          {o.status}
-                        </span>
+                        <StatusBadge status={o.status} />
                         {d !== null && (
                           <span className="text-[10px] text-muted-foreground">{d}d dispatch</span>
                         )}

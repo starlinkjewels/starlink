@@ -3,7 +3,10 @@ import { ClientEditDialog } from "@/components/ClientEditDialog";
 import { companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
-import { useEffect, useState } from "react";
+import { PageHeader, ViewSwitch } from "@/components/PageHeader";
+import { FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
+import { useEffect, useState, type MouseEvent } from "react";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { Link, useNavigate } from "react-router-dom";
 import { loadDb, updateDbAs, fmtMoney, fmtDate, clientAccount, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
 import { filled, refLink, noteText, type Detail } from "@/components/rowDetails";
@@ -13,20 +16,22 @@ import { auth } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
 import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
-import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { IfExport } from "@/components/IfExport";
 import { clientDeleteBlocker, deleteClientFlow, toggleClientActive } from "@/lib/clientActions";
 import { needsAccess } from "@/lib/actionHints";
 
 const PAGE_SIZE = 9;
+
+/** A click inside a card that does its own thing (its menu, its link), so it
+ *  must not also open the client. The menu is portalled, but React still
+ *  bubbles its clicks up through the card. */
+const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row]";
 
 /** Open a new window with an A5 shipping label and auto-print it */
 function printLabel(c: Client) {
@@ -181,6 +186,16 @@ export function ClientsPage() {
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
+  // The company filter, behind one Filters button in the table's (or the
+  // grid's) toolbar — only once there is more than one company. "All" is the
+  // page's own "all", so it narrows exactly as it did.
+  const filters: TableFilter[] = multiCo ? [
+    { kind: "select", label: "Company", value: coFilter === "all" ? "" : coFilter, onChange: v => setCoFilter(v || "all"),
+      options: companiesOf(dbNow.settings).map(co => ({ value: co.id, label: co.name })), allLabel: "All companies" },
+  ] : [];
+  const clearFilters = () => setCoFilter("all");
+  const countText = `${total} client${total !== 1 ? "s" : ""}`;
+
   // Grand totals across all clients this user can see: outstanding = money
   // clients owe us (receivable · ughrani); credit = advances we hold for them,
   // i.e. money we'd owe back (payable · chukavni). Rejected orders aren't billed.
@@ -304,20 +319,44 @@ export function ClientsPage() {
     ]);
   };
 
+  // Everything that can be done to one client — the same in a row's ⋯ and a
+  // card's ⋯. An action someone's access doesn't reach, or that this client
+  // can't take (Delete for a client with anything on record), is greyed with
+  // the reason under it.
+  const clientActions = (c: Client): MoreAction[] => {
+    const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
+    const delWhy = staff ? deleteWhy(c) : undefined;
+    return [
+      { label: "View", icon: Eye, hint: "Account, invoices and orders", onSelect: () => navigate(`/clients/${c.id}`) },
+      { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
+      { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff,
+        disabled: !mayEdit, hint: noEdit ?? (c.status === "active" ? "Stops sign-in; history stays" : undefined) },
+      { label: c.productPhotoAccess ? "Revoke photo access" : "Grant photo access", icon: Camera,
+        hint: noEdit ?? (c.productPhotoAccess ? "Access is on" : "Access is off"),
+        onSelect: () => togglePhotoAccess(c), show: staff, disabled: !mayEdit },
+      { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff, disabled: !mayEdit, hint: noEdit },
+      { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff, disabled: !mayEdit, hint: noEdit },
+      { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff, disabled: !!delWhy, hint: delWhy },
+    ];
+  };
+
+  // A card opens the client, as a row does (Ctrl/⌘-click: a new tab).
+  const openCard = (href: string) => (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest(OWN_CLICK)) return;
+    if (e.ctrlKey || e.metaKey) window.open(href, "_blank", "noopener");
+    else navigate(href);
+  };
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Clients</h1>
-          <p className="text-sm text-muted-foreground">{total} client{total !== 1 ? "s" : ""}</p>
-        </div>
-        {user!.role !== "client" && can("clients", "add") && (
-          <>
-            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Client</Button>
-            <ClientCreateDialog open={open} onOpenChange={setOpen} />
-          </>
-        )}
-      </div>
+      {/* How many there are is the table's (or the grid's) own count. */}
+      <PageHeader
+        title="Clients"
+        subtitle="Orders, bills and payments"
+        primary={user!.role !== "client" && can("clients", "add") ? { label: "New Client", icon: Plus, onClick: () => setOpen(true) } : null}
+        actions={<ViewSwitch view={view} onChange={saveView} />}
+      />
+      {user!.role !== "client" && can("clients", "add") && <ClientCreateDialog open={open} onOpenChange={setOpen} />}
 
       <ClientEditDialog clientId={editingId} onClose={() => setEditingId(null)} />
 
@@ -329,39 +368,18 @@ export function ClientsPage() {
         payableSub="client advances held · chukavni"
       />
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." className="pl-9 h-11 rounded-xl" />
-        </div>
-        {multiCo && (
-          <Select value={coFilter} onValueChange={setCoFilter}>
-            <SelectTrigger className="w-40 sm:w-52 h-11 rounded-xl text-sm shrink-0" aria-label="Company"><Building2 className="h-4 w-4 mr-1.5 shrink-0 text-primary" /><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All companies</SelectItem>
-              {companiesOf(dbNow.settings).map(co => <SelectItem key={co.id} value={co.id}>{co.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
-          <button onClick={() => saveView("list")} aria-label="List view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
-          </button>
-          <button onClick={() => saveView("grid")} aria-label="Grid view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
-          </button>
-        </div>
-      </div>
-
       {/* ── List view — the shared table: sort by any heading, Excel, pages.
-          The search and company filter above narrow it, as they do the grid. ── */}
+          The page's own search and company filter (the same ones the grid
+          uses) sit in its toolbar; a change starts it on page 1. ── */}
       {view === "list" && (
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="clients"
             noun="client"
+            search={{ value: q, onChange: setQ, placeholder: "Search clients..." }}
+            filters={filters}
+            onClearFilters={clearFilters}
+            resetKey={`${q}|${coFilter}`}
             rows={list}
             columns={columns}
             rowKey={c => c.id}
@@ -382,24 +400,24 @@ export function ClientsPage() {
             // The grid card's buttons, plus View. An action someone's access
             // doesn't reach, or that this client can't take (Delete for a client
             // with anything on record), is greyed with the reason under it.
-            rowActions={c => {
-              const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
-              const delWhy = staff ? deleteWhy(c) : undefined;
-              return [
-                { label: "View", icon: Eye, hint: "Their page — account, invoices, orders", onSelect: () => navigate(`/clients/${c.id}`) },
-                { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
-                { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff,
-                  disabled: !mayEdit, hint: noEdit ?? (c.status === "active" ? "They can no longer sign in; their history stays" : undefined) },
-                { label: c.productPhotoAccess ? "Revoke photo access" : "Grant photo access", icon: Camera,
-                  hint: noEdit ?? (c.productPhotoAccess ? "Product Photos access is on" : "Product Photos access is off"),
-                  onSelect: () => togglePhotoAccess(c), show: staff, disabled: !mayEdit },
-                { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff, disabled: !mayEdit, hint: noEdit },
-                { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff, disabled: !mayEdit, hint: noEdit },
-                { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff, disabled: !!delWhy, hint: delWhy },
-              ];
-            }}
+            rowActions={clientActions}
             emptyText="No clients found."
           />
+        </div>
+      )}
+
+      {/* The grid's one toolbar row, laid out like the table's. */}
+      {view === "grid" && (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+              <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." aria-label="Search clients..." className="h-9 pl-9 rounded-xl bg-white" />
+            </div>
+            {filters.length > 0 && <FiltersButton filters={filters} onClear={clearFilters} count={countText} />}
+            <span className="ml-auto text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
+          </div>
+          <FilterChips filters={filters} onClear={clearFilters} />
         </div>
       )}
 
@@ -413,7 +431,10 @@ export function ClientsPage() {
           const clientUser = db.users.find(u => u.clientId === c.id);
           const online = isOnline(clientUser?.lastActiveAt);
           return (
-            <div key={c.id} className="card-luxe card-hover p-5 flex flex-col">
+            // The whole card opens the client; what can be done to them is in
+            // its one ⋯ — the same menu as a list row, each item greyed with
+            // its reason when it can't be done.
+            <div key={c.id} onClick={openCard(`/clients/${c.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
                   <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display text-lg grid place-items-center ring-1 ring-primary/10">
@@ -421,131 +442,71 @@ export function ClientsPage() {
                   </div>
                   <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${online ? "bg-success" : "bg-muted-foreground/40"}`} />
                 </div>
-                <div className="flex items-start justify-between gap-2 flex-1 min-w-0">
-                  <div className="min-w-0">
-                    <p className="font-display text-lg text-brand-dark truncate leading-tight">{c.companyName}</p>
-                    {multiCo && <p className="text-[10px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
-                    <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
-                    {clientUser && (
-                      <p className={`text-[11px] mt-0.5 ${online ? "text-success font-medium" : "text-muted-foreground"}`}>
-                        {online ? "Online now" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
-                      </p>
-                    )}
-                  </div>
-                  <StatusBadge status={c.status} />
+                <div className="min-w-0 flex-1">
+                  <p className="font-display text-lg text-brand-dark truncate leading-tight" title={c.companyName}>{c.companyName}</p>
+                  {multiCo && <p className="text-[10px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
+                  <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
+                  {clientUser && (
+                    <p className={`text-[11px] mt-0.5 ${online ? "text-success font-medium" : "text-muted-foreground"}`}>
+                      {online ? "Online now" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
+                    </p>
+                  )}
                 </div>
+                <StatusBadge status={c.status} />
+                <MoreMenu size="sm" label={`Actions for ${c.companyName}`} actions={clientActions(c)} className="relative after:absolute after:-inset-1" />
               </div>
 
               {user!.role === "admin" && (
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2">
-                  <UserCog className="h-3.5 w-3.5" />
-                  {manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Handled by Admin"}
+                <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2 min-w-0">
+                  <UserCog className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Handled by Admin"}</span>
                 </p>
               )}
 
-              <div className="mt-4 space-y-2 text-sm">
-                <p className="flex items-center gap-2 text-muted-foreground truncate">
-                  <Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{c.email || "—"}</span>
+              <div className="mt-4 space-y-2 text-sm min-w-0">
+                <p className="flex items-center gap-2 text-muted-foreground min-w-0">
+                  <Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate" title={c.email || undefined}>{c.email || "—"}</span>
                 </p>
                 <p className="flex items-center gap-2 text-muted-foreground">
-                  <Phone className="h-3.5 w-3.5" />{c.phone || "—"}
+                  <Phone className="h-3.5 w-3.5 shrink-0" />{c.phone || "—"}
                 </p>
-                <p className="flex items-center gap-2 text-muted-foreground truncate">
+                <p className="flex items-center gap-2 text-muted-foreground min-w-0">
                   <MapPin className="h-3.5 w-3.5 shrink-0" />
                   <span className="truncate">{[c.country, c.zip].filter(Boolean).join(" · ") || "—"}</span>
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 mt-4">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-secondary px-2.5 py-1 rounded-full">
-                  <Package className="h-3.5 w-3.5" /> {orderCount} total
-                </span>
-                {activeCount > 0 && (
-                  <span className="flex items-center gap-1 text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full">
-                    {activeCount} active
-                  </span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-1.5 mt-3 pt-3 border-t border-border/50">
-                <div className="text-center">
+              {/* Figures: colour on the figure only, a zero in grey. */}
+              <div className="grid grid-cols-3 gap-1.5 mt-4 pt-3 border-t border-border/50 text-center">
+                <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Total</p>
-                  <p className="text-xs font-semibold text-brand-dark">{fmtMoney(acc.billed)}</p>
+                  <p className={`text-xs font-semibold tabular-nums ${acc.billed ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoney(acc.billed)}</p>
                 </div>
-                <div className="text-center">
+                <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Received</p>
-                  <p className="text-xs font-semibold text-success">{fmtMoney(acc.received)}</p>
+                  <p className={`text-xs font-semibold tabular-nums ${acc.received ? "text-success" : "text-muted-foreground"}`}>{fmtMoney(acc.received)}</p>
                 </div>
-                <div className="text-center">
+                <div>
                   <p className="text-[10px] text-muted-foreground mb-0.5">Pending</p>
-                  <p className={`text-xs font-semibold ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
+                  <p className={`text-xs font-semibold tabular-nums ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
                     {acc.outstanding > 0 ? fmtMoney(acc.outstanding) : "Cleared"}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-                  <Link to={`/clients/${c.id}`}>
-                    <History className="h-4 w-4 text-primary" />
-                    View Order History
-                  </Link>
+              <div className="mt-auto pt-3 flex items-center gap-2">
+                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-secondary px-2.5 py-1 rounded-full shrink-0">
+                  <Package className="h-3.5 w-3.5" /> {orderCount} total
+                </span>
+                {activeCount > 0 && (
+                  <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full shrink-0">
+                    {activeCount} active
+                  </span>
+                )}
+                <Button asChild variant="outline" size="sm" className="ml-auto h-8 rounded-lg gap-1.5 shrink-0 relative after:absolute after:-inset-1">
+                  <Link to={`/clients/${c.id}`}><History className="h-3.5 w-3.5 text-primary" />View Order History</Link>
                 </Button>
-
-                {/* Print shipping label */}
-                <IfExport>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => printLabel(c)}
-                  className="w-full rounded-xl gap-2 font-medium text-muted-foreground hover:text-foreground"
-                >
-                  <Printer className="h-4 w-4" />
-                  Print Shipping Label
-                </Button>
-                </IfExport>
               </div>
-
-              {user!.role !== "client" && (() => {
-                // Greyed (not hidden) when access doesn't reach them, the reason
-                // in the tooltip; Delete also when this client has anything on record.
-                const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
-                const delWhy = deleteWhy(c);
-                return (
-                // Fits a 360px phone: the label button may shrink, the icons are a
-                // touch smaller there. It did not, and pushed the card off-screen.
-                <div className="mt-2 space-y-1">
-                <div className="flex gap-1.5 sm:gap-2">
-                  <AsyncButton size="sm" variant="outline" onClick={() => toggle(c)} disabled={!mayEdit} title={noEdit} className="rounded-lg flex-1 min-w-0 px-2">
-                    {c.status === "active" ? "Deactivate" : "Activate"}
-                  </AsyncButton>
-                  <AsyncButton
-                    size="sm" variant="outline" onClick={() => togglePhotoAccess(c)} disabled={!mayEdit}
-                    className={`rounded-lg w-8 sm:w-9 shrink-0 px-0 ${c.productPhotoAccess
-                      ? "text-success border-success/40 bg-success/5 hover:text-success hover:bg-success/10"
-                      : "text-destructive border-destructive/40 bg-destructive/5 hover:text-destructive hover:bg-destructive/10"}`}
-                    title={noEdit ?? (c.productPhotoAccess ? "Product Photos access ON — click to revoke" : "Product Photos access OFF — click to grant")}
-                  >
-                    <Camera className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => openEdit(c)} disabled={!mayEdit} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title={noEdit ?? "Edit client details"}>
-                    <Pencil className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  <AsyncButton size="sm" variant="outline" onClick={() => resetPw(c)} disabled={!mayEdit} className="rounded-lg w-8 sm:w-9 shrink-0 px-0" title={noEdit ?? "Send password reset email"}>
-                    <KeyRound className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                  {/* Kept clickable when blocked: a disabled button can't show
-                      its tooltip everywhere, and the click says why. */}
-                  <AsyncButton size="sm" variant="outline" onClick={() => (delWhy ? toast.error(delWhy) : del(c.id))} aria-disabled={!!delWhy}
-                    className={`rounded-lg w-8 sm:w-9 shrink-0 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive ${delWhy ? "opacity-50" : ""}`}
-                    title={delWhy ? `Delete client — ${delWhy}` : "Delete client"}>
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </AsyncButton>
-                </div>
-                {noEdit && <p className="text-[10px] text-muted-foreground">{noEdit}</p>}
-                </div>
-                );
-              })()}
             </div>
           );
         })}

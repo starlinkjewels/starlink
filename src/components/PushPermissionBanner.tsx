@@ -1,24 +1,31 @@
 import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { requestPushPermission } from "@/lib/push";
-import { Bell, BellOff } from "lucide-react";
+import { Bell, BellOff, X } from "lucide-react";
 import { toast } from "sonner";
+
+/** The × on the Dashboard's strip, remembered on this device. */
+const HIDE_KEY = "push-banner-hidden";
+const hiddenBefore = () => { try { return localStorage.getItem(HIDE_KEY) === "1"; } catch { return false; } };
 
 /**
  * The actual "ask permission" trigger — browsers require a real click before
- * showing the native notification prompt, so this button IS the ask, not a
- * decoration. Shown on the Dashboard (first thing after login, so it gets
- * priority) and again on the Notifications page (so it's always reachable
- * later even if dismissed once by navigating away).
+ * showing the native notification prompt, so its button IS the ask, not a
+ * decoration. One slim line with an ×, so it never takes the top of a phone's
+ * screen. Shown on the Dashboard (first thing after login), where the × is
+ * remembered on this device, and on the Notifications page, which passes
+ * `keepReachable`: there the × only hides it for this visit, so the ask can
+ * always be found again.
  */
-export function PushPermissionBanner() {
+export function PushPermissionBanner({ keepReachable = false }: { keepReachable?: boolean }) {
   const { user } = useAuth();
   const [permission, setPermission] = useState<NotificationPermission | "unsupported">(
     typeof Notification === "undefined" ? "unsupported" : Notification.permission,
   );
   const [asking, setAsking] = useState(false);
+  const [hidden, setHidden] = useState(() => !keepReachable && hiddenBefore());
 
-  if (!user || permission === "granted" || permission === "unsupported") return null;
+  if (!user || permission === "granted" || permission === "unsupported" || hidden) return null;
 
   const enable = async () => {
     setAsking(true);
@@ -29,29 +36,37 @@ export function PushPermissionBanner() {
     } finally { setAsking(false); }
   };
 
+  const dismiss = () => {
+    setHidden(true);
+    if (!keepReachable) { try { localStorage.setItem(HIDE_KEY, "1"); } catch { /* private window */ } }
+  };
+  // 32px to look at, 40px to tap.
+  const close = (
+    <button type="button" onClick={dismiss} aria-label="Dismiss" title="Dismiss"
+      className="relative after:absolute after:-inset-1 h-8 w-8 shrink-0 grid place-items-center rounded-lg text-muted-foreground hover:bg-black/5 hover:text-foreground">
+      <X className="h-4 w-4" />
+    </button>
+  );
+
   if (permission === "denied") {
     return (
-      <div className="card-luxe p-4 bg-amber-50 border border-amber-200 flex items-start gap-3">
-        <BellOff className="h-5 w-5 shrink-0 mt-0.5 text-amber-600" />
-        <p className="text-sm text-amber-800">
-          Notifications are blocked for this site. To turn them back on, open your browser's site settings (the icon next to the address bar) and allow notifications.
-        </p>
+      <div role="status" className="flex items-center gap-2.5 rounded-xl border border-amber-200 bg-amber-50 pl-3 pr-1 py-1 text-[13px] text-amber-800">
+        <BellOff className="h-4 w-4 shrink-0 text-amber-600" />
+        <p className="min-w-0 flex-1 leading-snug line-clamp-2">Notifications are blocked — allow them in your browser&rsquo;s site settings (the icon by the address bar).</p>
+        {close}
       </div>
     );
   }
 
   return (
-    <div className="card-luxe p-4 bg-primary/5 border border-primary/20 flex items-center justify-between gap-3 flex-wrap">
-      <div className="flex items-center gap-3 min-w-0">
-        <Bell className="h-5 w-5 text-primary shrink-0" />
-        <p className="text-sm text-foreground">Turn on notifications to get alerts even when the app is closed.</p>
-      </div>
-      <button
-        onClick={enable} disabled={asking}
-        className="btn-hero h-9 px-4 rounded-xl text-sm font-semibold shrink-0 disabled:opacity-60"
-      >
-        {asking ? "Enabling…" : "Enable Notifications"}
+    <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary/5 pl-3 pr-1 py-1 text-[13px]">
+      <Bell className="h-4 w-4 shrink-0 text-primary" />
+      <p className="min-w-0 flex-1 truncate text-foreground">Alerts even when the app is closed</p>
+      <button type="button" onClick={enable} disabled={asking}
+        className="btn-hero h-8 px-3 rounded-lg text-xs font-semibold shrink-0 disabled:opacity-60">
+        {asking ? "Enabling…" : <><span className="sm:hidden">Turn on</span><span className="max-sm:hidden">Enable Notifications</span></>}
       </button>
+      {close}
     </div>
   );
 }

@@ -1,29 +1,34 @@
 import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
-import { useState } from "react";
+import { useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDebitAmt, type Supplier } from "@/lib/db";
 import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { SupplierEditDialog } from "@/components/SupplierEditDialog";
-import type { MoreAction } from "@/components/MoreMenu";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { supplierAccount, fmtMoneyInr } from "@/lib/manufacturing";
 import { AccountSummary } from "@/components/AccountSummary";
 import { Button } from "@/components/ui/button";
-import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
+import { PageHeader, ViewSwitch } from "@/components/PageHeader";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { confirmBox } from "@/lib/confirm";
 
 const PAGE_SIZE = 9;
+
+/** A click inside a card that does its own thing (its menu, its link), so it
+ *  must not also open the supplier. The menu is portalled, but React still
+ *  bubbles its clicks up through the card. */
+const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row]";
 
 export function SuppliersPage() {
   const db = useDb();
@@ -105,12 +110,19 @@ export function SuppliersPage() {
   const actionsFor = (s: Supplier): MoreAction[] => {
     const guard = guardOf(s);
     return [
-      { label: "View ledger", icon: History, hint: "Purchases, payments and the account statement", onSelect: () => navigate(`/suppliers/${s.id}`) },
+      { label: "View ledger", icon: History, hint: "Purchases, payments, statement", onSelect: () => navigate(`/suppliers/${s.id}`) },
       { label: "Edit details", icon: Pencil, onSelect: () => setEditing(s), disabled: !isAdmin, hint: isAdmin ? "Name, contact, GSTIN, address" : ADMIN_ONLY },
       { label: s.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(s), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
       { label: "Delete supplier", icon: Trash2, danger: true, onSelect: () => del(s),
         disabled: !isAdmin || !guard.ok, hint: !isAdmin ? ADMIN_ONLY : guard.reason },
     ];
+  };
+
+  // A card opens the supplier, as a row does (Ctrl/⌘-click: a new tab).
+  const openCard = (href: string) => (e: MouseEvent) => {
+    if ((e.target as HTMLElement).closest(OWN_CLICK)) return;
+    if (e.ctrlKey || e.metaKey) window.open(href, "_blank", "noopener");
+    else navigate(href);
   };
 
   // ── List view: the shared table ──
@@ -159,18 +171,14 @@ export function SuppliersPage() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Suppliers</h1>
-          <p className="text-sm text-muted-foreground">{total} supplier{total !== 1 ? "s" : ""}</p>
-        </div>
-        {isAdmin && (
-          <>
-            <Button onClick={() => setOpen(true)} className="btn-hero h-11 rounded-xl"><Plus className="h-4 w-4 mr-2" />New Supplier</Button>
-            <SupplierCreateDialog open={open} onOpenChange={setOpen} />
-          </>
-        )}
-      </div>
+      {/* How many there are is the table's (or the grid's) own count. */}
+      <PageHeader
+        title="Suppliers"
+        subtitle="Purchases, payments and balances"
+        primary={isAdmin ? { label: "New Supplier", icon: Plus, onClick: () => setOpen(true) } : null}
+        actions={<ViewSwitch view={view} onChange={saveView} />}
+      />
+      {isAdmin && <SupplierCreateDialog open={open} onOpenChange={setOpen} />}
 
       <AccountSummary
         receivable={totals.receivable}
@@ -180,30 +188,16 @@ export function SuppliersPage() {
         payableSub="we owe suppliers · chukavni"
       />
 
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." className="pl-9 h-11 rounded-xl" />
-        </div>
-        <div className="shrink-0 inline-flex items-center gap-0.5 p-0.5 rounded-lg bg-secondary border border-border/60">
-          <button onClick={() => saveView("list")} aria-label="List view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "list" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">List</span>
-          </button>
-          <button onClick={() => saveView("grid")} aria-label="Grid view"
-            className={`flex items-center gap-1 h-8 px-2 rounded-md text-xs font-medium transition-colors ${view === "grid" ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
-            <LayoutGrid className="h-3.5 w-3.5" /><span className="hidden sm:inline">Grid</span>
-          </button>
-        </div>
-      </div>
-
       {/* ── List view — the shared table: sort by any heading, Excel, pages.
-          The search above narrows it, as it does the grid. ── */}
+          The page's own search (the same one the grid uses) sits in its
+          toolbar; a new search starts it on page 1. ── */}
       {view === "list" && (
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="suppliers"
             noun="supplier"
+            search={{ value: q, onChange: setQ, placeholder: "Search suppliers..." }}
+            resetKey={q}
             rows={list}
             columns={columns}
             rowKey={s => s.id}
@@ -227,42 +221,59 @@ export function SuppliersPage() {
         </div>
       )}
 
+      {/* The grid's one toolbar row, laid out like the table's. */}
+      {view === "grid" && (
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." aria-label="Search suppliers..." className="h-9 pl-9 rounded-xl bg-white" />
+          </div>
+          <span className="ml-auto text-xs text-muted-foreground tabular-nums whitespace-nowrap">{total} supplier{total !== 1 ? "s" : ""}</span>
+        </div>
+      )}
+
       {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(s => {
           const account = accounts.get(s.id)!;
           return (
-            <div key={s.id} className="card-luxe card-hover p-5 flex flex-col">
+            // The whole card opens the supplier; what can be done to them is in
+            // its one ⋯ — the same menu as a list row, each item greyed with
+            // its reason when it can't be done.
+            <div key={s.id} onClick={openCard(`/suppliers/${s.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-400/20 text-amber-600 grid place-items-center shrink-0 ring-1 ring-amber-500/10">
                   <Truck className="h-5 w-5" />
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="font-display text-lg text-brand-dark truncate leading-tight">{s.name}</p>
+                  <p className="font-display text-lg text-brand-dark truncate leading-tight" title={s.name}>{s.name}</p>
                   <p className="text-sm text-muted-foreground truncate">{s.contactPerson || "—"}</p>
                 </div>
-                {s.active === false && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground shrink-0">Inactive</span>}
+                {s.active === false && <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground shrink-0 mt-1">Inactive</span>}
+                <MoreMenu size="sm" label={`Actions for ${s.name}`} actions={actionsFor(s)} className="relative after:absolute after:-inset-1" />
               </div>
 
-              <div className="mt-4 space-y-2 text-sm">
-                <p className="flex items-center gap-2 text-muted-foreground truncate"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{s.email || "—"}</span></p>
-                <p className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5" />{s.phone || "—"}</p>
-                {s.gstin && <p className="flex items-center gap-2 text-muted-foreground"><Hash className="h-3.5 w-3.5" />{s.gstin}</p>}
-                {s.address && <p className="flex items-center gap-2 text-muted-foreground truncate"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{s.address}</span></p>}
+              <div className="mt-4 space-y-2 text-sm min-w-0">
+                <p className="flex items-center gap-2 text-muted-foreground min-w-0"><Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate" title={s.email || undefined}>{s.email || "—"}</span></p>
+                <p className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5 shrink-0" />{s.phone || "—"}</p>
+                {s.gstin && <p className="flex items-center gap-2 text-muted-foreground min-w-0"><Hash className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{s.gstin}</span></p>}
+                {s.address && <p className="flex items-center gap-2 text-muted-foreground min-w-0"><MapPin className="h-3.5 w-3.5 shrink-0" /><span className="truncate" title={s.address}>{s.address}</span></p>}
               </div>
 
-              <div className="mt-4 grid grid-cols-2 gap-2">
-                <div className="p-2.5 rounded-xl bg-secondary text-center">
-                  <p className="text-[10px] text-muted-foreground">Purchased</p>
-                  <p className="text-xs font-semibold">{fmtMoneyInr(account.totalPurchased)}</p>
+              {/* Figures: colour on the figure only, a zero in grey. The owed
+                  figure is the NET position, the same one the list and the
+                  ledger show. It used to read balanceOwed, which only counts
+                  unpaid bills: a supplier holding an advance has no unpaid
+                  bill, so the card said "Cleared" while their ledger said they
+                  owed us money. */}
+              <div className="mt-4 pt-3 grid grid-cols-2 gap-1.5 border-t border-border/50 text-center">
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">Purchased</p>
+                  <p className={`text-xs font-semibold tabular-nums ${account.totalPurchased ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(account.totalPurchased)}</p>
                 </div>
-                {/* The NET position, the same figure the list and the ledger show.
-                    This used to read balanceOwed, which only counts unpaid bills:
-                    a supplier holding an advance has no unpaid bill, so the card
-                    said "Cleared" while their ledger said they owed us money. */}
-                <div className={`p-2.5 rounded-xl text-center ${account.net > 0 ? "bg-destructive/5" : account.net < 0 ? "bg-blue-500/5" : "bg-success/8"}`}>
-                  <p className="text-[10px] text-muted-foreground">{account.net < 0 ? "Owes you" : "Owed"}</p>
-                  <p className={`text-xs font-semibold ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>
+                <div>
+                  <p className="text-[10px] text-muted-foreground mb-0.5">{account.net < 0 ? "Owes you" : "Owed"}</p>
+                  <p className={`text-xs font-semibold tabular-nums ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>
                     {account.net > 0 ? fmtMoneyInr(account.net)
                       : account.net < 0 ? fmtMoneyInr(-account.net)
                       : "✓ Cleared"}
@@ -270,34 +281,11 @@ export function SuppliersPage() {
                 </div>
               </div>
 
-              <p className="text-[11px] text-muted-foreground mt-2">Supplier since {fmtDate(s.createdAt)}</p>
-
-              <div className="mt-3 pt-3 border-t border-border/50 space-y-2">
-                <Button asChild variant="outline" size="sm" className="w-full rounded-xl gap-2 font-medium">
-                  <Link to={`/suppliers/${s.id}`}><History className="h-4 w-4 text-primary" />View Ledger</Link>
+              <div className="mt-auto pt-3 flex items-center gap-2">
+                <p className="text-[11px] text-muted-foreground truncate">Supplier since {fmtDate(s.createdAt)}</p>
+                <Button asChild variant="outline" size="sm" className="ml-auto h-8 rounded-lg gap-1.5 shrink-0 relative after:absolute after:-inset-1">
+                  <Link to={`/suppliers/${s.id}`}><History className="h-3.5 w-3.5 text-primary" />View Ledger</Link>
                 </Button>
-                {isAdmin && (() => {
-                  const guard = guardOf(s);
-                  return (
-                    <>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="outline" onClick={() => setEditing(s)} aria-label="Edit supplier" title="Edit details" className="rounded-lg w-9 px-0">
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <AsyncButton size="sm" variant="outline" onClick={() => toggle(s)} className="rounded-lg flex-1">
-                          {s.active === false ? "Activate" : "Deactivate"}
-                        </AsyncButton>
-                        <AsyncButton size="sm" variant="outline" onClick={() => del(s)} disabled={!guard.ok} aria-label="Delete supplier"
-                          title={guard.reason ?? "Delete supplier"}
-                          className="rounded-lg w-9 px-0 text-destructive hover:bg-destructive/10 hover:text-destructive">
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </AsyncButton>
-                      </div>
-                      {/* Why Delete is greyed, said on the card rather than only on hover. */}
-                      {!guard.ok && <p className="text-[11px] text-muted-foreground leading-snug">Delete: {guard.reason}</p>}
-                    </>
-                  );
-                })()}
               </div>
             </div>
           );

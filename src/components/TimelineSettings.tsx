@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { ArrowDown, ArrowUp, ListOrdered, Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateDb } from "@/lib/db";
@@ -104,16 +105,8 @@ export function TimelineSettings() {
 
   return (
     <div className="card-luxe p-6 space-y-4">
-      <div className="flex items-center gap-2">
-        <ListOrdered className="h-4 w-4 text-primary" />
-        <div>
-          <h3 className="font-semibold">Production Timeline</h3>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            The stages every order goes through, and the columns of the Orders board. Put the middle stages in your
-            order with the arrows, or add your own (e.g. Hallmarking, Polishing, Quality Check).
-          </p>
-        </div>
-      </div>
+      <SectionTitle icon={ListOrdered} title="Production Timeline" sub="Order stages and board columns"
+        info="Reorder the middle stages with the arrows, or add your own (e.g. Hallmarking, Polishing)." />
 
       <div className="space-y-1.5">
         {HEAD_STAGES.map(s => row(s, true))}

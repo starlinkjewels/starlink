@@ -4,10 +4,11 @@ import {
   fmtMoney, fmtDate, orderTotal, orderGrossTotal, totalAdvance, balanceDue, returnedCredit,
   invoiceOrderIds, type Order, type Invoice, type Client,
 } from "@/lib/db";
-import { Input } from "@/components/ui/input";
-import { Search, Download, ChevronDown, FileText, Package, Undo2 } from "lucide-react";
-import { IfExport } from "@/components/IfExport";
+import { Search, Download, ChevronDown, FileText, Package, Undo2, X, Gift } from "lucide-react";
+import { useMayExport } from "@/hooks/useCan";
+import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { SectionTitle } from "@/components/SectionTitle";
 
 // The shared DataTable's header and cell classes, so this table reads the same.
 const TH = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
@@ -215,67 +216,51 @@ export function ClientInvoiceLedger({
   }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
   const closing = openingDebit - openingCredit + T.balance;
 
+  const mayExport = useMayExport();
+  const filters: TableFilter[] = [{ kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
+    onChange: v => setOnly((v || "all") as "all" | "due" | "paid"),
+    options: [{ value: "due", label: "Outstanding" }, { value: "paid", label: "Settled" }] }];
+  const countText = `${filtered.length} invoice${filtered.length === 1 ? "" : "s"}`;
+
   const toggle = (id: string) =>
     setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
 
   return (
     <div className="card-luxe overflow-hidden">
-      <div className="px-5 py-4 border-b border-border/60 flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-display text-xl text-brand-dark">Invoice Statement</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {client.companyName} · invoice by invoice, with the pieces on each one
-          </p>
-        </div>
-        {onExport && (
-          <IfExport>
-          <button onClick={onExport}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
-            <Download className="h-4 w-4" /> Export
-          </button>
-          </IfExport>
-        )}
+      <div className="px-5 py-4 border-b border-border/60">
+        <SectionTitle title="Invoice Statement" sub={client.companyName}
+          info="Tap an invoice for its pieces and payments. Only invoiced work is here — an order not billed yet isn't on the client's account." />
       </div>
 
-      <div className={`px-5 pt-4 grid grid-cols-2 gap-2.5 ${T.returned > 0 ? "lg:grid-cols-5" : "lg:grid-cols-4"}`}>
-        <div className="rounded-xl p-3 text-center bg-secondary/60 text-brand-dark">
-          <p className="text-[10px] uppercase tracking-wider opacity-70">Billed</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoney(T.gross)}</p>
-        </div>
-        <div className="rounded-xl p-3 text-center bg-primary/10 text-primary">
-          <p className="text-[10px] uppercase tracking-wider opacity-80">Gift card used</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoney(T.gift)}</p>
-        </div>
-        {T.returned > 0 && (
-          <div className="rounded-xl p-3 text-center bg-amber-500/10 text-amber-800">
-            <p className="text-[10px] uppercase tracking-wider opacity-80">Returned</p>
-            <p className="text-base font-semibold mt-0.5">{fmtMoney(T.returned)}</p>
+      {/* The same one-row toolbar as every table: search, Filters, the count,
+          Export — and the statement's own totals in one quiet line under it. */}
+      <div className="px-5 pt-4 space-y-2.5">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, order or item…" aria-label="Search invoice, order or item"
+              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+            {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
           </div>
-        )}
-        <div className="rounded-xl p-3 text-center bg-success/10 text-success">
-          <p className="text-[10px] uppercase tracking-wider opacity-80">Received</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoney(T.received)}</p>
+          <FiltersButton filters={filters} onClear={() => setOnly("all")} count={countText} />
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
+            {onExport && mayExport && <ExportMenu scope="Pick the invoices or dates, then the file"
+              exports={[{ label: "PDF or Excel", icon: Download, hint: "The statement, invoice by invoice", onSelect: onExport }]} />}
+          </div>
         </div>
-        <div className={`rounded-xl p-3 text-center ${closing > 0.009 ? "bg-destructive/10 text-destructive" : "bg-success/10 text-success"}`}>
-          <p className="text-[10px] uppercase tracking-wider opacity-80">Outstanding</p>
-          <p className="text-base font-semibold mt-0.5">{fmtMoney(Math.max(0, closing))}</p>
-        </div>
-      </div>
-
-      <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => setQ(e.target.value)}
-            placeholder="Search invoice, order or item…" className="rounded-xl h-9 pl-9" />
-        </div>
-        <div className="inline-flex rounded-lg bg-secondary p-0.5">
-          {(["all", "due", "paid"] as const).map(k => (
-            <button key={k} onClick={() => setOnly(k)}
-              className={`px-3 h-8 rounded-md text-xs font-medium ${only === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-              {k === "all" ? "All" : k === "due" ? "Outstanding" : "Settled"}
-            </button>
-          ))}
-        </div>
+        <FilterChips filters={filters} onClear={() => setOnly("all")} />
+        {/* The statement's own totals: invoices only. The page's figures above
+            also count orders not billed yet, so these are a different sum. */}
+        <StatStrip items={[
+          { label: "Invoiced", value: fmtMoney(T.gross), icon: FileText },
+          ...(T.gift > 0.009 ? [{ label: "Gift card used", value: fmtMoney(T.gift), icon: Gift }] : []),
+          ...(T.returned > 0 ? [{ label: "Returned", value: fmtMoney(T.returned), icon: Undo2 }] : []),
+          { label: "Received on invoices", value: fmtMoney(T.received), tone: "in" as const },
+          // Outstanding counts the balance brought forward, so no signs between them.
+          { label: "Due on invoices", value: fmtMoney(Math.max(0, closing)), tone: closing > 0.009 ? "out" as const : "in" as const,
+            sub: openingDebit > 0 || openingCredit > 0 ? "With the balance brought forward" : undefined },
+        ]} note={q || only !== "all" ? "For the invoices shown" : "Invoices only — orders not billed yet are in the figures above"} />
       </div>
 
       {/* Drawn like the app's shared DataTable — the same box, header and cell
@@ -312,7 +297,7 @@ export function ClientInvoiceLedger({
               </tr>
             ) : null}
             {filtered.length === 0 ? (
-              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">Nothing to show.</td></tr>
+              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">{blocks.length ? "No invoices match." : "No invoices yet."}</td></tr>
             ) : filtered.map(b => (
               <>
                 <tr key={b.id} onClick={() => toggle(b.id)}
@@ -396,10 +381,6 @@ export function ClientInvoiceLedger({
         </table>
       </div>
       </div>
-      <p className="px-5 py-2 text-[11px] text-muted-foreground border-t border-border/40">
-        Tap an invoice to see the pieces on it and the payments received against it. Only invoiced work appears
-        here — an order that has not been billed yet is not on the client’s account.
-      </p>
     </div>
   );
 }

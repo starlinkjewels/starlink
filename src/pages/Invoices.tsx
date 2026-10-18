@@ -16,7 +16,11 @@ import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { FileText, CheckCircle2, AlertCircle, Clock, Search, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle } from "lucide-react";
+import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { ActionSheet } from "@/components/ActionSheet";
+import { SectionTitle } from "@/components/SectionTitle";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { buildInvoiceBlocks, type InvoicePayment } from "@/components/ClientInvoiceLedger";
 import { ReceiptEditSheet, cancelReceiptFlow, loadReceipts, paymentLockReason } from "@/components/ReceiptEditSheet";
@@ -44,6 +48,7 @@ import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
 import { companyById } from "@/lib/companies";
 import { filled, lockerLabel, recorded, refLink, refNo, when, type Detail } from "@/components/rowDetails";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
 /** Whether an order has been dispatched, and when (local "Dispatch" step). */
 function dispatchInfo(o: Order): { dispatched: boolean; date?: string } {
@@ -72,6 +77,8 @@ export function InvoicesPage() {
 
   // Create-invoice selection (staff): which of the client's un-invoiced orders to bill.
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // The create-invoice panel, opened from the page's main button.
+  const [creating, setCreating] = useState(false);
   // Invoice detail modal + inline per-order payment form.
   const [detailInvId, setDetailInvId] = useState<string | null>(null);
   // Pieces sent back from an invoice — which orders, and how many of each to start with.
@@ -276,6 +283,23 @@ export function InvoicesPage() {
   // Each invoice's live figures, worked out once for the table.
   const invRows = list.map(inv => ({ inv, client: db.clients.find(c => c.id === inv.clientId), ...invLive(inv) }));
 
+  // The client filter is also the client being invoiced: a new pick starts
+  // the order ticks afresh, wherever it is made.
+  const pickClient = (v: string) => { setClientFilter(v); setSelected(new Set()); };
+  // Staff narrow the list by client (and company, once there are several),
+  // behind the table's one Filters button.
+  const invoiceFilters: TableFilter[] = [];
+  if (isStaff) invoiceFilters.push({
+    kind: "select", label: "Client", allLabel: "All Clients", value: clientFilter === "all" ? "" : clientFilter,
+    onChange: v => pickClient(v || "all"),
+    options: clientOptions.map(c => ({ value: c.id, label: c.companyName })),
+  });
+  if (isStaff && multiCo) invoiceFilters.push({
+    kind: "select", label: "Company", allLabel: "All companies", value: companyFilter === "all" ? "" : companyFilter,
+    onChange: v => setCompanyFilter(v || "all"),
+    options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })),
+  });
+
   // The Advance Payment Ledger, one order a row, live from the order's payments.
   const ledgerClient = (o: Order) => db.clients.find(c => c.id === o.clientId)?.companyName ?? "";
   const ledgerColumns: DataColumn<Order>[] = [
@@ -288,7 +312,7 @@ export function InvoicesPage() {
     { key: "advance", header: "Advance paid", align: "right", kind: "number", sortValue: o => totalAdvance(o),
       cell: o => <CellAmount tone="in">{fmtMoney(totalAdvance(o))}</CellAmount> },
     { key: "balance", header: "Balance due", align: "right", kind: "number", sortValue: o => balanceDue(o),
-      cell: o => { const bal = balanceDue(o); return bal > 0 ? <CellAmount tone="out">{fmtMoney(bal)}</CellAmount> : <span className="text-success font-semibold whitespace-nowrap">✓ Cleared</span>; } },
+      cell: o => { const bal = balanceDue(o); return bal > 0 ? <CellAmount tone="out">{fmtMoney(bal)}</CellAmount> : <span className="text-muted-foreground font-medium whitespace-nowrap">✓ Cleared</span>; } },
   ];
   const ledgerSum = (rows: Order[], f: (o: Order) => number) => rows.reduce((s, o) => s + f(o), 0);
 
@@ -389,7 +413,7 @@ export function InvoicesPage() {
   const removeInvoice = async (inv: Invoice) => {
     if (await deleteInvoiceFlow(inv.id, user) && detailInvId === inv.id) { setDetailInvId(null); setPayOrderId(null); }
   };
-  const NO_EDIT = "Change the order's pricing — the invoice follows it";
+  const NO_EDIT = "Edit the order's price instead";
   const invoiceActions = (inv: Invoice, opened = false): MoreAction[] => {
     const delWhy = invDeleteWhy(inv);
     return [
@@ -397,7 +421,7 @@ export function InvoicesPage() {
       { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: NO_EDIT, show: isStaff },
       { label: "Print", icon: Printer, onSelect: () => printInv(inv), show: mayExport && !opened },
       { label: "Delete", icon: Trash2, danger: true, onSelect: () => removeInvoice(inv), show: isStaff, disabled: !!delWhy,
-        hint: delWhy ?? `Only the bill goes — the orders and their payments stay; ${inv.number} won't be reused` },
+        hint: oneLine(delWhy) ?? "Orders and payments stay" },
     ];
   };
   const mayPayEdit = isStaff && can("payments", "edit");
@@ -406,10 +430,10 @@ export function InvoicesPage() {
     const lock = paymentLockReason(db, p);
     return [
       { label: "Edit", icon: Pencil, disabled: !!lock || !mayPayEdit,
-        hint: lock ?? (mayPayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit")),
+        hint: oneLine(lock) ?? (mayPayEdit ? "Amount, date, account, mode" : needsAccess("payments", "edit")),
         onSelect: async () => { await loadReceipts(); setEditReceiptId(p.receiptId!); } },
       { label: "Delete", icon: Trash2, danger: true, disabled: !!lock || !mayPayDelete,
-        hint: lock ?? (mayPayDelete ? "Cancels the receipt — off the bills, the account and any credit" : needsAccess("payments", "delete")),
+        hint: oneLine(lock) ?? (mayPayDelete ? "Off the bills, account and credit" : needsAccess("payments", "delete")),
         onSelect: () => cancelReceiptFlow(p.receiptId!, user!.id) },
     ];
   };
@@ -417,126 +441,34 @@ export function InvoicesPage() {
     const why = !mayReturn ? needsAccess("invoices", "edit") : creditNoteCancelBlocker(db, noteId);
     return [
       { label: "Cancel return", icon: XCircle, danger: true, disabled: !!why,
-        hint: why ?? "The pieces count as theirs again and the credit comes back off", onSelect: () => cancelCreditNoteFlow(noteId, user!) },
+        hint: oneLine(why) ?? "Undoes the return and its credit", onSelect: () => cancelCreditNoteFlow(noteId, user!) },
     ];
   };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Invoices</h1>
+      <PageHeader title="Invoices"
+        primary={isStaff && can("invoices", "add") ? { label: "Create Invoice", icon: Plus, onClick: () => setCreating(true) } : null} />
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {[
-          { label: "Total Invoices", value: list.length, icon: FileText, color: "text-primary", bg: "bg-primary/10" },
-          { label: "Billed", value: fmtMoney(totalBilled), icon: FileText, color: "text-brand-dark", bg: "bg-brand-light/10" },
-          { label: "Received", value: fmtMoney(totalReceived), icon: CheckCircle2, color: "text-success", bg: "bg-success/10" },
-          { label: "Outstanding", value: fmtMoney(totalOutstanding), icon: AlertCircle, color: "text-destructive", bg: "bg-destructive/10" },
-        ].map(s => (
-          <div key={s.label} className="card-luxe p-4">
-            <div className={`h-8 w-8 rounded-lg ${s.bg} grid place-items-center mb-3`}>
-              <s.icon className={`h-4 w-4 ${s.color}`} />
-            </div>
-            <p className="text-lg font-display font-bold text-brand-dark truncate">{s.value}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* Invoices section */}
+      {/* Invoices section — the page title already names it. */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-          <h2 className="font-semibold text-brand-dark shrink-0">All Invoices</h2>
-          <div className="relative flex-1 min-w-[180px] max-sm:basis-full sm:max-w-xs sm:ml-auto">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, order, client…" className="pl-9 h-9 rounded-xl text-sm" />
-          </div>
-          {isStaff && (
-            <Select value={clientFilter} onValueChange={v => { setClientFilter(v); setSelected(new Set()); }}>
-              <SelectTrigger className="h-9 w-[160px] max-sm:w-auto max-sm:flex-1 rounded-xl"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Clients</SelectItem>
-                {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
-          {isStaff && multiCo && (
-            <Select value={companyFilter} onValueChange={setCompanyFilter}>
-              <SelectTrigger className="h-9 w-[170px] max-sm:w-auto max-sm:flex-1 rounded-xl" aria-label="Company"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All companies</SelectItem>
-                {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
-          {list.length > 0 && <p className="text-xs text-muted-foreground shrink-0">{list.length} invoice{list.length !== 1 ? "s" : ""}</p>}
-        </div>
-
-        {/* ── Create invoice from dispatched orders (staff) ── */}
-        {isStaff && can("invoices", "add") && (
-          <div className="px-5 py-3 border-b border-border/60 bg-secondary/20">
-            <div className="flex items-center gap-2 flex-wrap">
-              <Plus className="h-3.5 w-3.5 text-primary shrink-0" />
-              <span className="text-xs font-medium text-brand-dark">Create invoice from dispatched orders</span>
-              {clientFilter === "all" && <span className="text-xs text-muted-foreground">— pick a client above first</span>}
-            </div>
-
-            {clientFilter !== "all" && (
-              eligible.length === 0 ? (
-                notYet.length === 0 ? (
-                  <p className="text-xs text-muted-foreground mt-2">Nothing left to bill — every order of this client is already on an invoice.</p>
-                ) : (
-                  <div className="mt-2 space-y-1.5">
-                    <p className="text-xs text-muted-foreground">
-                      Nothing ready to bill yet. An order is invoiced once it is <span className="font-semibold text-brand-dark">priced and dispatched</span> —
-                      {" "}{notYet.length} order{notYet.length !== 1 ? "s" : ""} of this client {notYet.length !== 1 ? "are" : "is"} still on the way:
-                    </p>
-                    <div className="grid gap-1 max-h-48 overflow-y-auto pr-1">
-                      {notYet.map(({ o, why }) => (
-                        <Link key={o.id} to={`/orders/${o.id}`} className="flex items-center gap-3 p-2 rounded-lg border border-border/70 bg-white hover:bg-secondary/50 transition-colors">
-                          <span className="font-mono text-xs font-semibold text-primary">{o.orderNumber}</span>
-                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.status}</span>
-                          <span className="ml-auto text-[11px] font-medium text-amber-700 shrink-0">{why}</span>
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                )
-              ) : (
-                <div className="mt-3 space-y-2">
-                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer">
-                    <Checkbox checked={selected.size === eligibleIds.length && eligibleIds.length > 0} onCheckedChange={toggleAll} />
-                    Select all ({eligible.length})
-                  </label>
-                  <div className="grid gap-1.5 max-h-64 overflow-y-auto pr-1">
-                    {eligible.map(({ o, disp }) => (
-                      <label key={o.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors ${selected.has(o.id) ? "border-primary bg-primary/5" : "border-border/70 hover:bg-secondary/50"}`}>
-                        <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggle(o.id)} />
-                        <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
-                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.metal}</span>
-                        {disp.dispatched
-                          ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">Dispatched{disp.date ? ` ${fmtDate(disp.date)}` : ""}</span>
-                          : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{o.status}</span>}
-                        <span className="ml-auto font-semibold text-sm shrink-0">{fmtMoney(orderTotal(o))}</span>
-                      </label>
-                    ))}
-                  </div>
-                  <div className="flex items-center justify-between gap-3 pt-1">
-                    <span className="text-xs text-muted-foreground">{selected.size} selected · <span className="font-semibold text-foreground">{fmtMoney(selectedTotal)}</span></span>
-                    <Button size="sm" onClick={generateInvoice} disabled={selected.size === 0} className="btn-hero rounded-xl gap-2 h-9">
-                      <FileText className="h-3.5 w-3.5" /> Generate Invoice
-                    </Button>
-                  </div>
-                </div>
-              )
-            )}
-          </div>
-        )}
-
         {/* One table at every size: click any heading to sort (amounts and dates
-            high → low first); on a phone the invoice number stays in view. */}
+            high → low first); on a phone the invoice number stays in view. Its
+            search and filters are the page's (the figures follow them); the
+            count is the table's own. */}
         <div className="p-3 sm:p-4">
           <DataTable
+            search={{ value: q, onChange: setQ, placeholder: "Search invoice, order, client…" }}
+            filters={invoiceFilters}
+            onClearFilters={() => { pickClient("all"); setCompanyFilter("all"); }}
+            summary={
+              <StatStrip items={[
+                { label: "Billed", value: fmtMoney(totalBilled), tone: "strong", icon: FileText },
+                { label: "Received", value: fmtMoney(totalReceived), tone: "in" },
+                { label: "Outstanding", value: fmtMoney(totalOutstanding), tone: "out" },
+              ]} />
+            }
+            resetKey={JSON.stringify([ql, clientFilter, companyFilter])}
             id="invoices"
             noun="invoice"
             rows={invRows}
@@ -546,7 +478,7 @@ export function InvoicesPage() {
             rowActions={r => invoiceActions(r.inv)}
             defaultSort={{ key: "date", dir: "desc" }}
             pageSizes={[25, 50, 100]}
-            emptyText={ql ? "No invoices match your search." : isStaff ? "No invoices yet — select dispatched orders above to create one." : "No invoices yet."}
+            emptyText={ql ? "No invoices match your search." : "No invoices yet."}
             columns={[
               { key: "number", header: "Invoice", always: true, kind: "number", sortFirst: "desc",
                 sortValue: r => { const parts = r.inv.number.split("-"); const n = parseInt(parts[parts.length - 1], 10); return isNaN(n) ? r.inv.number : n; },
@@ -559,7 +491,7 @@ export function InvoicesPage() {
               { key: "date", header: "Date", kind: "date", sortValue: r => r.inv.createdAt, cell: r => <span className="font-semibold text-brand-dark text-xs whitespace-nowrap">{fmtDate(r.inv.createdAt)}</span> },
               { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount, cell: r => <span className="font-semibold">{fmtMoney(r.amount)}</span> },
               { key: "received", header: "Received", align: "right", sortValue: r => r.adv, cell: r => (r.adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(r.adv)}</span> : <span className="text-muted-foreground text-xs">—</span>) },
-              { key: "balance", header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs font-semibold ${r.bal > 0 ? "text-destructive" : "text-success"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
+              { key: "balance", header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs ${r.bal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
               { key: "status", header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
                 cell: r => r.paid
                   ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
@@ -573,29 +505,21 @@ export function InvoicesPage() {
           that were generated for them, never their un-invoiced orders. */}
       {isStaff && ordersWithAdvanceBase.length > 0 && (
         <div className="card-luxe overflow-hidden">
-          <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-            <div className="shrink-0">
-              <h2 className="font-semibold text-brand-dark">Advance Payment Ledger</h2>
-              <p className="text-xs text-muted-foreground mt-0.5">All recorded advance payments per order</p>
-            </div>
-            <div className="relative flex-1 min-w-[180px] sm:max-w-xs sm:ml-auto">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-              <Input value={ledgerQ} onChange={e => setLedgerQ(e.target.value)} placeholder="Search order, client…" className="pl-9 h-9 rounded-xl text-sm" />
-            </div>
-            {isStaff && (
-              <Select value={ledgerClientFilter} onValueChange={setLedgerClientFilter}>
-                <SelectTrigger className="h-9 w-[160px] rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Clients</SelectItem>
-                  {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
+          <div className="px-5 py-4 border-b border-border/60">
+            <SectionTitle title="Advance Payment Ledger" />
           </div>
 
-          {/* Keyed on the search and client filter so a new view starts on page 1. */}
+          {/* Its search and client filter sit in the table's toolbar. Keyed on
+              them so a new view starts on page 1. */}
           <div className="p-3 sm:p-4">
             <DataTable
+              search={{ value: ledgerQ, onChange: setLedgerQ, placeholder: "Search order, client…" }}
+              filters={[{
+                kind: "select", label: "Client", allLabel: "All Clients", value: ledgerClientFilter === "all" ? "" : ledgerClientFilter,
+                onChange: v => setLedgerClientFilter(v || "all"),
+                options: clientOptions.map(c => ({ value: c.id, label: c.companyName })),
+              }]}
+              onClearFilters={() => setLedgerClientFilter("all")}
               resetKey={`${ledgerQ}|${ledgerClientFilter}`}
               id="invoice-advances"
               noun="order"
@@ -617,7 +541,7 @@ export function InvoicesPage() {
               totals={{
                 total: rows => fmtMoney(ledgerSum(rows, orderTotal)),
                 advance: rows => <span className="text-success">{fmtMoney(ledgerSum(rows, totalAdvance))}</span>,
-                balance: rows => { const due = ledgerSum(rows, balanceDue); return <span className={due > 0 ? "text-destructive" : "text-success"}>{fmtMoney(due)}</span>; },
+                balance: rows => { const due = ledgerSum(rows, balanceDue); return <span className={due > 0 ? "text-destructive" : "text-muted-foreground"}>{fmtMoney(due)}</span>; },
               }}
             />
           </div>
@@ -660,8 +584,8 @@ export function InvoicesPage() {
 
                   <div className="grid grid-cols-3 gap-2">
                     <div className="bg-secondary rounded-xl p-3 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Amount</p><p className="text-sm font-semibold">{fmtMoney(amount)}</p></div>
-                    <div className="bg-success/10 rounded-xl p-3 text-center"><p className="text-[10px] text-muted-foreground mb-0.5">Received</p><p className="text-sm font-semibold text-success">{fmtMoney(adv)}</p></div>
-                    <div className={`rounded-xl p-3 text-center ${bal > 0 ? "bg-destructive/10" : "bg-success/10"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-sm font-semibold ${bal > 0 ? "text-destructive" : "text-success"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</p></div>
+                    <div className={`rounded-xl p-3 text-center ${adv > 0 ? "bg-success/10" : "bg-secondary"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Received</p><p className={`text-sm font-semibold ${adv > 0 ? "text-success" : "text-muted-foreground"}`}>{fmtMoney(adv)}</p></div>
+                    <div className={`rounded-xl p-3 text-center ${bal > 0 ? "bg-destructive/10" : "bg-secondary"}`}><p className="text-[10px] text-muted-foreground mb-0.5">Balance</p><p className={`text-sm font-semibold ${bal > 0 ? "text-destructive" : "text-muted-foreground"}`}>{bal > 0 ? fmtMoney(bal) : "✓ Cleared"}</p></div>
                   </div>
 
                   {gift > 0 && (
@@ -692,8 +616,7 @@ export function InvoicesPage() {
                         {fmtMoney(db.clients.find(c => c.id === detailInv.clientId)?.creditBalance || 0)} of unapplied credit on this client&rsquo;s account
                       </p>
                       <p className="text-[11px] text-muted-foreground mt-0.5">
-                        Money they have sent that is not against any invoice yet. Putting it here settles this invoice
-                        by that much; anything over stays as credit. Money already on another invoice is not touched.
+                        Settles this invoice by that much; any extra stays as credit.
                       </p>
                       <AsyncButton
                         size="sm" variant="outline"
@@ -748,7 +671,7 @@ export function InvoicesPage() {
                               )}
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className={`text-xs font-semibold ${oBal > 0 ? "text-destructive" : "text-success"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
+                              <span className={`text-xs ${oBal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{oBal > 0 ? `${fmtMoney(oBal)} due` : "✓ Cleared"}</span>
                               {isStaff && can("payments", "add") && oBal > 0 && payOrderId !== o.id && (
                                 <Button size="sm" variant="outline" onClick={() => startPay(o.id)} className="rounded-lg h-8 gap-1.5"><DollarSign className="h-3.5 w-3.5" /> Receive</Button>
                               )}
@@ -801,6 +724,84 @@ export function InvoicesPage() {
           })()}
         </DialogContent>
       </Dialog>
+      {/* ── Create invoice — the page's main button opens it. The client to
+          bill is the list's own Client filter, as it always was: picked here
+          or in the table's Filters, one choice either way. ── */}
+      {isStaff && can("invoices", "add") && (
+        <ActionSheet open={creating} onOpenChange={setCreating} size="md" icon={FileText}
+          title="Create invoice" description="From priced, dispatched orders"
+          footer={
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              {clientFilter !== "all" && eligible.length > 0
+                ? <span className="text-xs text-muted-foreground">{selected.size} selected · <span className="font-semibold text-foreground">{fmtMoney(selectedTotal)}</span></span>
+                : <span />}
+              <div className="flex items-center gap-2 max-sm:w-full">
+                <Button variant="outline" onClick={() => setCreating(false)} className="rounded-xl h-10 max-sm:flex-1">Close</Button>
+                {clientFilter !== "all" && eligible.length > 0 && (
+                  <Button onClick={generateInvoice} disabled={selected.size === 0} className="btn-hero rounded-xl gap-2 h-10 max-sm:flex-1">
+                    <FileText className="h-4 w-4" /> Generate Invoice
+                  </Button>
+                )}
+              </div>
+            </div>
+          }>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-xs">Client</Label>
+              <Select value={clientFilter} onValueChange={pickClient}>
+                <SelectTrigger aria-label="Client to invoice" className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Choose a client…</SelectItem>
+                  {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {clientFilter !== "all" && (
+              eligible.length === 0 ? (
+                notYet.length === 0 ? (
+                  <p className="text-sm text-muted-foreground">Nothing left to bill.</p>
+                ) : (
+                  <div className="space-y-1.5">
+                    <p className="text-xs text-muted-foreground">
+                      Only <span className="font-semibold text-brand-dark">priced, dispatched</span> orders can be billed — {notYet.length} still on the way:
+                    </p>
+                    <div className="grid gap-1">
+                      {notYet.map(({ o, why }) => (
+                        <Link key={o.id} to={`/orders/${o.id}`} className="flex items-center gap-3 p-2 rounded-lg border border-border/70 bg-white hover:bg-secondary/50 transition-colors">
+                          <span className="font-mono text-xs font-semibold text-primary">{o.orderNumber}</span>
+                          <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.status}</span>
+                          <span className="ml-auto text-[11px] font-medium text-amber-700 shrink-0">{why}</span>
+                        </Link>
+                      ))}
+                    </div>
+                  </div>
+                )
+              ) : (
+                <div className="space-y-2">
+                  <label className="flex items-center gap-2 text-xs font-medium text-muted-foreground cursor-pointer">
+                    <Checkbox checked={selected.size === eligibleIds.length && eligibleIds.length > 0} onCheckedChange={toggleAll} />
+                    Select all ({eligible.length})
+                  </label>
+                  <div className="grid gap-1.5">
+                    {eligible.map(({ o, disp }) => (
+                      <label key={o.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors ${selected.has(o.id) ? "border-primary bg-primary/5" : "border-border/70 hover:bg-secondary/50"}`}>
+                        <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggle(o.id)} />
+                        <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
+                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {o.metal}</span>
+                        {disp.dispatched
+                          ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">Dispatched{disp.date ? ` ${fmtDate(disp.date)}` : ""}</span>
+                          : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{o.status}</span>}
+                        <span className="ml-auto font-semibold text-sm shrink-0">{fmtMoney(orderTotal(o))}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )
+            )}
+          </div>
+        </ActionSheet>
+      )}
+
       <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
       {returning && (
         <ReturnDialog

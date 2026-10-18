@@ -83,7 +83,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       open={open}
       onOpenChange={onOpenChange}
       title="Create Client"
-      description="A buyer's business details, and the email and password they sign in with."
+      description="Business details and their login"
       icon={UserPlus}
       size="md"
       footer={
@@ -125,7 +125,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           onDate={v => setF({ ...f, openingDate: v || undefined })}
           debitLabel="Client owes us (Debit)"
           creditLabel="We owe client / advance (Credit)"
-          hint="What this client already owed you (or prepaid) when you started using this app. Shown as the first line of their ledger."
+          hint="Owed or prepaid when you started using the app."
         />
       </div>
       {multiCo && (
@@ -137,7 +137,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
               {myCompanies.map(co => <SelectItem key={co.id} value={co.id}>{co.name}{co.country ? ` · ${co.country}` : ""}</SelectItem>)}
             <AddNewItem kind="company" /></SelectContent>
           </Select>
-          <p className="text-[11px] text-muted-foreground mt-1">Their invoices, proformas and statements carry this company's name, logo, bank details and invoice numbers.</p>
+          <p className="text-[11px] text-muted-foreground mt-1">Their invoices carry this company's name and bank details.</p>
         </div>
       )}
       {user!.role === "admin" ? (
@@ -153,12 +153,10 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
               {employees.filter(e => !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
             <AddNewItem kind="employee" /></SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground mt-1">
-            If no employee is selected, this client stays under Admin. Otherwise the selected employee gets full access to this client only.
-          </p>
+          <p className="text-xs text-muted-foreground mt-1">The employee gets full access to this client only.</p>
         </div>
       ) : (
-        <p className="text-xs text-muted-foreground mt-4">This client will be added under your account — you'll manage them and their orders.</p>
+        <p className="text-xs text-muted-foreground mt-4">Added under your account.</p>
       )}
     </ActionSheet>
   );

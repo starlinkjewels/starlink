@@ -39,15 +39,15 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
   return (
     <div className="space-y-4">
       {(ctx.employeeId || ctx.clientIds) && !ctx.companyId && (
-        <p className="text-[11px] text-muted-foreground px-1">Purchases and what suppliers and factories are owed are for the whole business — they are not split by client or employee.</p>
+        <p className="text-[11px] text-muted-foreground px-1">Purchases and dues are for the whole business — not split by client or person.</p>
       )}
       {ctx.companyId && (
-        <p className="text-[11px] text-muted-foreground px-1">Purchases are this company&rsquo;s; what suppliers and factories are owed is for the whole business, since payments are not yet kept per company.</p>
+        <p className="text-[11px] text-muted-foreground px-1">Purchases are this company&rsquo;s; dues are for the whole business.</p>
       )}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         <KpiCard icon={Coins} label="Gold bought" value={inr(data.goldInr, true)} sub={`${num(Math.round(data.goldG * 1000) / 1000, " g")} · ${num(Math.round(data.goldFine * 1000) / 1000, " g fine")}`} tone="gold" />
         <KpiCard icon={Gem} label="Diamonds bought" value={inr(data.diaInr, true)} sub={`${num(Math.round(data.diaCt * 100) / 100, " ct")}${data.diaCt ? ` · ${inr(data.diaInr / data.diaCt)}/ct avg` : ""}${data.othCount ? ` · other materials ${inr(data.othInr, true)}` : ""}`} tone="sky" />
-        <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT — what pieces are costed at" : "No priced gold purchase yet"} tone="violet" />
+        <KpiCard icon={Scale} label="Fine gold cost" value={data.fine ? `${inr(data.fine.rate)}/g` : "—"} sub={data.fine ? "Average, 24KT" : "No priced gold yet"} tone="violet" />
         <KpiCard icon={Landmark} label="Owed to suppliers" value={inr(data.pay.suppliersInr, true)} sub="As of today" tone="rose" />
         <KpiCard icon={Factory} label="Owed to factories" value={inr(data.pay.factoriesInr, true)} sub="Labour, as of today" tone="rose" />
       </div>
@@ -71,7 +71,7 @@ export function PurchasesTab({ ctx }: { ctx: ReportCtx }) {
             </div>
           ) : <Empty>Nothing bought in this period.</Empty>}
         </Panel>
-        <Panel title="Top suppliers" subtitle="Bought in the period" icon={Truck}>
+        <Panel title="Top suppliers" subtitle="By amount" icon={Truck}>
           {data.suppliers.length ? (
             <ul className="space-y-2.5 text-xs">
               {data.suppliers.map(s => (

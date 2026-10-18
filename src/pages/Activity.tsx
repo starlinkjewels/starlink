@@ -4,12 +4,12 @@ import { fetchActivity, undoCheck, undoEntry } from "@/lib/activity";
 import { fieldLabel, type ActivityEntry, type LoggedChange } from "@/lib/activityFormat";
 import { MODULES, moduleLabel } from "@/lib/modules";
 import { useDbVersion } from "@/hooks/useDb";
-import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { DataTable, CellMain, CellTag, CellDate, type DataColumn } from "@/components/DataTable";
+import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
+import { PageHeader } from "@/components/PageHeader";
+import type { TableFilter } from "@/components/TableToolbar";
 import {
-  History, RefreshCw, Search, Undo2, Download, Printer, LogIn, Pencil, Plus, Trash2, Lock, Loader2,
+  RefreshCw, Undo2, Download, Printer, LogIn, Pencil, Plus, Trash2, Lock, Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
@@ -143,7 +143,31 @@ export function ActivityPage() {
     }
   };
 
-  const fmtAt = (iso: string) => new Date(iso).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  // What narrows the log, behind the table's one Filters button. "All" is the
+  // page's own "all", so each filter reads exactly as it did. The dates also
+  // decide what is fetched, as they always have.
+  const filters: TableFilter[] = [
+    { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); } },
+    { kind: "select", label: "Person", value: who === "all" ? "" : who, onChange: v => setWho(v || "all"),
+      options: people.map(([id, name]) => ({ value: id, label: name })), allLabel: "Everyone" },
+    { kind: "select", label: "Section", value: mod === "all" ? "" : mod, onChange: v => setMod(v || "all"),
+      options: MODULES.map(m => ({ value: m.key, label: m.label })), allLabel: "All sections" },
+    { kind: "select", label: "Kind", value: kind === "all" ? "" : kind, onChange: v => setKind(v || "all"),
+      options: Object.entries(KIND_LABEL).map(([k, l]) => ({ value: k, label: l })), allLabel: "Every kind" },
+  ];
+  const clearFilters = () => { setFrom(""); setTo(""); setWho("all"); setMod("all"); setKind("all"); };
+
+  // The date and the time, each kept whole: where a phone has no room, the
+  // time goes under the date instead of being cut off.
+  const fmtAt = (iso: string) => {
+    const d = new Date(iso);
+    return (
+      <span className="text-muted-foreground tabular-nums">
+        <span className="whitespace-nowrap">{d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })},</span>{" "}
+        <span className="whitespace-nowrap">{d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}</span>
+      </span>
+    );
+  };
   const cantUndoNote = (e: ActivityEntry) => !e.undoable && !!e.undoBlocker && e.kind === "change";
   // Only rows with something to show open; the rest have no chevron.
   const hasDetail = (e: ActivityEntry) => !!(e.changes?.length || e.meta || e.truncated || cantUndoNote(e));
@@ -174,73 +198,41 @@ export function ActivityPage() {
     { key: "who", header: "Who", sortValue: e => e.actorName,
       cell: e => <CellMain title={e.actorName} sub={ROLE_LABEL[e.actorRole] ?? e.actorRole} /> },
     { key: "section", header: "Section", sortValue: e => moduleLabel(e.module), cell: e => <CellTag>{moduleLabel(e.module)}</CellTag> },
-    { key: "when", header: "When", kind: "date", sortValue: e => e.at, cell: e => <CellDate>{fmtAt(e.at)}</CellDate> },
+    { key: "when", header: "When", kind: "date", sortValue: e => e.at, cell: e => fmtAt(e.at) },
   ];
 
   return (
     <div className="max-w-6xl mx-auto space-y-4">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div className="flex items-start gap-3 min-w-0 flex-1">
-          <div className="h-10 w-10 md:h-11 md:w-11 rounded-2xl bg-primary/10 grid place-items-center shrink-0"><History className="h-5 w-5 text-primary" /></div>
-          <div className="min-w-0">
-            <h1 className="font-display text-2xl md:text-3xl text-brand-dark leading-tight">Activity</h1>
-            <p className="text-sm text-muted-foreground">
-              <Lock className="h-3 w-3 inline -mt-0.5 mr-1" />Every change, download, print and sign-in — by anyone. Nothing here can be edited or deleted.
-            </p>
-          </div>
-        </div>
-        <Button variant="outline" onClick={() => load(false)} disabled={loading} className="rounded-xl gap-2">
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /> Refresh
-        </Button>
-      </div>
+      {/* Refresh turns while the log loads, so it is drawn here rather than
+          handed to the header as a plain button. On a phone it is just its
+          icon, beside the title. */}
+      <PageHeader
+        title="Activity"
+        subtitle={<><Lock className="h-3 w-3 inline -mt-0.5 mr-1" />A permanent record of everyone's work</>}
+        info="Every change, download, print and sign-in, by anyone. Nothing here can be edited or deleted; an undo is recorded too."
+        actions={
+          <Button variant="outline" onClick={() => load(false)} disabled={loading} aria-label="Refresh" title="Refresh" className="h-10 rounded-xl px-3.5 gap-2 max-sm:w-10 max-sm:px-0">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} /><span className="max-sm:hidden">Refresh</span>
+          </Button>
+        }
+      />
 
       {refused ? (
         <div className="card-luxe p-6 text-sm">
           <p className="font-semibold text-brand-dark mb-1">The activity log is not switched on yet</p>
-          <p className="text-muted-foreground">
-            It starts recording once the security update is deployed (<code className="text-xs">firebase deploy --only firestore</code>).
-            Until then nothing is written, and nothing about the app changes.
-          </p>
+          <p className="text-muted-foreground">It starts once the security update is deployed (<code className="text-xs">firebase deploy --only firestore</code>).</p>
         </div>
       ) : (
         <>
-          {/* ── Filters ── */}
-          <div className="card-luxe p-3 flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[180px]">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search — client, order, person…" className="pl-9 h-10 rounded-lg" />
-            </div>
-            <Select value={who} onValueChange={setWho}>
-              <SelectTrigger className="h-10 w-48 rounded-lg"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Everyone</SelectItem>
-                {people.map(([id, name]) => <SelectItem key={id} value={id}>{name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={mod} onValueChange={setMod}>
-              <SelectTrigger className="h-10 w-40 rounded-lg"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All sections</SelectItem>
-                {MODULES.map(m => <SelectItem key={m.key} value={m.key}>{m.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Select value={kind} onValueChange={setKind}>
-              <SelectTrigger className="h-10 w-36 rounded-lg"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Every kind</SelectItem>
-                {Object.entries(KIND_LABEL).map(([k, l]) => <SelectItem key={k} value={k}>{l}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            <Input type="date" value={from} onChange={e => setFrom(e.target.value)} className="h-10 w-[9.5rem] rounded-lg" />
-            <span className="text-xs text-muted-foreground">to</span>
-            <Input type="date" value={to} onChange={e => setTo(e.target.value)} className="h-10 w-[9.5rem] rounded-lg" />
-          </div>
-
           {/* ── The log ── */}
-          {/* The page's own filters above do the searching. Keyed on them so a
-              new view starts on page 1. A click on a row opens what it changed. */}
+          {/* The page narrows the rows itself; its search and filters sit in the
+              table's toolbar. Keyed on them so a new view starts on page 1. A
+              click on a row opens what it changed. */}
           <div className="card-luxe p-3 sm:p-4 space-y-2">
             <DataTable
+              search={{ value: q, onChange: setQ, placeholder: "Search — client, order, person…" }}
+              filters={filters}
+              onClearFilters={clearFilters}
               resetKey={`${who}|${mod}|${kind}|${q}|${from}|${to}`}
               id="activity"
               noun="event"
@@ -256,7 +248,7 @@ export function ActivityPage() {
                     {cantUndoNote(e) && (
                       <p className="text-[11px] text-muted-foreground">Can&rsquo;t be undone automatically: {e.undoBlocker}</p>
                     )}
-                    {e.truncated && <p className="text-[11px] text-amber-700">A very large change — the list of what changed is kept, the full copies are not.</p>}
+                    {e.truncated && <p className="text-[11px] text-amber-700">A very large change — only the list of what changed is kept.</p>}
                     {e.changes?.map(c => <ChangeDetail key={`${c.col}/${c.id}`} c={c} />)}
                     {e.meta && !e.changes?.length && (
                       <p className="text-xs text-muted-foreground">{Object.entries(e.meta).map(([k, v]) => `${fieldLabel(k)}: ${show(v)}`).join(" · ")}</p>
@@ -268,19 +260,18 @@ export function ActivityPage() {
                 // Undo is always listed; when it can't be done, greyed with the
                 // reason (the live check, so "changed since" shows before a click).
                 const check = e.kind === "change" ? undoCheck(e) : null;
-                const why = e.kind === "undo" ? "An undo can't itself be undone — make the change again instead"
-                  : e.kind !== "change" ? `Nothing was changed — a ${e.kind === "export" ? "download" : e.kind === "print" ? "print" : "sign-in"} is only recorded`
+                const why = e.kind === "undo" ? "An undo can't be undone"
+                  : e.kind !== "change" ? "Nothing was changed"
                   : check && !check.ok ? [check.reason, ...(check.moved ?? []).slice(0, 2)].join(" · ") : undefined;
                 return [
-                  { label: "Undo", icon: Undo2, hint: why ?? "Every record it changed goes back as it was", disabled: !!why, onSelect: () => tryUndo(e) },
+                  { label: "Undo", icon: Undo2, hint: why ?? "Puts every record back as it was", disabled: !!why, onSelect: () => tryUndo(e) },
                   // The log is the record of what happened — never rewritten.
-                  { label: "Edit", icon: Pencil, hint: "The activity log is permanent — entries can't be edited", disabled: true, onSelect: () => undefined },
-                  { label: "Delete", icon: Trash2, danger: true, hint: "The activity log is permanent — entries can't be deleted", disabled: true, onSelect: () => undefined },
+                  { label: "Edit", icon: Pencil, hint: "The log is permanent", disabled: true, onSelect: () => undefined },
+                  { label: "Delete", icon: Trash2, danger: true, hint: "The log is permanent", disabled: true, onSelect: () => undefined },
                 ];
               }}
-              emptyText={loading
-                ? <Loader2 className="h-5 w-5 animate-spin text-muted-foreground mx-auto" />
-                : "Nothing recorded for these filters."}
+              loading={loading}
+              emptyText="Nothing recorded for these filters."
             />
             {loading && shown.length > 0 && <div className="p-4 grid place-items-center"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>}
           </div>

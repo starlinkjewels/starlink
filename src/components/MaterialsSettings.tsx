@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { SectionTitle } from "@/components/SectionTitle";
 import { toast } from "sonner";
 import { Plus, Pencil, Layers, Coins, Gem, Link2, X, Power } from "lucide-react";
 import { updateDb, type DB } from "@/lib/db";
@@ -160,10 +161,8 @@ export function MaterialsSettings() {
   return (
     <div className="card-luxe p-5 space-y-4">
       <div className="flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-display text-xl text-brand-dark flex items-center gap-2"><Layers className="h-5 w-5 text-primary" /> Materials</h2>
-          <p className="text-sm text-muted-foreground mt-0.5 max-w-2xl">Gold and diamonds are built in. Add anything else a piece can use — platinum, silver, gemstones, pearls, locks, chains — and it gets its own stock, purchases, factory issues and costing, just like gold and diamonds.</p>
-        </div>
+        <SectionTitle icon={Layers} title="Materials" sub="Gold and diamonds are built in"
+          info="Anything else a piece uses — platinum, silver, gemstones, locks — gets its own stock, purchases, factory issues and costing." />
         <Button onClick={() => setEditing("new")} className="btn-hero rounded-xl gap-1.5"><Plus className="h-4 w-4" /> New material</Button>
       </div>
       <div className="grid gap-2 md:grid-cols-2">

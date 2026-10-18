@@ -1,13 +1,15 @@
 import { companiesOf, companyById, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import type { Order } from "@/lib/db";
 import { useMemo, useState } from "react";
-import { Building2, BarChart3, CalendarDays, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog, X } from "lucide-react";
+import { BarChart3, Factory, LayoutDashboard, ListOrdered, ShoppingCart, TrendingUp, Users, UserCog } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { currentUserOrders, costDataReady } from "@/lib/db";
-import { PRESETS, presetPeriod, presetOf, previousPeriod, periodLabel, type Period, type PresetKey } from "@/lib/analytics";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { presetPeriod, previousPeriod, periodLabel, type Period } from "@/lib/analytics";
+import { PageHeader, TabBar } from "@/components/PageHeader";
+import { FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
 import { ReportSections } from "./ReportSections";
+import { PeriodPicker } from "./ui";
 import { OverviewTab } from "./OverviewTab";
 import { SalesTab } from "./SalesTab";
 import { ClientsTab } from "./ClientsTab";
@@ -96,7 +98,6 @@ export function ReportsHub() {
       + (clientId !== "all" ? `_${(db.clients.find(c => c.id === clientId)?.companyName ?? "client").replace(/\W+/g, "-")}` : "")
       + (emp ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
   };
-  const preset = presetOf(period);
   const combinedScope = empScope || companyId !== "all"
     ? (o: Order) => (!empScope || empScope(o)) && (companyId === "all" || companyOfOrder(db, o) === companyId)
     : undefined;
@@ -105,94 +106,43 @@ export function ReportsHub() {
     .filter(c => !emp || empClients.has(c.id) || allOrders.some(o => o.clientId === c.id && empScope?.(o)))
     .sort((a, b) => a.companyName.localeCompare(b.companyName));
   const staff = db.users.filter(u => (u.role === "employee" || u.role === "admin") && u.status !== "inactive").sort((a, b) => a.name.localeCompare(b.name));
+  // Company, person and client narrow every tab — behind one Filters button,
+  // what is on shown as chips. The period stays in view: it is never "off".
+  const clientOpts = clients.map(c => ({ value: c.id, label: c.companyName }));
+  // A client chosen before the company or person changed still names itself.
+  if (clientId !== "all" && !clientOpts.some(o => o.value === clientId)) clientOpts.push({ value: clientId, label: db.clients.find(c => c.id === clientId)?.companyName ?? "Client" });
+  const filters: TableFilter[] = [
+    ...(multiCo ? [{ kind: "select" as const, label: "Company", value: companyId === "all" ? "" : companyId, onChange: (v: string) => setCompanyId(v || "all"),
+      allLabel: "All companies", options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
+    ...(isAdmin ? [{ kind: "select" as const, label: "Employee", value: employeeId === "all" ? "" : employeeId, onChange: (v: string) => setEmployeeId(v || "all"),
+      allLabel: "Whole team", options: staff.map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""}` })) }] : []),
+    { kind: "select", label: "Client", value: clientId === "all" ? "" : clientId, onChange: v => setClientId(v || "all"), allLabel: "All clients", options: clientOpts },
+  ];
+  const clearFilters = () => { setCompanyId("all"); setEmployeeId("all"); setClientId("all"); };
 
   return (
     <div className="max-w-7xl mx-auto space-y-4">
-      <div>
-        <h1 className="font-display text-2xl sm:text-3xl text-brand-dark leading-tight">Reports &amp; Analytics</h1>
-        <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
+      <PageHeader
+        title="Reports & Analytics"
+        subtitle={<>
           {periodLabel(period)}{ctx.prev ? ` · compared with ${periodLabel(ctx.prev)}` : ""}
           {clientId !== "all" ? ` · ${db.clients.find(c => c.id === clientId)?.companyName}` : ""}
           {emp ? ` · ${emp.name}'s work` : ""}
           {companyId !== "all" ? ` · ${companyById(db.settings, companyId).name}` : ""}
-        </p>
-      </div>
+        </>}
+      />
 
-      {/* One filter for every tab */}
-      <div className="card-luxe p-3 sm:p-4 space-y-3 sm:sticky sm:top-0 z-20">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="w-full sm:w-48">
-            <Select value={preset ?? "custom"} onValueChange={v => { if (v !== "custom") setPeriod(presetPeriod(v as PresetKey)); }}>
-              <SelectTrigger className="h-9 rounded-lg text-xs font-medium" aria-label="Period"><CalendarDays className="h-4 w-4 text-primary shrink-0 mr-1" /><SelectValue /></SelectTrigger>
-              <SelectContent className="max-h-80">
-                {PRESETS.map(p => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
-                <SelectItem value="custom" disabled={preset !== null}>Custom range</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <input type="date" value={period.from} max={period.to || undefined} onChange={e => setPeriod({ ...period, from: e.target.value })}
-              aria-label="From date" className="h-9 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-            <span className="text-muted-foreground text-xs">to</span>
-            <input type="date" value={period.to} min={period.from || undefined} onChange={e => setPeriod({ ...period, to: e.target.value })}
-              aria-label="To date" className="h-9 rounded-lg border border-border bg-white px-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
-          </div>
-          {multiCo && (
-            <div className="w-full sm:w-48 sm:ml-auto">
-              <Select value={companyId} onValueChange={setCompanyId}>
-                <SelectTrigger className="h-9 rounded-lg text-xs" aria-label="Company"><Building2 className="h-4 w-4 text-primary shrink-0 mr-1" /><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All companies</SelectItem>
-                  {companiesOf(db.settings).map(c => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-          {isAdmin && (
-            <div className={`w-full sm:w-52 ${multiCo ? "" : "sm:ml-auto"} flex items-center gap-1.5`}>
-              <Select value={employeeId} onValueChange={setEmployeeId}>
-                <SelectTrigger className="h-9 rounded-lg text-xs" aria-label="Employee"><UserCog className="h-4 w-4 text-primary shrink-0 mr-1" /><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Whole team</SelectItem>
-                  {staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.role === "admin" ? " (admin)" : ""}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {employeeId !== "all" && (
-                <button type="button" onClick={() => setEmployeeId("all")} title="Whole team" className="h-9 w-9 grid place-items-center rounded-lg border border-border bg-white text-muted-foreground hover:text-destructive shrink-0">
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              )}
-            </div>
-          )}
-          <div className={`w-full sm:w-56 ${isAdmin ? "" : "sm:ml-auto"} flex items-center gap-1.5`}>
-            <Select value={clientId} onValueChange={setClientId}>
-              <SelectTrigger className="h-9 rounded-lg text-xs"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All clients</SelectItem>
-                {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-              </SelectContent>
-            </Select>
-            {clientId !== "all" && (
-              <button type="button" onClick={() => setClientId("all")} title="All clients" className="h-9 w-9 grid place-items-center rounded-lg border border-border bg-white text-muted-foreground hover:text-destructive shrink-0">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
+      {/* One filter row for every tab: the period (the same picker every report
+          has), then Filters — one row on every screen. */}
+      <div className="card-luxe p-2.5 sm:p-3 space-y-2.5 sm:sticky sm:top-0 z-20">
+        <div className="flex items-center gap-2 min-w-0">
+          <PeriodPicker value={period} onChange={setPeriod} />
+          <FiltersButton filters={filters} onClear={clearFilters} />
         </div>
+        <FilterChips filters={filters} onClear={clearFilters} />
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 overflow-x-auto -mx-1 px-1 pb-1">
-        {tabs.map(t => {
-          const on = t.key === activeTab;
-          return (
-            <button key={t.key} type="button" onClick={() => setTab(t.key)}
-              className={`inline-flex items-center gap-1.5 h-9 px-3.5 rounded-xl text-xs sm:text-sm font-medium whitespace-nowrap transition-colors shrink-0 ${on ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:bg-secondary/70 hover:text-foreground"}`}>
-              <t.icon className="h-4 w-4" />{t.label}
-            </button>
-          );
-        })}
-      </div>
+      <TabBar label="Reports" tabs={tabs} value={activeTab} onChange={setTab} />
 
       {activeTab === "overview" && <OverviewTab ctx={ctx} goTo={setTab} />}
       {activeTab === "sales" && (
@@ -200,7 +150,7 @@ export function ReportsHub() {
           <SalesTab ctx={ctx} />
           {emp && isAdmin && (
             <p className="text-[11px] text-muted-foreground px-1">
-              The company Profit &amp; Loss — running costs, exchange differences, net profit — is for the whole business, so it is not shown for one person. Their profit by client and by item is above.
+              The company Profit &amp; Loss is for the whole business, so it isn&rsquo;t shown for one person.
             </p>
           )}
           <ReportSections embedded show={emp ? ["sales"] : ["sales", "profit"]} period={period} clientId={clientId === "all" ? undefined : clientId} scope={combinedScope} scopeKey={`${emp?.id ?? ""}|${companyId}`} companyId={companyId === "all" ? undefined : companyId} />

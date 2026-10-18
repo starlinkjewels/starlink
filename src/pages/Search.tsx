@@ -4,6 +4,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
 import { Link } from "react-router-dom";
+import { PageHeader } from "@/components/PageHeader";
 import { Package, Users, Briefcase, FileText } from "lucide-react";
 
 export function SearchPage() {
@@ -36,7 +37,7 @@ export function SearchPage() {
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
-      <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Search</h1>
+      <PageHeader title="Search" />
       <Input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search orders, clients, employees, invoices, credit notes..." className="rounded-xl h-12" />
       {q && <div className="space-y-4">
         <Section title="Orders" icon={Package} items={orders.map(o => ({ id: o.id, to: `/orders/${o.id}`, title: o.orderNumber, sub: `${o.jewelleryType} - ${o.status}${o.designNumber ? ` · Design #${o.designNumber}` : ""}${o.returns?.length ? ` · returned on ${[...new Set(o.returns.map(r => r.creditNoteNo))].join(", ")}` : ""}` }))} />

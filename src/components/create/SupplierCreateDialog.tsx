@@ -43,7 +43,7 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
       open={open}
       onOpenChange={onOpenChange}
       title="Add Supplier"
-      description="Who you buy material from — their details and any balance carried over."
+      description="Their details and any opening balance"
       icon={Truck}
       size="md"
       footer={
@@ -82,7 +82,7 @@ export function SupplierCreateDialog({ open, onOpenChange, onCreated }: {
           onDate={v => setF({ ...f, openingDate: v || undefined })}
           debitLabel="Supplier owes us (Debit)"
           creditLabel="We owe supplier (Credit)"
-          hint="Amount outstanding with this supplier when you started using this app (₹). Shown as the first line of their ledger."
+          hint="Owed either way when you started using the app (₹)."
         />
       </div>
     </ActionSheet>

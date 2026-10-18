@@ -2,13 +2,11 @@ import { DataTable } from "@/components/DataTable";
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, giftCardStatus, type GiftCard, type GiftCardStatus } from "@/lib/db";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
-import { Gift, CheckCircle2, Clock, AlertCircle, Search, Download, Eye, Pencil, Ban, Trash2 } from "lucide-react";
-import { IfExport } from "@/components/IfExport";
+import { Gift, Download, Eye, Pencil, Ban, Trash2, CheckCircle2, Clock } from "lucide-react";
+import { PageHeader } from "@/components/PageHeader";
+import { StatStrip } from "@/components/TableToolbar";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
@@ -16,6 +14,7 @@ import type { MoreAction } from "@/components/MoreMenu";
 import { GIFT_CARD_NO_DELETE, GIFT_CARD_NO_EDIT, cancelGiftCardFlow, giftCardCancelBlocker } from "@/lib/giftCardActions";
 import { needsAccess } from "@/lib/actionHints";
 import { filled, when, userName, refLink, linkList, noteText, type Detail } from "@/components/rowDetails";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
 const STATUS_STYLE: Record<GiftCardStatus, string> = {
   active: "bg-success/10 text-success",
@@ -130,63 +129,48 @@ export function GiftCardsAdminPage() {
     return [
       { label: "View client", icon: Eye, onSelect: () => navigate(`/clients/${c.clientId}`),
         disabled: !can("clients"), hint: can("clients") ? clientName(c.clientId) : needsAccess("clients", "view") },
-      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_EDIT },
+      { label: "Edit", icon: Pencil, onSelect: () => {}, disabled: true, hint: oneLine(GIFT_CARD_NO_EDIT) },
       { label: "Cancel card", icon: Ban, danger: true, onSelect: () => cancelGiftCardFlow(c.id), disabled: !!dead || !admin,
-        hint: dead ?? (admin ? `Stops the ${fmtMoney(giftCardRemaining(c, db.orders))} left on it being spent` : "Only an admin can cancel a gift card") },
+        hint: oneLine(dead) ?? (admin ? `Stops ${fmtMoney(giftCardRemaining(c, db.orders))} being spent` : "Admins only") },
       { label: "Delete", icon: Trash2, danger: true, onSelect: () => {}, disabled: true, hint: GIFT_CARD_NO_DELETE },
     ];
   };
 
-  const TILES: [string, string, typeof Gift, string][] = [
-    ["Issued", fmtMoney(stats.issued), Gift, "text-primary"],
-    ["Redeemed", fmtMoney(stats.used), CheckCircle2, "text-success"],
-    ["Pending", fmtMoney(stats.pending), Clock, "text-warning-foreground"],
-    ["Expired / Cancelled", fmtMoney(stats.expired), AlertCircle, "text-muted-foreground"],
-  ];
-
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark flex items-center gap-2"><Gift className="h-6 w-6 text-primary" /> Gift Cards</h1>
-          <p className="text-sm text-muted-foreground">Every card issued, redeemed, pending and expired — {stats.count} card{stats.count !== 1 ? "s" : ""}</p>
-        </div>
-        <IfExport>
-        <Button variant="outline" onClick={() => setShowExport(true)} className="rounded-xl gap-2"><Download className="h-4 w-4" /> Export</Button>
-        </IfExport>
-      </div>
+      <PageHeader
+        title="Gift Cards"
+        subtitle={`${stats.count} card${stats.count !== 1 ? "s" : ""} issued`}
+      />
 
-      {/* Summary — Issued = Redeemed + Pending + Expired */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        {TILES.map(([label, val, Icon, color]) => (
-          <div key={label} className="card-luxe p-4">
-            <div className="h-8 w-8 rounded-lg bg-secondary grid place-items-center mb-3"><Icon className={`h-4 w-4 ${color}`} /></div>
-            <p className="text-lg font-display font-bold text-brand-dark truncate">{val}</p>
-            <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
-          </div>
-        ))}
-      </div>
-
+      {/* The search, status and download sit in the table's toolbar. The figures
+          are every card ever issued, whatever the filters, and they add up:
+          redeemed + pending + expired = issued (giftCardStats). */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60 flex items-center justify-between gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-[180px] sm:max-w-xs">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search client…" className="pl-9 h-9 rounded-xl text-sm" />
-          </div>
-          <Select value={statusFilter} onValueChange={v => setStatusFilter(v as "all" | GiftCardStatus)}>
-            <SelectTrigger className="h-9 w-[150px] rounded-xl"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All statuses</SelectItem>
-              <SelectItem value="active">Active</SelectItem>
-              <SelectItem value="used">Used</SelectItem>
-              <SelectItem value="expired">Expired</SelectItem>
-              <SelectItem value="cancelled">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="p-4">
+        <div className="p-3 sm:p-4">
           <DataTable
+            search={{ value: q, onChange: setQ, placeholder: "Search client…" }}
+            filters={[{
+              kind: "select", label: "Status", allLabel: "All statuses", value: statusFilter === "all" ? "" : statusFilter,
+              onChange: v => setStatusFilter((v || "all") as "all" | GiftCardStatus),
+              options: [
+                { value: "active", label: "Active" },
+                { value: "used", label: "Used" },
+                { value: "expired", label: "Expired" },
+                { value: "cancelled", label: "Cancelled" },
+              ],
+            }]}
+            onClearFilters={() => setStatusFilter("all")}
+            exports={[{ label: "PDF or Excel", icon: Download, hint: "By issue date, as filtered", onSelect: () => setShowExport(true) }]}
+            summary={
+              <StatStrip items={[
+                { label: "Redeemed", value: fmtMoney(stats.used), tone: "in", icon: CheckCircle2 },
+                { label: "Pending", value: fmtMoney(stats.pending), icon: Clock, op: "+" },
+                { label: "Expired or cancelled", value: fmtMoney(stats.expired), icon: Ban, op: "+" },
+                { label: "Issued", value: fmtMoney(stats.issued), tone: "strong", icon: Gift, op: "=" },
+              ]} note="All cards, all time" />
+            }
+            resetKey={JSON.stringify([ql, statusFilter])}
             id="gift-cards"
             rows={rows}
             rowKey={c => c.id}
@@ -198,7 +182,7 @@ export function GiftCardsAdminPage() {
               { key: "client", header: "Client", always: true, sortValue: c => clientName(c.clientId), cell: c => <span className="font-medium max-w-[180px] truncate block">{clientName(c.clientId)}</span> },
               { key: "source", header: "Source", sortValue: c => sourceLabel(c.source), cell: c => <span className="text-xs text-muted-foreground">{sourceLabel(c.source)}</span> },
               { key: "amount", header: "Amount", align: "right", sortValue: c => giftCardGranted(c), cell: c => <span className="font-semibold tabular-nums">{fmtMoney(giftCardGranted(c))}</span> },
-              { key: "used", header: "Used", align: "right", sortValue: c => giftCardGranted(c) - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums text-success">{fmtMoney(giftCardGranted(c) - giftCardRemaining(c, db.orders))}</span> },
+              { key: "used", header: "Used", align: "right", sortValue: c => giftCardGranted(c) - giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums">{fmtMoney(giftCardGranted(c) - giftCardRemaining(c, db.orders))}</span> },
               { key: "remaining", header: "Remaining", align: "right", sortValue: c => giftCardRemaining(c, db.orders), cell: c => <span className="tabular-nums">{fmtMoney(giftCardRemaining(c, db.orders))}</span> },
               { key: "status", header: "Status", align: "center", sortValue: c => giftCardStatus(c, db.orders), cell: c => { const st = giftCardStatus(c, db.orders); return <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_STYLE[st]}`}>{st}</span>; } },
               { key: "issued", header: "Issued", kind: "date", sortValue: c => c.createdAt, cell: c => <span className="text-xs text-muted-foreground">{fmtDate(c.createdAt)}</span> },

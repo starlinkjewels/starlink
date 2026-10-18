@@ -1,5 +1,8 @@
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTitle } from "@/components/SectionTitle";
+import { StatStrip } from "@/components/TableToolbar";
 import { IssuanceEditSheet } from "@/components/IssuanceEditSheet";
 import { FactoryEditDialog } from "@/components/FactoryEditDialog";
 import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact, isPoolDraw } from "@/lib/issuanceEdit";
@@ -30,9 +33,9 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ArrowLeft, Factory as FactoryIcon, Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
+  Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
   Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
-  Pencil, Trash2, ExternalLink, Lock, RotateCcw,
+  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, Receipt,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -78,7 +81,7 @@ export function FactoryHistoryPage() {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {collectionLoaded("factories") ? "Factory not found." : "Loading…"}{" "}
-        <Link to="/factories" className="text-primary underline">Back</Link>
+        <Link to="/factories" className="inline-block py-2.5 -my-2.5 text-primary underline">Back</Link>
       </div>
     );
   }
@@ -103,7 +106,7 @@ function FactoryHistoryPageBody() {
   if (!factory) {
     return (
       <div className="text-center py-20 text-muted-foreground">
-        Factory not found. <Link to="/factories" className="text-primary underline">Back to Factories</Link>
+        Factory not found. <Link to="/factories" className="inline-block py-2.5 -my-2.5 text-primary underline">Back to Factories</Link>
       </div>
     );
   }
@@ -570,17 +573,17 @@ function FactoryHistoryPageBody() {
         onSelect: () => navigate(`/suppliers/${purchase!.supplierId}`) },
       { label: "Edit issuance", icon: Pencil, onSelect: () => setEditingIssuance(mi), disabled: !isAdmin || !edit.ok,
         hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason
-          : certified ? "Charge and note — the stones keep their own weight" : "Quantity, purity or shape, charge, note" },
+          : certified ? "Charge and note only" : "Quantity, purity or shape, charge, note" },
       // Not offered as working actions, and said why: none of these left a
       // record that can be reversed exactly, so doing it here would guess.
       { label: "Edit finished pieces", icon: Lock, show: !!mi.orderId, disabled: true, onSelect: () => {},
         hint: mi.status === "closed"
-          ? "Closed — what was used was settled when it was closed"
-          : "Not changed one by one — Edit issuance corrects what was used, or cancel it and record it again" },
+          ? "Settled when it was closed"
+          : "Use Edit issuance instead" },
       { label: "Re-open issuance", icon: RotateCcw, show: mi.status === "closed", disabled: true, onSelect: () => {},
-        hint: "Closing sent the unused material back without a record tied to this issue, so it can't be taken back exactly — issue the material again instead" },
+        hint: "Can't be reversed exactly — issue again" },
       { label: "Undo a return", icon: Undo2, show: !(mi.source === "melt" && mi.quantityIssued === 0), disabled: true, onSelect: () => {},
-        hint: "A return isn't recorded against this issue, so it can't be undone exactly — issue the material again instead" },
+        hint: "Can't be undone exactly — issue again" },
       { label: "Cancel issuance", icon: Trash2, danger: true, onSelect: () => cancelIssuance(mi), disabled: !isAdmin || !cancel.ok,
         hint: !isAdmin ? ADMIN_ONLY : !cancel.ok ? cancel.reason
           : isPoolDraw(mi) ? "It goes back into the factory's pool"
@@ -968,134 +971,107 @@ function FactoryHistoryPageBody() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <button onClick={() => navigate("/factories")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Factories
-      </button>
+      {/* The name row: issuing material is what people come here to do; the
+          company switch decides what the whole page shows; the rest waits in
+          the ⋯. */}
+      <PageHeader
+        back={{ label: "Back to Factories", to: "/factories" }}
+        title={factory.name}
+        subtitle={factory.contactPerson || undefined}
+        actions={<CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-40 sm:w-48 min-w-0" />}
+        primary={user?.role === "admin" ? { label: "Issue Material", icon: Plus, onClick: () => setShowIssueForm(true) } : null}
+        menu={[
+          { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold or diamonds, company to company", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
+          { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport },
+          { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
+            hint: isAdmin ? "Name, contact, phone, address" : "Only an admin can change factories" },
+          { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !isAdmin || !deleteGuard.ok,
+            hint: !isAdmin ? "Only an admin can change factories" : deleteGuard.reason },
+        ]}
+      />
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-6">
-        <div className="flex items-start gap-4 min-w-0">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-orange-500/15 to-orange-400/15 grid place-items-center shrink-0">
-            <FactoryIcon className="h-7 w-7 text-orange-600" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{factory.name}</h1>
-            <p className="text-muted-foreground mt-1 break-words">{factory.contactPerson}</p>
-          </div>
-          {/* Its own label, apart from the account's "More actions" below. */}
-          <MoreMenu label="Factory actions" title="Factory" actions={[
-            { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
-              hint: isAdmin ? "Name, contact, phone, address" : "Only an admin can change factories" },
-            { label: "Delete factory", icon: Trash2, danger: true, onSelect: deleteFactory, disabled: !isAdmin || !deleteGuard.ok,
-              hint: !isAdmin ? "Only an admin can change factories" : deleteGuard.reason },
-          ]} />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-6 text-sm">
-          <div className="flex items-start gap-2"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{factory.phone || "—"}</p></div></div>
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm min-w-0">
+          <div className="flex items-start gap-2 min-w-0"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium break-words">{factory.phone || "—"}</p></div></div>
           {factory.address && <div className="flex items-start gap-2 min-w-0"><MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{factory.address}</p></div></div>}
         </div>
       </motion.div>
+      <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
+        extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
+        options={[
+          { label: "Factory Ledger — PDF", sublabel: "Gold, diamond, metal and labour, by order", kind: "pdf", run: exportOrdersPdf },
+          { label: "Factory Ledger — Excel", sublabel: "Gold, diamond, metal and labour, by order", kind: "excel", run: exportOrdersCsv },
+          { label: "Movement Sheet — PDF", sublabel: "Every issue and return, line by line", kind: "pdf", run: exportCombinedPdf },
+          { label: "Movement Sheet — Excel", sublabel: "Every issue and return, line by line", kind: "excel", run: exportCombinedCsv },
+        ]} />
 
-      <div className="card-luxe p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0"><Wallet className="h-5 w-5 text-success" /></div>
-            <div>
-              <h3 className="font-display text-lg text-brand-dark">Factory Account</h3>
-              <p className="text-xs text-muted-foreground">Gold in grams, diamonds in carats, charges in INR</p>
+      {/* What is with the factory, then its labour account — the company
+          picked in the header decides both. */}
+      <div className="card-luxe p-5 space-y-3">
+        <SectionTitle title="Factory Account" sub={view !== "all" ? companyById(db.settings, view).name : undefined} className="mb-1" />
+        <StatStrip items={[
+          { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
+          { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
+            tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
+          ...Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => ({
+            label: materialName(db.settings, k), value: `${q.toLocaleString()} ${materialUnit(db.settings, k)}`, icon: Package,
+            tone: q < 0 ? "out" as const : undefined, sub: "At the factory" })),
+        ]} />
+        <StatStrip items={[
+          { label: "Charges pending", value: account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared",
+            tone: account.chargesPending > 0 ? "out" : "in", icon: Coins, sub: "Still to pay" },
+          { label: "Total charges", value: fmtMoneyInr(account.chargesTotal), icon: Receipt, sub: "Labour billed" },
+          { label: "Charges paid", value: fmtMoneyInr(account.chargesPaid), tone: "in", icon: CreditCard },
+          { label: "Charges overpaid", value: fmtMoneyInr(account.chargesOverpaid), icon: Wallet, sub: "Held by the factory" },
+        ]} />
+      </div>
+
+      {/* Opening balance (migration) — admin only */}
+      {user?.role === "admin" && (
+        <div className="card-luxe p-5">
+          <SectionTitle title="Opening Balance"
+            sub={hasOpeningBalance(factory) || factory.openingFineGold
+              ? [
+                  hasOpeningBalance(factory) ? `${fmtMoneyInr(Math.abs(factory.openingBalance!))} ${factory.openingDir === "credit" ? "we owe" : "owed to us"}` : "",
+                  factory.openingFineGold ? `${factory.openingFineGold}g fine gold` : "",
+                ].filter(Boolean).join(" · ")
+              : "Not set"}
+            info="Balances carried in from your previous system."
+            actions={<button type="button" onClick={() => setObOpen(v => !v)} aria-expanded={obOpen} className="text-sm text-primary font-medium hover:underline">{obOpen ? "Close" : "Edit"}</button>} />
+        {obOpen && (
+          <div className="mt-3 grid grid-cols-2 gap-3">
+            <OpeningBalanceFields
+              amount={ob.amount}
+              dir={ob.dir}
+              date={ob.date}
+              onAmount={v => setOb({ ...ob, amount: v })}
+              onDir={v => setOb({ ...ob, dir: v })}
+              onDate={v => setOb({ ...ob, date: v })}
+              debitLabel="Factory owes us (Debit)"
+              creditLabel="We owe factory (Credit)"
+              title="Opening Making-Charge Balance"
+              hint="Unpaid making charges when you started (₹)."
+            />
+            <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
+              <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="text-[11px] text-muted-foreground">Fine gold at factory (24KT grams)</label>
+                  <Input type="number" min={0} step="0.001" value={ob.fineGold} onChange={e => setOb({ ...ob, fineGold: e.target.value })} placeholder="0.000" className="rounded-lg mt-1 h-9" />
+                </div>
+                <div>
+                  <label className="text-[11px] text-muted-foreground">As of date</label>
+                  <Input type="date" value={ob.fineGoldDate} onChange={e => setOb({ ...ob, fineGoldDate: e.target.value })} className="rounded-lg mt-1 h-9" />
+                </div>
+              </div>
+            </div>
+            <div className="col-span-2">
+              <AsyncButton onClick={saveOpening} className="btn-hero rounded-xl h-10">Save Opening Balance</AsyncButton>
             </div>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-48" />
-            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
-              extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
-              options={[
-                { label: "Factory Ledger — PDF", sublabel: "One table: gold, diamond, other metal and labour, order by order", kind: "pdf", run: exportOrdersPdf },
-                { label: "Factory Ledger — Excel", sublabel: "One table: gold, diamond, other metal and labour, order by order", kind: "excel", run: exportOrdersCsv },
-                { label: "Movement Sheet — PDF", sublabel: "Every issue and return line by line, if a figure needs checking", kind: "pdf", run: exportCombinedPdf },
-                { label: "Movement Sheet — Excel", sublabel: "Every issue and return line by line, if a figure needs checking", kind: "excel", run: exportCombinedCsv },
-              ]} />
-            {user?.role === "admin" && (
-              <Button onClick={() => setShowIssueForm(true)} className="btn-hero rounded-xl gap-2">
-                <Plus className="h-4 w-4" /> Issue Material
-              </Button>
-            )}
-            <MoreMenu title="Factory account" actions={[
-              { label: "Move between companies", icon: ArrowRightLeft, hint: "One company's gold or diamonds here, to another's", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
-              { label: "Export ledger", icon: Download, hint: "Factory ledger or movement sheet, PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
-            ]} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Fine Gold at Factory (24KT){view !== "all" ? ` · ${companyById(db.settings, view).name}` : ""}</p><p className="font-semibold text-sm text-amber-700">{factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g</p></div>
-          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Diamond (net ±)</p><p className={`font-semibold text-sm ${account.diamondOutstanding < 0 ? "text-destructive" : ""}`}>{account.diamondOutstanding > 0 ? "+" : ""}{account.diamondOutstanding.toLocaleString()} ct</p></div>
-          {Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => (
-            <div key={k} className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">{materialName(db.settings, k)} at factory</p><p className={`font-semibold text-sm ${q < 0 ? "text-destructive" : ""}`}>{q.toLocaleString()} {materialUnit(db.settings, k)}</p></div>
-          ))}
-          <div className={`p-3 rounded-xl text-center border ${account.chargesPending > 0 ? "bg-destructive/5 border-destructive/20" : "bg-success/8 border-success/20"}`}>
-            <p className="text-xs text-muted-foreground mb-1">Charges Pending</p>
-            <p className={`font-semibold text-sm ${account.chargesPending > 0 ? "text-destructive" : "text-success"}`}>{account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared"}</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Total Charges</p><p className="font-semibold text-sm">{fmtMoneyInr(account.chargesTotal)}</p></div>
-          <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Paid</p><p className="font-semibold text-sm text-success">{fmtMoneyInr(account.chargesPaid)}</p></div>
-          <div className="p-3 rounded-xl bg-primary/5 border border-primary/20 text-center"><p className="text-xs text-muted-foreground mb-1">Charges Overpaid</p><p className="font-semibold text-sm text-primary">{fmtMoneyInr(account.chargesOverpaid)}</p></div>
-        </div>
-
-        {/* Opening balance (migration) — admin only */}
-        {user?.role === "admin" && (
-          <div className="pt-2 border-t border-border/60">
-            <button onClick={() => setObOpen(v => !v)} className="w-full flex items-center justify-between gap-3 text-left">
-              <div>
-                <p className="text-sm font-semibold text-brand-dark">Opening Balance</p>
-                <p className="text-xs text-muted-foreground">
-                  {hasOpeningBalance(factory) || factory.openingFineGold
-                    ? [
-                        hasOpeningBalance(factory) ? `${fmtMoneyInr(Math.abs(factory.openingBalance!))} ${factory.openingDir === "credit" ? "we owe" : "owed to us"}` : "",
-                        factory.openingFineGold ? `${factory.openingFineGold}g fine gold` : "",
-                      ].filter(Boolean).join(" · ")
-                    : "Not set — add balances carried in from your previous system"}
-                </p>
-              </div>
-              <span className="text-sm text-primary font-medium shrink-0">{obOpen ? "Close" : "Edit"}</span>
-            </button>
-            {obOpen && (
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <OpeningBalanceFields
-                  amount={ob.amount}
-                  dir={ob.dir}
-                  date={ob.date}
-                  onAmount={v => setOb({ ...ob, amount: v })}
-                  onDir={v => setOb({ ...ob, dir: v })}
-                  onDate={v => setOb({ ...ob, date: v })}
-                  debitLabel="Factory owes us (Debit)"
-                  creditLabel="We owe factory (Credit)"
-                  title="Opening Making-Charge Balance"
-                  hint="Unpaid labour / making charges with this factory when you started using this app (₹)."
-                />
-                <div className="col-span-2 rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2.5">
-                  <p className="text-xs font-semibold text-amber-700">Opening Gold Stock (optional)</p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <div>
-                      <label className="text-[11px] text-muted-foreground">Fine gold at factory (24KT grams)</label>
-                      <Input type="number" min={0} step="0.001" value={ob.fineGold} onChange={e => setOb({ ...ob, fineGold: e.target.value })} placeholder="0.000" className="rounded-lg mt-1 h-9" />
-                    </div>
-                    <div>
-                      <label className="text-[11px] text-muted-foreground">As of date</label>
-                      <Input type="date" value={ob.fineGoldDate} onChange={e => setOb({ ...ob, fineGoldDate: e.target.value })} className="rounded-lg mt-1 h-9" />
-                    </div>
-                  </div>
-                </div>
-                <div className="col-span-2">
-                  <AsyncButton onClick={saveOpening} className="btn-hero rounded-xl h-10">Save Opening Balance</AsyncButton>
-                </div>
-              </div>
-            )}
-          </div>
         )}
-      </div>
+        </div>
+      )}
       {movingPool && <FactoryPoolTransferDialog factoryId={id!} onClose={() => setMovingPool(false)} />}
       <FactoryEditDialog factory={editingFactory} onClose={() => setEditingFactory(null)} />
       <IssuanceEditSheet issuance={editingIssuance} onClose={() => setEditingIssuance(null)} />
@@ -1114,7 +1090,7 @@ function FactoryHistoryPageBody() {
 
 
       <div className="space-y-3">
-        <h2 className="font-display text-xl text-brand-dark px-1">Material Issuances</h2>
+        <SectionTitle title="Material Issuances" sub={issuances.length ? `${issuances.length} issue${issuances.length !== 1 ? "s" : ""}` : undefined} className="px-1" />
         {issuances.map(mi => {
           const order = db.orders.find(o => o.id === mi.orderId);
           const used = issuanceUsed(mi);
@@ -1127,8 +1103,8 @@ function FactoryHistoryPageBody() {
               <div className="flex items-start justify-between gap-3 flex-wrap">
                 <div>
                   <p className="font-semibold text-sm">
-                    {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
-                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
+                    {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
+                      <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
                     )}
@@ -1157,7 +1133,7 @@ function FactoryHistoryPageBody() {
                       <p className={`text-xs font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{pending > 0 ? `${fmtMoneyInr(pending)} pending` : "Paid"}</p>
                     )}
                   </div>
-                  <MoreMenu size="sm" label="Issuance actions" title="This issue" actions={issuanceActions(mi)} />
+                  <MoreMenu size="sm" label="Issuance actions" title="This issue" actions={issuanceActions(mi)} className="relative after:absolute after:-inset-1" />
                 </div>
               </div>
 
@@ -1195,7 +1171,7 @@ function FactoryHistoryPageBody() {
         open={showIssueForm}
         onOpenChange={setShowIssueForm}
         title="Issue Material"
-        description={<>To {factory.name} — what it used for one order, or a bulk delivery into its pool.</>}
+        description={<>To {factory.name} · for an order, or into its pool</>}
         icon={ArrowUpCircle}
         size="lg"
         footer={
@@ -1226,8 +1202,8 @@ function FactoryHistoryPageBody() {
           </div>
           <p className="text-xs text-muted-foreground">
             {issueMode === "bulkDelivery"
-              ? "Hand this factory raw material not tied to any order yet — builds up its pool for later orders to draw from."
-              : "How much this factory used for one order, and their making charge — where it physically came from is figured out automatically."}
+              ? "Material for no order yet — it builds up their pool."
+              : "What they used for one order, and the charge."}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -1347,7 +1323,7 @@ function FactoryHistoryPageBody() {
           body = (
             <div className="space-y-2">
               <Input type="number" min={0} value={chargeAmount} onChange={e => setChargeAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Making charge (₹)" />
-              <p className="text-xs text-muted-foreground">The whole charge for this job — saving replaces any charge already set.</p>
+              <p className="text-xs text-muted-foreground">The whole charge — it replaces any set before.</p>
             </div>
           );
         } else if (action === "pay") {
@@ -1360,10 +1336,11 @@ function FactoryHistoryPageBody() {
           );
           body = (
             <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-2">
-                <div className="p-2.5 rounded-xl bg-secondary text-center min-w-0"><p className="text-[11px] text-muted-foreground">Charge</p><p className="text-sm font-semibold break-words">{fmtMoneyInr(mi.makingCharges.amountInr)}</p></div>
-                <div className="p-2.5 rounded-xl bg-success/8 border border-success/20 text-center min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className="text-sm font-semibold text-success break-words">{fmtMoneyInr(issuancePaid(mi))}</p></div>
-                <div className="p-2.5 rounded-xl bg-destructive/5 border border-destructive/20 text-center min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className="text-sm font-semibold text-destructive break-words">{fmtMoneyInr(pending)}</p></div>
+              {/* Colour on the figure only, a zero in grey — as every figure strip. */}
+              <div className="grid grid-cols-3 rounded-xl border border-border/60 bg-white divide-x divide-border/60 text-center">
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Charge</p><p className={`text-sm font-semibold tabular-nums break-words ${mi.makingCharges.amountInr ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoneyInr(mi.makingCharges.amountInr)}</p></div>
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className={`text-sm font-semibold tabular-nums break-words ${issuancePaid(mi) ? "text-success" : "text-muted-foreground"}`}>{fmtMoneyInr(issuancePaid(mi))}</p></div>
+                <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className={`text-sm font-semibold tabular-nums break-words ${pending ? "text-destructive" : "text-muted-foreground"}`}>{fmtMoneyInr(pending)}</p></div>
               </div>
               <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
               <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
@@ -1394,7 +1371,7 @@ function FactoryHistoryPageBody() {
           body = (
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
-                Returns material to Stock — use for a diamond swap/replacement or leftover gold. Unused remainder: {remainder}{unit}
+                Back to stock — a swapped stone or leftover gold. Unused: {remainder}{unit}
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} autoFocus className="rounded-xl h-10" placeholder={`Return qty (${unit})`} />

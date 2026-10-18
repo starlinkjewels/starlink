@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { Lock, Pencil, PencilLine, Trash2 } from "lucide-react";
+import { ExternalLink, Lock, Pencil, PencilLine, Trash2 } from "lucide-react";
+import type { ModuleKey } from "@/lib/modules";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
@@ -8,7 +9,7 @@ import { ccy, ccySymbol, fmtCcy, rateOf } from "@/lib/currency";
 import { deleteEntry, editEntry, entryDeleteQuestion, moveToDay, transferLegs, type MoneyEntry } from "@/lib/moneyEntries";
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
-import { CHECKING } from "@/lib/actionHints";
+import { CHECKING, needsAccess } from "@/lib/actionHints";
 import { ActionSheet } from "@/components/ActionSheet";
 import { RateInput } from "@/components/CurrencyFields";
 import { Input } from "@/components/ui/input";
@@ -24,6 +25,45 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
  * corrected somewhere else says where, greyed, rather than vanishing.
  */
 
+/**
+ * A reason as one short line for a ⋯ menu: its first sentence, and — when that
+ * is still long — only what comes before its " — " aside (the "why", not the
+ * "what to do instead", which the confirm box or the page itself says).
+ */
+export function oneLine(reason: string): string;
+export function oneLine(reason: string | undefined): string | undefined;
+export function oneLine(reason: string | undefined): string | undefined {
+  if (!reason) return reason;
+  const first = reason.split(/(?<=\.)\s/)[0].replace(/\.$/, "");
+  // "What to do instead" (after the dash) is kept while it fits two short lines.
+  return first.length > 90 ? first.split(" — ")[0] : first;
+}
+
+/**
+ * The page a locked entry is corrected on, when one can be named — the
+ * Payments tab or Buy & Assign that `lockedWhere` / `lockedLabel` speak of.
+ * Payments opens on the tab its `?book=` names.
+ */
+function lockedPage(e: MoneyEntry): { name: string; to: string; module: ModuleKey } | undefined {
+  if (e.lockedLabel === "Correct in Account entries") return { name: "Account entries", to: "/payments?book=locker", module: "payments" };
+  switch (e.lockedWhere) {
+    case "Supplier Payments": return { name: "Supplier payments", to: "/payments?book=supplier", module: "payments" };
+    case "Factory Payments": return { name: "Factory payments", to: "/payments?book=factory", module: "payments" };
+    case "Expenses": return { name: "Expenses", to: "/payments?book=expense", module: "payments" };
+    case "Payments Received": return { name: "Payments received", to: "/payments?book=received", module: "payments" };
+    case "Buy & Assign": return { name: "Buy & Assign", to: "/buy-assign", module: "buyAssign" };
+    default: return undefined;
+  }
+}
+
+/** Why a locked entry isn't corrected here, in one line for its menu. The
+ *  whole story stays on the entry (`locked`) for the toast and the details. */
+function lockedWhy(e: MoneyEntry): string {
+  if (e.lockedLabel === "Correct in Account entries") return "Shares one account movement";
+  if (e.lockedWhere === "Buy & Assign") return "Money from a diamond sale";
+  return e.lockedWhere ? `Recorded in ${e.lockedWhere}` : "Corrected on another page";
+}
+
 /** The ⋯ items for one entry. `e` undefined: what it belongs to is still
  *  loading, so nothing is offered yet — greyed "Checking…" until it is here. */
 export function entryRowActions(e: MoneyEntry | undefined, o: {
@@ -32,16 +72,28 @@ export function entryRowActions(e: MoneyEntry | undefined, o: {
   editNeeds: string; deleteNeeds: string;
   onEdit: (e: MoneyEntry) => void;
   onDelete: (e: MoneyEntry) => void;
+  /** Opens a page in the app. With it, an entry corrected on another page
+   *  links there ("Open in Expenses →") instead of a greyed item. */
+  go?: (to: string) => void;
+  /** Whether the person may open a section — the link greys, saying so, if not. */
+  mayOpen?: (module: ModuleKey) => boolean;
 }): MoreAction[] {
   if (!e) return [
     { label: "Edit", icon: Pencil, disabled: true, hint: CHECKING, onSelect: () => {} },
     { label: "Delete", icon: Trash2, danger: true, disabled: true, hint: CHECKING, onSelect: () => {} },
   ];
-  // Owned by another tab: say where it is corrected instead.
+  // Owned by another page: a link to it, or — where none can be named — say
+  // so, greyed. Either way the reason is one line.
   if (e.locked) {
-    return [{ label: e.lockedLabel ?? (e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked"), hint: e.locked, icon: Lock, disabled: true, onSelect: () => {} }];
+    const page = lockedPage(e);
+    if (page && o.go) {
+      const may = o.mayOpen ? o.mayOpen(page.module) : true;
+      return [{ label: `Open in ${page.name} →`, icon: ExternalLink, disabled: !may,
+        hint: may ? lockedWhy(e) : needsAccess(page.module, "view"), onSelect: () => o.go!(page.to) }];
+    }
+    return [{ label: e.lockedLabel ?? (e.lockedWhere ? `Edit in ${e.lockedWhere}` : "Locked"), hint: lockedWhy(e), icon: Lock, disabled: true, onSelect: () => {} }];
   }
-  const alone = e.orphan ? "Changes the account only" : e.noTxn ? "Changes their books only — no account movement found" : undefined;
+  const alone = e.orphan ? "Changes the account only" : e.noTxn ? "Changes their books only" : undefined;
   return [
     { label: "Edit", icon: Pencil, onSelect: () => o.onEdit(e), disabled: !o.mayEdit, hint: o.mayEdit ? alone : o.editNeeds },
     { label: "Delete", icon: Trash2, danger: true, onSelect: () => o.onDelete(e), disabled: !o.mayDelete, hint: o.mayDelete ? alone : o.deleteNeeds },
@@ -145,8 +197,8 @@ function EntrySheet({ entry, onClose, mayDelete }: { entry: MoneyEntry; onClose:
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} size="md" icon={PencilLine}
       title="Correct this entry"
-      description={<>{entry.party}{entry.against ? ` · ${entry.against}` : ""}.{" "}
-        {entry.orphan || entry.noTxn ? "" : "The account it came from moves with it, so the balance and what is owed stay in step."}</>}
+      description={<>{entry.party}{entry.against ? ` · ${entry.against}` : ""}
+        {entry.orphan || entry.noTxn ? "" : " · its account moves with it"}</>}
       footer={
         <div className="flex gap-2 flex-wrap">
           {mayDelete && (

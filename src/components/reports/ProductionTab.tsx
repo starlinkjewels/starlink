@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
 import { ResponsiveContainer, BarChart, Bar as RBar, XAxis, YAxis, CartesianGrid, Tooltip, Cell } from "recharts";
 import { Factory, Hammer, AlarmClock, Timer, BadgeCheck, Coins, ClipboardList, Gauge } from "lucide-react";
@@ -66,7 +67,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
       </div>
 
       <div className="grid lg:grid-cols-2 gap-4">
-        <Panel title="How long orders take" subtitle="Days from order to dispatch, for pieces shipped in the period" icon={Gauge}>
+        <Panel title="How long orders take" subtitle="Days, order to dispatch" icon={Gauge}>
           {data.spread.some(s => s.count) ? (
             <div className="h-56">
               <ResponsiveContainer width="100%" height="100%">
@@ -84,7 +85,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
           ) : <Empty>No pieces shipped in this period.</Empty>}
         </Panel>
 
-        <Panel title={`Late orders (${data.late.length})`} subtitle="Open work past the date promised to the client" icon={AlarmClock}
+        <Panel title={`Late orders (${data.late.length})`} subtitle="Past the promised date" icon={AlarmClock}
           actions={data.late.length ? <ExportButton onClick={exportLate} /> : undefined}>
           {data.late.length ? (
             <DataTable
@@ -103,7 +104,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
                   cell: o => <Link to={`/orders/${o.id}`} className="font-mono text-primary hover:underline whitespace-nowrap">{o.orderNumber}</Link> },
                 { key: "client", header: "Client", sortValue: o => clientName(o.clientId),
                   cell: o => <span className="block truncate max-w-[160px]">{clientName(o.clientId) || "—"}</span> },
-                { key: "stage", header: "Stage", sortValue: o => o.status, cell: o => <span className="whitespace-nowrap">{o.status}</span> },
+                { key: "stage", header: "Stage", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
                 { key: "late", header: "Late by", align: "right", kind: "number", sortValue: o => daysLate(o),
                   cell: o => <span className="font-semibold text-destructive tabular-nums whitespace-nowrap">{daysLate(o)} d</span> },
               ]}
@@ -112,7 +113,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
         </Panel>
       </div>
 
-      <Panel title="Factories" subtitle="Pieces and labour in the period · open jobs and labour owed as of today" icon={Factory}
+      <Panel title="Factories" subtitle="Work in the period · labour owed as of today" icon={Factory}
         actions={data.factories.length ? <ExportButton onClick={exportFactories} /> : undefined}>
         {data.factories.length ? (
           <>

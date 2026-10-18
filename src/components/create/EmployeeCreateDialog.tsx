@@ -44,9 +44,9 @@ export function emailTakenMessage(db: DB, email: string, exceptId?: string): str
  * nothing for access to apply to, as before. */
 type StepKey = "person" | "access" | "review";
 const STEP: Record<StepKey, { label: string; hint: string }> = {
-  person: { label: "Person", hint: "Who they are, and whether they sign in." },
-  access: { label: "Access", hint: "What they may see and do once signed in." },
-  review: { label: "Pay & review", hint: "Anything already paid before this app, then a last look before it is created." },
+  person: { label: "Person", hint: "Who they are and how they sign in" },
+  access: { label: "Access", hint: "What they may see and do" },
+  review: { label: "Pay & review", hint: "Opening pay, then a last look" },
 };
 
 /** A labelled field; the star marks what must be filled in. */
@@ -301,10 +301,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                   <span className="h-9 w-9 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0"><KeyRound className="h-4 w-4" /></span>
                   <span className="min-w-0 flex-1">
                     <span className="text-sm font-semibold text-brand-dark block">Give them a login</span>
-                    <span className="text-xs text-muted-foreground block mt-0.5">
-                      Leave this off for someone who is only on the books for wages — they are paid and appear in the
-                      salary ledger without an email or password.
-                    </span>
+                    <span className="text-xs text-muted-foreground block mt-0.5">Off for wages-only staff — no email needed.</span>
                   </span>
                   <Switch checked={needsLogin} onCheckedChange={setNeedsLogin} aria-label="Give them a login" className="mt-1" />
                 </label>
@@ -334,7 +331,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
           {cur === "access" && (
             <div ref={stepTop} className="space-y-6">
               <section className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                <SectionHead title="Kind of account" hint="Staff get exactly the access set below; an admin partner can do everything." />
+                <SectionHead title="Kind of account" hint="An admin partner can do everything." />
                 <div role="radiogroup" aria-label="Kind of account" className="grid grid-cols-2 sm:inline-flex gap-0.5 p-1 rounded-xl bg-secondary border border-border/60 shrink-0">
                   {([["employee", "Employee", UserRound], ["admin", "Admin — partner", ShieldCheck]] as const).map(([k, l, Icon]) => (
                     <button key={k} type="button" role="radio" aria-checked={access === k} disabled={!rolesLive} onClick={() => setAccess(k)}
@@ -345,15 +342,15 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                 </div>
               </section>
               {!rolesLive ? (
-                <p className="rounded-xl bg-secondary/60 px-4 py-3 text-xs text-muted-foreground">Roles and extra admins switch on once the security update is deployed — until then everyone is Standard staff.</p>
+                <p className="rounded-xl bg-secondary/60 px-4 py-3 text-xs text-muted-foreground">Until the security update is deployed, everyone is Standard staff.</p>
               ) : access === "admin" ? (
                 <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 flex items-start gap-3">
                   <Crown className="h-4 w-4 text-amber-600 mt-0.5 shrink-0" />
-                  <p className="text-xs text-muted-foreground">Full control, the same as you: money, settings, employees and roles. You can take it back later from their card.</p>
+                  <p className="text-xs text-muted-foreground">Full control, as you have: money, settings and roles. Can be taken back later.</p>
                 </div>
               ) : (
                 <div className="border-t border-border/60 pt-6 space-y-5">
-                  <p className="text-xs text-muted-foreground">Pick the role closest to their job, then tick or clear anything for this person alone. Temporary access ends by itself. All of it can be changed later from their card.</p>
+                  <p className="text-xs text-muted-foreground">Pick a role, then adjust anything for this person.</p>
                   <AccessFields layout="stacked" draft={draft} onChange={setDraft} docs={docs} by={{ id: me?.id ?? "", name: me?.name ?? "Admin" }} />
                 </div>
               )}
@@ -365,8 +362,8 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
             <div ref={stepTop} className="space-y-7">
               {/* Opening salary already paid before the app (optional, migration) */}
               <section className="space-y-3">
-                <SectionHead icon={<Wallet className="h-4 w-4 text-amber-600" />} title="Opening — already paid before this app" optional
-                  hint="Salary/wages already paid to this person before you started using this app. Added to their total paid to date." />
+                <SectionHead icon={<Wallet className="h-4 w-4 text-amber-600" />} title="Already paid before this app" optional
+                  hint="Added to their total paid to date." />
                 <div className="grid grid-cols-2 sm:grid-cols-[9rem_minmax(0,1fr)_minmax(0,1fr)] gap-3">
                   <Field label="Currency">
                     <Select value={openingCurrency} onValueChange={v => setOpeningCurrency(v as "INR" | "USD")}>
@@ -386,7 +383,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
               </section>
 
               <section className="space-y-3">
-                <SectionHead title="Review" hint="What will be created. All of it can be changed later from their card." />
+                <SectionHead title="Review" hint="All of it can be changed later." />
                 <dl className="rounded-xl border border-border/70 divide-y divide-border/50 bg-white">
                   {review.map(r => (
                     <div key={r.label} className="grid grid-cols-[6.5rem_minmax(0,1fr)_auto] sm:grid-cols-[9rem_minmax(0,1fr)_auto] items-baseline gap-3 px-4 py-2.5">

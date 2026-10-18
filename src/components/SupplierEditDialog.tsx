@@ -50,7 +50,7 @@ export function SupplierEditDialog({ supplier, onClose }: { supplier: Supplier |
       open={!!supplier}
       onOpenChange={o => { if (!o) onClose(); }}
       title="Edit Supplier"
-      description="Their name and contact details. Purchases, payments and the opening balance stay as they are."
+      description="Name and contact details only"
       icon={Truck}
       size="md"
       footer={

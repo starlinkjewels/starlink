@@ -1,10 +1,11 @@
 import { useMemo, useState, type ReactNode } from "react";
+import type { LucideIcon } from "lucide-react";
 import { fmtDate } from "@/lib/db";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Download } from "lucide-react";
-import { IfExport } from "@/components/IfExport";
+import { Download } from "lucide-react";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { ledgerTable } from "@/components/LedgerFilters";
+import { StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
 import { filled, when, type Detail } from "@/components/rowDetails";
 import type { MoreAction } from "@/components/MoreMenu";
 
@@ -39,21 +40,27 @@ export interface StatementSummary {
   label: string;
   value: string;
   tone?: "neutral" | "in" | "out" | "due";
+  /** The picture beside the figure; one is chosen from the tone without it. */
+  icon?: LucideIcon;
+  /** A quiet line under the figure — "8 purchases", "after advances". */
+  sub?: ReactNode;
 }
 
-const TONE: Record<NonNullable<StatementSummary["tone"]>, string> = {
-  neutral: "bg-secondary/60 text-brand-dark",
-  in: "bg-success/10 text-success",
-  out: "bg-destructive/10 text-destructive",
-  due: "bg-warning/10 text-warning",
+// The statement's tones as the table's figures strip draws them: what is
+// still due stands out in bold rather than in a colour of its own.
+const TONE: Record<NonNullable<StatementSummary["tone"]>, "in" | "out" | "strong" | undefined> = {
+  neutral: undefined,
+  in: "in",
+  out: "out",
+  due: "strong",
 };
 
 /**
  * One account statement, everywhere: a supplier's dues, a factory's charges, a
- * client's billing, an employee's salary. Summary first, then the filters, then
- * every entry with Debit / Credit / a running balance — the same ledger people
- * already read on the Stock and Locker pages, instead of each page inventing
- * its own flat list.
+ * client's billing, an employee's salary. The search, dates and type in the
+ * table's own toolbar, the summary under it, then every entry with Debit /
+ * Credit / a running balance — the same ledger people already read on the
+ * Stock and Locker pages, instead of each page inventing its own flat list.
  *
  * Rows arrive with their balance already worked out: only the caller knows the
  * opening balance and which way round its figures run.
@@ -150,7 +157,8 @@ export function StatementLedger({
     { key: "debit", header: debitLabel, align: "right", kind: "number", sortValue: r => r.debit,
       cell: r => (r.debit > 0 ? <CellAmount tone="out">{fmt(r.debit)}</CellAmount> : null) },
     ...(showCredit ? [{ key: "credit", header: creditLabel, align: "right" as const, kind: "number" as const, sortValue: (r: StatementRow) => r.credit,
-      cell: (r: StatementRow) => (r.credit > 0 ? <CellAmount tone="in">{fmt(r.credit)}</CellAmount> : null) }] : []),
+      // Plain: on a supplier's statement this is money we paid, not money received.
+      cell: (r: StatementRow) => (r.credit > 0 ? <CellAmount>{fmt(r.credit)}</CellAmount> : null) }] : []),
     { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => r.balance,
       cell: r => <CellAmount>{fmt(r.balance)}</CellAmount> },
     // rowAction hands back its own control (a button, say), not menu items,
@@ -160,65 +168,28 @@ export function StatementLedger({
 
   return (
     <div className="card-luxe overflow-hidden">
-      <div className="px-5 py-4 border-b border-border/60 flex items-start justify-between gap-3 flex-wrap">
-        <div>
-          <h2 className="font-display text-xl text-brand-dark">{title}</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {caption ?? `${rows.length} entr${rows.length !== 1 ? "ies" : "y"}`}
-          </p>
-        </div>
-        {onExport && (
-          <IfExport>
-          <button onClick={onExport}
-            className="flex items-center gap-1.5 h-9 px-3 rounded-xl border border-border bg-white hover:bg-secondary text-xs font-medium text-brand-dark shrink-0">
-            <Download className="h-4 w-4" /> Export
-          </button>
-          </IfExport>
-        )}
+      <div className="px-5 py-4 border-b border-border/60">
+        <SectionTitle title={title} sub={caption ?? `${rows.length} entr${rows.length !== 1 ? "ies" : "y"}`} />
       </div>
 
-      {summary.length > 0 && (
-        <div className="px-5 pt-4 grid grid-cols-2 lg:grid-cols-4 gap-2.5">
-          {summary.map(s => (
-            <div key={s.label} className={`rounded-xl p-3 text-center ${TONE[s.tone ?? "neutral"]}`}>
-              <p className="text-[10px] uppercase tracking-wider opacity-70">{s.label}</p>
-              <p className="text-base font-semibold mt-0.5">{s.value}</p>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <div className="px-5 py-3 flex items-center gap-2 flex-wrap">
-        <div className="relative flex-1 min-w-[180px]">
-          <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-          <Input value={q} onChange={e => { setQ(e.target.value); }}
-            placeholder="Search particulars or reference…" className="rounded-xl h-9 pl-9" />
-        </div>
-        <Input type="date" value={from} onChange={e => { setFrom(e.target.value); }}
-          className="rounded-xl h-9 w-auto" />
-        <span className="text-xs text-muted-foreground">to</span>
-        <Input type="date" value={to} onChange={e => { setTo(e.target.value); }}
-          className="rounded-xl h-9 w-auto" />
-        {kinds.length > 1 && (
-          <Select value={kind} onValueChange={v => { setKind(v); }}>
-            <SelectTrigger className="h-9 rounded-xl w-auto min-w-[130px]"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All types</SelectItem>
-              {kinds.map(k => <SelectItem key={k} value={k}>{k}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        )}
-        {active && (
-          <span className="text-[11px] text-muted-foreground">{filtered.length} of {rows.length} shown</span>
-        )}
-        {active && (
-          <button onClick={() => { setQ(""); setFrom(""); setTo(""); setKind("all"); }}
-            className="text-xs text-primary hover:underline">Reset</button>
-        )}
-      </div>
-
-      <div className="px-5 pb-5">
+      {/* Search, dates, type and the download sit in the table's own toolbar,
+          the summary under it. A new filter (resetKey) starts it again from
+          the first page. */}
+      <div className="px-5 py-4">
         <DataTable
+          {...ledgerTable({
+            q, onQ: setQ, placeholder: "Search particulars or reference…",
+            from, to, onFrom: setFrom, onTo: setTo,
+            selects: kinds.length > 1 ? [{ label: "Type", allLabel: "All types", value: kind === "all" ? "" : kind,
+              onChange: v => setKind(v || "all"), options: kinds.map(k => ({ value: k, label: k })) }] : [],
+          })}
+          // Clears the type too, even while its dropdown is hidden, as Reset did.
+          onClearFilters={() => { setFrom(""); setTo(""); setKind("all"); }}
+          exports={onExport ? [{ label: "PDF or Excel", icon: Download, hint: "Pick the dates, then the file", onSelect: onExport }] : undefined}
+          summary={summary.length > 0
+            ? <StatStrip items={summary.map(s => ({ label: s.label, value: s.value, tone: TONE[s.tone ?? "neutral"], icon: s.icon, sub: s.sub }))} />
+            : undefined}
+          resetKey={JSON.stringify([q.trim(), from, to, kind])}
           id={`statement-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
           noun="transaction"
           rows={onlyPinned ? pinned : entries}
@@ -254,7 +225,7 @@ export function StatementLedger({
           // and a second, differently-made total beside them would only confuse.
           totals={active ? {
             debit: () => <span className="text-destructive">{fmt(totalDebit)}</span>,
-            ...(showCredit ? { credit: () => <span className="text-success">{fmt(totalCredit)}</span> } : {}),
+            ...(showCredit ? { credit: () => <span>{fmt(totalCredit)}</span> } : {}),
           } : undefined}
         />
       </div>

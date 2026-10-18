@@ -1,4 +1,5 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { StatStrip } from "@/components/TableToolbar";
 import { useCan } from "@/hooks/useCan";
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
@@ -11,8 +12,7 @@ import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/
 import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
 import { ActionSheet } from "@/components/ActionSheet";
-import { MoreMenu } from "@/components/MoreMenu";
-import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers, Plus } from "lucide-react";
@@ -52,27 +52,18 @@ export function BuyAssignPage() {
   const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-        <div className="min-w-0">
-          <h1 className="font-display text-2xl md:text-3xl text-brand-dark">Buy &amp; Assign</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Buy material into stock, hand gold or other metal to a factory, or sell a diamond directly</p>
-          {!may && <p className="text-xs text-muted-foreground mt-1">Your role lets you look at these entries but not record new ones.</p>}
-        </div>
-        {may && (
-          <div className="flex items-center gap-2 shrink-0">
-            <Button onClick={() => setPanel("buy")} className="btn-hero h-11 rounded-xl flex-1 sm:flex-none px-3 sm:px-4">
-              <Plus className="h-4 w-4 mr-1.5 hidden sm:block" />New purchase
-            </Button>
-            <Button variant="outline" onClick={() => setPanel("assign")} className="h-11 rounded-xl flex-1 sm:flex-none px-3 sm:px-4">
-              <ArrowRightLeft className="h-4 w-4 mr-1.5 hidden sm:block" />Assign to factory
-            </Button>
-            <MoreMenu className="h-11 w-11" actions={[
-              { label: "Opening stock", icon: Boxes, hint: "Stock owned from before the app — no supplier, no dues", onSelect: () => setPanel("opening") },
-              { label: "Sell diamond", icon: Tag, hint: "Straight out of stock, with no jewellery order", onSelect: () => setPanel("sell") },
-            ]} />
-          </div>
-        )}
-      </div>
+      <PageHeader
+        title="Buy & Assign"
+        subtitle="Material into stock, out to factories"
+        primary={may ? { label: "New purchase", icon: Plus, onClick: () => setPanel("buy") } : null}
+        secondary={may ? { label: "Assign to factory", icon: ArrowRightLeft, onClick: () => setPanel("assign") } : null}
+        menu={may ? [
+          { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setPanel("opening") },
+          { label: "Sell diamond", icon: Tag, hint: "From stock, without an order", onSelect: () => setPanel("sell") },
+        ] : undefined}
+      >
+        {!may && <p className="text-xs text-muted-foreground mt-1">View only — your role can't add entries.</p>}
+      </PageHeader>
 
       <MonthFigures />
 
@@ -119,42 +110,19 @@ function MonthFigures() {
   const others = issued.filter(i => i.material !== "gold" && i.material !== "diamond").length;
   const sold = (db.diamondSales ?? []).filter(s => inMonth(s.createdAt));
 
-  const tiles: { key: string; label: string; short: string; value: string; sub: string; icon: typeof Tag; chip: string; bar: string }[] = [
-    {
-      key: "buy", label: `Bought in ${month}`, short: "Bought", value: fmtMoneyInr(total(bought, p => p.totalInr)),
-      sub: `${bills} bill${bills !== 1 ? "s" : ""}`, icon: ShoppingCart, chip: "bg-primary/10 text-primary", bar: "bg-primary",
-    },
-    {
-      key: "fac", label: "Assigned to factories", short: "Assigned",
-      value: goldG > 0 || diamondCt === 0 ? `${fmtQty(goldG, "g")}` : fmtQty(diamondCt, "ct"),
-      sub: [goldG > 0 || diamondCt === 0 ? `gold · ${fmtQty(fineG, "g")} fine` : "diamond",
-        goldG > 0 && diamondCt > 0 ? `${fmtQty(diamondCt, "ct")} diamond` : "",
-        others ? `${others} other` : ""].filter(Boolean).join(" · "),
-      icon: ArrowRightLeft, chip: "bg-amber-500/10 text-amber-700", bar: "bg-amber-500",
-    },
-    {
-      key: "sold", label: "Diamonds sold", short: "Sold", value: fmtQty(total(sold, s => s.carat), "ct"),
-      sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}`,
-      icon: Tag, chip: "bg-success/10 text-success", bar: "bg-success",
-    },
-  ];
-
+  // The month's three figures, in the app's one figure strip.
   return (
-    <div className="grid grid-cols-3 gap-2.5 sm:gap-4">
-      {tiles.map(({ icon: Icon, ...t }) => (
-        <div key={t.key} className="relative overflow-hidden rounded-2xl border border-border/60 bg-white shadow-sm transition-shadow hover:shadow-md p-3 pl-4 sm:p-5 sm:pl-6 min-w-0">
-          <span className={`absolute left-0 top-0 h-full w-1 ${t.bar}`} aria-hidden="true" />
-          <div className="flex items-center gap-2">
-            <span className={`hidden sm:grid h-9 w-9 rounded-xl place-items-center shrink-0 ${t.chip}`}><Icon className="h-4 w-4" /></span>
-            <span className="text-[10px] sm:text-[11px] font-medium uppercase tracking-[0.08em] sm:tracking-[0.12em] text-muted-foreground truncate" title={t.label}>
-              <span className="sm:hidden">{t.short}</span><span className="hidden sm:inline">{t.label}</span>
-            </span>
-          </div>
-          <p className="mt-2 sm:mt-3 font-display text-[17px] sm:text-3xl leading-none tabular-nums truncate text-brand-dark" title={t.value}>{t.value}</p>
-          <p className="text-[10px] sm:text-[11px] text-muted-foreground mt-1.5 line-clamp-2 leading-snug">{t.sub}</p>
-        </div>
-      ))}
-    </div>
+    <StatStrip items={[
+      { label: `Bought in ${month}`, value: fmtMoneyInr(total(bought, p => p.totalInr)), icon: ShoppingCart, sub: `${bills} bill${bills !== 1 ? "s" : ""}` },
+      {
+        label: "Assigned to factories", icon: ArrowRightLeft,
+        value: goldG > 0 || diamondCt === 0 ? `${fmtQty(goldG, "g")}` : fmtQty(diamondCt, "ct"),
+        sub: [goldG > 0 || diamondCt === 0 ? `gold · ${fmtQty(fineG, "g")} fine` : "diamond",
+          goldG > 0 && diamondCt > 0 ? `${fmtQty(diamondCt, "ct")} diamond` : "",
+          others ? `${others} other` : ""].filter(Boolean).join(" · "),
+      },
+      { label: "Diamonds sold", value: fmtQty(total(sold, s => s.carat), "ct"), icon: Tag, sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}` },
+    ]} />
   );
 }
 
@@ -263,7 +231,7 @@ function OpeningStock({ open, onOpenChange }: PanelProps) {
 
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Boxes} title="Opening stock"
-      description={<>Stock you already own from before this app. It goes straight into Stock and shows in the ledger — <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.</>}
+      description={<>Owned before this app — into Stock with <span className="font-medium text-foreground">no supplier and no dues (ughrani)</span>.</>}
       footer={(
         <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
           <Stat label="Adds to stock" value={shown > 0 ? fmtQty(shown, unit) : "—"} sub={`${what}${multiCo ? ` · ${companyById(db.settings, companyId).name}` : ""}`} />
@@ -417,7 +385,7 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
 
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={ArrowRightLeft} title="Assign to factory"
-      description="Hand stock gold — or another material — to a factory. It leaves stock and joins the factory's pool."
+      description="It leaves stock and joins the factory's pool."
       footer={(
         <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
           <Stat label="Assigning" value={assigning > 0 ? fmtQty(assigning, unit) : "—"} sub={stockText} />
@@ -584,7 +552,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
 
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Tag} title="Sell a diamond"
-      description="Straight out of stock to a client or a walk-in buyer — no jewellery order involved."
+      description="From stock to any buyer — no jewellery order."
       footer={(
         <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
           <Stat label="Carat" value={effectiveCarat > 0 ? fmtQty(effectiveCarat, "ct") : "—"}
@@ -674,7 +642,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
               <Input id={id} value={buyerName} onChange={e => setBuyerName(e.target.value)} className="rounded-xl h-10" placeholder="Buyer's name" />
             )}</Field>
             <Field label="Deposit proceeds into (optional)"
-              hint={lockerId === "" && lockers.length === 0 ? `No active ${currency} lockers — sale will still be recorded, just without a cash entry.` : undefined}>{id => (
+              hint={lockerId === "" && lockers.length === 0 ? `No ${currency} locker — no cash entry is made.` : undefined}>{id => (
               <Select value={lockerId || "__none"} onValueChange={addNew("locker", v => setLockerId(v === "__none" ? "" : v))}>
                 <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Don't record a cash movement" /></SelectTrigger>
                 <SelectContent>

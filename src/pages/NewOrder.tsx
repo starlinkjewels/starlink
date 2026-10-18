@@ -15,6 +15,7 @@ import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/cur
 import { useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
+import { PageHeader } from "@/components/PageHeader";
 import { uploadDataUrl } from "@/lib/storage";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
@@ -28,7 +29,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, ArrowLeft, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
+import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -479,21 +480,16 @@ export function NewOrderPage() {
     <div className="max-w-3xl mx-auto space-y-4">
 
       {/* ── Page header ── */}
-      <button onClick={() => nav(-1)} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back
-      </button>
-      <div className="pb-1">
-        <h1 className="font-display text-2xl md:text-3xl text-brand-dark">New Order</h1>
-        <p className="text-sm text-muted-foreground mt-0.5">
-          {isClient ? "Submit a new jewellery order request" : "Create an order on behalf of a client"}
-        </p>
-      </div>
+      <PageHeader
+        back={{ label: "Back", onClick: () => nav(-1) }}
+        title="New Order"
+      />
 
       <form onSubmit={submit} className="space-y-4">
 
         {/* ══ 1. Client selector (admin / employee only) ══ */}
         {(isAdmin || isEmployee) && (
-          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Select the client — or build a piece for your own Ready Stock">
+          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Or build for Ready Stock">
             <Field label="Select Client *">
               <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
@@ -515,7 +511,7 @@ export function NewOrderPage() {
             {forReadyStock && (
               <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 text-sm mt-3">
                 <PackageCheck className="h-5 w-5 text-primary shrink-0" />
-                <p className="text-xs text-muted-foreground">In-house build — no client, no billing. Produce it, then add the finished piece to Ready Stock from the order page.</p>
+                <p className="text-xs text-muted-foreground">In-house build — no client, no billing.</p>
               </div>
             )}
             {forReadyStock && (
@@ -544,7 +540,7 @@ export function NewOrderPage() {
 
         {/* ══ 1b. Sell from Ready Stock (optional) — not for in-house stock builds ══ */}
         {!forReadyStock && (
-        <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional — pick an existing finished piece instead of a custom order">
+        <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional">
           <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => { selectReadyStock(v === READY_STOCK_NONE ? "" : v); setStockSearch(""); }}>
             <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="None — custom order" /></SelectTrigger>
             <SelectContent>
@@ -715,7 +711,7 @@ export function NewOrderPage() {
 
         {/* ══ 3. Reference Images — not for a Ready-Stock sale (the piece has its own photos) ══ */}
         {!isReadyStockSale && (
-        <SectionCard icon={<ImagePlus className="h-4 w-4 text-primary" />} title="Reference Images" subtitle="Upload up to 3 design or reference photos">
+        <SectionCard icon={<ImagePlus className="h-4 w-4 text-primary" />} title="Reference Images" subtitle="Up to 3">
           <div className="grid grid-cols-3 gap-3">
             {images.map((src, i) => (
               <div key={i} className="relative group aspect-square rounded-xl overflow-hidden border border-border">
@@ -750,7 +746,7 @@ export function NewOrderPage() {
 
         {/* ══ 4. Product Specifications — skipped for a Ready-Stock sale (specs come from the piece) ══ */}
         {!isReadyStockSale && (
-        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond — no jewellery piece involved" : "Design details required for manufacturing"}>
+        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond" : undefined}>
 
           {!isDiamondOnly && (
             <Field label="Design Number *">
@@ -862,13 +858,11 @@ export function NewOrderPage() {
 
         {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
         {!isClient && f.materialSourcing === "readyStock" ? (
-          <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Not applicable — sold from finished-goods stock">
-            <p className="text-xs p-2.5 rounded-xl bg-secondary text-muted-foreground">
-              This order is a direct sale from Ready Stock — the piece already exists, so no factory material issuance is needed.
-            </p>
+          <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Not needed — the piece already exists">
+            {null}
           </SectionCard>
         ) : !isClient && (
-          <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional — decide now, or leave for later">
+          <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional">
             <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
               {[
                 { v: "later", label: "Decide later", icon: HelpCircle },
@@ -888,7 +882,7 @@ export function NewOrderPage() {
             {f.materialSourcing === "stock" && (
               isDiamondOnly ? (
                 <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                  Actual diamond sourcing (from stock or a new purchase) happens later from this order's Diamond section.
+                  Sourced later, from this order's Diamond section.
                 </p>
               ) : (
                 <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
@@ -901,7 +895,7 @@ export function NewOrderPage() {
             )}
             {f.materialSourcing === "purchase" && (
               <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                This just notes the intent — record the actual purchase from Suppliers (using this order's number) once confirmed, and it'll link to this order automatically.
+                Only notes the intent — record the purchase in Suppliers with this order's number.
               </p>
             )}
           </SectionCard>
@@ -913,7 +907,7 @@ export function NewOrderPage() {
             make it. Independent of Material Sourcing above. Not applicable to
             a diamond-only sale — nothing is being manufactured. ══ */}
         {!isClient && !isDiamondOnly && !isReadyStockSale && (
-          <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional — which factory will make this piece">
+          <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional">
             <Select value={f.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => set("assignedFactoryId", v === "__none" ? "" : v))}>
               <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
               <SelectContent>
@@ -928,7 +922,7 @@ export function NewOrderPage() {
         <SectionCard
           icon={<BadgeCheck className="h-4 w-4 text-amber-600" />}
           title="Certificate"
-          subtitle="Do you require a diamond/jewellery certificate with this order?"
+          subtitle="Optional"
           iconBg="bg-amber-50"
         >
           <RadioGroup
@@ -985,7 +979,7 @@ export function NewOrderPage() {
         {!isClient && !forReadyStock && (
           <>
             {/* Order Value */}
-            <SectionCard icon={<DollarSign className="h-4 w-4 text-brand-dark" />} title="Order Value" subtitle="Set the agreed order amount" iconBg="bg-brand-light/15">
+            <SectionCard icon={<DollarSign className="h-4 w-4 text-brand-dark" />} title="Order Value" iconBg="bg-brand-light/15">
               <Field label="Order Value (USD) *">
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">$</span>
@@ -1018,7 +1012,7 @@ export function NewOrderPage() {
             </SectionCard>
 
             {/* Shipping */}
-            <SectionCard icon={<Truck className="h-4 w-4 text-brand-dark" />} title="Shipping Charge" subtitle="Freight / courier cost for this order" iconBg="bg-brand-light/15">
+            <SectionCard icon={<Truck className="h-4 w-4 text-brand-dark" />} title="Shipping Charge" iconBg="bg-brand-light/15">
               <Field label="Shipping Charge (USD)">
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">$</span>
@@ -1031,7 +1025,7 @@ export function NewOrderPage() {
             </SectionCard>
 
             {/* Advance Payment */}
-            <SectionCard icon={<CreditCard className="h-4 w-4 text-success" />} title="Advance Payment" subtitle="Optional — enter any amount paid upfront" iconBg="bg-success/10">
+            <SectionCard icon={<CreditCard className="h-4 w-4 text-success" />} title="Advance Payment" subtitle="Optional" iconBg="bg-success/10">
               {/* Amount + Note — 2 cols on desktop only (note is wide) */}
               <div className="grid md:grid-cols-2 gap-3">
                 <Field label="Advance Amount (USD)">
@@ -1137,7 +1131,7 @@ export function NewOrderPage() {
 
         {/* ── Gift Card ── */}
         {!forReadyStock && giftClientId && giftCard && (
-          <SectionCard icon={<Gift className="h-4 w-4 text-primary" />} title="Gift Card" subtitle="Apply available gift-card credit to this order">
+          <SectionCard icon={<Gift className="h-4 w-4 text-primary" />} title="Gift Card">
             {giftMax > 0 ? (
               <label className={`flex items-start gap-3 p-3 rounded-xl border cursor-pointer transition-colors ${redeemGift ? "border-primary bg-primary/5" : "border-border hover:bg-secondary/50"}`}>
                 <input type="checkbox" checked={redeemGift} onChange={e => setRedeemGift(e.target.checked)} className="mt-1 h-4 w-4 accent-current text-primary" />
@@ -1151,19 +1145,20 @@ export function NewOrderPage() {
               </label>
             ) : (
               <p className="text-xs p-3 rounded-xl bg-primary/5 border border-primary/20 text-muted-foreground">
-                This client has <span className="font-semibold text-foreground">${giftBalance.toLocaleString()}</span> in gift-card credit. It will be applied to this order once it's priced — up to {Math.round(giftPct * 100)}% per order.
+                Gift-card credit <span className="font-semibold text-foreground">${giftBalance.toLocaleString()}</span> — applied once priced, up to {Math.round(giftPct * 100)}% per order.
               </p>
             )}
           </SectionCard>
         )}
 
-        {/* ── Submit / Cancel — sticky so the action is always reachable on a long form ── */}
-        <div className="sticky bottom-0 z-20 -mx-4 sm:mx-0 px-4 sm:px-3 py-3 border-t border-border/60 bg-white/92 backdrop-blur sm:rounded-xl">
-          <div className="flex flex-col-reverse sm:flex-row sm:justify-end gap-2.5">
-            <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 w-full sm:w-auto">
+        {/* ── Submit / Cancel — sticky so the action is always reachable on a long
+            form; solid, with a line above, so the form never shows through it. ── */}
+        <div className="sticky bottom-0 z-20 mt-2 -mx-4 sm:mx-0 px-4 pt-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] bg-white border-t border-border shadow-[0_-8px_16px_-12px_rgb(15_23_42/0.18)] sm:rounded-xl sm:border sm:border-border/70">
+          <div className="flex items-center justify-end gap-2.5">
+            <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5">
               Cancel
             </Button>
-            <Button type="submit" disabled={saving} className="btn-hero rounded-xl h-11 sm:px-10 w-full sm:w-auto">
+            <Button type="submit" disabled={saving} className="btn-hero rounded-xl h-11 px-8 max-sm:flex-1">
               {saving ? "Submitting…" : "Submit Order"}
             </Button>
           </div>

@@ -1,12 +1,11 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, Columns3, Download, Search, ChevronLeft, ChevronRight, Minus, Rows3 } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, X } from "lucide-react";
 import { useMayExport } from "@/hooks/useCan";
 import { useNavigate } from "react-router-dom";
 import { downloadCsv } from "@/lib/ledgerExport";
-import {
-  DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { ExportMenu, FilterChips, FiltersButton, ViewMenu, activeFilterCount, useNarrow, type Density, type TableExport, type TableFilter } from "@/components/TableToolbar";
+import { FloatingScrollbar, useWideScroll } from "@/components/WideScroll";
 
 /**
  * The app's one table: sort by any column, search, show or hide columns, row
@@ -35,13 +34,17 @@ export interface DataColumn<T> {
   /** Which way the first click sorts. Amounts and dates start high → low
    *  (biggest, newest on top); text starts A → Z. Defaults by alignment. */
   sortFirst?: "asc" | "desc";
+  /** Left out while it is empty on every row (a voucher number no entry has
+   *  yet) — only for a column whose cell shows nothing more than its value;
+   *  never for one that also draws a warning or a note. */
+  hideIfEmpty?: boolean;
   /** A date or an amount — reads "newest first" / "high → low" in the hint. */
   kind?: "date" | "number" | "text";
   className?: string;
 }
 
 type Sort = { key: string; dir: "asc" | "desc" } | null;
-type Prefs = { sort?: Sort; hidden?: string[]; dense?: "compact" | "normal" | "spacious"; pageSize?: number };
+type Prefs = { sort?: Sort; hidden?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[] };
 
 const read = (id: string): Prefs => { try { return JSON.parse(localStorage.getItem(`dt:${id}`) || "{}"); } catch { return {}; } };
 const write = (id: string, p: Prefs) => { try { localStorage.setItem(`dt:${id}`, JSON.stringify(p)); } catch { /* private window */ } };
@@ -65,6 +68,7 @@ export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
   rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
+  search, filters, onClearFilters, exports, exportScope, summary, loading,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
@@ -123,6 +127,21 @@ export function DataTable<T>({
   /** When adding "s" is wrong: "factories", "entries". */
   plural?: string;
   searchPlaceholder?: string;
+  /** The page's own search, when the page narrows the rows itself (a ledger
+   *  that also works out balances) — shown in the table's toolbar. */
+  search?: { value: string; onChange: (v: string) => void; placeholder?: string; ariaLabel?: string };
+  /** What else narrows the rows: behind one Filters button, shown as chips. */
+  filters?: TableFilter[];
+  onClearFilters?: () => void;
+  /** Downloads the page makes itself (a PDF); with exportName's Excel, one Export menu. */
+  exports?: TableExport[];
+  /** What the downloads hold, when it isn't "what the table shows" — a page
+   *  whose own PDF leaves the search out says so here. */
+  exportScope?: string;
+  /** A line of figures between the toolbar and the table — opening, in, out. */
+  summary?: ReactNode;
+  /** The rows are still on their way: placeholder rows instead of "nothing here". */
+  loading?: boolean;
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => read(id));
   const save = (p: Prefs) => { setPrefs(p); write(id, p); };
@@ -137,13 +156,18 @@ export function DataTable<T>({
   // when the table itself is wider and scrolls sideways.
   const boxRef = useRef<HTMLDivElement>(null);
   const [boxW, setBoxW] = useState<number>();
+  // On a phone a list reads best as cards — what the row is, its few key
+  // figures, ⋯ — not a table to slide sideways. View → Table brings it back.
+  const narrow = useNarrow();
+  const canCards = controls === "full" && narrow && !footer;
+  const cardMode = canCards && (prefs.layout ?? "cards") === "cards";
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const ro = new ResizeObserver(() => setBoxW(el.clientWidth));
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [cardMode]);
   if (resetKey !== lastReset) { setLastReset(resetKey); setPage(1); }
   const full = controls === "full";
   const mayExport = useMayExport();
@@ -151,10 +175,27 @@ export function DataTable<T>({
   const toggleOpen = (k: string) => setOpen(prev => { const n = new Set(prev); if (!n.delete(k)) n.add(k); return n; });
   const ticking = !!selected && !!onSelectedChange;
 
-  const shown = columns.filter(c => c.always || !hidden.has(c.key));
+  // A column with nothing in it on any row (a voucher number no entry has)
+  // only takes room: it stays out until asked for in View.
+  const emptyCols = useMemo(() => {
+    const out = new Set<string>();
+    if (rows.length < 2) return out;
+    for (const c of columns.slice(1)) {
+      if (!c.hideIfEmpty || c.always || (!c.sortValue && !c.csv)) continue;
+      const nothing = rows.every(r => {
+        const v = c.csv ? c.csv(r) : c.sortValue!(r);
+        return v === null || v === undefined || v === "" || v === "—" || v === "–";
+      });
+      if (nothing) out.add(c.key);
+    }
+    return out;
+  }, [rows, columns]);
+  const forced = new Set(prefs.forced ?? []);
+  const isShown = (k: string) => !hidden.has(k) && (!emptyCols.has(k) || forced.has(k));
+  const shown = columns.filter(c => c.always || isShown(c.key));
 
   const filtered = useMemo(() => {
-    const t = full ? q.trim().toLowerCase() : "";
+    const t = full && !search ? q.trim().toLowerCase() : "";
     let list = t && searchText ? rows.filter(r => searchText(r).toLowerCase().includes(t)) : rows.slice();
     const col = sort && columns.find(c => c.key === sort.key);
     if (col?.sortValue) {
@@ -172,7 +213,7 @@ export function DataTable<T>({
         .map(x => x.r);
     }
     return list;
-  }, [rows, q, full, sort?.key, sort?.dir, columns, searchText]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [rows, q, full, !!search, sort?.key, sort?.dir, columns, searchText]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const cur = Math.min(page, pages);
@@ -203,6 +244,13 @@ export function DataTable<T>({
     return sort!.dir === first ? `Sorted ${words(c, first)} — click for ${words(c, first === "asc" ? "desc" : "asc")}` : `Sorted ${words(c, sort!.dir)} — click to reset`;
   };
   const toggleCol = (k: string) => {
+    if (emptyCols.has(k)) {
+      // An empty column: shown only on request, and the request remembered.
+      const f = new Set(forced), h = new Set(hidden);
+      if (f.has(k) && !h.has(k)) f.delete(k); else { f.add(k); h.delete(k); }
+      save({ ...prefs, forced: [...f], hidden: [...h] });
+      return;
+    }
     const h = new Set(hidden);
     if (h.has(k)) h.delete(k); else h.add(k);
     save({ ...prefs, hidden: [...h] });
@@ -268,67 +316,182 @@ export function DataTable<T>({
     } else if (onRowClick) onRowClick(r);
     else if (canOpen(r)) toggleOpen(rowKey(r));
   };
-  // On a phone the table scrolls sideways; what a row is stays in view.
+  // A table wider than its box scrolls sideways; what a row is (its first
+  // column, and its tick) and what can be done to it (⋯) stay in view.
   const firstKey = shown[0]?.key;
-  const stick = "max-md:sticky max-md:z-[1] max-md:bg-white";
-  const stickLeft = ticking ? "max-md:left-10" : "max-md:left-0";
+  const stick = "sticky z-[1] dt-stick";
+  const stickLeft = ticking ? "left-10 dt-stick-l" : "left-0 dt-stick-l";
+  // The details toggle stays beside the ⋯ (which is 3rem wide), or at the edge without one.
+  const openerPin = rowActions ? "right-12 dt-stick-r" : "right-0 dt-stick-r";
   const cols = shown.length + (ticking ? 1 : 0) + (rowActions ? 1 : 0) + (opener ? 1 : 0);
   const countText = `${filtered.length} ${filtered.length === 1 ? noun : plural ?? (noun.endsWith("s") ? noun : `${noun}s`)}`;
 
+  const wide = useWideScroll(boxRef, cardMode);
+  // The header row stays at the top of the page while a long list scrolls
+  // under it — whenever the table fits its width (a box that scrolls sideways
+  // holds it instead), from a tablet up (a phone shows cards).
+  const headStick = !maxHeight && !wide.over ? "md:sticky md:-top-6" : "";
+  const searchRef = useRef<HTMLInputElement>(null);
+  // "/" jumps to the search, as in most apps — the first table on the page
+  // that has one and is in view, and never while typing somewhere else.
+  useEffect(() => {
+    if (!full) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "/" || e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+      const t = e.target as HTMLElement;
+      if (t.closest("input,textarea,select,[contenteditable=true],[role=dialog],[role=menu]")) return;
+      const el = searchRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      if (r.bottom < 0 || r.top > window.innerHeight || !r.width) return;
+      e.preventDefault();
+      el.focus();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [full]);
+
+  const qv = search ? search.value : q;
+  const setQv = (v: string) => { if (search) search.onChange(v); else { setQ(v); setPage(1); } };
+  const hasSearch = !!search || !!searchText;
+  const nFilters = filters ? activeFilterCount(filters) : 0;
+  const clearFilters = () => { onClearFilters?.(); };
+  const allExports: TableExport[] = [
+    ...(exports ?? []),
+    ...(exportName ? [{ label: "Excel (.csv)", icon: FileSpreadsheet, hint: "Opens in Excel or Google Sheets", onSelect: exportCsv }] : []),
+  ];
+  const narrowed = !!qv || nFilters > 0;
+  const listed = [...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !(!search && q) ? pinnedRows ?? [] : [])];
+
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {full && (
       <div className="flex flex-wrap items-center gap-2">
-        {searchText && (
-          <div className="relative flex-1 min-w-[160px] max-w-xs">
-            <Search className="h-3.5 w-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder={searchPlaceholder} aria-label={searchPlaceholder}
-              className="h-8 w-full rounded-lg border border-border bg-white pl-8 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-primary/30" />
+        {hasSearch && (
+          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <input ref={searchRef} value={qv} onChange={e => setQv(e.target.value)} placeholder={search?.placeholder ?? searchPlaceholder} aria-label={search?.ariaLabel ?? search?.placeholder ?? searchPlaceholder}
+              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
+            {qv
+              ? <button type="button" onClick={() => setQv("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+              : <kbd className="max-sm:hidden absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] font-medium text-muted-foreground/70 border border-border rounded px-1.5 leading-4 pointer-events-none">/</kbd>}
           </div>
         )}
-        <span className="text-[11px] text-muted-foreground">{countText}{q ? ` of ${rows.length}` : ""}{ticking && selected!.size ? ` · ${selected!.size} ticked` : ""}</span>
+        {filters && filters.length > 0 && <FiltersButton filters={filters} onClear={clearFilters} count={countText} />}
         {toolbarExtra}
-        <div className="ml-auto flex items-center gap-1.5">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Rows3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Spacing</span></button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="rounded-xl">
-              {(["compact", "normal", "spacious"] as const).map(d => (
-                <DropdownMenuCheckboxItem key={d} checked={dense === d} onCheckedChange={() => save({ ...prefs, dense: d })} className="capitalize text-xs">{d}</DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button type="button" className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary"><Columns3 className="h-3.5 w-3.5" /><span className="hidden sm:inline">Columns</span></button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="rounded-xl w-52">
-              <DropdownMenuLabel className="text-[10px] uppercase tracking-wider text-muted-foreground">Show columns</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              {columns.map(c => (
-                <DropdownMenuCheckboxItem key={c.key} checked={c.always || !hidden.has(c.key)} disabled={c.always}
-                  onCheckedChange={() => toggleCol(c.key)} onSelect={e => e.preventDefault()} className="text-xs">{c.header}</DropdownMenuCheckboxItem>
-              ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-          {exportName && mayExport && (
-            <button type="button" onClick={exportCsv} className="h-8 px-2.5 inline-flex items-center gap-1.5 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary">
-              <Download className="h-3.5 w-3.5" />Excel
-            </button>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{!search && q ? ` of ${rows.length}` : ""}{ticking && selected!.size ? ` · ${selected!.size} ticked` : ""}</span>
+          {wide.over && (
+            <span className="max-md:hidden inline-flex rounded-xl border border-border bg-white overflow-hidden" title="Wider than the screen — drag the table, Shift + scroll, or use these">
+              <button type="button" onClick={() => wide.scrollBy(-1)} disabled={wide.start} aria-label="Scroll the table left" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 disabled:opacity-35"><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => wide.scrollBy(1)} disabled={wide.end} aria-label="Scroll the table right" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 border-l border-border disabled:opacity-35"><ChevronRight className="h-4 w-4" /></button>
+            </span>
           )}
+          <ViewMenu density={dense} onDensity={d => save({ ...prefs, dense: d })} columns={columns}
+            isShown={isShown} onToggle={toggleCol} onReset={() => save({ pageSize: prefs.pageSize })}
+            layout={canCards ? { value: cardMode ? "cards" : "table", onChange: v => save({ ...prefs, layout: v }) } : undefined}
+            sortBy={cardMode ? {
+              options: shown.filter(c => c.sortValue && c.header).map(c => ({ key: c.key, header: c.header })),
+              value: sort, onPick: k => { const c = columns.find(x => x.key === k); if (c) clickSort(c); },
+            } : undefined} />
+          {mayExport && <ExportMenu exports={allExports} disabled={!rows.length} scope={exportScope ?? `${countText}${narrowed ? ", as filtered" : ""}`} />}
         </div>
       </div>
       )}
+      {full && filters && nFilters > 0 && <FilterChips filters={filters} onClear={clearFilters} />}
+      {summary}
 
+      {cardMode ? (
+        <div className="space-y-2">
+          {ticking && keysShown.length > 0 && (
+            <div className="flex items-center gap-2 px-1">
+              <Tick state={allState} onClick={toggleAll} label={allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`} />
+              <span className="text-xs text-muted-foreground">{allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`}</span>
+            </div>
+          )}
+          {listed.map(r => {
+            const k = rowKey(r);
+            const pin = !!pinnedRows?.includes(r);
+            const on = !pin && ticking && selected!.has(k);
+            const opens = !pin && canOpen(r), isOpen = opens && open.has(k);
+            const opensPage = !pin && pageable && (canClickRow ? canClickRow(r) : true);
+            const [head, ...restCols] = shown;
+            // Its next few figures, the empty ones left out — the rest are a tap
+            // away. A pinned line (an opening balance) shows whatever it holds.
+            const filled = restCols.filter(c => c.header && (pin || !blank(c, r)))
+              .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== "");
+            const pairs = pin ? filled : filled.slice(0, 4);
+            return (
+              <div key={k} className={`dt-card rounded-xl border bg-white overflow-hidden ${on ? "border-primary/40 bg-primary/[0.03]" : "border-border/60"} ${pin ? "bg-secondary/25 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
+                <div onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
+                  className={`px-3.5 py-3 ${!pin && (opensPage || opens) ? "cursor-pointer active:bg-secondary/40 transition-colors" : ""}`}>
+                  <div className="flex items-start gap-2.5">
+                    {ticking && !pin && <span className="pt-0.5"><Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} /></span>}
+                    <div className="min-w-0 flex-1">{head ? head.cell(r) : null}</div>
+                    {rowActions && !pin && (
+                      <div data-no-row className="-mr-1 -mt-0.5 shrink-0">
+                        <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} />
+                      </div>
+                    )}
+                  </div>
+                  {pairs.length > 0 && (
+                    <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2">
+                      {pairs.map(c => (
+                        <div key={c.key} className="min-w-0">
+                          <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">{c.header}</dt>
+                          <dd className="text-[13px] text-brand-dark mt-0.5 min-w-0 overflow-hidden">{c.v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                  )}
+                  {opens && (
+                    <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen}
+                      className="mt-1 -mb-2 -ml-1 inline-flex items-center gap-1 min-h-10 px-1 text-xs font-medium text-primary">
+                      {isOpen ? "Less" : "All details"}<ChevronDown className={`h-3.5 w-3.5 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </button>
+                  )}
+                </div>
+                {isOpen && <div className="border-t border-border/60 bg-secondary/20 px-3.5 py-3">{expand ? expand.render(r) : autoDetails(r)}</div>}
+              </div>
+            );
+          })}
+          {!visible.length && (
+            loading
+              ? [0, 1, 2].map(i => (
+                <div key={i} className="rounded-xl border border-border/60 bg-white px-3.5 py-3 space-y-3" aria-hidden>
+                  <div className="h-3.5 w-2/3 rounded bg-secondary animate-pulse" />
+                  <div className="grid grid-cols-2 gap-3">
+                    {[0, 1, 2, 3].map(j => <div key={j} className="space-y-1.5"><div className="h-2 w-12 rounded bg-secondary/80 animate-pulse" /><div className="h-3 w-20 rounded bg-secondary animate-pulse" /></div>)}
+                  </div>
+                </div>
+              ))
+              : <div className="rounded-xl border border-dashed border-border bg-white px-4 py-10 text-center">
+                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} />
+                </div>
+          )}
+          {totals && filtered.length > 0 && (
+            <div className="rounded-xl border border-border/70 bg-secondary/30 px-3.5 py-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</p>
+              <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-2">
+                {shown.filter(c => totals[c.key]).map(c => (
+                  <div key={c.key} className="min-w-0">
+                    <dt className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{c.header}</dt>
+                    <dd className="text-sm font-bold text-brand-dark tabular-nums mt-0.5">{totals[c.key]!(filtered)}</dd>
+                  </div>
+                ))}
+              </dl>
+            </div>
+          )}
+        </div>
+      ) : (<>
       {/* relative: the hidden column labels are placed inside this box, so
           they can't widen the page past a phone's screen. */}
-      <div ref={boxRef} className="relative overflow-x-auto rounded-xl border border-border/60 bg-white" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
+      <div ref={boxRef} className={`dt-box relative ${maxHeight || wide.over ? "overflow-x-auto" : "overflow-x-clip"} rounded-xl border border-border/60 bg-white ${wide.over ? "dt-over" : ""} ${wide.over && !wide.start ? "dt-scrolled" : ""} ${wide.over && !wide.end ? "dt-more" : ""}`} style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
         <table className="w-full text-sm">
           <thead className={`bg-secondary/40 ${maxHeight ? "sticky top-0 z-10" : ""}`}>
             <tr className="border-b border-border/60">
               {ticking && (
-                <th className={`w-10 px-3 py-3 ${stick} max-md:left-0 max-md:bg-secondary`}>
+                <th className={`w-10 px-3 py-3 ${stick} left-0 dt-stick-head ${headStick} md:z-[3]`}>
                   {keysShown.length > 0 && <Tick state={allState} onClick={toggleAll} label={allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`} />}
                 </th>
               )}
@@ -336,23 +499,23 @@ export function DataTable<T>({
                 const on = sort?.key === c.key;
                 return (
                   <th key={c.key} title={hint(c)}
-                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary bg-primary/[0.06] shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "cursor-pointer select-none hover:text-primary hover:bg-primary/[0.04] transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} max-md:bg-secondary` : ""}`}
+                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head ${headStick}`}
                     onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}
                       {c.sortValue && (on
                         ? (sort!.dir === "asc" ? <ArrowUp className="h-3 w-3 text-primary" /> : <ArrowDown className="h-3 w-3 text-primary" />)
-                        : <ArrowUpDown className="h-3 w-3 opacity-30" />)}
+                        : <ArrowUpDown className="h-3 w-3 opacity-0 group-hover/th:opacity-50 transition-opacity" />)}
                     </span>
                   </th>
                 );
               })}
-              {opener && <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>}
-              {rowActions && <th className="w-12 px-2 py-3"><span className="sr-only">Actions</span></th>}
+              {opener && <th className={`w-10 px-2 py-3 ${stick} ${openerPin} dt-stick-head ${headStick} md:z-[3]`}><span className="sr-only">Details</span></th>}
+              {rowActions && <th className={`w-12 px-2 py-3 ${stick} right-0 ${opener ? "" : "dt-stick-r"} dt-stick-head ${headStick} md:z-[3]`}><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
-            {[...(pinnedAt === "top" && cur === 1 ? pinnedRows ?? [] : []), ...visible, ...(pinnedAt === "bottom" && cur === pages && !q ? pinnedRows ?? [] : [])].map(r => {
+            {listed.map(r => {
               const k = rowKey(r);
               const pin = !!pinnedRows?.includes(r);
               const on = !pin && ticking && selected!.has(k);
@@ -361,13 +524,13 @@ export function DataTable<T>({
               return (
                 <Fragment key={k}>
                 <tr onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
-                  className={`group transition-colors ${pin ? "bg-secondary/25 italic" : on ? "bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
-                  {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${stick} max-md:left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
+                  className={`dt-row group transition-colors ${pin ? "dt-pin bg-secondary/25 italic" : on ? "dt-on bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "dt-open bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
+                  {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${stick} left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
                   {shown.map(c => (
-                    <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${sort?.key === c.key ? "bg-primary/[0.03]" : ""} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
+                    <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
                   ))}
                   {opener && (
-                    <td className={`w-10 px-2 ${PAD[dense]} text-center`}>
+                    <td className={`w-10 px-2 ${PAD[dense]} text-center ${stick} ${openerPin}`}>
                       {opens && (
                         <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Hide details" : "Show details"}
                           className="h-7 w-7 inline-grid place-items-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground">
@@ -377,7 +540,7 @@ export function DataTable<T>({
                     </td>
                   )}
                   {rowActions && (
-                    <td className={`w-12 px-2 ${PAD[dense]} text-right`} data-no-row>
+                    <td className={`w-12 px-2 ${PAD[dense]} text-right ${stick} right-0 ${opener ? "" : "dt-stick-r"}`} data-no-row>
                       {!pin && <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100" />}
                     </td>
                   )}
@@ -394,28 +557,46 @@ export function DataTable<T>({
                 </Fragment>
               );
             })}
-            {!visible.length && (
-              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">{q ? "No row matches the search." : emptyText}</td></tr>
+            {!visible.length && loading && [0, 1, 2, 3, 4].map(i => (
+              <tr key={`sk${i}`} aria-hidden>
+                {ticking && <td className="w-10 px-3 py-3"><div className="h-4 w-4 rounded bg-secondary animate-pulse" /></td>}
+                {shown.map((c, j) => (
+                  <td key={c.key} className={`px-3 py-3.5 ${alignCls(c.align)}`}>
+                    <div className={`h-3 rounded bg-secondary animate-pulse inline-block ${c.align === "right" ? "ml-auto" : ""}`} style={{ width: `${45 + ((i * 37 + j * 23) % 45)}%` }} />
+                  </td>
+                ))}
+                {opener && <td />}
+                {rowActions && <td />}
+              </tr>
+            ))}
+            {!visible.length && !loading && (
+              <tr><td colSpan={cols} className="p-0">
+                <div className="sticky left-0 px-4 py-12 text-center" style={boxW ? { width: boxW } : undefined}>
+                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} />
+                </div>
+              </td></tr>
             )}
           </tbody>
           {footer && filtered.length > 0 && <tfoot className="border-t-2 border-border/70 bg-secondary/30">{footer(shown, filtered)}</tfoot>}
           {!footer && totals && filtered.length > 0 && (
             <tfoot className="border-t-2 border-border/70 bg-secondary/30">
               <tr>
-                {ticking && <td className={`w-10 ${stick} max-md:left-0 max-md:bg-secondary`} />}
+                {ticking && <td className={`w-10 ${stick} left-0 dt-stick-foot`} />}
                 {shown.map((c, i) => (
-                  <td key={c.key} className={`px-3 py-2.5 ${alignCls(c.align)} font-bold text-brand-dark ${c.key === firstKey ? `${stick} ${stickLeft} max-md:bg-secondary` : ""}`}>
+                  <td key={c.key} className={`px-3 py-2.5 ${alignCls(c.align)} font-bold text-brand-dark ${c.key === firstKey ? `${stick} ${stickLeft} dt-stick-foot` : ""}`}>
                     {totals[c.key] ? <span className="tabular-nums whitespace-nowrap">{totals[c.key]!(filtered)}</span>
                       : i === 0 ? <span className="text-xs uppercase tracking-wider">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</span> : null}
                   </td>
                 ))}
-                {opener && <td />}
-                {rowActions && <td />}
+                {opener && <td className={`${stick} ${openerPin} dt-stick-foot`} />}
+                {rowActions && <td className={`${stick} right-0 ${opener ? "" : "dt-stick-r"} dt-stick-foot`} />}
               </tr>
             </tfoot>
           )}
         </table>
       </div>
+      <FloatingScrollbar boxRef={boxRef} over={wide.over} />
+      </>)}
 
       {filtered.length > pageSizes[0] && (
         <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-muted-foreground">
@@ -432,6 +613,23 @@ export function DataTable<T>({
             <button type="button" disabled={cur >= pages} onClick={() => setPage(cur + 1)} className="h-7 w-7 grid place-items-center rounded-md border border-border bg-white disabled:opacity-40" aria-label="Next page"><ChevronRight className="h-3.5 w-3.5" /></button>
           </span>
         </div>
+      )}
+    </div>
+  );
+}
+
+/** What an empty table says: nothing yet (the page's own words), or nothing
+ *  left after the search and filters — with the way back. */
+function EmptyState({ narrowedOut, text, onClear }: { narrowedOut: boolean; text: ReactNode; onClear: () => void }) {
+  if (!narrowedOut && typeof text !== "string") return <div className="text-sm text-muted-foreground">{text}</div>;
+  const Icon = narrowedOut ? SearchX : Inbox;
+  return (
+    <div className="flex flex-col items-center">
+      <span className="h-11 w-11 rounded-2xl bg-secondary/80 grid place-items-center text-muted-foreground"><Icon className="h-5 w-5" /></span>
+      <p className="mt-3 text-sm font-medium text-brand-dark">{narrowedOut ? "Nothing matches" : text}</p>
+      {narrowedOut && <p className="mt-1 text-xs text-muted-foreground">Try fewer filters or another search.</p>}
+      {narrowedOut && (
+        <button type="button" onClick={onClear} className="mt-3 h-8 px-3 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary/70">Clear search and filters</button>
       )}
     </div>
   );

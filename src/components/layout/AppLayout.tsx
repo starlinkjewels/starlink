@@ -325,37 +325,40 @@ export function AppLayout() {
   return (
     <div className="app-shell h-[100dvh] overflow-hidden bg-background flex">
       {/* ── Sidebar (desktop) ── */}
-      <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen" style={{ width: '16rem', minWidth: '16rem' }}>
-        <div className="px-5 py-5 flex items-center">
-          <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-auto object-contain" />
+      {/* A tablet or small laptop gets a rail of icons (names on hover), so the
+          page keeps its width; from 1280px the full list with its names. */}
+      <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen w-[4.5rem] xl:w-60">
+        <div className="px-3 xl:px-5 py-5 flex items-center justify-center xl:justify-start">
+          <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-10 object-cover object-left xl:w-auto xl:object-contain" />
         </div>
-        <nav className="flex-1 px-3 py-2 overflow-y-auto">
+        <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
             const isCollapsed = collapsedGroups.has(group.title);
             return (
               <div key={group.title} className="mb-1.5">
                 <button
                   onClick={() => toggleGroup(group.title)}
-                  className="w-full flex items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
+                  className="hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
                 >
                   <span>{group.title}</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
                 </button>
-                {!isCollapsed && (
-                  <div className="space-y-0.5 mt-0.5">
+                {/* On the rail a thin line marks where a group starts. */}
+                <div className="xl:hidden mx-2 my-2 border-t border-border/70" />
+                {/* The rail shows every item (it has no group headings to open). */}
+                {(
+                  <div className={`space-y-0.5 mt-0.5 ${isCollapsed ? "xl:hidden" : ""}`}>
                     {group.items.map(item => (
-                      <NavLink key={item.to} to={item.to} end={item.to === "/"}
+                      <NavLink key={item.to} to={item.to} end={item.to === "/"} title={item.label} aria-label={item.label}
                         className={({ isActive }) =>
-                          `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all
+                          `relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all justify-center xl:justify-start
                            ${isActive
                              ? "bg-primary text-primary-foreground shadow-soft"
-                             : item.highlight
-                             ? "bg-gradient-to-r from-primary/10 to-brand-light/10 text-primary ring-1 ring-primary/25 font-semibold hover:from-primary/15 hover:to-brand-light/15"
                              : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
-                        <item.icon className="h-4 w-4 shrink-0" />
-                        <span>{item.label}</span>
+                        <item.icon className="h-[18px] w-[18px] xl:h-4 xl:w-4 shrink-0" />
+                        <span className="hidden xl:inline truncate">{item.label}</span>
                         {item.to === "/notifications" && unread > 0 && (
-                          <span className="ml-auto bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                          <span className="xl:ml-auto max-xl:absolute max-xl:top-1 max-xl:right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                             {unread > 99 ? "99+" : unread}
                           </span>
                         )}
@@ -369,20 +372,11 @@ export function AppLayout() {
         </nav>
 
         {/* Sidebar user card */}
-        <div className="p-3 border-t space-y-1">
-          <div className="flex items-center gap-3 px-3 py-2.5 rounded-xl bg-secondary/50">
-            <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs font-bold grid place-items-center shrink-0 shadow-soft">
-              {initials}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-foreground truncate">{user?.name}</p>
-              <p className="text-[11px] text-muted-foreground">{ROLE_LABEL[user?.role ?? ""] ?? user?.role}</p>
-            </div>
-          </div>
+        <div className="p-2.5 xl:p-3 border-t">
           <button
-            onClick={() => { logout(); navigate("/login"); }}
-            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
-            <LogOut className="h-4 w-4" /> Sign out
+            onClick={() => { logout(); navigate("/login"); }} title="Sign out" aria-label="Sign out"
+            className="w-full flex items-center justify-center xl:justify-start gap-3 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+            <LogOut className="h-4 w-4" /><span className="hidden xl:inline">Sign out</span>
           </button>
         </div>
       </aside>
@@ -404,17 +398,6 @@ export function AppLayout() {
           <div className="md:hidden flex items-center shrink-0">
             <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-8 w-auto object-contain" />
           </div>
-
-          {/* Page title (desktop) */}
-          {pageTitle && (
-            <div className="hidden md:flex flex-col justify-center shrink-0">
-              <h1 className="text-base font-semibold text-brand-dark leading-tight">{pageTitle}</h1>
-              <p className="text-[11px] text-muted-foreground leading-tight capitalize">{user?.role} portal</p>
-            </div>
-          )}
-
-          {/* Divider (desktop) */}
-          {pageTitle && <div className="hidden md:block h-6 w-px bg-border/60 shrink-0" />}
 
           {/* Search bar */}
           <button

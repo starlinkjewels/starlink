@@ -116,16 +116,16 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
             <p className="text-sm font-medium break-all">{u.email || <span className="italic text-muted-foreground font-normal">No login — salary only</span>}</p>
             <p className="text-[11px] text-muted-foreground mt-1">
               {u.authUid || u.role === "admin"
-                ? "Their sign-in can't be changed here — it is their login account. Use Send password reset from their ⋯ if they are locked out."
-                : "To let them sign in, use Give login from their ⋯ on the Employees page."}
+                ? "Can't be changed here — locked out? Send password reset."
+                : "To let them sign in, use Give login on the Employees page."}
             </p>
           </div>
         </div>
 
         <section className="space-y-3">
           <div>
-            <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Wallet className="h-4 w-4 text-amber-600" />Opening — already paid before this app</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Added to their total paid to date and shown as the first line of their salary ledger. Leave empty for none.</p>
+            <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Wallet className="h-4 w-4 text-amber-600" />Already paid before this app</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Added to their total paid to date.</p>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-[8rem_minmax(0,1fr)_minmax(0,1fr)] gap-3">
             <div>

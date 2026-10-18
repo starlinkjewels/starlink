@@ -107,7 +107,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
 
   return (
     <div className="space-y-4">
-      <Panel title="Month by month" subtitle="Sales by the month shipped · orders by the month placed · money by the day received" icon={CalendarRange}
+      <Panel title="Month by month" subtitle="Sales by month shipped · money by day received" icon={CalendarRange}
         actions={<ExportButton onClick={exportMonths} />}>
         {data.months.some(m => m.salesUsd || m.receivedCount) ? (
           <>
@@ -206,7 +206,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
 
       {withProfit && data.pr && (
         <div className="grid lg:grid-cols-2 gap-4">
-          <Panel title="Profit by client" subtitle="Margin on pieces shipped in the period" icon={Users}>
+          <Panel title="Profit by client" subtitle="Pieces shipped in the period" icon={Users}>
             <DataTable
               id="reports-sales-profit-client"
               noun="client"
@@ -222,7 +222,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
               searchPlaceholder="Search clients"
             />
           </Panel>
-          <Panel title="Profit by item" subtitle="Which pieces earn the most" icon={Layers}>
+          <Panel title="Profit by item" subtitle="By margin" icon={Layers}>
             <DataTable
               id="reports-sales-profit-item"
               noun="item"
@@ -236,7 +236,7 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
             />
           </Panel>
           {data.pr.losses.length > 0 && (
-            <Panel title={`Sold at a loss (${data.pr.losses.length})`} subtitle="Check the price or the cost on these first" icon={TrendingDown} className="lg:col-span-2">
+            <Panel title={`Sold at a loss (${data.pr.losses.length})`} subtitle="Check price or cost" icon={TrendingDown} className="lg:col-span-2">
               {/* Every loss, a page at a time — the worst first. */}
               <DataTable
                 id="reports-sales-losses"

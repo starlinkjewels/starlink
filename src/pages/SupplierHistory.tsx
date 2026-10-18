@@ -1,5 +1,7 @@
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import type { MoreAction } from "@/components/MoreMenu";
+import { PageHeader } from "@/components/PageHeader";
+import { SectionTitle } from "@/components/SectionTitle";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
@@ -32,7 +34,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  ArrowLeft, Truck, Mail, Phone, MapPin, Hash, Wallet, Plus, CreditCard,
+  Truck, Mail, Phone, MapPin, Hash, Plus, CreditCard,
   Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
 } from "lucide-react";
 import { motion } from "framer-motion";
@@ -124,7 +126,7 @@ export function SupplierHistoryPage() {
     return (
       <div className="text-center py-20 text-muted-foreground">
         {collectionLoaded("suppliers") ? "Supplier not found." : "Loading…"}{" "}
-        <Link to="/suppliers" className="text-primary underline">Back</Link>
+        <Link to="/suppliers" className="inline-block py-2.5 -my-2.5 text-primary underline">Back</Link>
       </div>
     );
   }
@@ -151,7 +153,7 @@ function SupplierHistoryPageBody() {
   if (!supplier) {
     return (
       <div className="text-center py-20 text-muted-foreground">
-        Supplier not found. <Link to="/suppliers" className="text-primary underline">Back to Suppliers</Link>
+        Supplier not found. <Link to="/suppliers" className="inline-block py-2.5 -my-2.5 text-primary underline">Back to Suppliers</Link>
       </div>
     );
   }
@@ -516,7 +518,7 @@ function SupplierHistoryPageBody() {
         hint: !isAdmin ? ADMIN_ONLY : !edit.ok ? edit.reason : !scope.quantity ? scope.reason : undefined },
       { label: voidingId === p.id ? "Voiding…" : "Void", icon: Trash2, danger: true,
         disabled: !isAdmin || voidingId === p.id || !voidable.ok, onSelect: () => voidPurchase(p),
-        hint: !isAdmin ? ADMIN_ONLY : voidable.ok ? "Reverses the supplier due, stock and factory issue" : voidable.reason },
+        hint: !isAdmin ? ADMIN_ONLY : voidable.ok ? "Reverses due, stock and factory issue" : voidable.reason },
     ];
   };
 
@@ -542,6 +544,7 @@ function SupplierHistoryPageBody() {
       mayEdit: can("payments", "edit"), mayDelete: can("payments", "delete"),
       editNeeds: needsAccess("payments", "edit"), deleteNeeds: needsAccess("payments", "delete"),
       onEdit: setEditingEntry, onDelete: x => { void confirmDeleteEntry(db, x); },
+      go: navigate, mayOpen: m => can(m),
     });
   };
 
@@ -761,7 +764,7 @@ function SupplierHistoryPageBody() {
         if (p.purpose !== "order") return <CellTag>Stock</CellTag>;
         const o = orderOf(p);
         return o
-          ? <Link to={`/orders/${o.id}`} className="hover:opacity-80"><CellTag tone="blue">For Order {o.orderNumber}</CellTag></Link>
+          ? <Link to={`/orders/${o.id}`} className="inline-block py-2.5 -my-2.5 hover:opacity-80"><CellTag tone="blue">For Order {o.orderNumber}</CellTag></Link>
           : <CellTag tone="blue">For Order</CellTag>;
       } },
     { key: "invoice", header: "Invoice no.", sortValue: p => p.invoiceNumber, csv: p => p.invoiceNumber ?? "",
@@ -836,92 +839,48 @@ function SupplierHistoryPageBody() {
 
   return (
     <div className="max-w-7xl mx-auto space-y-6">
-      <button onClick={() => navigate("/suppliers")} className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
-        <ArrowLeft className="h-4 w-4" /> Back to Suppliers
-      </button>
+      {/* The name row and the money: a purchase is what people come here to
+          record, a payment the next most; the rest waits in the ⋯. */}
+      <PageHeader
+        back={{ label: "Back to Suppliers", to: "/suppliers" }}
+        title={supplier.name}
+        subtitle={supplier.contactPerson || undefined}
+        primary={isAdmin ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
+        secondary={isAdmin ? { label: "Pay", icon: CreditCard, onClick: () => setShowPayForm(true) } : null}
+        menu={[
+          { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
+          { label: "Export statement", icon: Download, hint: "PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
+          { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
+            hint: isAdmin ? "Name, contact, GSTIN, address" : "Only an admin can change suppliers" },
+          { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !isAdmin || !deleteGuard.ok,
+            hint: !isAdmin ? "Only an admin can change suppliers" : deleteGuard.reason },
+        ]}
+      />
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-6">
-        <div className="flex items-start gap-4 min-w-0">
-          <div className="h-14 w-14 rounded-2xl bg-gradient-to-br from-amber-500/15 to-amber-400/15 grid place-items-center shrink-0">
-            <Truck className="h-7 w-7 text-amber-600" />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h1 className="font-display text-xl md:text-3xl text-brand-dark leading-tight break-words">{supplier.name}</h1>
-            <p className="text-muted-foreground mt-1 break-words">{supplier.contactPerson}</p>
-          </div>
-          {/* Its own label, apart from the account's "More actions" below. */}
-          <MoreMenu label="Supplier actions" title="Supplier" actions={[
-            { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
-              hint: isAdmin ? "Name, contact, GSTIN, address" : "Only an admin can change suppliers" },
-            { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !isAdmin || !deleteGuard.ok,
-              hint: !isAdmin ? "Only an admin can change suppliers" : deleteGuard.reason },
-          ]} />
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6 text-sm">
-          <div className="flex items-start gap-2 min-w-0"><Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium break-all">{supplier.email || "—"}</p></div></div>
-          <div className="flex items-start gap-2"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{supplier.phone || "—"}</p></div></div>
-          <div className="flex items-start gap-2"><Hash className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div><p className="text-xs text-muted-foreground">GSTIN</p><p className="font-medium">{supplier.gstin || "—"}</p></div></div>
+      {/* Who they are. Where the account stands is the statement's, below. */}
+      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm min-w-0">
+          {/* Cut with "…" and whole on hover, never broken mid-word; the full row on a phone. */}
+          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0"><Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={supplier.email || undefined}>{supplier.email || "—"}</p></div></div>
+          <div className="flex items-start gap-2 min-w-0"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium break-words">{supplier.phone || "—"}</p></div></div>
+          <div className="flex items-start gap-2 min-w-0"><Hash className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">GSTIN</p><p className="font-medium truncate" title={supplier.gstin || undefined}>{supplier.gstin || "—"}</p></div></div>
           {supplier.address && <div className="flex items-start gap-2 min-w-0"><MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{supplier.address}</p></div></div>}
         </div>
       </motion.div>
-
-      {/* Account Ledger */}
-      <div className="card-luxe p-5 space-y-4">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-xl bg-success/10 grid place-items-center shrink-0"><Wallet className="h-5 w-5 text-success" /></div>
-            <div>
-              <h3 className="font-display text-lg text-brand-dark">Account Ledger</h3>
-              <p className="text-xs text-muted-foreground">All amounts in INR</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
-              { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
-              { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
-            ]} />
-            {user?.role === "admin" && (
-              <Button onClick={() => setShowPayForm(true)} variant="outline" className="rounded-xl gap-2">
-                <CreditCard className="h-4 w-4" /> Pay
-              </Button>
-            )}
-            {user?.role === "admin" && (
-              <Button onClick={() => setShowPurchaseForm(true)} className="btn-hero rounded-xl gap-2">
-                <Plus className="h-4 w-4" /> Record Purchase
-              </Button>
-            )}
-            <MoreMenu title="Supplier account" actions={[
-              { label: "Receive money", icon: ArrowDownCircle, hint: "A refund or money back from this supplier", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
-              { label: "Export statement", icon: Download, hint: "Purchases, payments and receipts — PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
-            ]} />
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-          <div className="p-3 rounded-xl bg-secondary text-center"><p className="text-xs text-muted-foreground mb-1">Total Purchased</p><p className="font-semibold text-sm">{fmtMoneyInr(account.totalPurchased)}</p></div>
-          <div className="p-3 rounded-xl bg-success/8 border border-success/20 text-center"><p className="text-xs text-muted-foreground mb-1">Total Paid</p><p className="font-semibold text-sm text-success">{fmtMoneyInr(account.totalPaid)}</p></div>
-          <div className="p-3 rounded-xl bg-blue-500/8 border border-blue-500/20 text-center"><p className="text-xs text-muted-foreground mb-1">Received (refunds)</p><p className="font-semibold text-sm text-blue-600">{fmtMoneyInr(account.received)}</p></div>
-          <div className={`p-3 rounded-xl text-center border ${account.net > 0 ? "bg-destructive/5 border-destructive/20" : account.net < 0 ? "bg-blue-500/8 border-blue-500/20" : "bg-success/8 border-success/20"}`}>
-            <p className="text-xs text-muted-foreground mb-1">{account.net < 0 ? "Supplier owes you" : "Net balance"}</p>
-            <p className={`font-semibold text-sm ${account.net > 0 ? "text-destructive" : account.net < 0 ? "text-blue-600" : "text-success"}`}>{account.net > 0 ? fmtMoneyInr(account.net) : account.net < 0 ? fmtMoneyInr(-account.net) : "✓ Settled"}</p>
-          </div>
-        </div>
-      </div>
+      <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
+        { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
+        { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
+      ]} />
 
       {/* Opening balance (migration) — admin only */}
       {user?.role === "admin" && (
         <div className="card-luxe p-5">
-          <button onClick={() => setObOpen(v => !v)} className="w-full flex items-center justify-between gap-3 text-left">
-            <div>
-              <h3 className="font-display text-lg text-brand-dark">Opening Balance</h3>
-              <p className="text-xs text-muted-foreground">
-                {hasOpeningBalance(supplier)
-                  ? `${fmtMoneyInr(Math.abs(supplier.openingBalance!))} · ${supplier.openingDir === "credit" ? "we owe supplier" : "supplier owes us"}${supplier.openingDate ? ` · as of ${fmtDate(supplier.openingDate)}` : ""}`
-                  : "Not set — add the balance carried in from your previous system"}
-              </p>
-            </div>
-            <span className="text-sm text-primary font-medium shrink-0">{obOpen ? "Close" : "Edit"}</span>
-          </button>
+          <SectionTitle title="Opening Balance"
+            sub={hasOpeningBalance(supplier)
+              ? `${fmtMoneyInr(Math.abs(supplier.openingBalance!))} · ${supplier.openingDir === "credit" ? "we owe supplier" : "supplier owes us"}${supplier.openingDate ? ` · as of ${fmtDate(supplier.openingDate)}` : ""}`
+              : "Not set"}
+            info="The balance carried in from your previous system."
+            actions={<button type="button" onClick={() => setObOpen(v => !v)} aria-expanded={obOpen} className="text-sm text-primary font-medium hover:underline">{obOpen ? "Close" : "Edit"}</button>} />
           {obOpen && (
             <div className="mt-3 grid grid-cols-2 gap-3">
               <OpeningBalanceFields
@@ -933,7 +892,7 @@ function SupplierHistoryPageBody() {
                 onDate={v => setOb({ ...ob, date: v })}
                 debitLabel="Supplier owes us (Debit)"
                 creditLabel="We owe supplier (Credit)"
-                hint="Amount outstanding with this supplier when you started using this app (₹)."
+                hint="Owed either way when you started (₹)."
               />
               <div className="col-span-2">
                 <AsyncButton onClick={saveOpening} className="btn-hero rounded-xl h-10">Save Opening Balance</AsyncButton>
@@ -943,10 +902,12 @@ function SupplierHistoryPageBody() {
         </div>
       )}
       {/* Account Statement — the same ledger people read on Stock and Locker:
-          summary, filters, then every entry with a running balance. */}
+          summary, filters, then every entry with a running balance. Its
+          figures are the page's one set: what was bought, paid and refunded,
+          and where that leaves the account, said whichever way it runs. */}
       <StatementLedger
         title="Account Statement"
-        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · purchases and payments, running balance in INR`}
+        caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · INR`}
         rows={statement}
         fmt={fmtMoneyInr}
         debitLabel="Bill"
@@ -957,20 +918,20 @@ function SupplierHistoryPageBody() {
         summary={[
           { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
           { label: "Total paid", value: fmtMoneyInr(account.totalPaid), tone: "in" },
+          { label: "Received (refunds)", value: fmtMoneyInr(account.received) },
           // net = what is owed AFTER refunds received and any overpayment, which
           // is exactly where the running balance below ends up.
-          { label: "Outstanding", value: fmtMoneyInr(account.net), tone: account.net > 0 ? "due" : "in" },
-          { label: "Purchases", value: String(purchases.length) },
+          { label: account.net < 0 ? "Supplier owes you" : "Net balance",
+            value: account.net > 0 ? fmtMoneyInr(account.net) : account.net < 0 ? fmtMoneyInr(-account.net) : "✓ Settled",
+            tone: account.net > 0 ? "due" : "in" },
         ]}
       />
 
 
       {/* Purchase history */}
       <div className="card-luxe overflow-hidden">
-        <div className="px-5 py-4 border-b border-border/60">
-          <h2 className="font-display text-xl text-brand-dark">Purchase History</h2>
-          <p className="text-xs text-muted-foreground mt-0.5">{purchases.length} purchase{purchases.length !== 1 ? "s" : ""}</p>
-        </div>
+        {/* How many is the table's own count. */}
+        <SectionTitle title="Purchase History" className="px-5 py-4 border-b border-border/60" />
         <div className="p-3 sm:p-4">
           <DataTable
             id="supplier-purchases"
@@ -1016,7 +977,7 @@ function SupplierHistoryPageBody() {
         open={showPurchaseForm}
         onOpenChange={setShowPurchaseForm}
         title="Record Purchase"
-        description={<>From {supplier.name} — one bill, with a line for each size or quality on it.</>}
+        description={<>From {supplier.name} · a line per size or quality</>}
         icon={Truck}
         size="lg"
         footer={
@@ -1034,7 +995,7 @@ function SupplierHistoryPageBody() {
         }
       >
         <div className="space-y-3">
-          <CompanyPicker value={billCompany} onChange={setBillCompany} label="Company — whose stock this is" hint="A line bought for a particular order goes to that order's company." />
+          <CompanyPicker value={billCompany} onChange={setBillCompany} label="Company — whose stock this is" hint="An order's line goes to that order's company." />
           <div>
             <Label className="text-xs">Bill no. <span className="text-destructive">*</span></Label>
             <Input value={billNo} onChange={e => setBillNo(e.target.value)} autoFocus
@@ -1068,19 +1029,33 @@ function SupplierHistoryPageBody() {
               )}
 
               {isOtherMaterial(line.material) ? (
-                <div className="grid grid-cols-3 gap-2.5">
-                  <GradeInput material={line.material} value={line.otherGrade} onChange={v => updatePurchaseLine(idx, { otherGrade: v })} />
-                  <Input type="number" min={0} step="0.001" value={line.otherQty} onChange={e => updatePurchaseLine(idx, { otherQty: e.target.value })} className="rounded-xl h-10" placeholder={`Quantity (${materialUnit(db.settings, line.material)})`} />
-                  <Input type="number" min={0} value={line.otherRate} onChange={e => updatePurchaseLine(idx, { otherRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/${materialUnit(db.settings, line.material)} (${line.currency})`} />
+                // Two to a row on a phone, each with its name above — a placeholder
+                // alone is gone once something is typed.
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <div className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Grade</span>
+                    <GradeInput material={line.material} value={line.otherGrade} onChange={v => updatePurchaseLine(idx, { otherGrade: v })} />
+                  </div>
+                  <label className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Quantity ({materialUnit(db.settings, line.material)})</span>
+                    <Input type="number" min={0} step="0.001" value={line.otherQty} onChange={e => updatePurchaseLine(idx, { otherQty: e.target.value })} className="rounded-xl h-10" placeholder={`Quantity (${materialUnit(db.settings, line.material)})`} />
+                  </label>
+                  <label className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Rate / {materialUnit(db.settings, line.material)} ({line.currency})</span>
+                    <Input type="number" min={0} value={line.otherRate} onChange={e => updatePurchaseLine(idx, { otherRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/${materialUnit(db.settings, line.material)} (${line.currency})`} />
+                  </label>
                 </div>
               ) : line.material === "gold" ? (
-                <div className="grid grid-cols-3 gap-2.5">
-                  <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
-                  <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                  </Select>
-                  <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                  <label className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Weight (g)</span>
+                    <Input type="number" min={0} value={line.goldWeight} onChange={e => updatePurchaseLine(idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="Weight (g)" />
+                  </label>
+                  <div className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Purity</span>
+                    <Select value={line.goldPurity} onValueChange={v => updatePurchaseLine(idx, { goldPurity: v })}>
+                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </div>
+                  <label className="space-y-1 min-w-0 text-[11px] font-medium text-muted-foreground"><span>Rate / g ({line.currency})</span>
+                    <Input type="number" min={0} value={line.goldRate} onChange={e => updatePurchaseLine(idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/g (${line.currency})`} />
+                  </label>
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -1171,7 +1146,7 @@ function SupplierHistoryPageBody() {
         open={showPayForm}
         onOpenChange={setShowPayForm}
         title="Record Payment"
-        description={<>To {supplier.name}{account.net > 0 ? <> — {fmtMoneyInr(account.net)} owed</> : null}. Against their oldest bills, one bill, or as an advance.</>}
+        description={<>To {supplier.name}{account.net > 0 ? <> · {fmtMoneyInr(account.net)} owed</> : null}</>}
         icon={CreditCard}
         footer={
           <div className="flex items-center justify-between gap-3 flex-wrap">
@@ -1213,7 +1188,7 @@ function SupplierHistoryPageBody() {
         open={showReceiveForm}
         onOpenChange={setShowReceiveForm}
         title={`Receive from ${supplier.name}`}
-        description="Money the supplier gave back (refund / return credit). It goes into a locker and reduces what you owe them."
+        description="A refund — it lowers what you owe them"
         icon={ArrowDownCircle}
         footer={
           <div className="flex items-center justify-between gap-3 flex-wrap">

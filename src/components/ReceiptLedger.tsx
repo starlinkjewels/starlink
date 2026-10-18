@@ -11,7 +11,10 @@ import { needsAccess } from "@/lib/actionHints";
 import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { filled, linkList, recorded, refLink, refNo, when, type Detail } from "@/components/rowDetails";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
-import { LedgerFilters, inDateRange, rangeLabel } from "@/components/LedgerFilters";
+import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
+import { StatStrip } from "@/components/TableToolbar";
+import { SectionTitle } from "@/components/SectionTitle";
+import { oneLine } from "@/components/MoneyEntryEditor";
 
 const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
 
@@ -51,7 +54,6 @@ export function ReceiptLedger() {
       || r.method.toLowerCase().includes(ql);
   });
   const filtered = !!(ql || from || to || clientId || acct || mode);
-  const reset = () => { setQ(""); setFrom(""); setTo(""); setClientId(""); setAcct(""); setMode(""); };
   const totalReceived = rows.reduce((s, r) => s + r.amountUsd, 0);
   // Only clients who actually have a receipt — a list of every client would be
   // mostly dead options.
@@ -175,34 +177,29 @@ export function ReceiptLedger() {
 
   return (
     <div className="card-luxe p-5">
-      <div className="mb-3">
-        <p className="font-display text-lg text-brand-dark leading-tight">Payments Received</p>
-        <p className="text-xs text-muted-foreground">
-          {rows.length} receipt{rows.length !== 1 ? "s" : ""}{filtered ? ` of ${allReceipts.length}` : ""} · total {fmtMoney(totalReceived)}
-          {(from || to) && <> · {rangeLabel(from, to)}</>}
-        </p>
-      </div>
+      <SectionTitle className="mb-4" title="Payments received" />
 
-      <LedgerFilters
-        q={q} onQ={setQ}
-        placeholder="Search receipt #, client, remark…"
-        from={from} to={to}
-        onFrom={setFrom} onTo={setTo}
-        selects={[
-          { label: "Clients", value: clientId, onChange: setClientId, options: payers },
-          { label: "Accounts", value: acct, onChange: setAcct,
-            options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
-          { label: "Modes", value: mode, onChange: setMode,
-            options: METHODS.map(m => ({ value: m, label: m })) },
-        ]}
-        active={filtered} onReset={reset}
-        onPdf={exportPdf} onCsv={exportCsv}
-      />
-
-      {/* The filters, search and downloads live in the bar above, so the table
-          brings no search or Excel of its own. A new filter (resetKey)
-          starts it again from the first page. */}
+      {/* Search, filters and downloads sit in the table's own toolbar, the
+          total under it. A new filter (resetKey) starts it again from the
+          first page. */}
       <DataTable
+        summary={
+          <StatStrip items={[
+            { label: "Received", value: fmtMoney(totalReceived), tone: "in", sub: "In US dollars" },
+          ]} note={filtered ? `For what the filters show${from || to ? ` · ${rangeLabel(from, to)}` : ""}` : undefined} />
+        }
+        {...ledgerTable({
+          q, onQ: setQ, placeholder: "Search receipt #, client, remark…",
+          from, to, onFrom: setFrom, onTo: setTo,
+          selects: [
+            { label: "Client", value: clientId, onChange: setClientId, options: payers },
+            { label: "Account", value: acct, onChange: setAcct,
+              options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
+            { label: "Mode", value: mode, onChange: setMode,
+              options: METHODS.map(m => ({ value: m, label: m })) },
+          ],
+          onPdf: exportPdf, onCsv: exportCsv,
+        })}
         resetKey={JSON.stringify([ql, from, to, clientId, acct, mode])}
         id="receipt-ledger"
         noun="receipt"
@@ -219,9 +216,9 @@ export function ReceiptLedger() {
           const stuck = mayDelete ? receiptCancelBlocker(db, r.id) : undefined;
           return [
             { label: "Edit", icon: Pencil, onSelect: () => setEditId(r.id), disabled: !mayEdit,
-              hint: mayEdit ? "Correct the receipt — amount, date, account, mode" : needsAccess("payments", "edit") },
+              hint: mayEdit ? "Amount, date, account, mode" : needsAccess("payments", "edit") },
             { label: "Delete", icon: Trash2, danger: true, onSelect: () => cancelReceiptFlow(r.id, user!.id), disabled: !mayDelete || !!stuck,
-              hint: !mayDelete ? needsAccess("payments", "delete") : stuck ?? "Cancels the receipt — off the bills, the account and any credit" },
+              hint: !mayDelete ? needsAccess("payments", "delete") : oneLine(stuck) ?? "Off the bills, account and credit" },
           ];
         }}
       />
