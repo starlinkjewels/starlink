@@ -1151,14 +1151,15 @@ export function NewOrderPage() {
           </SectionCard>
         )}
 
-        {/* ── Submit / Cancel — sticky so the action is always reachable on a long
-            form. The page keeps 6rem free at its foot on a phone (for the tab
-            bar) and a sticky bar stops above that space, so on a phone the bar
-            reaches down through it: solid to the screen's edge, the buttons
-            just above the tab bar, and no form showing between the two. ── */}
-        <div className="sticky z-20 mt-2 -mx-4 px-4 pt-3 bg-card border-t border-border/80
-                        max-md:-bottom-24 max-md:pb-[calc(6rem+0.75rem)]
-                        md:bottom-0 md:mx-0 md:pb-3 md:rounded-2xl md:border md:shadow-[0_8px_24px_-12px_rgb(15_23_42/0.18)]">
+        {/* ── Submit / Cancel — always reachable on a long form. On a phone the
+            tab bar is put away on this page (AppLayout) and the bar is pinned
+            to the screen's bottom edge — fixed, not sticky: Safari and Chrome
+            place a sticky bar differently inside the scrolling page, and on an
+            iPhone it slid under the tab bar. The page's own bottom space keeps
+            the last field clear of it. On a laptop it floats at the form's foot. ── */}
+        <div className="z-30 bg-card
+                        max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:px-4 max-md:pt-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:border-t max-md:border-border/80 max-md:shadow-[0_-6px_16px_-12px_rgb(15_23_42/0.25)]
+                        md:sticky md:bottom-0 md:mt-2 md:px-4 md:py-3 md:rounded-2xl md:border md:border-border/80 md:shadow-[0_8px_24px_-12px_rgb(15_23_42/0.18)]">
           <div className="flex items-center justify-end gap-3">
             <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5 shadow-none">
               Cancel

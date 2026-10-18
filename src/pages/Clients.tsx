@@ -18,7 +18,7 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, History, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -434,78 +434,74 @@ export function ClientsPage() {
             // The whole card opens the client; what can be done to them is in
             // its one ⋯ — the same menu as a list row, each item greyed with
             // its reason when it can't be done.
-            <div key={c.id} onClick={openCard(`/clients/${c.id}`)} className="card-luxe card-hover p-5 flex flex-col min-w-0 cursor-pointer">
+            <div key={c.id} onClick={openCard(`/clients/${c.id}`)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
-                  <div className="h-12 w-12 rounded-2xl bg-gradient-to-br from-primary/15 to-brand-light/20 text-primary font-display text-lg grid place-items-center ring-1 ring-primary/10">
+                  <div className="h-11 w-11 rounded-full bg-primary/10 text-primary text-base font-semibold grid place-items-center">
                     {(c.companyName || "?").charAt(0).toUpperCase()}
                   </div>
-                  <span className={`absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full ring-2 ring-white ${online ? "bg-success" : "bg-muted-foreground/40"}`} />
+                  <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full ring-2 ring-white ${online ? "bg-success" : "bg-muted-foreground/40"}`} />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="font-display text-lg text-brand-dark truncate leading-tight" title={c.companyName}>{c.companyName}</p>
-                  {multiCo && <p className="text-[10px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
-                  <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>
-                  {clientUser && (
-                    <p className={`text-[11px] mt-0.5 ${online ? "text-success font-medium" : "text-muted-foreground"}`}>
-                      {online ? "Online now" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
-                    </p>
-                  )}
+                  <p className="text-base font-semibold text-foreground leading-snug line-clamp-2 break-words" title={c.companyName}>{c.companyName}</p>
+                  {multiCo && <p className="text-[11px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
+                  {c.ownerName && <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>}
+                  <div className="mt-1.5 flex items-center gap-2 flex-wrap">
+                    <StatusBadge status={c.status} />
+                    {clientUser && (
+                      <span className={`text-xs ${online ? "text-success font-medium" : "text-muted-foreground"}`}>
+                        {online ? "Online now" : `Last seen ${timeAgo(clientUser.lastActiveAt)}`}
+                      </span>
+                    )}
+                  </div>
                 </div>
-                <StatusBadge status={c.status} />
-                <MoreMenu size="sm" label={`Actions for ${c.companyName}`} actions={clientActions(c)} className="relative after:absolute after:-inset-1" />
+                <MoreMenu size="sm" label={`Actions for ${c.companyName}`} actions={clientActions(c)} className="-mr-1.5 -mt-1.5" />
               </div>
 
-              {user!.role === "admin" && (
-                <p className="flex items-center gap-1.5 text-xs text-muted-foreground mt-2 min-w-0">
-                  <UserCog className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Handled by Admin"}</span>
-                </p>
-              )}
-
-              <div className="mt-4 space-y-2 text-sm min-w-0">
+              <div className="mt-4 space-y-1.5 text-sm min-w-0">
+                {user!.role === "admin" && (
+                  <p className="flex items-center gap-2 text-muted-foreground min-w-0">
+                    <UserCog className="h-4 w-4 shrink-0" />
+                    <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Handled by Admin"}</span>
+                  </p>
+                )}
                 <p className="flex items-center gap-2 text-muted-foreground min-w-0">
-                  <Mail className="h-3.5 w-3.5 shrink-0" /><span className="truncate" title={c.email || undefined}>{c.email || "—"}</span>
+                  <Mail className="h-4 w-4 shrink-0" /><span className="truncate" title={c.email || undefined}>{c.email || "—"}</span>
                 </p>
                 <p className="flex items-center gap-2 text-muted-foreground">
-                  <Phone className="h-3.5 w-3.5 shrink-0" />{c.phone || "—"}
+                  <Phone className="h-4 w-4 shrink-0" />{c.phone || "—"}
                 </p>
                 <p className="flex items-center gap-2 text-muted-foreground min-w-0">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" />
+                  <MapPin className="h-4 w-4 shrink-0" />
                   <span className="truncate">{[c.country, c.zip].filter(Boolean).join(" · ") || "—"}</span>
                 </p>
               </div>
 
               {/* Figures: colour on the figure only, a zero in grey. */}
-              <div className="grid grid-cols-3 gap-1.5 mt-4 pt-3 border-t border-border/50 text-center">
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Total</p>
-                  <p className={`text-xs font-semibold tabular-nums ${acc.billed ? "text-brand-dark" : "text-muted-foreground"}`}>{fmtMoney(acc.billed)}</p>
+              <div className="@container grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-border/60">
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.billed ? "text-foreground" : "text-muted-foreground"}`}>{fmtMoney(acc.billed)}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Received</p>
-                  <p className={`text-xs font-semibold tabular-nums ${acc.received ? "text-success" : "text-muted-foreground"}`}>{fmtMoney(acc.received)}</p>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Received</p>
+                  <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.received ? "text-success" : "text-muted-foreground"}`}>{fmtMoney(acc.received)}</p>
                 </div>
-                <div>
-                  <p className="text-[10px] text-muted-foreground mb-0.5">Pending</p>
-                  <p className={`text-xs font-semibold tabular-nums ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
+                <div className="min-w-0">
+                  <p className="text-xs text-muted-foreground">Pending</p>
+                  <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
                     {acc.outstanding > 0 ? fmtMoney(acc.outstanding) : "Cleared"}
                   </p>
                 </div>
               </div>
 
-              <div className="mt-auto pt-3 flex items-center gap-2">
-                <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground bg-secondary px-2.5 py-1 rounded-full shrink-0">
-                  <Package className="h-3.5 w-3.5" /> {orderCount} total
+              {/* The card itself opens the client; the footer just says what is there. */}
+              <div className="mt-auto pt-3 flex items-center justify-between gap-2 text-sm text-muted-foreground">
+                <span className="inline-flex items-center gap-1.5 min-w-0">
+                  <Package className="h-4 w-4 shrink-0" />
+                  <span className="truncate">{orderCount} order{orderCount !== 1 ? "s" : ""}{activeCount > 0 ? <> · <span className="font-medium text-primary">{activeCount} active</span></> : null}</span>
                 </span>
-                {activeCount > 0 && (
-                  <span className="text-xs font-medium text-primary bg-primary/10 px-2.5 py-1 rounded-full shrink-0">
-                    {activeCount} active
-                  </span>
-                )}
-                <Button asChild variant="outline" size="sm" className="ml-auto h-8 rounded-lg gap-1.5 shrink-0 relative after:absolute after:-inset-1">
-                  <Link to={`/clients/${c.id}`}><History className="h-3.5 w-3.5 text-primary" />View Order History</Link>
-                </Button>
+                <span className="inline-flex items-center gap-0.5 font-medium text-primary shrink-0">Orders<ChevronRight className="h-4 w-4" /></span>
               </div>
             </div>
           );

@@ -438,8 +438,8 @@ export function DataTable<T>({
                     <dl className="mt-2.5 grid grid-cols-2 gap-x-4 gap-y-2">
                       {pairs.map(c => (
                         <div key={c.key} className="min-w-0">
-                          <dt className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground truncate">{c.header}</dt>
-                          <dd className="text-[13px] text-brand-dark mt-0.5 min-w-0 overflow-hidden">{c.v}</dd>
+                          <dt className="text-xs text-muted-foreground truncate">{c.header}</dt>
+                          <dd className="text-sm text-foreground mt-0.5 min-w-0 overflow-hidden">{c.v}</dd>
                         </div>
                       ))}
                     </dl>
@@ -471,11 +471,11 @@ export function DataTable<T>({
           )}
           {totals && filtered.length > 0 && (
             <div className="rounded-xl border border-border/70 bg-secondary/30 px-3.5 py-3">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</p>
+              <p className="text-xs font-semibold text-foreground">{totalsLabel}{filtered.length !== rows.length ? ` (${filtered.length})` : ""}</p>
               <dl className="mt-1.5 grid grid-cols-2 gap-x-4 gap-y-2">
                 {shown.filter(c => totals[c.key]).map(c => (
                   <div key={c.key} className="min-w-0">
-                    <dt className="text-[10px] uppercase tracking-wider text-muted-foreground truncate">{c.header}</dt>
+                    <dt className="text-xs text-muted-foreground truncate">{c.header}</dt>
                     <dd className="text-sm font-bold text-brand-dark tabular-nums mt-0.5">{totals[c.key]!(filtered)}</dd>
                   </div>
                 ))}

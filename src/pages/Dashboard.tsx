@@ -30,12 +30,12 @@ function Kpi({ label, value, icon: Icon, tone, sub, to }: {
   label: string; value: ReactNode; icon?: LucideIcon; tone?: Tone; sub?: ReactNode; to?: string;
 }) {
   const body = (
-    <div className="h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
+    <div className="@container h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs font-medium text-muted-foreground truncate" title={label}>{label}</p>
         {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
       </div>
-      <p className={`mt-1.5 text-[clamp(1.125rem,4.4vw,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight break-words ${tone ? TONE[tone] : "text-brand-dark"}`}>{value}</p>
+      <p className={`mt-1.5 text-[clamp(1rem,12cqi,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${tone ? TONE[tone] : "text-brand-dark"}`}>{value}</p>
       {sub && <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{sub}</p>}
     </div>
   );
