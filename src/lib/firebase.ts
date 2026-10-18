@@ -84,7 +84,7 @@ export const app: FirebaseApp = initializeApp(firebaseConfig);
  *
  * TO TURN IT ON PROPERLY
  *  1. Create a reCAPTCHA v3 key for SS Diam with every address the app is
- *     served from (diamondflow-35f6e.web.app and any custom domain).
+ *     served from (ssdiam.web.app and any custom domain).
  *  2. Firebase Console → App Check → Apps → this web app → reCAPTCHA v3 with
  *     that key (and its secret).
  *  3. Build with VITE_APP_CHECK=on (and VITE_RECAPTCHA_SITE_KEY if the key is

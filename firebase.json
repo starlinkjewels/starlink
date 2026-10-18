@@ -15,14 +15,22 @@
       "codebase": "default"
     }
   ],
-  "hosting": {
-    "site": "diamondflow-35f6e",
-    "public": "dist",
-    "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-    "rewrites": [{ "source": "**", "destination": "/index.html" }],
-    "headers": [
-      { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
-      { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
-    ]
-  }
+  "hosting": [
+    {
+      "site": "ssdiam",
+      "public": "dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "headers": [
+        { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
+        { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+      ]
+    },
+    {
+      "site": "diamondflow-35f6e",
+      "public": "dist",
+      "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
+      "redirects": [{ "regex": "^/(?P<path>.*)$", "destination": "https://ssdiam.web.app/:path", "type": 301 }]
+    }
+  ]
 }

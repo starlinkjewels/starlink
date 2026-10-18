@@ -28,7 +28,7 @@ const INK = "#2B2A29";
 const MUTED = "#6b6862";
 const BG = "#F6F5F3";
 /** Absolute, so mail clients can load it. */
-const LOGO_URL = "https://diamondflow-35f6e.web.app/brand-logo-wide-white.png";
+const LOGO_URL = "https://ssdiam.web.app/brand-logo-wide-white.png";
 
 /** Wrap body content in a consistent, email-client-safe branded layout. */
 function shell(opts: { preheader: string; accent?: string; heading: string; intro: string; body: string; cta?: { label: string; url: string } }): string {

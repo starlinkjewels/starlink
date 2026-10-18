@@ -1,6 +1,6 @@
 # `ssdiamdemo` — Shree Suktam Diamond (SS Diam)
 
-**Live at https://diamondflow-35f6e.web.app**
+**Live at https://ssdiam.web.app** (the old address https://diamondflow-35f6e.web.app forwards to it)
 
 This branch is **Shree Suktam Diamond's live app**: a separate company, with a
 separate Firebase project. Starlink Jewels is `main`, on its own project.
@@ -11,7 +11,7 @@ The two never share data, logins, files, functions or mail.
 | Firebase project | `diamondflow-35f6e` | `starlinkjewels109` |
 | Firestore database | `diamondflow` (asia-south1) | `diamondflow` (nam5) |
 | Functions region | `asia-south1` | `us-central1` |
-| Hosting | Firebase Hosting `diamondflow-35f6e` | Vercel |
+| Hosting | Firebase Hosting site `ssdiam` (`diamondflow-35f6e` only forwards) | Vercel |
 | Admin (owner) | `online@ssdiam.in` | Starlink's own |
 | Mail | `sendMail` function, sent from `harshil@ssdiam.in` | Starlink's mail service |
 
