@@ -9,12 +9,14 @@ import { functions } from "./firebase";
 /** The company inbox that gets the internal alerts (new order, client login). */
 export const MARKETING_EMAIL = "marketing.starlinkjewels@gmail.com";
 
-const sendMailFn = httpsCallable<{ to: string; subject: string; html: string }, { ok: boolean }>(functions, "sendMail");
+const sendMailFn = httpsCallable<{ to: string; subject: string; html: string; onceKey?: string }, { ok: boolean; skipped?: boolean }>(functions, "sendMail");
 
-export async function sendMail(to: string, subject: string, html: string): Promise<boolean> {
+/** `onceKey`: send this kind of email at most once per login per day — the
+ *  server skips it if any of that login's devices already sent it today. */
+export async function sendMail(to: string, subject: string, html: string, opts?: { onceKey?: string }): Promise<boolean> {
   if (!to || !to.includes("@")) return false;
   try {
-    const res = await sendMailFn({ to, subject, html });
+    const res = await sendMailFn({ to, subject, html, ...(opts?.onceKey ? { onceKey: opts.onceKey } : {}) });
     return !!res.data?.ok;
   } catch {
     return false;
@@ -182,18 +184,24 @@ export interface ClientLoginEmailInfo {
   companyName: string;
   email: string;
   at: string; // ISO
+  /** Typed their password, or opened the app already signed in. */
+  how?: "signed in" | "opened the app";
 }
 
-/** A client just signed in → the team's inbox, so staff notice engagement. */
+/** A client is using the portal (the first time today) → the team's inbox,
+ *  so staff notice engagement. */
 export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; html: string } {
   const when = new Date(o.at).toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" }).replace(/\bSept\b/, "Sep");
+  const typed = o.how !== "opened the app";
   return {
-    subject: `${o.companyName} signed in`,
+    subject: typed ? `${o.companyName} signed in` : `${o.companyName} opened the portal`,
     html: shell({
-      preheader: `${o.companyName} just signed in to the portal.`,
-      label: "Client sign-in", tone: "neutral",
-      heading: `${esc(o.companyName)} signed in`,
-      intro: `${esc(o.companyName)} just signed in to the ${BRAND_NAME} portal.`,
+      preheader: `${o.companyName} ${typed ? "just signed in to" : "opened"} the portal.`,
+      label: typed ? "Client sign-in" : "Client active", tone: "neutral",
+      heading: `${esc(o.companyName)} ${typed ? "signed in" : "opened the portal"}`,
+      intro: typed
+        ? `${esc(o.companyName)} just signed in to the ${BRAND_NAME} portal.`
+        : `${esc(o.companyName)} opened the ${BRAND_NAME} portal, already signed in on their device. This is their first visit today.`,
       body: detailRows([["Client", o.companyName], ["Login", o.email], ["Time", when]]),
       footerNote: TO_TEAM,
     }),

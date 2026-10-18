@@ -61,10 +61,29 @@ function noteAfterReload(msg: string) {
   try { sessionStorage.setItem(AFTER_RELOAD_KEY, msg); } catch { /* no storage */ }
 }
 
+/**
+ * A client is using the portal: tell the team's inbox, once a day. This
+ * device asks at most once a day, and the server keeps it to one across all
+ * of the client's devices (onceKey). Covers a typed sign-in and a session the
+ * app restored on opening alike — most clients stay signed in, so a typed
+ * sign-in alone left the team hearing almost nothing.
+ */
+function alertClientActive(p: User, how: "signed in" | "opened the app") {
+  if (p.role !== "client") return;
+  const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
+  const key = `sl-active-alert:${p.id}`;
+  try { if (localStorage.getItem(key) === day) return; localStorage.setItem(key, day); } catch { /* no storage */ }
+  const client = loadDb().clients.find(c => c.id === p.clientId);
+  const m = clientLoginEmail({ companyName: client?.companyName ?? p.name, email: p.email, at: new Date().toISOString(), how });
+  void sendMail(MARKETING_EMAIL, m.subject, m.html, { onceKey: "client-active" });
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [booting, setBooting] = useState(true);
   const fbRef = useRef<FbUser | null>(null);
+  /** True from a typed sign-in until its alert is sent (vs a restored session). */
+  const typedSignInRef = useRef(false);
   const accessUnsubRef = useRef<null | (() => void)>(null);
   /** Set once the device copy is being wiped, so two sign-out events do it once. */
   const clearingRef = useRef(false);
@@ -159,6 +178,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setUser(profile);
+    alertClientActive(profile, typedSignInRef.current ? "signed in" : "opened the app");
+    typedSignInRef.current = false;
     // Auto-logout the instant an admin deactivates or removes this account.
     if (profile.role !== "admin") {
       accessUnsubRef.current = watchAccess(fb.uid, () => {
@@ -190,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = useCallback(async (email: string, password: string): Promise<User | null> => {
     try {
+      typedSignInRef.current = true;
       const cred = await signInWithEmailAndPassword(auth, email.trim(), password);
       await handleAuth(cred.user);
       const p = resolveProfile(cred.user);
@@ -197,15 +219,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // A real sign-in, typed in — not the session quietly restored on every
       // page load, which would bury the log in noise.
       logEvent("signin", `Signed in — ${p.name || p.email}`);
-      // Only a real, explicit sign-in fires this — not the automatic session
-      // restore on every page load (handleAuth alone doesn't distinguish those).
-      if (p.role === "client") {
-        const client = loadDb().clients.find(c => c.id === p.clientId);
-        const m = clientLoginEmail({ companyName: client?.companyName ?? p.name, email: p.email, at: new Date().toISOString() });
-        void sendMail(MARKETING_EMAIL, m.subject, m.html);
-      }
+      // The team's "client is active" email goes out from handleAuth, for a
+      // typed sign-in and a restored session alike — once a day.
       return p;
     } catch {
+      typedSignInRef.current = false;
       return null;
     }
   }, [handleAuth, resolveProfile]);
