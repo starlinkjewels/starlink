@@ -14,6 +14,7 @@ The two never share data, logins, files, functions or mail.
 | Hosting | Firebase Hosting site `ssdiam` (`diamondflow-35f6e` only forwards) | Vercel |
 | Admin (owner) | `online@ssdiam.in` | Starlink's own |
 | Mail | `sendMail` function, sent from `harshil@ssdiam.in` | Starlink's mail service |
+| Assistant (AI) | `starlinkAiChat`, SS Diam's own Sarvam key (secret) | Starlink's own key |
 
 ## Rules
 
@@ -34,16 +35,13 @@ The two never share data, logins, files, functions or mail.
 npm run build                                   # the web app
 firebase deploy --only firestore                # rules + indexes of "diamondflow"
 firebase deploy --only storage                  # storage rules
-firebase deploy --only functions                # sendMail, sendNotificationPush, sumProd
+firebase deploy --only functions                # sendMail, sendNotificationPush, sumProd, starlinkAiChat
 firebase deploy --only hosting
 ```
 
 ## Switched off for now
 
-- **The assistant (/ai).** It needs an AI provider key of SS Diam's own. To turn it on:
-  1. set `SARVAM_API_KEY` with `firebase functions:secrets:set`;
-  2. export `starlinkAiChat` from `functions/src/index.ts` (the code is in `functions/src/ai.ts`);
-  3. set `AI_ENABLED = true` in `src/lib/firebase.ts`;
-  4. deploy.
+- (The assistant (/ai) is ON since 2026-10-18: function `starlinkAiChat`, secret
+  `SARVAM_API_KEY` = SS Diam's own Sarvam key, `AI_ENABLED = true` in `src/lib/firebase.ts`.)
 - **Google Drive backup.** Build with `VITE_GOOGLE_CLIENT_ID` set to an OAuth client from SS Diam's Google Cloud.
 - **App Check.** See the note in `src/lib/firebase.ts`.

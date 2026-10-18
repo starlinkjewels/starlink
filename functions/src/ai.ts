@@ -1,7 +1,5 @@
-// The assistant (/ai in the app). NOT exported from index.ts, so it is not
-// deployed: it needs an AI provider key of Shree Suktam Diamond's own (secret
-// SARVAM_API_KEY). To turn it on: set that secret, export starlinkAiChat from
-// index.ts, deploy, and set AI_ENABLED in src/lib/firebase.ts.
+// The assistant (/ai in the app), exported from index.ts. It runs on Shree
+// Suktam Diamond's own AI provider key, the functions secret SARVAM_API_KEY.
 
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";

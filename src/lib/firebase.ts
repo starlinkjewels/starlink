@@ -42,11 +42,10 @@ export const DATABASE_ID = "diamondflow";
 export const IS_DEMO = false;
 
 /**
- * The assistant (/ai). Off: it runs on a paid AI provider key that belongs to
- * another company, and SS Diam has none of its own yet. Turning it on needs
- * that key as a secret plus the function deployed — see SSDIAM.md.
+ * The assistant (/ai). On: it runs in this project's starlinkAiChat function
+ * on SS Diam's own AI provider key (secret SARVAM_API_KEY) — see SSDIAM.md.
  */
-export const AI_ENABLED = false;
+export const AI_ENABLED = true;
 
 /** Uploads go straight into this project's own bucket — no folder prefix. */
 export const STORAGE_PREFIX = "";

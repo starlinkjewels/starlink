@@ -9,4 +9,6 @@ export { sendMail } from "./mail";
 import { makeSummaries } from "./summaries";
 export const sumProd = makeSummaries("diamondflow");
 
-// The assistant lives in ai.ts and is deliberately not exported here.
+// The assistant (/ai in the app), on SS Diam's own AI provider key — the
+// functions secret SARVAM_API_KEY.
+export { starlinkAiChat } from "./ai";
