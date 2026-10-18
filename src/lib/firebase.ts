@@ -45,6 +45,10 @@ const firebaseConfig = EMULATORS ? {
 /** The Firestore named database id this app reads/writes. */
 export const DATABASE_ID = "diamondflow";
 
+/** The assistant (/ai): the name it goes by in this app, and whether it is on. */
+export const AI_NAME = "Starlink AI";
+export const AI_ENABLED = true;
+
 /**
  * Admin accounts, identified by their Firebase Auth email. Anyone signing in
  * with one of these emails is treated as the admin (full access).
