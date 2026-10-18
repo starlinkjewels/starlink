@@ -15,13 +15,13 @@ const TONE: Record<string, { pill: string; dot: string }> = {
 };
 const OTHER = { pill: "bg-slate-50 text-slate-700 ring-slate-500/20", dot: "bg-slate-400" };
 
-export function StatusBadge({ status }: { status: string }) {
+export function StatusBadge({ status, className = "" }: { status: string; className?: string }) {
   const t = TONE[status] ?? OTHER;
   // "active" / "inactive" are stored in lower case; shown as words.
   const text = status === "active" ? "Active" : status === "inactive" ? "Inactive" : status;
   return (
-    <span className={`inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-xs font-medium ring-1 ring-inset whitespace-nowrap ${t.pill}`}>
-      <span className={`h-1.5 w-1.5 rounded-full ${t.dot}`} aria-hidden />{text}
+    <span title={text} className={`inline-flex items-center gap-1.5 h-6 px-2.5 rounded-full text-xs font-medium ring-1 ring-inset whitespace-nowrap min-w-0 max-w-full ${t.pill} ${className}`}>
+      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${t.dot}`} aria-hidden /><span className="truncate">{text}</span>
     </span>
   );
 }

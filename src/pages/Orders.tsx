@@ -253,7 +253,7 @@ export function OrdersPage() {
         return (
           <div className="min-w-[7rem]">
             <div className="flex items-center gap-2">
-              <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden"><div className="h-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${pct}%` }} /></div>
+              <div className="h-1.5 flex-1 rounded-full bg-secondary overflow-hidden"><div className="h-full bg-primary" style={{ width: `${pct}%` }} /></div>
               <span className="text-[11px] tabular-nums text-muted-foreground w-8 text-right">{pct}%</span>
             </div>
             {active && !o.courierName && <p className="text-[11px] text-primary truncate max-w-[12rem] mt-0.5">{lastTrackingStep(o)}</p>}
@@ -536,20 +536,13 @@ export function OrdersPage() {
               <Link key={o.id} to={`/orders/${o.id}`}
                 className={`group card-luxe card-hover overflow-hidden flex flex-col min-w-0 ${sel.has(o.id) ? "ring-2 ring-primary" : ""}`}>
                 {/* Status and the tick box sit above the photo, never on it —
-                    a CAD sheet's measurements run right to its corners. */}
-                <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2">
+                    a CAD sheet's measurements run right to its corners. On a
+                    narrow phone card the status gives way (it shortens), the
+                    tick box never does. */}
+                <div className="flex items-center justify-between gap-2 px-3 pt-3 pb-2 min-w-0">
                   <StatusBadge status={o.status} />
-                  <span className="flex items-center gap-1.5">
-                    {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)}
-                      className={sel.size ? "" : "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"} />}
-                    {/* Inside the card's link: a click on the menu (or in it — React
-                        events travel up from the menu's portal) must not open the order. */}
-                    {isStaff && (
-                      <span onClick={e => { e.preventDefault(); e.stopPropagation(); }} className="contents">
-                        <MoreMenu size="sm" label={`Actions for ${o.orderNumber}`} title={o.orderNumber} actions={orderActions(o)} className="h-[22px] w-[22px] rounded-md" />
-                      </span>
-                    )}
-                  </span>
+                  {isStaff && <SelectBox checked={sel.has(o.id)} onToggle={() => toggleSel(o.id)}
+                    className={`shrink-0 ${sel.size ? "" : "[@media(hover:hover)]:opacity-0 group-hover:opacity-100 focus-visible:opacity-100"}`} />}
                 </div>
                 {/* The whole sheet, on white: shown in full, never cropped. */}
                 {img && !brokenImg.has(o.id) ? (
@@ -570,12 +563,21 @@ export function OrdersPage() {
                   </div>
                 )}
                 <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-w-0">
-                  <p className="font-semibold text-[15px] leading-tight tracking-tight truncate">{o.orderNumber}</p>
+                  <div className="flex items-center justify-between gap-1 min-w-0 -mr-1.5">
+                    <p className="font-semibold text-[15px] max-sm:text-sm leading-tight tracking-tight truncate">{o.orderNumber}</p>
+                    {/* Inside the card's link: a click on the menu (or in it — React
+                        events travel up from the menu's portal) must not open the order. */}
+                    {isStaff && (
+                      <span onClick={e => { e.preventDefault(); e.stopPropagation(); }} className="contents">
+                        <MoreMenu size="xs" label={`Actions for ${o.orderNumber}`} title={o.orderNumber} actions={orderActions(o)} className="-my-1.5" />
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-muted-foreground truncate mt-1">
                     {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
                   {user!.role !== "client" && (o.forReadyStock
-                    ? <p className="text-xs font-medium text-primary truncate mt-1">🏭 Ready Stock</p>
+                    ? <p className="text-xs font-medium text-primary truncate mt-1">Ready Stock</p>
                     : client && <p className="text-xs font-semibold text-foreground/70 truncate mt-1">{client.companyName}</p>)}
                   {(o.melted || jobFinished(o) || !!o.returns?.length) && (
                     <div className="flex flex-wrap gap-1 mt-1.5">
@@ -594,7 +596,7 @@ export function OrdersPage() {
                       <span className="tabular-nums font-medium shrink-0">{progress}%</span>
                     </div>
                     <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
-                      <div className="h-full rounded-full bg-gradient-to-r from-primary to-brand-light" style={{ width: `${progress}%` }} />
+                      <div className="h-full rounded-full bg-primary" style={{ width: `${progress}%` }} />
                     </div>
                     {/* The price, with its invoice number in red right before it. */}
                     <div className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1 mt-3 pt-2.5 border-t border-border/60">

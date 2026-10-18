@@ -187,6 +187,9 @@ async function compressImage(file: File): Promise<string> {
  * next crashed (React #310) whenever it was opened or refreshed directly.
  */
 /** One fact about the piece, as a tile; nothing at all when there is no value. */
+/** A section of the order card: edge to edge, a hairline above it. */
+const ORDER_SECTION = "-mx-4 sm:-mx-6 px-4 sm:px-6 py-4 sm:py-5 border-t border-border/60";
+
 /** One detail of the order: a quiet label over its value — no box around it. */
 function OrderSpec({ label, value, wide }: { label: string; value?: string | number | null; wide?: boolean }) {
   if (value == null || value === "") return null;
@@ -2400,46 +2403,45 @@ function OrderDetailPageBody() {
           </div>
         </div>
 
-        <div className="px-5 sm:px-6 pb-5 sm:pb-6">
+        <div className="px-4 sm:px-6 pb-4 sm:pb-6">
 
         {/* ── Pricing — set/edited by admin & employee only, never by the client ── */}
         {user!.role !== "client" && (
-          <div className="mt-4 pt-4 border-t border-border/60">
-            <div className="flex items-center justify-between gap-4 flex-wrap">
-              <div className="flex gap-6">
-                <div>
-                  <p className="text-xs text-muted-foreground">Order Value</p>
-                  <div className="flex items-center gap-2 flex-wrap mt-0.5">
-                    <p className={`font-semibold text-xl tabular-nums ${order.amount ? "text-foreground" : "text-muted-foreground italic font-medium text-base"}`}>
-                      {order.amount ? fmtMoney(order.amount) : "Pricing pending"}
-                    </p>
-                    {returnedCredit(order) > 0 && <span className="text-xs font-medium text-amber-800">−{fmtMoney(returnedCredit(order))} returned</span>}
-                    {/* Its invoice, in green, right beside the price — or plainly none. */}
-                    {(() => {
-                      const inv = findInvoiceForOrder(db.invoices, order.id);
-                      if (inv || needsInvoice(order)) return <InvoiceBadge invoice={inv} dispatched={needsInvoice(order)} size="md" onOpen={n => nav(`/invoices?q=${encodeURIComponent(n)}`)} />;
-                      return order.forReadyStock ? null : <span className="text-[11px] font-medium px-2 py-1 rounded-lg bg-secondary text-muted-foreground">Not invoiced yet</span>;
-                    })()}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Shipping</p>
-                  <p className="font-medium mt-0.5">{(order.shippingCharge || 0) > 0 ? fmtMoney(order.shippingCharge) : "—"}</p>
-                </div>
-              </div>
+          <div className={ORDER_SECTION}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-sm font-semibold text-foreground">Price</p>
               {canEditStage() && (
-                <Button
-                  size="sm" variant="outline" className="rounded-xl gap-2"
+                <button
+                  type="button"
+                  className="h-8 -mr-2 px-2 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors"
                   onClick={() => {
                     setPriceValue(order.amount ? String(order.amount) : "");
                     setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
                     setShowPricing(v => !v);
                   }}
                 >
-                  <DollarSign className="h-3.5 w-3.5" />
-                  {order.amount ? "Edit Pricing" : "Set Pricing"}
-                </Button>
+                  {order.amount ? "Edit" : "Set price"}
+                </button>
               )}
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-4">
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Order value</p>
+                <p className={`mt-0.5 tabular-nums ${order.amount ? "text-xl font-semibold text-foreground" : "text-[15px] font-medium text-muted-foreground"}`}>
+                  {order.amount ? fmtMoney(order.amount) : "Not priced yet"}
+                </p>
+                {returnedCredit(order) > 0 && <p className="text-xs font-medium text-amber-800 mt-0.5">−{fmtMoney(returnedCredit(order))} returned</p>}
+                {/* Its invoice right under the price — or plainly none. */}
+                {(() => {
+                  const inv = findInvoiceForOrder(db.invoices, order.id);
+                  if (inv || needsInvoice(order)) return <div className="mt-1.5"><InvoiceBadge invoice={inv} dispatched={needsInvoice(order)} size="md" onOpen={n => nav(`/invoices?q=${encodeURIComponent(n)}`)} /></div>;
+                  return order.forReadyStock ? null : <p className="text-xs text-muted-foreground mt-1">Not invoiced yet</p>;
+                })()}
+              </div>
+              <div className="min-w-0">
+                <p className="text-xs text-muted-foreground">Shipping</p>
+                <p className="mt-0.5 text-xl font-semibold text-foreground tabular-nums">{(order.shippingCharge || 0) > 0 ? fmtMoney(order.shippingCharge) : "—"}</p>
+              </div>
             </div>
 
             <AnimatePresence>
@@ -2473,7 +2475,7 @@ function OrderDetailPageBody() {
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
-                    <AsyncButton size="sm" onClick={savePricing} className="btn-hero rounded-xl">Save &amp; Notify Client</AsyncButton>
+                    <AsyncButton size="sm" onClick={savePricing} className="rounded-xl">Save &amp; Notify Client</AsyncButton>
                     <Button size="sm" variant="outline" onClick={() => setShowPricing(false)} className="rounded-xl">Cancel</Button>
                   </div>
                 </motion.div>
@@ -2484,31 +2486,34 @@ function OrderDetailPageBody() {
 
         {/* Reference images — staff can add them after the order was placed */}
         {((order.images?.length ?? 0) > 0 || (user!.role !== "client" && canEditStage() && !order.melted)) && (
-          <div className="mt-4">
-            <p className="text-xs text-muted-foreground mb-2">Reference Images</p>
-            <div className="flex gap-2 flex-wrap">
+          <div className={ORDER_SECTION}>
+            <div className="flex items-center justify-between gap-3 mb-3">
+              <p className="text-sm font-semibold text-foreground">Reference images</p>
+              {user!.role !== "client" && canEditStage() && !order.melted && <span className="text-xs text-muted-foreground tabular-nums">{order.images?.length ?? 0} of 3</span>}
+            </div>
+            <div className="flex gap-3 flex-wrap">
               {(order.images ?? []).map((src, i) => (
                 <div key={src} className="relative group">
                   <button type="button" onClick={() => setLightboxSrc(src)}
-                    className="h-20 w-20 rounded-xl overflow-hidden border border-border hover:border-primary/50 transition-colors relative block">
+                    className="h-24 w-24 rounded-xl overflow-hidden bg-white ring-1 ring-border/70 hover:ring-primary/40 transition relative block">
                     <img src={src} alt={`Ref ${i + 1}`} className="w-full h-full object-cover" />
-                    <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                    <div className="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                       <Eye className="h-4 w-4 text-white" />
                     </div>
                   </button>
                   {user!.role !== "client" && canEditStage() && (
-                    <button type="button" onClick={() => removeRefImage(src)} aria-label="Remove reference image"
-                      className="absolute -top-1.5 -right-1.5 h-6 w-6 rounded-full bg-destructive text-white grid place-items-center shadow-md opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                      <X className="h-3 w-3" />
+                    <button type="button" onClick={() => removeRefImage(src)} aria-label="Remove reference image" title="Remove"
+                      className="absolute top-1.5 right-1.5 h-7 w-7 rounded-full bg-black/55 text-white grid place-items-center backdrop-blur-sm hover:bg-destructive transition-colors opacity-100 [@media(hover:hover)]:opacity-0 [@media(hover:hover)]:group-hover:opacity-100 focus-visible:opacity-100">
+                      <X className="h-3.5 w-3.5" />
                     </button>
                   )}
                 </div>
               ))}
               {user!.role !== "client" && canEditStage() && !order.melted && (order.images?.length ?? 0) < 3 && (
                 <button type="button" onClick={() => refImageRef.current?.click()} disabled={refUploading}
-                  className="h-20 w-20 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-primary/5 transition-colors flex flex-col items-center justify-center gap-1 text-muted-foreground disabled:opacity-60">
+                  className="h-24 w-24 rounded-xl border border-dashed border-border bg-secondary/30 hover:bg-secondary/70 hover:border-primary/40 transition-colors flex flex-col items-center justify-center gap-1.5 text-muted-foreground disabled:opacity-60">
                   {refUploading ? <Loader2 className="h-5 w-5 animate-spin" /> : <ImagePlus className="h-5 w-5" />}
-                  <span className="text-[10px] font-medium">{refUploading ? "Uploading…" : "Add image"}</span>
+                  <span className="text-xs font-medium">{refUploading ? "Uploading…" : "Add"}</span>
                 </button>
               )}
               <input ref={refImageRef} type="file" accept="image/*" multiple className="hidden"
@@ -2518,25 +2523,25 @@ function OrderDetailPageBody() {
         )}
 
         {(order.instructions || (isStaffUser && !editWhy)) && (
-          <div className="mt-4 p-3 rounded-xl bg-secondary text-sm">
-            <div className="flex items-center justify-between gap-2 mb-1">
-              <p className="text-xs text-muted-foreground">Special Instructions</p>
+          <div className={ORDER_SECTION}>
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <p className="text-sm font-semibold text-foreground">Special instructions</p>
               {/* Changed with the rest of the details, in the side panel. */}
               {isStaffUser && (
                 <button type="button" onClick={() => (editWhy ? toast.error(editWhy) : setEditOpen(true))} title={editWhy ?? "Edit the instructions and other details"}
                   aria-label="Edit instructions" aria-disabled={!!editWhy}
-                  className={`h-6 w-6 rounded grid place-items-center text-muted-foreground shrink-0 ${editWhy ? "opacity-40 cursor-not-allowed" : "hover:text-primary hover:bg-primary/10"}`}>
-                  <Pencil className="h-3 w-3" />
+                  className={`h-8 -mr-2 px-2 rounded-lg text-sm font-medium transition-colors ${editWhy ? "text-muted-foreground opacity-50 cursor-not-allowed" : "text-primary hover:bg-primary/[0.07]"}`}>
+                  Edit
                 </button>
               )}
             </div>
-            {order.instructions || <span className="text-muted-foreground italic">None yet — add them with Edit details.</span>}
+            <p className={`text-[15px] whitespace-pre-wrap break-words ${order.instructions ? "text-foreground" : "text-muted-foreground"}`}>{order.instructions || "None"}</p>
           </div>
         )}
 
         {canEditStage() && order.status === "Waiting" && (
-          <div className="mt-5 flex gap-3">
-            <AsyncButton onClick={() => approve(true)} className="btn-hero rounded-xl">Approve Order</AsyncButton>
+          <div className={`${ORDER_SECTION} flex gap-3`}>
+            <AsyncButton onClick={() => approve(true)} className="rounded-xl">Approve Order</AsyncButton>
             <AsyncButton variant="outline" onClick={() => approve(false)} className="rounded-xl">Reject</AsyncButton>
           </div>
         )}
