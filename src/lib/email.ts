@@ -152,7 +152,7 @@ export interface ClientLoginEmailInfo {
 /** 3.5 — a client just signed into the portal → to the marketing inbox, so
  *  staff notice engagement (or the lack of it) without watching the app. */
 export function clientLoginEmail(o: ClientLoginEmailInfo): { subject: string; html: string } {
-  const when = new Date(o.at).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" });
+  const when = new Date(o.at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
   return {
     subject: `Client Login — ${o.companyName}`,
     html: shell({

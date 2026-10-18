@@ -288,7 +288,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       subjectLines: [
         selectedBucket ? `Bucket: ${selectedBucket}` : "All purities/shapes",
         "Rate & Amount in Rs (INR)",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: entries.map(([key, qty]) => ({ label: key, value: `${qty.toLocaleString()} ${unit}` })),
       landscape: true,
@@ -485,7 +485,7 @@ function CertifiedSection() {
       subjectLines: [
         `${filtered.length} packet${filtered.length !== 1 ? "s" : ""}${from || to ? " (filtered)" : " (all time)"}`,
         "Totals in Rs (INR); the $ column is what a dollar purchase was billed at",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
         { label: "Carats", value: String(Math.round(filtered.reduce((s, p) => s + p.carat, 0) * 100) / 100) },

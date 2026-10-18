@@ -3430,7 +3430,7 @@ export function fmtMoney(n: number) {
 
 export function fmtDate(iso?: string) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleDateString("en-US", {
+  return new Date(iso).toLocaleDateString("en-IN", {
     month: "short",
     day: "numeric",
     year: "numeric",

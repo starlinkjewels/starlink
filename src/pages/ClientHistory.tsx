@@ -400,7 +400,7 @@ function ClientHistoryPageBody() {
         [client.ownerName, client.country].filter(Boolean).join(" · "),
         [client.email, client.phone].filter(Boolean).join("   "),
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
         ...(oD || oC ? [{ label: "Balance brought forward", value: fmtMoney(oD - oC) }] : []),
@@ -533,7 +533,7 @@ function ClientHistoryPageBody() {
         [client.ownerName, client.country].filter(Boolean).join(" · "),
         [client.email, client.phone].filter(Boolean).join("   "),
         client.gstVat ? `GST/VAT: ${client.gstVat}` : "",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
         { label: "Total Orders", value: String(rows.length) },

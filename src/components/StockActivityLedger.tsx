@@ -309,7 +309,7 @@ export function StockActivityLedger() {
       `${rows.length} entr${rows.length !== 1 ? "ies" : "y"} · ${rangeLabel(from, to)}`,
       [kind && `Entry: ${kind}`, material && `Material: ${material}`, ql && `Search: "${q.trim()}"`]
         .filter(Boolean).join(" · ") || "All entries",
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Bought in", value: fmtMoneyInr(totalIn) },

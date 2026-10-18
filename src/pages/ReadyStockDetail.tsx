@@ -44,7 +44,7 @@ const KIND: Record<ReadyStockEventKind, { icon: LucideIcon; tone: string; label:
   cost: { icon: Lock, tone: "bg-secondary text-muted-foreground", label: "Cost" },
 };
 
-const when = (iso: string) => `${fmtDate(iso)}, ${new Date(iso).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+const when = (iso: string) => `${fmtDate(iso)}, ${new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}`;
 
 /** One label + value in a facts grid. */
 function Fact({ label, children, className = "" }: { label: string; children: ReactNode; className?: string }) {

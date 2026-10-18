@@ -701,7 +701,7 @@ function SupplierHistoryPageBody() {
       subjectLines: [
         `Supplier: ${supplier.name}`,
         supplier.contactPerson ? `Contact: ${supplier.contactPerson}` : "",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
         { label: "Total Purchased", value: fmtInrPlain(account.totalPurchased) },

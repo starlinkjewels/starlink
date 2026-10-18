@@ -111,7 +111,7 @@ export function exportProductsPdf(db: DB, orders: Order[], name: string, subject
     subjectLines: [
       subject,
       `${rows.length} piece${rows.length !== 1 ? "s" : ""}`,
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Gross weight", value: `${sum(r => r.grossG)} g` },
@@ -182,7 +182,7 @@ export function exportReadyStockPdf(items: ReadyStockItem[], name: string, subje
     subjectLines: [
       subject,
       `${items.length} item${items.length !== 1 ? "s" : ""}`,
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ],
     summary: [
       { label: "Pieces", value: String(sum(i => i.quantity)) },

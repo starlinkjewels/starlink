@@ -28,7 +28,7 @@ export function when(iso?: string): string {
   const d = new Date(iso);
   if (isNaN(+d)) return "";
   if (iso.length <= 10 || /T00:00(:00(\.000)?)?Z$/.test(iso)) return fmtDate(iso);
-  return `${fmtDate(iso)}, ${d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" })}`;
+  return `${fmtDate(iso)}, ${d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}`;
 }
 
 export const userName = (db: Pick<DB, "users">, id?: string) => (id ? db.users.find(u => u.id === id)?.name : undefined) ?? "";

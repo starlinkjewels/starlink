@@ -1594,7 +1594,7 @@ export function SettingsPage() {
                       <div className="min-w-0">
                         <p className="text-sm font-medium truncate">{keep.name} · {g.email}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {g.users.length} accounts — keeping the oldest ({new Date(keep.createdAt).toLocaleDateString()}), removing {drops.length}
+                          {g.users.length} accounts — keeping the oldest ({new Date(keep.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}), removing {drops.length}
                         </p>
                       </div>
                       <AsyncButton
@@ -1648,7 +1648,7 @@ export function SettingsPage() {
                             <div className="min-w-0">
                               <p className="text-sm font-medium truncate">{client?.companyName || "Ready Stock"} · {o.jewelleryType}</p>
                               <p className="text-[11px] text-muted-foreground">
-                                {new Date(o.createdAt).toLocaleDateString()} · {o.status}
+                                {new Date(o.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {o.status}
                                 {invoiced ? " · already invoiced" : ""}
                               </p>
                             </div>
@@ -1703,7 +1703,7 @@ export function SettingsPage() {
                     const client = liveDb.clients.find(c => c.id === g.clientId);
                     return (
                       <p key={i} className="text-[11px] text-muted-foreground">
-                        {new Date(g.at).toLocaleDateString()} · {client?.companyName ?? "Client"} · {fmtMoney(g.amount)}
+                        {new Date(g.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {client?.companyName ?? "Client"} · {fmtMoney(g.amount)}
                         {g.orders.length > 1 ? ` · across ${g.orders.length} orders` : ""}
                       </p>
                     );
@@ -1755,7 +1755,7 @@ export function SettingsPage() {
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
               {widowedUses.slice(0, 8).map(r => (
                 <p key={r.id} className="text-[11px] text-muted-foreground">
-                  {new Date(r.createdAt).toLocaleDateString()} · {r.purityOrQuality} · {r.quantity}{materialUnit(db.settings, r.material)} · {r.orderNumber}
+                  {new Date(r.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {r.purityOrQuality} · {r.quantity}{materialUnit(db.settings, r.material)} · {r.orderNumber}
                 </p>
               ))}
               {widowedUses.length > 8 && (
@@ -1792,7 +1792,7 @@ export function SettingsPage() {
             <div className="mt-3 space-y-1 max-h-40 overflow-y-auto">
               {lostSupplierPayments.slice(0, 8).map(o => (
                 <p key={o.txnId} className="text-[11px] text-muted-foreground">
-                  {new Date(o.at).toLocaleDateString()} · {o.partyName} · {fmtMoneyInr(o.amountInr)}
+                  {new Date(o.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} · {o.partyName} · {fmtMoneyInr(o.amountInr)}
                   {" · "}{liveDb.lockers.find(l => l.id === o.lockerId)?.name ?? "account"}
                 </p>
               ))}
@@ -1845,7 +1845,7 @@ export function SettingsPage() {
                             {fmtCcy(t.amountInr, t.currency)} · {t.category || t.note || "Money in"}
                           </p>
                           <p className="text-[11px] text-muted-foreground truncate">
-                            {locker?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
+                            {locker?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                           </p>
                         </div>
                         <div className="flex items-center gap-2 shrink-0">
@@ -1887,7 +1887,7 @@ export function SettingsPage() {
                           {fmtCcy(t.amountInr, t.currency)} · {t.category || t.note || "Money in"}
                         </p>
                         <p className="text-[11px] text-muted-foreground truncate">
-                          {liveDb.lockers.find(l => l.id === t.lockerId)?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString()}
+                          {liveDb.lockers.find(l => l.id === t.lockerId)?.name ?? "Locker"} · {new Date(t.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                         </p>
                       </div>
                       <Button size="sm" variant="ghost" onClick={() => setNotClientPayment(t.id, false)}
@@ -1903,7 +1903,7 @@ export function SettingsPage() {
             {fixTxn && (
               <div className="mt-3 rounded-xl border border-primary/30 bg-primary/5 p-3 space-y-2.5">
                 <p className="text-xs font-semibold text-brand-dark">
-                  Apply {fmtCcy(fixTxn.amountInr, fixTxn.currency)} from {new Date(fixTxn.createdAt).toLocaleDateString()}
+                  Apply {fmtCcy(fixTxn.amountInr, fixTxn.currency)} from {new Date(fixTxn.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}
                 </p>
                 <div>
                   <Label className="text-xs">Received from</Label>
@@ -2021,7 +2021,7 @@ export function SettingsPage() {
                     </p>
                     <p className="text-[11px] text-muted-foreground truncate">
                       {r.orders.map(o => o.orderNumber).join(", ") || "order missing"} ·{" "}
-                      {new Date(r.inv.createdAt).toLocaleDateString()} ·{" "}
+                      {new Date(r.inv.createdAt).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })} ·{" "}
                       {r.dispatched ? "dispatched" : "NOT dispatched"}
                       {r.paid ? " · fully paid" : ""}
                     </p>

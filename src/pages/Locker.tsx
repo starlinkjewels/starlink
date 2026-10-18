@@ -533,7 +533,7 @@ export function LockerPage() {
         `Account: ${selected.name}${selected.type === "bank" && selected.accountNumberLast4 ? ` (····${selected.accountNumberLast4})` : ""}`,
         `Type: ${selected.type === "bank" ? "Bank" : "Cash"} · Currency: ${cur}`,
         `Opening Balance: ${fmtCcyPdf(selected.openingBalance || 0, cur)}`,
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
       summary: [
         { label: "Current Balance", value: fmtCcyPdf(lockerBalance(selected, db.lockerTransactions), cur) },
@@ -814,10 +814,14 @@ export function LockerPage() {
                         const billed = ccy(selected.currency) === "USD" ? amt : (r > 0 ? amt / r : 0);
                         const chosen = clientInvoices.find(x => x.inv.id === txnInvoiceId);
                         if (!billed) return "Enter the amount to see what it settles.";
-                        // What settleClientAccount does: the named invoice, the rest as credit.
-                        return chosen
-                          ? `${fmtMoney(billed)} against invoice ${chosen.inv.number} (${fmtMoney(chosen.bal)} pending); anything over is held as credit.`
-                          : `${fmtMoney(billed)} held as credit — pick an invoice to settle one.`;
+                        // What settleClientAccount does: this money and any credit they
+                        // already hold go onto the named invoice up to what it owes;
+                        // the rest is their credit. With none named, all of it is credit.
+                        const held = db.clients.find(x => x.id === txnClientId)?.creditBalance || 0;
+                        if (!chosen) return `${fmtMoney(billed)} held as credit — pick an invoice to settle one.`;
+                        const onInv = Math.round(Math.min(billed + held, chosen.bal) * 100) / 100;
+                        const after = Math.round((billed + held - onInv) * 100) / 100;
+                        return `${fmtMoney(onInv)} goes on invoice ${chosen.inv.number}${held > 0.005 ? " (with their held credit)" : ""}; credit after: ${fmtMoney(after)}.`;
                       })()}
                     </p>
                   )}

@@ -848,7 +848,7 @@ function FactoryHistoryPageBody() {
       subjectLines: [
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
         { label: (factory.openingFineGold || 0) + T.goldOut - T.goldIn < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${q3(Math.abs((factory.openingFineGold || 0) + T.goldOut - T.goldIn))} g fine` },
@@ -922,7 +922,7 @@ function FactoryHistoryPageBody() {
       subjectLines: [
         factory.contactPerson ? `Contact: ${factory.contactPerson}` : "",
         from || to ? `Period: ${from ? fmtDate(from.toISOString()) : "start"} → ${to ? fmtDate(to.toISOString()) : "today"}` : "Period: all time",
-        `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+        `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ].filter(Boolean),
       summary: [
         { label: "Charges Pending", value: fmtInrPlain(acct.chargesPending) },
@@ -1083,7 +1083,9 @@ function FactoryHistoryPageBody() {
       <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}
-        openingFineGold={factory.openingFineGold || 0}
+        // The opening fine gold is the first company's (as on the account card
+        // above — factoryFineGoldBalance): another company's view leaves it out.
+        openingFineGold={firstCo ? factory.openingFineGold || 0 : 0}
         account={account}
         onExport={() => setShowExport(true)}
       />

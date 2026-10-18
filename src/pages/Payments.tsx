@@ -348,6 +348,15 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
     } finally { setSaving(false); }
   };
 
+  // What saving will do (settleClientAccount): with an invoice named, this
+  // money and any credit they already hold go onto that invoice up to what it
+  // still owes, and the rest is their credit; with none, it is all held as credit.
+  const amt0 = Number(amount) || 0;
+  const heldCredit = db.clients.find(x => x.id === clientId)?.creditBalance || 0;
+  const invoiceDue = invoiceId ? openInvoices.find(x => x.inv.id === invoiceId)?.bal ?? 0 : 0;
+  const onInvoice = invoiceId ? Math.round(Math.min(amt0 + heldCredit, invoiceDue) * 100) / 100 : 0;
+  const creditAfter = Math.round((amt0 + heldCredit - onInvoice) * 100) / 100;
+
   // Unknown until there is a rate — never shown as if the dollars landed unconverted.
   const depositPreview = !amount ? null : needsRate ? (rate > 0 ? roundCcy(Number(amount) * rate, lockerCurrency) : null) : Number(amount);
 
@@ -363,9 +372,11 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
               <p className="font-medium text-foreground tabular-nums break-words">{fmtMoney(Number(amount))}</p>
             </div>
             <div className="min-w-0">
-              {/* No invoice named: settleClientAccount holds it all as credit. */}
-              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{invoiceId ? "Against the invoice" : "Held as credit"}</p>
-              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(Number(amount))}</p>
+              <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{invoiceId ? "On the invoice" : "Held as credit"}</p>
+              <p className="font-semibold text-primary tabular-nums break-words">{fmtMoney(invoiceId ? onInvoice : amt0)}</p>
+              {(invoiceId ? creditAfter > 0.005 || heldCredit > 0.005 : heldCredit > 0.005) && (
+                <p className="text-[11px] text-muted-foreground tabular-nums">Credit after: {fmtMoney(creditAfter)}</p>
+              )}
             </div>
             {depositPreview != null && locker && (
               <div className="min-w-0">

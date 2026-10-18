@@ -225,7 +225,7 @@ export function EmployeeDetailPage() {
       `Name: ${employee.name}`,
       employee.department ? `Department: ${employee.department}` : "",
       `Total paid to date: ${pdfMix(salaryTotals.total)}`,
-      `Report Generated: ${new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}`,
+      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
     ].filter(Boolean),
     summary: [],
     columns: [{ header: "Date", x: 20 }, { header: "Particulars", x: 55 }, { header: "Category", x: 120 }, { header: "Amount", x: 175 }],

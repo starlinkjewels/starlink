@@ -46,7 +46,7 @@ export const DATE_PRESETS: { key: string; label: string; range: () => [string, s
   { key: "lastfy", label: "Last financial year", range: () => { const d = new Date(); const y = (d.getMonth() >= 3 ? d.getFullYear() : d.getFullYear() - 1) - 1; return [iso(new Date(y, 3, 1)), iso(new Date(y + 1, 2, 31))]; } },
 ];
 
-const short = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const short = (s: string) => new Date(`${s}T00:00:00`).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
 /** "This month", or "1 Oct 2026 – 17 Oct 2026" for a range of one's own. */
 export function dateRangeText(from: string, to: string): string {
