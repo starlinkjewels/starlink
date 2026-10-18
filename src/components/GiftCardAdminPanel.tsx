@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { updateDb, uid, fmtMoney, fmtDate, issueGiftCard, giftCardRemaining, giftCardExpired, giftCardGranted, type GiftCard } from "@/lib/db";
-import { sendMail } from "@/lib/email";
+import { sendMail, giftCardEmail } from "@/lib/email";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
@@ -56,8 +56,9 @@ export function GiftCardAdminPanel({ clientId }: { clientId: string }) {
       });
     });
     if (client.email) {
-      void sendMail(client.email, "You've received a gift card",
-        `<p>Dear ${client.companyName},</p><p>You've received a <b>${fmtMoney(amt)}</b> gift card to use on your next order. It is valid for 30 days.</p>${note.trim() ? `<p>${note.trim()}</p>` : ""}<p>Open your account to see and use it.</p>`);
+      const until = new Date(Date.parse(now) + 30 * 86400e3).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }).replace(/\bSept\b/, "Sep");
+      const m = giftCardEmail({ clientName: client.companyName, amount: fmtMoney(amt), validUntil: until, note: note.trim() || undefined });
+      void sendMail(client.email, m.subject, m.html);
     }
     toast.success(`${fmtMoney(amt)} gift card issued`);
     setAmount(""); setNote("");
