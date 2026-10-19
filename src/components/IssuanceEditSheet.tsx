@@ -1,3 +1,4 @@
+import { LotPicker } from "@/components/LotFields";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
@@ -112,13 +113,18 @@ export function IssuanceEditSheet({ issuance, onClose }: { issuance: MaterialIss
             ) : certified ? (
               <div className="rounded-xl h-10 px-3 mt-1 flex items-center bg-secondary/60 text-sm text-muted-foreground">Certified</div>
             ) : (
+              mi?.material === "diamond" ? (
+                // Loose: a lot in stock — or the one it already came from.
+                <LotPicker value={f.bucket} onChange={v => setF({ ...f, bucket: v })} companyId={mi.companyId || "main"} className="h-10 rounded-xl mt-1" />
+              ) : (
               <Select value={f.bucket} onValueChange={v => setF({ ...f, bucket: v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label={mi?.material === "gold" ? "Purity" : "Shape"}><SelectValue /></SelectTrigger>
+                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Purity"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {[...new Set([...(mi?.material === "gold" ? GOLD_PURITIES : DIAMOND_SHAPES), mi?.purityOrQuality ?? ""])].filter(Boolean)
+                  {[...new Set([...GOLD_PURITIES, mi?.purityOrQuality ?? ""])].filter(Boolean)
                     .map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
+              )
             )}
           </div>
         </div>

@@ -2,6 +2,8 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
+import { ListSelect } from "@/components/LotFields";
+import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { useDb } from "@/hooks/useDb";
 import {
@@ -50,6 +52,8 @@ interface Line {
   kind: BuyKind;
   purity: string;
   shape: string;
+  /** Loose: the lot's size — sieve or mm (lib/diamondLots.ts); its colour and clarity are below. */
+  size: string;
   qty: string;      // grams (gold) or carats (diamond)
   rate: string;     // per gram / per carat
   quality: string;
@@ -62,10 +66,13 @@ interface Line {
 }
 
 const emptyLine = (): Line => ({
-  kind: "loose", purity: "22K", shape: "Round", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
+  kind: "loose", purity: "22K", shape: "Round", size: "", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
   color: "", clarity: "", cut: "", polish: "", sym: "", fluor: "", measure: "", lab: "", certNo: "",
   materialId: "", grade: "",
 });
+
+/** A loose line's lot: shape · size · colour · clarity. */
+const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", size: l.size || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
 
 /** The stock material a line buys. */
 const lineMaterial = (l: Line): MaterialKey => (l.kind === "gold" ? "gold" : l.kind === "other" ? (l.materialId as MaterialKey) : "diamond");
@@ -176,10 +183,13 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
       // becomes its own packet below.
       for (const [i, l] of lines.entries()) {
         if (l.kind === "certified") continue;
+        // Loose stones go into their lot: shape · size · colour · clarity (lib/diamondLots.ts).
+        const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
         await increaseStock({
           material: lineMaterial(l), companyId,
-          purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : l.shape,
+          purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
           quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
+          lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
         });
       }
       updateDb(d => {
@@ -198,9 +208,11 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               pieces: Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
             } : undefined,
             diamond: !isGold && !isOther ? {
-              carat: q, quality: l.quality.trim() || undefined, ratePerCarat: Number(l.rate) || 0,
+              // Loose: its colour and clarity read as its quality, where older screens show one.
+              carat: q, quality: (l.kind === "loose" ? [l.color, l.clarity].map(x => x.trim()).filter(Boolean).join(" ") : l.quality.trim()) || undefined, ratePerCarat: Number(l.rate) || 0,
               pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
               kind: l.kind === "certified" ? "certified" : "loose", shape: l.shape,
+              ...(l.kind === "loose" ? { size: l.size || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined } : {}),
               certificateNumber: l.kind === "certified" ? l.certNo.trim() : undefined,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
@@ -419,15 +431,19 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         ) : (
           <>
             <Field label="Shape">{id => (
-              <Select value={l.shape} onValueChange={v => onChange({ shape: v })}>
-                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-              </Select>
+              <ListSelect id={id} list="diamondShapes" value={l.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} />
             )}</Field>
             {l.kind === "loose" ? (
               <>
-                <Field label="Quality">{id => (
-                  <Input id={id} value={l.quality} onChange={e => onChange({ quality: e.target.value })} className="rounded-xl h-10" placeholder="Optional" />
+                {/* The lot it goes into: shape · size · colour · clarity (lib/diamondLots.ts). */}
+                <Field label="Size">{id => (
+                  <ListSelect id={id} list="diamondSizes" value={l.size} onChange={v => onChange({ size: v })} />
+                )}</Field>
+                <Field label="Colour">{id => (
+                  <ListSelect id={id} list="diamondColors" value={l.color} onChange={v => onChange({ color: v })} />
+                )}</Field>
+                <Field label="Clarity">{id => (
+                  <ListSelect id={id} list="diamondClarities" value={l.clarity} onChange={v => onChange({ clarity: v })} />
                 )}</Field>
                 <Field label="Pcs">{id => (
                   <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />
@@ -469,8 +485,8 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
           </button>
           {grading && (
             <div className="grid grid-cols-2 @md:grid-cols-4 gap-2 px-3 pb-3">
-              <Input value={l.color} onChange={e => onChange({ color: e.target.value })} className={box} placeholder="Color" />
-              <Input value={l.clarity} onChange={e => onChange({ clarity: e.target.value })} className={box} placeholder="Clarity" />
+              <ListSelect list="diamondColors" value={l.color} onChange={v => onChange({ color: v })} placeholder="Colour" className={box} />
+              <ListSelect list="diamondClarities" value={l.clarity} onChange={v => onChange({ clarity: v })} placeholder="Clarity" className={box} />
               <Input value={l.cut} onChange={e => onChange({ cut: e.target.value })} className={box} placeholder="Cut" />
               <Input value={l.polish} onChange={e => onChange({ polish: e.target.value })} className={box} placeholder="Polish" />
               <Input value={l.sym} onChange={e => onChange({ sym: e.target.value })} className={box} placeholder="Symmetry" />

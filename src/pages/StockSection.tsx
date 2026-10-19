@@ -25,11 +25,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet } from "lucide-react";
+import { Pencil, Trash2, ExternalLink, Lock, FileText, FileSpreadsheet, BadgeCheck, Gem, Wallet } from "lucide-react";
 import { isOtherMaterial, materialDef, materialUnit, purchaseQty, KIND_LABEL, type MaterialKey } from "@/lib/materials";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PageHeader } from "@/components/PageHeader";
+import { lotShape } from "@/lib/diamondLots";
+import { StockLotsTable } from "@/components/StockLotsTable";
+import { ListSelect } from "@/components/LotFields";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
+import { listOf } from "@/lib/optionLists";
 
 export function StockSectionPage() {
   const { section } = useParams<{ section: string }>();
@@ -95,15 +100,17 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const filteredRows = rows.filter(m => inDateRange(m.createdAt, filterFromDate, filterToDate));
 
   const materialLabel = material === "gold" ? "Gold Reserve" : material === "diamond" ? "Loose Diamonds" : (def?.name ?? "Material");
-  const bucketLabel = material === "gold" ? "Purity" : material === "diamond" ? "Shape" : "Grade"; // purityOrQuality = shape for diamonds, grade for the rest
+  const bucketLabel = material === "gold" ? "Purity" : material === "diamond" ? "Lot" : "Grade"; // purityOrQuality = the lot for loose diamonds (lib/diamondLots.ts), grade for the rest
 
   // ── One-time cleanup: older order-bought loose diamonds were filed by quality
   // grade ("EF VVS") or "unspecified" instead of shape. Each is part of a
   // net-zero direct-use pair, so re-labelling to the real shape (from the linked
   // purchase) changes NO balance — it just fixes the Shape column. Admin only. ──
   const { user } = useAuth();
-  const SHAPE_SET = new Set(DIAMOND_SHAPES.map(s => s.toLowerCase()));
-  const isBadShape = (v: string) => v !== "Certified" && !SHAPE_SET.has(String(v).toLowerCase());
+  // The standard shapes and any the business added (Settings → Dropdown lists).
+  const SHAPE_SET = new Set([...DIAMOND_SHAPES, ...listOf("diamondShapes", db.settings)].map(s => s.toLowerCase()));
+  // A lot ("Round · +6.5-7 · G-H · VS") is filed under its shape too — only its first part must be a shape.
+  const isBadShape = (v: string) => v !== "Certified" && !SHAPE_SET.has(lotShape(String(v)).toLowerCase());
   const badShapeCount = material === "diamond"
     ? db.stockMovements.filter(m => m.material === "diamond" && isBadShape(m.purityOrQuality)).length
     : 0;
@@ -170,6 +177,9 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       cell: m => <CellDate>{fmtDate(m.createdAt)}</CellDate> },
     { key: "bucket", header: bucketLabel, sortValue: m => String(m.purityOrQuality),
       cell: m => <CellTag tone="blue">{m.purityOrQuality}</CellTag> },
+    // Loose diamonds: how many stones moved, when counted.
+    ...(material === "diamond" ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (m: Movement) => m.pieces ?? null,
+      cell: (m: Movement) => (m.pieces != null ? <span className="tabular-nums">{m.type === "purchase_in" ? "+" : "−"}{m.pieces}</span> : dash) }] : []),
     { key: "particulars", header: "Particulars", sortValue: m => m.link.label,
       cell: m => <span>{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</span> },
     { key: "in", header: `In (${unit})`, align: "right", kind: "number", sortValue: m => (m.type === "purchase_in" ? m.quantity : null),
@@ -324,7 +334,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By shape" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By lot — shape · size · colour · clarity" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 
@@ -335,29 +345,9 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         </div>
       )}
 
-      <div className="card-luxe p-5">
-        <SectionTitle className="mb-3" title="Balances"
-          actions={selectedBucket && <button onClick={() => setSelectedBucket(null)} className="text-xs text-primary hover:underline">Show all</button>} />
-        {entries.length === 0 ? (
-          <p className="text-sm text-muted-foreground">Nothing in stock.</p>
-        ) : (
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-2">
-            {entries.map(([key, qty]) => (
-              <button
-                key={key}
-                type="button"
-                onClick={() => setSelectedBucket(v => (v === key ? null : key))}
-                className={`flex items-center justify-between p-2.5 rounded-xl text-left transition-colors ${
-                  selectedBucket === key ? "bg-primary/10 ring-1 ring-primary/30" : "bg-secondary hover:bg-secondary/70"
-                }`}
-              >
-                <span className="text-sm font-medium">{key}</span>
-                <span className="text-sm font-semibold">{qty.toLocaleString()} {unit}</span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* What is in stock, line by line — loose diamonds by lot, with filters;
+          a line opens its history below. */}
+      <StockLotsTable material={material} companyId={co} selected={selectedBucket} onSelect={setSelectedBucket} />
 
       <div className="card-luxe overflow-hidden">
         <SectionTitle className="px-5 pt-4" title="Movement History" sub={selectedBucket ?? undefined} />
@@ -407,6 +397,12 @@ function CertifiedSection() {
   // Rate is edited as free text so a half-typed number does not snap to 0.
   const [editRate, setEditRate] = useState("");
   const [savingPacket, setSavingPacket] = useState(false);
+  // Filters on the stones in stock — by what a buyer asks for.
+  const [fShape, setFShape] = useState("");
+  const [fColor, setFColor] = useState("");
+  const [fClarity, setFClarity] = useState("");
+  const [fLab, setFLab] = useState("");
+  const [fSize, setFSize] = useState("");
   const [histFrom, setHistFrom] = useState("");
   const [histTo, setHistTo] = useState("");
 
@@ -781,6 +777,30 @@ function CertifiedSection() {
     ];
   };
 
+  // ── Filters: shape, colour, clarity, lab, and size bands by carat ──
+  const SIZE_BANDS: { key: string; label: string; min: number; max: number }[] = [
+    { key: "a", label: "Under 0.30 ct", min: 0, max: 0.3 }, { key: "b", label: "0.30 – 0.49 ct", min: 0.3, max: 0.5 },
+    { key: "c", label: "0.50 – 0.69 ct", min: 0.5, max: 0.7 }, { key: "d", label: "0.70 – 0.99 ct", min: 0.7, max: 1 },
+    { key: "e", label: "1.00 – 1.49 ct", min: 1, max: 1.5 }, { key: "f", label: "1.50 – 1.99 ct", min: 1.5, max: 2 },
+    { key: "g", label: "2.00 – 2.99 ct", min: 2, max: 3 }, { key: "h", label: "3.00 ct and over", min: 3, max: Infinity },
+  ];
+  const certOpts = (pick: (p: DiamondPacket) => string | undefined) =>
+    [...new Set(allInStockPackets.map(p => (pick(p) || "").trim()))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }))
+      .map(v => ({ value: v || "__none", label: v || "Not recorded" }));
+  const want = (w: string, have?: string) => !w || (w === "__none" ? !(have || "").trim() : (have || "").trim() === w);
+  const band = SIZE_BANDS.find(b => b.key === fSize);
+  const certShown = allInStockPackets.filter(p => want(fShape, p.shape) && want(fColor, p.color) && want(fClarity, p.clarity)
+    && want(fLab, p.certificateLab) && (!band || (p.carat >= band.min && p.carat < band.max)));
+  const certFiltered = !!(fShape || fColor || fClarity || fLab || fSize);
+  const certFilters: TableFilter[] = [
+    { kind: "select", label: "Shape", value: fShape, onChange: setFShape, options: certOpts(p => p.shape), allLabel: "All shapes" },
+    { kind: "select", label: "Size", value: fSize, onChange: setFSize, allLabel: "All sizes",
+      options: SIZE_BANDS.filter(b => allInStockPackets.some(p => p.carat >= b.min && p.carat < b.max)).map(b => ({ value: b.key, label: b.label })) },
+    { kind: "select", label: "Colour", value: fColor, onChange: setFColor, options: certOpts(p => p.color), allLabel: "All colours" },
+    { kind: "select", label: "Clarity", value: fClarity, onChange: setFClarity, options: certOpts(p => p.clarity), allLabel: "All clarities" },
+    { kind: "select", label: "Lab", value: fLab, onChange: setFLab, options: certOpts(p => p.certificateLab), allLabel: "All labs" },
+  ];
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
@@ -797,11 +817,26 @@ function CertifiedSection() {
         </div>
       )}
 
-      <div className="card-luxe p-3 sm:p-4">
+      <div className="card-luxe p-3 sm:p-4 space-y-3">
+        {(() => {
+          // The stones the filters leave — and what they come to.
+          const r2 = (n: number) => Math.round(n * 100) / 100;
+          const value = certShown.reduce((t, p) => t + (p.ratePerCaratInr ? p.ratePerCaratInr * p.carat : 0), 0);
+          const unpriced = certShown.filter(p => !p.ratePerCaratInr).length;
+          return (
+            <StatStrip items={[
+              { label: certFiltered ? "In stock · filtered" : "In stock", value: `${certShown.length} stone${certShown.length === 1 ? "" : "s"}`, icon: BadgeCheck },
+              { label: "Carats", value: `${r2(certShown.reduce((t, p) => t + (p.carat || 0), 0))} ct`, icon: Gem },
+              { label: "Value at cost", value: fmtMoneyInr(value), icon: Wallet, sub: unpriced ? `${unpriced} without a rate` : "Rate/ct × carats" },
+            ]} />
+          );
+        })()}
         <DataTable
           id="stock-certified-in-stock"
           noun="packet"
-          rows={allInStockPackets}
+          rows={certShown}
+          filters={certFilters}
+          onClearFilters={() => { setFShape(""); setFColor(""); setFClarity(""); setFLab(""); setFSize(""); }}
           columns={inStockColumns}
           rowKey={p => p.id}
           defaultSort={{ key: "bought", dir: "desc" }}
@@ -863,10 +898,7 @@ function CertifiedSection() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label className="text-xs">Shape</Label>
-                <Select value={editPacket.shape} onValueChange={v => setEditPacket({ ...editPacket, shape: v })}>
-                  <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Shape" /></SelectTrigger>
-                  <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                </Select>
+                <ListSelect list="diamondShapes" value={editPacket.shape} onChange={v => setEditPacket({ ...editPacket, shape: v || "Round" })} optional={false} className="rounded-xl mt-1" />
               </div>
               <div>
                 <Label className="text-xs">Carat</Label>
@@ -882,11 +914,11 @@ function CertifiedSection() {
               </div>
               <div>
                 <Label className="text-xs">Color</Label>
-                <Input value={editPacket.color ?? ""} onChange={e => setEditPacket({ ...editPacket, color: e.target.value })} className="rounded-xl mt-1" />
+                <ListSelect list="diamondColors" value={editPacket.color ?? ""} onChange={v => setEditPacket({ ...editPacket, color: v || undefined })} className="rounded-xl mt-1" />
               </div>
               <div>
                 <Label className="text-xs">Clarity</Label>
-                <Input value={editPacket.clarity ?? ""} onChange={e => setEditPacket({ ...editPacket, clarity: e.target.value })} className="rounded-xl mt-1" />
+                <ListSelect list="diamondClarities" value={editPacket.clarity ?? ""} onChange={v => setEditPacket({ ...editPacket, clarity: v || undefined })} className="rounded-xl mt-1" />
               </div>
               <div>
                 <Label className="text-xs">Cut</Label>

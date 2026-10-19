@@ -74,7 +74,7 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
       for (const s of stones) {
         const ref = `${meltId}_d_${s.issuanceId}`;
         if (done.has(ref)) continue;
-        await increaseStock({ material: "diamond", companyId: coOfIssue(s.issuanceId), purityOrQuality: s.quality, quantity: s.ct, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}` });
+        await increaseStock({ material: "diamond", companyId: coOfIssue(s.issuanceId), purityOrQuality: s.quality, quantity: s.ct, refType: "manual", refId: ref, createdBy: user.id, note: `Back from melted ${order.orderNumber}`, pieces: s.pcs || undefined });
       }
       // Any other material in the piece — back into its own stock, once.
       for (const x of plan.others) {

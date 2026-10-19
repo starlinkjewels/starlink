@@ -28,13 +28,16 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
       // Stock-sourced: return only the part not actually consumed into a piece.
       const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
       const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
-      if (remaining > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user.id, note: `Returned from cancelled order ${order.orderNumber}` });
+      if (remaining > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user.id, note: `Returned from cancelled order ${order.orderNumber}`,
+        // Loose stones: all of them come back when none was used in a piece.
+        pieces: mi.material === "diamond" && used === 0 && mi.piecesIssued ? mi.piecesIssued : undefined });
     } else if (mi.source === "purchase") {
       // Bought new for THIS order and sent to the factory (never entered the
       // shared pool). On cancel the piece isn't being made, so the material
       // comes back from the factory into general Stock, available for reuse.
       // The supplier purchase itself stays — that money was really spent.
-      if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock` });
+      if (mi.quantityIssued > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: mi.quantityIssued, refType: "manual", createdBy: user.id, note: `Purchased for cancelled order ${order.orderNumber} — moved to stock`,
+        pieces: mi.material === "diamond" && mi.piecesIssued ? mi.piecesIssued : undefined });
     }
   }
   const wasRejected = order.status === "Rejected";

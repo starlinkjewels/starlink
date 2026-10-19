@@ -1089,6 +1089,10 @@ export interface DiamondPurchaseDetail {
   // packet (see DiamondPacket). Older records without this are treated as loose.
   kind?: "loose" | "certified";
   shape?: string; // one of DIAMOND_SHAPES — the loose-stock bucket key
+  /** Loose: the lot it goes into with the shape (lib/diamondLots.ts) — sieve or mm size, colour, clarity. */
+  size?: string;
+  color?: string;
+  clarity?: string;
   certificateNumber?: string;
   certificateLab?: string; // GIA / IGI / etc.
 }
@@ -1144,7 +1148,10 @@ export interface DiamondSale {
   /** The company this belongs to — each company holds its own stock. Unset = the first company. */
   companyId?: string;
   kind: "loose" | "certified";
-  shape: string; // bucket key (loose) or the packet's own shape (certified)
+  shape: string; // the stones' shape (loose: the lot's first part) or the packet's own shape (certified)
+  /** Loose: the stock lot sold from (its bucket), when it has more than a shape. */
+  bucket?: string;
+  pieces?: number;
   quality?: string; // loose only, optional
   packetId?: string; // set iff kind === "certified"
   carat: number;
@@ -1466,6 +1473,11 @@ export interface StockMovement {
   companyId?: string;
   purityOrQuality: string;
   quantity: number; // always positive; direction implied by `type`
+  /** Loose diamonds: the lot's parts (lib/diamondLots.ts), for filtering — the
+   *  bucket above is already the lot's label. Absent on older movements. */
+  lot?: { shape: string; size?: string; color?: string; clarity?: string };
+  /** Loose diamonds: how many stones moved, when known. */
+  pieces?: number;
   /** "transfer": moved between our companies (in at the sending company's average cost). */
   refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "manual" | "opening" | "transfer";
   refId?: string;
@@ -3553,7 +3565,8 @@ export function mainDiamondShape(d: DB, orderId: string): string | undefined {
   }
   if (!best) {
     for (const i of d.materialIssuances ?? []) {
-      if (i.orderId === orderId && i.material === "diamond") take(i.purityOrQuality, i.quantityIssued || 0);
+      // A loose issue's bucket may be a whole lot ("Round · +6.5-7 · G-H · VS"): its shape is the first part.
+      if (i.orderId === orderId && i.material === "diamond") take(String(i.purityOrQuality).split(" · ")[0], i.quantityIssued || 0);
     }
   }
   if (!best) {

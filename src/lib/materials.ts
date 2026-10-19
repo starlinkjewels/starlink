@@ -17,6 +17,7 @@
  * never goes down a gold path.
  */
 import type { Settings, Purchase } from "./db";
+import { lotKey } from "./diamondLots";
 
 export type MaterialKind = "metal" | "stone" | "finding";
 export type MaterialUnit = "g" | "ct" | "pcs";
@@ -107,10 +108,13 @@ export function purchaseRate(p: Pick<Purchase, "material" | "gold" | "diamond" |
   return p.other?.ratePerUnit ?? 0;
 }
 
-/** The stock bucket it lands in: a purity, a shape (or "Certified"), or a grade. */
+/** The stock bucket it lands in: a purity, a loose diamond's lot (or "Certified"), or a grade.
+ *  A loose lot with only a shape is the shape, as it always was (lib/diamondLots.ts). */
 export function purchaseBucket(p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): string {
   if (p.material === "gold") return p.gold?.purity ?? "";
-  if (p.material === "diamond") return p.diamond?.kind === "certified" ? "Certified" : (p.diamond?.shape || "unspecified");
+  if (p.material === "diamond") return p.diamond?.kind === "certified" ? "Certified"
+    : !p.diamond?.shape ? "unspecified"
+    : lotKey({ shape: p.diamond.shape, size: p.diamond.size, color: p.diamond.color, clarity: p.diamond.clarity });
   return p.other?.grade || "—";
 }
 

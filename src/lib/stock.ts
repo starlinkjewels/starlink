@@ -103,9 +103,15 @@ function pruneUndefined<T extends Record<string, unknown>>(o: T): T {
   return out as T;
 }
 
+/** A lot's parts without the empty ones — Firestore refuses an undefined field, nested ones too. */
+function cleanLot(lot: StockMovement["lot"]): StockMovement["lot"] {
+  if (!lot?.shape) return undefined;
+  return pruneUndefined({ shape: lot.shape, size: lot.size || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
+}
+
 async function addStockMovement(m: Omit<StockMovement, "id">): Promise<void> {
   const id = uid("sm_");
-  await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, id }));
+  await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, lot: cleanLot(m.lot), id }));
 }
 
 /** Purchase → stock: a plain atomic increment is safe, since additions can never go negative. */
@@ -121,6 +127,9 @@ export async function increaseStock(args: {
   createdBy: string;
   note?: string;
   createdAt?: string; // as-of date (opening stock) — defaults to now
+  /** Loose diamonds: the lot's parts and how many stones (lib/diamondLots.ts). */
+  lot?: StockMovement["lot"];
+  pieces?: number;
 }): Promise<void> {
   // Each material its own map, keyed by the material itself.
   const field = args.material;
@@ -143,6 +152,8 @@ export async function increaseStock(args: {
     refType: args.refType,
     refId: args.refId,
     valueInr: args.valueInr,
+    lot: args.lot,
+    pieces: args.pieces,
     createdBy: args.createdBy,
     createdAt: args.createdAt || new Date().toISOString(),
     note: args.note,
@@ -166,6 +177,9 @@ export async function decreaseStock(args: {
   refId?: string;
   createdBy: string;
   note?: string;
+  /** Loose diamonds: the lot's parts and how many stones (lib/diamondLots.ts). */
+  lot?: StockMovement["lot"];
+  pieces?: number;
 }): Promise<void> {
   const field = args.material;
   const movementId = uid("sm_");
@@ -198,6 +212,8 @@ export async function decreaseStock(args: {
       quantity: args.quantity,
       refType: args.refType,
       refId: args.refId,
+      lot: cleanLot(args.lot),
+      pieces: args.pieces,
       createdBy: args.createdBy,
       createdAt: new Date().toISOString(),
       note: args.note,
@@ -235,16 +251,21 @@ export async function logOrderDirectPurchase(args: {
    *  purchase deleted the "bought" leg while orphaning the "used" leg — which
    *  is a stock balance that falls by the whole quantity and stays there. */
   createdAt?: string;
+  /** Loose diamonds: the lot's parts and how many stones (lib/diamondLots.ts). */
+  lot?: StockMovement["lot"];
+  pieces?: number;
 }): Promise<void> {
   const now = args.createdAt ?? new Date().toISOString();
   const co = args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {};
   await Promise.all([
     addStockMovement({
       material: args.material, ...co, type: "purchase_in", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      lot: args.lot, pieces: args.pieces,
       refType: "purchase", refId: args.purchaseId, createdBy: args.createdBy, createdAt: now,
     }),
     addStockMovement({
       material: args.material, ...co, type: "order_direct_use", purityOrQuality: args.purityOrQuality, quantity: args.quantity,
+      lot: args.lot, pieces: args.pieces,
       refType: "order", refId: args.orderId, createdBy: args.createdBy, createdAt: now,
     }),
   ]);

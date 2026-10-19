@@ -10,7 +10,7 @@ import { Switch } from "@/components/ui/switch";
 import { confirmBox } from "@/lib/confirm";
 import { LIST_DEFS, listDef, listOf, noKaratMetals, type ListKey } from "@/lib/optionLists";
 
-const GROUPS = ["Orders", "Payments", "Team", "Reasons"] as const;
+const GROUPS = ["Orders", "Diamonds", "Payments", "Team", "Reasons"] as const;
 const MAX = 60;
 
 /**
