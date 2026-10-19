@@ -58,8 +58,9 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       // can see and work with it). Admin keeps whatever manager was selected.
       const accountManagerId = user!.role === "employee" ? user!.id : f.accountManagerId;
       updateDb(d => {
-        const { companyId: _picked, ...rest } = f;
-        void _picked;
+        // The password goes to Firebase Auth only — never onto the record.
+        const { companyId: _picked, password: _pw, ...rest } = f;
+        void _picked; void _pw;
         d.clients.unshift({
           ...rest, id, accountManagerId, username: authUid ? email : "", email, status: "active", createdAt: new Date().toISOString(),
           ...(sellerId && sellerId !== MAIN_COMPANY_ID ? { companyId: sellerId } : {}),

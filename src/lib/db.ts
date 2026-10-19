@@ -86,7 +86,9 @@ export interface Client {
   gstVat: string;
   address: string;
   username: string;
-  password: string;
+  /** No longer saved — the login's password lives only in Firebase Auth.
+   *  Older records had it in plain text; dropStoredClientPasswords() removes it. */
+  password?: string;
   status: "active" | "inactive";
   accountManagerId?: string;
   /** Which of our companies sells to this client — its invoices, proformas and
@@ -2478,6 +2480,15 @@ async function recordChanges(
   try {
     const who = actor();
     if (!who) return;
+    // The log keeps full copies of what changed (for undo) and can never be
+    // edited afterwards — so a password must never ride along in one.
+    const noSecret = (x: Record<string, unknown> | null) => {
+      if (!x || !("password" in x)) return x;
+      const { password: _p, ...rest } = x;
+      void _p;
+      return rest;
+    };
+    raw = raw.map(r => ({ ...r, before: noSecret(r.before), after: noSecret(r.after) }));
     const changes = describeChanges(raw);
     if (!changes.length) return;
     const { summary, module } = summarise(changes);
@@ -2677,6 +2688,23 @@ export async function touchPresence(userId: string): Promise<void> {
   } catch {
     // A heartbeat that fails is not worth telling anyone about.
   }
+}
+
+/**
+ * Client records used to keep the login password in plain text: the Create
+ * Client form saved its whole form. Sign-in never needed it — passwords live
+ * in Firebase Auth — so it is no longer saved, and this takes it off records
+ * saved before. Run for the admin once the clients are here; nothing to
+ * remove, nothing written. Returns how many records it cleaned.
+ */
+export function dropStoredClientPasswords(): number {
+  if (!loadedCols.has("clients")) return 0;
+  const n = cache.clients.filter(c => Object.prototype.hasOwnProperty.call(c, "password")).length;
+  if (!n) return 0;
+  updateDbAs({ summary: `Removed stored login passwords from ${n} client record${n === 1 ? "" : "s"}` }, d => {
+    for (const c of d.clients) delete c.password;
+  });
+  return n;
 }
 
 export function updateDb(fn: (db: DB) => void) {
