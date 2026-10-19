@@ -1,3 +1,6 @@
+import { LotPicker, lotStockText } from "@/components/LotFields";
+import { lotBalances, lotLabel, lotParts } from "@/lib/diamondLots";
+import { purchaseBucket } from "@/lib/materials";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
@@ -172,7 +175,9 @@ function FactoryHistoryPageBody() {
   const matWord = (k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
   const issueUnit = materialUnit(db.settings, issueMaterial);
   const [issuePurity, setIssuePurity] = useState("22K");
-  const [issueQuality, setIssueQuality] = useState("Round");
+  // Loose diamonds: the stock LOT they leave (its bucket — lib/diamondLots.ts), and how many stones.
+  const [issueQuality, setIssueQuality] = useState("");
+  const [issuePcs, setIssuePcs] = useState("");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueChargeAmount, setIssueChargeAmount] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
@@ -196,13 +201,16 @@ function FactoryHistoryPageBody() {
 
   const resetIssueForm = () => {
     setIssueOrderNumber("");
-    setIssuePurity("22K"); setIssueQuality("Round"); setIssueGrade(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality(""); setIssuePcs(""); setIssueGrade(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
     const qty = Number(issueQuantity);
     if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} quantity to issue`); return; }
+    if (issueMaterial === "diamond" && !issueQuality.trim()) { toast.error("Choose the lot the stones come from"); return; }
     const purityOrQuality = issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
+    // Loose diamonds: the lot's parts and the stones counted, on the stock movement and the issue.
+    const diaLot = issueMaterial === "diamond" ? { lot: lotParts(purityOrQuality), pieces: Number(issuePcs) > 0 ? Math.round(Number(issuePcs)) : undefined } : {};
     const issuanceId = uid("mi_");
     const now = new Date().toISOString();
 
@@ -215,13 +223,14 @@ function FactoryHistoryPageBody() {
         await decreaseStockSelfHealing({
           material: issueMaterial, companyId: issueCompany, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
-          note: `Bulk delivery to ${factory.name}`,
+          note: `Bulk delivery to ${factory.name}`, ...diaLot,
         }, db.stockMovements);
         updateDb(d => {
           if (!d.materialIssuances) d.materialIssuances = [];
           d.materialIssuances.unshift({
             id: issuanceId, factoryId: id!, orderId: undefined, material: issueMaterial, ...coField(issueCompany),
             purityOrQuality, quantityIssued: qty, source: "stock",
+            ...(diaLot.pieces ? { piecesIssued: diaLot.pieces } : {}),
             issuedAt: now, issuedBy: user!.id, status: "open",
             finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
             notes: issueNotes.trim() || undefined,
@@ -258,7 +267,7 @@ function FactoryHistoryPageBody() {
         await decreaseStockSelfHealing({
           material: issueMaterial, companyId: orderCo, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
-          note: `Used by ${factory.name} for order ${matchedOrder.orderNumber}`,
+          note: `Used by ${factory.name} for order ${matchedOrder.orderNumber}`, ...diaLot,
         }, db.stockMovements);
       }
       updateDb(d => {
@@ -1195,7 +1204,7 @@ function FactoryHistoryPageBody() {
               : matchedOrder ? `Used for ${matchedOrder.orderNumber}`
               : issueOrderNumber.trim() ? "No order with that number yet" : "Used for an order"}
             value={Number(issueQuantity) > 0
-              ? [`${Number(issueQuantity)}${issueUnit}`, issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? issueGrade.trim() : (issueQuality || "Round"), matWord(issueMaterial)].filter(Boolean).join(" ")
+              ? [`${Number(issueQuantity)}${issueUnit}`, issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? issueGrade.trim() : (issueQuality || "—"), matWord(issueMaterial)].filter(Boolean).join(" ")
               : "—"}
             sub={issueMode === "orderConsumption" && Number(issueChargeAmount) > 0 ? `Making charge ${fmtMoneyInr(Number(issueChargeAmount))}` : undefined}
           >
@@ -1242,10 +1251,33 @@ function FactoryHistoryPageBody() {
               <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
             </Select>
           ) : (
-            <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-              <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-              <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-            </Select>
+            // A loose-diamond lot, and how many stones. A delivery comes out of stock;
+            // an order's stones come from this factory's pool first, then a purchase
+            // made for the order, then stock — so all three are offered for an order.
+            <div className="grid grid-cols-[minmax(0,1fr)_6rem] gap-2">
+              {issueMode === "bulkDelivery" || !matchedOrder ? (
+                <LotPicker value={issueQuality} onChange={setIssueQuality} companyId={issueCompany} />
+              ) : (() => {
+                const co = workCompanyOf(db, matchedOrder);
+                const poolKeys = [...new Set(db.materialIssuances.filter(i => i.factoryId === id && i.material === "diamond" && !i.orderId && i.diamondKind !== "certified").map(i => i.purityOrQuality))];
+                const pool = poolKeys.map(k => ({ k, ct: factoryPoolBalance(db.materialIssuances, id!, "diamond", k, co) })).filter(x => x.ct > 0);
+                const bought = eligiblePurchases.filter(p => p.diamond?.kind !== "certified").map(p => purchaseBucket(p));
+                const stock = lotBalances(db.stockMovements ?? [], co).filter(l => l.ct > 0);
+                const seen = new Set<string>();
+                const item = (k: string, text: string) => { if (seen.has(k)) return null; seen.add(k); return <SelectItem key={k} value={k}>{text}</SelectItem>; };
+                return (
+                  <Select value={issueQuality} onValueChange={setIssueQuality}>
+                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose the lot" /></SelectTrigger>
+                    <SelectContent className="max-h-80">
+                      {pool.map(x => item(x.k, `At ${factory.name}: ${lotLabel(x.k)} — ${x.ct} ct`))}
+                      {bought.map(k => item(k, `Bought for this order: ${lotLabel(k)}`))}
+                      {stock.map(l => item(l.key, `In stock: ${lotLabel(l.key)} — ${lotStockText(l, null)}`))}
+                    </SelectContent>
+                  </Select>
+                );
+              })()}
+              <Input type="number" min={0} step="1" value={issuePcs} onChange={e => setIssuePcs(e.target.value)} className="h-10 rounded-xl" placeholder="Pcs" aria-label="Pieces" />
+            </div>
           )}
 
           <Input

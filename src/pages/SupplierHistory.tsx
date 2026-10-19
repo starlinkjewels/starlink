@@ -1,3 +1,5 @@
+import { ListSelect } from "@/components/LotFields";
+import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
@@ -66,6 +68,8 @@ interface PurchaseLine {
   diaCarat: string;
   diaPcs: string;
   diaQuality: string;
+  /** Loose: the lot's size — sieve or mm (lib/diamondLots.ts); colour and clarity are diaColor / diaClarity. */
+  diaSize: string;
   diaRate: string;
   diaKind: "loose" | "certified";
   diaShape: string;
@@ -93,7 +97,7 @@ function emptyPurchaseLine(): PurchaseLine {
   return {
     material: "gold", purpose: "stock", orderNumber: "",
     goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
+    diaCarat: "", diaPcs: "", diaQuality: "", diaSize: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     otherQty: "", otherGrade: "", otherRate: "",
@@ -119,6 +123,10 @@ function purchaseLineTotalInr(line: PurchaseLine): number {
  * page that returned early on its first draw and then ran all its hooks on the
  * next crashed (React #310) whenever it was opened or refreshed directly.
  */
+/** A loose line's lot: shape · size · colour · clarity (lib/diamondLots.ts). */
+const lineLot = (l: { diaShape: string; diaSize: string; diaColor: string; diaClarity: string }): LotSpec =>
+  ({ shape: l.diaShape || "Round", size: l.diaSize || undefined, color: l.diaColor.trim() || undefined, clarity: l.diaClarity.trim() || undefined });
+
 export function SupplierHistoryPage() {
   const { id } = useParams();
   const db = useDb();
@@ -253,11 +261,14 @@ function SupplierHistoryPageBody() {
         const line = entry.line;
         if (line.purpose !== "stock") continue;
         // Certified diamonds are NOT pooled into stock levels — each becomes its
-        // own packet (created in the updateDb below). Loose diamonds pool by shape.
+        // own packet (created in the updateDb below). Loose diamonds pool by lot:
+        // shape · size · colour · clarity (lib/diamondLots.ts).
         if (line.material === "diamond" && line.diaKind === "certified") continue;
+        const lot = line.material === "diamond" ? lineLot(line) : undefined;
         await increaseStock({
           material: line.material, companyId: entry.companyId,
-          purityOrQuality: line.material === "gold" ? line.goldPurity : isOtherMaterial(line.material) ? (line.otherGrade.trim() || "—") : line.diaShape,
+          lot, pieces: lot && Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
+          purityOrQuality: line.material === "gold" ? line.goldPurity : isOtherMaterial(line.material) ? (line.otherGrade.trim() || "—") : lotKey(lot!),
           quantity: line.material === "gold" ? Number(line.goldWeight) : isOtherMaterial(line.material) ? Number(line.otherQty) : Number(line.diaCarat),
           refType: "purchase",
           refId: entry.id,
@@ -277,10 +288,15 @@ function SupplierHistoryPageBody() {
             other: isOtherMaterial(line.material) ? { qty: Number(line.otherQty), grade: line.otherGrade.trim() || "—", ratePerUnit: Number(line.otherRate) || 0 } : undefined,
             diamond: line.material === "diamond" ? {
               carat: Number(line.diaCarat),
-              quality: line.diaQuality || undefined,
+              // Loose: its colour and clarity read as its quality where one is shown.
+              quality: (line.diaKind === "loose" ? [line.diaColor, line.diaClarity].map(x => x.trim()).filter(Boolean).join(" ") : line.diaQuality) || undefined,
               ratePerCarat: Number(line.diaRate) || 0,
               kind: line.diaKind,
               shape: line.diaShape,
+              ...(line.diaKind === "loose" ? {
+                size: line.diaSize || undefined, color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
+                pieces: Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
+              } : {}),
               certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
               certificateLab: line.diaKind === "certified" ? (line.diaLab.trim() || undefined) : undefined,
             } : undefined,
@@ -1067,16 +1083,24 @@ function SupplierHistoryPageBody() {
                         <SelectItem value="certified">Certified (own packet)</SelectItem>
                       </SelectContent>
                     </Select>
-                    <Select value={line.diaShape} onValueChange={v => updatePurchaseLine(idx, { diaShape: v })}>
-                      <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                      <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                    </Select>
+                    <ListSelect list="diamondShapes" value={line.diaShape} onChange={v => updatePurchaseLine(idx, { diaShape: v || "Round" })} optional={false} />
                   </div>
+                  {/* Loose: the lot — size · colour · clarity (lib/diamondLots.ts). */}
+                  {line.diaKind === "loose" && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Size</span>
+                        <ListSelect list="diamondSizes" value={line.diaSize} onChange={v => updatePurchaseLine(idx, { diaSize: v })} /></label>
+                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Colour</span>
+                        <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updatePurchaseLine(idx, { diaColor: v })} /></label>
+                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Clarity</span>
+                        <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updatePurchaseLine(idx, { diaClarity: v })} /></label>
+                    </div>
+                  )}
                   {/* Four across on a laptop, two by two on a phone — the old
                       three-column row squeezed quality and pieces into one cell. */}
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                    <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                    {line.diaKind === "certified" && <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />}
                     <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
                     <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
                   </div>
@@ -1087,8 +1111,8 @@ function SupplierHistoryPageBody() {
                         <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
                       </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        <Input value={line.diaColor} onChange={e => updatePurchaseLine(idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
-                        <Input value={line.diaClarity} onChange={e => updatePurchaseLine(idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
+                        <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updatePurchaseLine(idx, { diaColor: v })} placeholder="Colour" />
+                        <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updatePurchaseLine(idx, { diaClarity: v })} placeholder="Clarity" />
                         <Input value={line.diaCut} onChange={e => updatePurchaseLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
                         <Input value={line.diaFluor} onChange={e => updatePurchaseLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="FL (fluor.)" />
                       </div>

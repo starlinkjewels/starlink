@@ -1,5 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
 import { OpeningStock } from "@/pages/BuyAssign";
+import { lotBalances } from "@/lib/diamondLots";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
@@ -66,6 +67,9 @@ export function StockPage() {
   const diamondTotal = Object.values(diamondBal).reduce((s, c) => s + c, 0);
   const goldPurities = Object.entries(goldBal).filter(([, g]) => g !== 0).length;
   const diamondShapes = Object.entries(diamondBal).filter(([, c]) => c !== 0).length;
+  // Loose diamonds by lot (lib/diamondLots.ts): how many lots, and the stones counted in them.
+  const lots = lotBalances(db.stockMovements ?? [], view).filter(l => l.ct > 0);
+  const lotPcs = lots.reduce((t, l) => t + (l.pcs ?? 0), 0);
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (view === "all" || companyOf(p) === view));
   // Every other material (Settings → Materials): offered ones, and any switched
   // off that still has stock or history.
@@ -148,7 +152,7 @@ export function StockPage() {
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
         <MaterialCard name="Gold Reserve" icon={Coins} sub={`${goldPurities} purit${goldPurities === 1 ? "y" : "ies"} in stock`}
           value={`${goldTotal.toLocaleString()} g`} to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`} />
-        <MaterialCard name="Loose Diamonds" icon={Gem} sub={`${diamondShapes} shape${diamondShapes === 1 ? "" : "s"} in stock`}
+        <MaterialCard name="Loose Diamonds" icon={Gem} sub={`${lots.length || diamondShapes} lot${(lots.length || diamondShapes) === 1 ? "" : "s"} in stock${lotPcs ? ` · ${lotPcs.toLocaleString()} pcs` : ""}`}
           value={`${diamondTotal.toLocaleString()} ct`} to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`} />
         <MaterialCard name="Certified Diamonds" icon={BadgeCheck} sub="One certificate each"
           value={`${inStockPackets.length} packet${inStockPackets.length !== 1 ? "s" : ""}`} to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`} />

@@ -57,7 +57,7 @@ export function saleVoidImpact(db: DB, sale: DiamondSale): string[] {
   const out: string[] = [];
   out.push(sale.kind === "certified"
     ? `• the certified stone goes back into stock`
-    : `• ${sale.carat}ct ${sale.shape} goes back into stock`);
+    : `• ${sale.carat}ct ${sale.bucket || sale.shape} goes back into stock`);
   const buyer = sale.clientId
     ? (db.clients.find(c => c.id === sale.clientId)?.companyName ?? "the client")
     : (sale.buyerName ?? "the buyer");
@@ -82,7 +82,7 @@ export async function voidDiamondSale(db: DB, sale: DiamondSale, userId: string)
   // removed with the stone never coming back.
   if (sale.kind === "loose") {
     await increaseStock({
-      material: "diamond", companyId: companyOf(sale), purityOrQuality: sale.shape, quantity: sale.carat,
+      material: "diamond", companyId: companyOf(sale), purityOrQuality: sale.bucket || sale.shape, quantity: sale.carat,
       refType: "manual", refId: sale.id, createdBy: userId,
       note: "Sale cancelled — returned to stock",
     });

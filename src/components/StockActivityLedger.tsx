@@ -24,7 +24,7 @@ import type { MoreAction } from "@/components/MoreMenu";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
-import { materialName, materialUnit, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
+import { materialName, materialUnit, purchaseBucket, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
 
@@ -147,7 +147,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     const check = canVoidSale(db, sale);
     if (!check.ok) { toast.error(check.reason!); return; }
     if (!(await confirmBox([
-      `Cancel this sale of ${sale.carat}ct ${sale.shape}?`,
+      `Cancel this sale of ${sale.carat}ct ${sale.bucket || sale.shape}?`,
       "",
       ...saleVoidImpact(db, sale),
       "",
@@ -199,7 +199,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     const label = p.material === "gold"
       ? `Gold ${p.gold?.purity ?? ""}`.trim()
       : p.material === "diamond"
-      ? `${p.diamond?.shape ?? "Diamond"}${p.diamond?.kind === "certified" ? " (certified)" : ""}`
+      ? (p.diamond?.kind === "certified" ? `${p.diamond?.shape ?? "Diamond"} (certified)` : `${purchaseBucket(p)}${p.diamond?.pieces ? ` · ${p.diamond.pieces} pcs` : ""}`)
       : `${materialName(db.settings, p.material)} ${p.other?.grade && p.other.grade !== "—" ? p.other.grade : ""}`.trim();
     const qty = purchaseQty(p);
     const unit = materialUnit(db.settings, p.material);
@@ -261,7 +261,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     all.push({
       id: s.id, date: s.createdAt, kind: "Diamond sold",
       party: s.clientId ? (db.clients.find(c => c.id === s.clientId)?.companyName ?? "Client") : (s.buyerName ?? "Buyer"),
-      material: `${s.shape}${s.kind === "certified" ? " (certified)" : ""}`, mats: ["diamond"], co: companyOf(s),
+      material: `${s.bucket || s.shape}${s.kind === "certified" ? " (certified)" : ""}${s.pieces ? ` · ${s.pieces} pcs` : ""}`, mats: ["diamond"], co: companyOf(s),
       qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,
     });
   }

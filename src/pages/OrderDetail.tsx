@@ -1,6 +1,10 @@
 
 import { choicesOf } from "@/lib/optionLists";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
+import { ListSelect, LotPicker } from "@/components/LotFields";
+import { lotBalances, lotLabel, lotParts, lotShape } from "@/lib/diamondLots";
+import { purchaseBucket } from "@/lib/materials";
+import { stockAverageRate } from "@/lib/orderCost";
 import { billBrokerageProblem, brokerageForLines, brokerageWePay, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -86,6 +90,8 @@ interface BuyLine {
   diaCarat: string;
   diaPcs: string;
   diaQuality: string;
+  /** Loose: the lot's size — sieve or mm (lib/diamondLots.ts); colour and clarity are diaColor / diaClarity. */
+  diaSize: string;
   diaRate: string;
   // Diamond kind + certified grading (mirrors the Supplier purchase form).
   diaKind: "loose" | "certified";
@@ -134,7 +140,7 @@ const billTotalInr = (b: BuyBill) => billLinesTotalInr(b) + billRoundOffInr(b);
 function emptyBuyLine(): BuyLine {
   return {
     material: "diamond", goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaPcs: "", diaQuality: "", diaRate: "",
+    diaCarat: "", diaPcs: "", diaQuality: "", diaSize: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     discountPct: "", currency: "INR", exchangeRate: "",
@@ -355,7 +361,9 @@ function OrderDetailPageBody() {
   const matWord = (k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
   const [issueFactoryId, setIssueFactoryId] = useState("");
   const [issuePurity, setIssuePurity] = useState("22K");
-  const [issueQuality, setIssueQuality] = useState("Round");
+  // Loose diamonds: the stock LOT they come out of (its bucket — lib/diamondLots.ts), and how many stones.
+  const [issueQuality, setIssueQuality] = useState("");
+  const [issueDiaPcs, setIssueDiaPcs] = useState("");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueChargeAmount, setIssueChargeAmount] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
@@ -627,7 +635,10 @@ function OrderDetailPageBody() {
           material: line.material,
           gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
           diamond: line.material === "diamond" ? {
-            carat: Number(line.diaCarat), quality: line.diaQuality || undefined, ratePerCarat: Number(line.diaRate) || 0,
+            carat: Number(line.diaCarat), ratePerCarat: Number(line.diaRate) || 0,
+            // Loose: its lot — size, colour, clarity — and those read as its quality where one is shown.
+            quality: (line.diaKind === "loose" ? [line.diaColor, line.diaClarity].map(x => x.trim()).filter(Boolean).join(" ") : line.diaQuality) || undefined,
+            ...(line.diaKind === "loose" ? { size: line.diaSize || undefined, color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined } : {}),
             pieces: line.diaKind === "loose" && Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
             kind: line.diaKind, shape: line.diaShape,
             certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
@@ -672,7 +683,7 @@ function OrderDetailPageBody() {
       // and Buy & Assign flows — NOT by quality grade — so the Stock ledger and
       // balances stay consistent across every purchase path.
       const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
-        : isCertified ? "Certified" : (purchase.diamond!.shape || "unspecified");
+        : isCertified ? "Certified" : purchaseBucket(purchase);
       return { isCertified, qty, purityOrQuality };
     });
 
@@ -688,8 +699,11 @@ function OrderDetailPageBody() {
       for (let i = 0; i < newPurchases.length; i++) {
         const { isCertified, qty, purityOrQuality } = lineMeta[i];
         if (isCertified) continue;
+        const loose = newPurchases[i].material === "diamond" && newPurchases[i].diamond?.kind !== "certified";
         await logOrderDirectPurchase({ companyId: workCo,
           material: newPurchases[i].material, purityOrQuality, quantity: qty,
+          lot: loose ? { shape: newPurchases[i].diamond!.shape || "Round", size: newPurchases[i].diamond!.size, color: newPurchases[i].diamond!.color, clarity: newPurchases[i].diamond!.clarity } : undefined,
+          pieces: loose ? newPurchases[i].diamond?.pieces : undefined,
           purchaseId: newPurchases[i].id, orderId: order.id, createdBy: user!.id,
           // Same instant as the purchase itself, so the two legs stay findable.
           createdAt: now,
@@ -791,7 +805,7 @@ function OrderDetailPageBody() {
 
   const resetIssueForm = () => {
     setIssueFactoryId("");
-    setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality(""); setIssueDiaPcs(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
     setIssueDiaMm(""); setIssueDiaColor(""); setIssueDiaClarity(""); setIssueDiaRate(""); setIssueDiaAmount("");
     setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch(""); setIssueGrade("");
   };
@@ -811,6 +825,8 @@ function OrderDetailPageBody() {
     const diaCt = rwDiaDir !== "none" ? Number(rwDiaCt) || 0 : 0;
     const charge = Number(rwCharge) || 0;
     if (goldG <= 0 && diaCt <= 0 && charge <= 0) { toast.error("Enter a gold/diamond change or a rework charge"); return; }
+    // Stones added come out of a lot in stock — checked before anything moves.
+    if (diaCt > 0 && rwDiaDir === "add" && !lotBalances(db.stockMovements, workCo).some(l => l.key === rwDiaShape && l.ct > 0)) { toast.error("Choose the lot the stones come from"); return; }
     setRwSaving(true);
     const now = new Date().toISOString();
     const noteBase = `Rework — ${order.orderNumber}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`;
@@ -1172,7 +1188,9 @@ function OrderDetailPageBody() {
     const qty = Number(issueQuantity);
     if (isOtherMaterial(issueMaterial) && !otherMaterials.some(m => m.id === issueMaterial)) { toast.error("Choose the material"); return; }
     if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} ${isOtherMaterial(issueMaterial) ? "quantity" : "weight/carat"} used`); return; }
+    if (issueMaterial === "diamond" && issueDiaKind === "loose" && !issueQuality.trim()) { toast.error("Choose the lot the stones come from"); return; }
     const purityOrQuality = issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
+    const issuePcs = issueMaterial === "diamond" && issueDiaKind === "loose" && Number(issueDiaPcs) > 0 ? Math.round(Number(issueDiaPcs)) : undefined;
 
     // "From Stock" is now an explicit choice, so it MUST draw from company stock
     // (and decrement it) — no silent auto-resolve to a factory pool or a linked
@@ -1198,6 +1216,7 @@ function OrderDetailPageBody() {
           material: issueMaterial, companyId: workCo, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
           note: `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
+          ...(issueMaterial === "diamond" && issueDiaKind === "loose" ? { lot: lotParts(purityOrQuality), pieces: issuePcs } : {}),
         }, db.stockMovements);
       }
       updateDb(d => {
@@ -1205,6 +1224,7 @@ function OrderDetailPageBody() {
         const issuance: MaterialIssuance = {
           id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial, ...coField(workCo),
           purityOrQuality, quantityIssued: qty,
+          ...(issuePcs ? { piecesIssued: issuePcs } : {}),
           source: resolvedSource,
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
@@ -1437,10 +1457,13 @@ function OrderDetailPageBody() {
         const returnedNow = looseReturnedCt(i);
         const returnedBefore = i.finishReturnedCt || 0;
         const delta = Math.round((returnedNow - returnedBefore) * 1000) / 1000;
+        // The stones as well as the carats, when counted — so the lot's pieces stay right.
+        const pcsRaw = (faDiaReturnedPcs[i.id] ?? "").trim();
+        const pcsDelta = pcsRaw === "" ? 0 : Math.max(0, Math.round(Number(pcsRaw) || 0)) - (i.finishReturnedPcs ?? 0);
         if (delta > 0) {
-          await increaseStock({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}` });
+          await increaseStock({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: delta, refType: "manual", createdBy: user!.id, note: `${delta}ct diamond returned on final approval for ${order.orderNumber}`, pieces: pcsDelta > 0 ? pcsDelta : undefined });
         } else if (delta < 0) {
-          await decreaseStockSelfHealing({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}` }, db.stockMovements);
+          await decreaseStockSelfHealing({ material: "diamond", companyId: companyOf(i), purityOrQuality: i.purityOrQuality, quantity: -delta, type: "issuance_out", refType: "materialIssuance", refId: i.id, createdBy: user!.id, note: `Diamond re-used (un-returned) on final approval edit for ${order.orderNumber}`, pieces: pcsDelta < 0 ? -pcsDelta : undefined }, db.stockMovements);
         }
       }
       // Other materials the same way: only what came out of our stock goes back to it, by the change.
@@ -3691,10 +3714,7 @@ function OrderDetailPageBody() {
                           </div>
                           <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                             <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Shape</span>
-                              <Select value={line.diaShape} onValueChange={v => updateBuyLine(bi, idx, { diaShape: v })}>
-                                <SelectTrigger className="h-10 rounded-xl" aria-label="Shape"><SelectValue placeholder="Shape" /></SelectTrigger>
-                                <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                              </Select></div>
+                              <ListSelect list="diamondShapes" value={line.diaShape} onChange={v => updateBuyLine(bi, idx, { diaShape: v || "Round" })} optional={false} /></div>
                             <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{line.diaKind === "certified" ? "Size (ct)" : "Carat"}</span>
                               <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(bi, idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
                             {line.diaKind === "loose" && (
@@ -3707,11 +3727,19 @@ function OrderDetailPageBody() {
                               <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
                           </div>
                           {line.diaKind === "loose" ? (
-                            <Input value={line.diaQuality} onChange={e => updateBuyLine(bi, idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />
+                            // The lot: size · colour · clarity (lib/diamondLots.ts).
+                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                              <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Size</span>
+                                <ListSelect list="diamondSizes" value={line.diaSize} onChange={v => updateBuyLine(bi, idx, { diaSize: v })} /></label>
+                              <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Colour</span>
+                                <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updateBuyLine(bi, idx, { diaColor: v })} /></label>
+                              <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Clarity</span>
+                                <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updateBuyLine(bi, idx, { diaClarity: v })} /></label>
+                            </div>
                           ) : (
                             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                              <Input value={line.diaColor} onChange={e => updateBuyLine(bi, idx, { diaColor: e.target.value })} className="rounded-xl h-10" placeholder="Color" />
-                              <Input value={line.diaClarity} onChange={e => updateBuyLine(bi, idx, { diaClarity: e.target.value })} className="rounded-xl h-10" placeholder="Clarity" />
+                              <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updateBuyLine(bi, idx, { diaColor: v })} placeholder="Colour" />
+                              <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updateBuyLine(bi, idx, { diaClarity: v })} placeholder="Clarity" />
                               <Input value={line.diaCut} onChange={e => updateBuyLine(bi, idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
                               <Input value={line.diaPolish} onChange={e => updateBuyLine(bi, idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
                               <Input value={line.diaSym} onChange={e => updateBuyLine(bi, idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
@@ -3830,10 +3858,14 @@ function OrderDetailPageBody() {
                   </SelectContent>
                 </Select>
                 {issueDiaKind === "loose" && (
-                  <Select value={issueQuality || "Round"} onValueChange={setIssueQuality}>
-                    <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Shape" /></SelectTrigger>
-                    <SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent>
-                  </Select>
+                  // A lot that is in stock; its size, colour and clarity fill the details below.
+                  <LotPicker value={issueQuality} companyId={workCo} onChange={(k, lot) => {
+                    setIssueQuality(k);
+                    const spec = lot?.spec ?? lotParts(k);
+                    setIssueDiaColor(spec.color ?? ""); setIssueDiaClarity(spec.clarity ?? "");
+                    setIssueDiaMm(spec.size && /mm$/i.test(spec.size) ? spec.size.replace(/\s*mm$/i, "") : "");
+                    setIssueDiaRate(""); setIssueDiaAmount("");
+                  }} />
                 )}
               </div>
               )}
@@ -3899,17 +3931,21 @@ function OrderDetailPageBody() {
                   order's cost uses for these stones. Stock is still counted by shape. */}
               {issueMaterial === "diamond" && issueDiaKind === "loose" && (() => {
                 const ct = Number(issueQuantity) || 0;
-                const auto = (Number(issueDiaRate) || 0) * ct;
+                // The lot's own average cost per carat — what the stones are valued at unless a price is typed.
+                const lotAvg = issueQuality ? stockAverageRate(db, "diamond", issueQuality, new Date().toISOString(), workCo) : null;
+                const auto = (Number(issueDiaRate) || lotAvg || 0) * ct;
                 return (
-                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                  <div className="grid grid-cols-2 sm:grid-cols-6 gap-2.5">
                     <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>MM</span>
                       <Input value={issueDiaMm} onChange={e => setIssueDiaMm(e.target.value)} className="rounded-xl h-10" placeholder="e.g. 1.3" /></label>
                     <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Color</span>
                       <Input value={issueDiaColor} onChange={e => setIssueDiaColor(e.target.value)} className="rounded-xl h-10" placeholder="e.g. G-H" /></label>
                     <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Clarity</span>
                       <Input value={issueDiaClarity} onChange={e => setIssueDiaClarity(e.target.value)} className="rounded-xl h-10" placeholder="e.g. VS" /></label>
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Pcs</span>
+                      <Input type="number" min={0} step="1" value={issueDiaPcs} onChange={e => setIssueDiaPcs(e.target.value)} className="rounded-xl h-10" placeholder="Optional" /></label>
                     <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Price/ct (₹)</span>
-                      <Input type="number" min={0} value={issueDiaRate} onChange={e => { setIssueDiaRate(e.target.value); setIssueDiaAmount(""); }} className="rounded-xl h-10" placeholder="0" /></label>
+                      <Input type="number" min={0} value={issueDiaRate} onChange={e => { setIssueDiaRate(e.target.value); setIssueDiaAmount(""); }} className="rounded-xl h-10" placeholder={lotAvg ? String(Math.round(lotAvg)) : "0"} title={lotAvg ? "The lot's average cost per carat" : undefined} /></label>
                     <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground col-span-2 sm:col-span-1"><span>Amount (₹)</span>
                       <Input type="number" min={0} value={issueDiaAmount} onChange={e => setIssueDiaAmount(e.target.value)} className="rounded-xl h-10" placeholder={auto > 0 ? String(Math.round(auto * 100) / 100) : "0"} /></label>
                   </div>
@@ -4096,7 +4132,10 @@ function OrderDetailPageBody() {
                     {rwDiaDir !== "none" && (
                       <div className="grid grid-cols-2 gap-2">
                         <div><Label className="text-xs">Carats to {rwDiaDir}</Label><Input type="number" step="0.001" min={0} value={rwDiaCt} onChange={e => setRwDiaCt(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 0.5" /></div>
-                        <div><Label className="text-xs">Shape</Label><Select value={rwDiaShape} onValueChange={setRwDiaShape}><SelectTrigger className="rounded-xl mt-1 h-9"><SelectValue /></SelectTrigger><SelectContent>{DIAMOND_SHAPES.map(s => <SelectItem key={s} value={s}>{s}</SelectItem>)}</SelectContent></Select></div>
+                        {/* Added: out of a lot in stock. Removed: back into stock under its shape. */}
+                        {rwDiaDir === "add"
+                          ? <div><Label className="text-xs">From lot</Label><LotPicker value={rwDiaShape} onChange={setRwDiaShape} companyId={workCo} className="rounded-xl mt-1 h-9" /></div>
+                          : <div><Label className="text-xs">Shape</Label><ListSelect list="diamondShapes" value={lotShape(rwDiaShape)} onChange={v => setRwDiaShape(v || "Round")} optional={false} className="rounded-xl mt-1 h-9" /></div>}
                       </div>
                     )}
                   </div>
@@ -4618,10 +4657,8 @@ function OrderDetailPageBody() {
             ) : editingIssuance?.diamondKind === "certified" ? (
               <div className="rounded-xl h-10 px-3 mt-1 flex items-center bg-secondary/60 text-sm text-muted-foreground">Certified</div>
             ) : (
-              <Select value={isf.bucket} onValueChange={v => setIsf({ ...isf, bucket: v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{DIAMOND_SHAPES.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
-              </Select>
+              // Loose: a lot in stock — or the one it already came from.
+              <LotPicker value={isf.bucket} onChange={v => setIsf({ ...isf, bucket: v })} companyId={editingIssuance?.companyId || "main"} className="h-10 rounded-xl mt-1" />
             )}
           </div>
         </div>
