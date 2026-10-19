@@ -1,7 +1,8 @@
 import { Handshake } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { billBrokerageInr, type BillBrokerage } from "@/lib/brokers";
+import { useEffect, useRef } from "react";
+import { billBrokerageInr, usualBrokerFor, type BillBrokerage } from "@/lib/brokers";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,10 +15,22 @@ const NONE = "__none";
  * form — Buy & Assign and an order's Buy — so the brokerage is recorded the
  * same way wherever a bill is entered.
  */
-export function BillBrokerFields({ value, onChange, billTotalInr, className = "" }: {
+export function BillBrokerFields({ value, onChange, billTotalInr, className = "", supplierId }: {
   value: BillBrokerage; onChange: (v: BillBrokerage) => void; billTotalInr: number; className?: string;
+  /** The bill's supplier: choosing one brings in their usual broker (only into an empty box). */
+  supplierId?: string;
 }) {
   const db = useDb();
+  const lastSupplier = useRef(supplierId);
+  useEffect(() => {
+    if (supplierId === lastSupplier.current) return;
+    lastSupplier.current = supplierId;
+    if (!supplierId || value.brokerId) return;
+    const bid = usualBrokerFor(db, supplierId);
+    const b = bid ? (db.brokers ?? []).find(x => x.id === bid) : undefined;
+    if (b) onChange({ ...value, brokerId: b.id, pct: b.brokeragePct != null ? String(b.brokeragePct) : "", amount: "" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId]);
   const addNew = useAddNew();
   const brokers = (db.brokers ?? []).filter(b => b.active !== false || b.id === value.brokerId).sort((a, b) => a.name.localeCompare(b.name));
   const broker = brokers.find(b => b.id === value.brokerId);

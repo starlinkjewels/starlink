@@ -27,7 +27,7 @@ export function purchaseLabel(p: Purchase): string {
   if (p.material === "gold" || p.material === "diamond") {
     return p.material === "gold"
       ? `${p.gold?.weightGrams ?? 0}g ${p.gold?.purity ?? ""} gold`
-      : `${p.diamond?.carat ?? 0}ct ${p.diamond?.kind === "certified" ? "certified " : ""}diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`;
+      : purchaseText(loadDb().settings, p);
   }
   return purchaseText(loadDb().settings, p);
 }

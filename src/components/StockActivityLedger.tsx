@@ -24,7 +24,7 @@ import type { MoreAction } from "@/components/MoreMenu";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { inDateRange, ledgerTable, rangeLabel } from "@/components/LedgerFilters";
 import { confirmBox } from "@/lib/confirm";
-import { materialName, materialUnit, purchaseBucket, purchaseQty, materialDefs, type MaterialUnit } from "@/lib/materials";
+import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, purchaseUnitInr, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
 
@@ -38,6 +38,10 @@ interface Row {
   kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold";
   party: string;
   material: string;
+  /** Its details under the material: a lot's size · colour · clarity · pcs, a stone's report, a grade. */
+  detail?: string;
+  /** The rate per unit in rupees, when the row is one material at one rate. */
+  rate?: number;
   /** The materials on the row ("gold", "diamond", "mat_…") — what the Materials filter matches. */
   mats: string[];
   /** Whose stock it was. */
@@ -47,7 +51,7 @@ interface Row {
   amountInr?: number;
   remark?: string;
   /** A bill's own lines, when this row is a whole bill. */
-  items?: { id: string; material: string; qty: number; unit: MaterialUnit; amountInr: number; discountPct?: number }[];
+  items?: { id: string; material: string; detail?: string; rate?: number; qty: number; unit: MaterialUnit; amountInr: number; discountPct?: number }[];
   billNo?: string;
   /** Set when the purchase was bought for one order rather than into stock. */
   forOrder?: string;
@@ -195,12 +199,17 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   // own total, so lines saved together are shown as that bill rather than as
   // strangers. They stay separate purchases underneath: stock is per size.
   const bills = new Map<string, Row>();
+  const packetOf = (purchaseId: string) => (db.diamondPackets ?? []).find(x => x.purchaseId === purchaseId);
   for (const p of db.purchases ?? []) {
     const label = p.material === "gold"
       ? `Gold ${p.gold?.purity ?? ""}`.trim()
       : p.material === "diamond"
-      ? (p.diamond?.kind === "certified" ? `${p.diamond?.shape ?? "Diamond"} (certified)` : `${purchaseBucket(p)}${p.diamond?.pieces ? ` · ${p.diamond.pieces} pcs` : ""}`)
+      ? (p.diamond?.kind === "certified" ? "Certified diamond" : "Loose diamond")
       : `${materialName(db.settings, p.material)} ${p.other?.grade && p.other.grade !== "—" ? p.other.grade : ""}`.trim();
+    const detail = p.material === "diamond"
+      ? diamondSpec(p.diamond, p.diamond?.kind === "certified" ? packetOf(p.id) : undefined) || undefined
+      : p.material !== "gold" && p.other?.pieces ? `${p.other.pieces} pcs` : undefined;
+    const rate = purchaseUnitInr(p);
     const qty = purchaseQty(p);
     const unit = materialUnit(db.settings, p.material);
     // A bill number groups a bill outright; without one, the lines written in
@@ -210,7 +219,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       : `${p.supplierId}|at:${p.createdAt}`;
     const existing = bills.get(key);
     if (existing) {
-      existing.items!.push({ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
+      existing.items!.push({ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct });
       existing.qty = Math.round((existing.qty + qty) * 1000) / 1000;
       existing.amountInr = (existing.amountInr ?? 0) + p.totalInr;
       if (!existing.mats.includes(p.material)) existing.mats.push(p.material);
@@ -222,14 +231,19 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       id: p.id, date: p.createdAt, kind: "Purchase",
       forOrder,
       party: db.suppliers.find(s => s.id === p.supplierId)?.name ?? "Supplier",
-      material: label, mats: [p.material], co: companyOf(p), qty, unit, amountInr: p.totalInr,
+      material: label, detail, rate, mats: [p.material], co: companyOf(p), qty, unit, amountInr: p.totalInr,
       billNo: p.invoiceNumber?.trim() || undefined,
       remark: p.notes || undefined,
-      items: [{ id: p.id, material: label, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
+      items: [{ id: p.id, material: label, detail, rate, qty, unit, amountInr: p.totalInr, discountPct: p.discountPct }],
     });
   }
   for (const b of bills.values()) {
-    if (b.items && b.items.length > 1) b.material = `${b.items.length} items`;
+    if (b.items && b.items.length > 1) {
+      b.material = `${b.items.length} items`;
+      // What the bill holds, at a glance; each line's own details open below.
+      b.detail = [...new Set(b.items.map(it => it.material))].join(", ");
+      b.rate = undefined;
+    }
     all.push(b);
   }
 
@@ -238,7 +252,12 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     if (m.refType !== "opening") continue;
     all.push({
       id: m.id, date: m.createdAt, kind: "Opening stock", party: "—",
-      material: `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(), mats: [m.material], co: companyOf(m),
+      material: m.material === "diamond" ? "Loose diamond" : `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(),
+      detail: m.material === "diamond"
+        ? [m.purityOrQuality, m.pieces ? `${m.pieces} pcs` : undefined].filter(Boolean).join(" · ")
+        : m.pieces ? `${m.pieces} pcs` : undefined,
+      rate: m.valueInr && m.quantity ? Math.round((m.valueInr / m.quantity) * 100) / 100 : undefined,
+      mats: [m.material], co: companyOf(m),
       qty: m.quantity, unit: materialUnit(db.settings, m.material),
       amountInr: m.valueInr, remark: m.note,
     });
@@ -261,7 +280,12 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     all.push({
       id: s.id, date: s.createdAt, kind: "Diamond sold",
       party: s.clientId ? (db.clients.find(c => c.id === s.clientId)?.companyName ?? "Client") : (s.buyerName ?? "Buyer"),
-      material: `${s.bucket || s.shape}${s.kind === "certified" ? " (certified)" : ""}${s.pieces ? ` · ${s.pieces} pcs` : ""}`, mats: ["diamond"], co: companyOf(s),
+      material: s.kind === "certified" ? "Certified diamond" : "Loose diamond",
+      detail: s.kind === "certified"
+        ? diamondSpec({ shape: s.shape }, (db.diamondPackets ?? []).find(x => x.id === s.packetId))
+        : [s.bucket || s.shape, s.pieces ? `${s.pieces} pcs` : undefined].filter(Boolean).join(" · "),
+      rate: s.ratePerCarat || undefined,
+      mats: ["diamond"], co: companyOf(s),
       qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,
     });
   }
@@ -278,8 +302,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       if (billFilter === "none" && r.billNo) return false;
       return !ql || r.party.toLowerCase().includes(ql)
         || r.material.toLowerCase().includes(ql)
+        || (r.detail ?? "").toLowerCase().includes(ql)
         || (r.billNo ?? "").toLowerCase().includes(ql)
-        || (r.items ?? []).some(it => it.material.toLowerCase().includes(ql))
+        || (r.items ?? []).some(it => `${it.material} ${it.detail ?? ""}`.toLowerCase().includes(ql))
         || (r.remark ?? "").toLowerCase().includes(ql);
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
@@ -296,15 +321,15 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     onTotals?.({ totalIn, nBought, totalOut, nSold, filtered });
   }, [onTotals, totalIn, nBought, totalOut, nSold, filtered]);
 
-  const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Quantity", "Unit", "Amount (INR)", "Remark"];
+  const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Details", "Quantity", "Unit", "Rate (INR)", "Amount (INR)", "Remark"];
   const body: (string | number)[][] = [];
   rows.forEach((r, i) => {
-    body.push([i + 1, fmtDate(r.date), r.kind, r.billNo ?? "", r.party, r.material, r.qty, r.unit, r.amountInr ?? "", r.remark ?? ""]);
+    body.push([i + 1, fmtDate(r.date), r.kind, r.billNo ?? "", r.party, r.material, r.detail ?? "", r.qty, r.unit, r.rate ?? "", r.amountInr ?? "", r.remark ?? ""]);
     // A bill's own lines follow it, so a download can be checked against the
     // chitthi a line at a time and not only on the total.
     if (r.items && r.items.length > 1) {
       for (const it of r.items) {
-        body.push(["", "", "  item", "", "", it.material, it.qty, it.unit, it.amountInr, it.discountPct ? discountLabel(it.discountPct) : ""]);
+        body.push(["", "", "  item", "", "", it.material, it.detail ?? "", it.qty, it.unit, it.rate ?? "", it.amountInr, it.discountPct ? discountLabel(it.discountPct) : ""]);
       }
     }
   });
@@ -332,7 +357,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     align: ["left", "left", "left", "left", "left", "left", "right", "right", "left"],
     rows: rows.map((r, i) => [
       String(i + 1), fmtDate(r.date), r.kind, (r.billNo ?? "").slice(0, 16),
-      r.party.slice(0, 26), r.material.slice(0, 26),
+      r.party.slice(0, 26), (r.detail ? `${r.material} · ${r.detail}` : r.material).slice(0, 26),
       `${r.qty}${r.unit}`, r.amountInr != null ? fmtMoneyInr(r.amountInr) : "",
       (r.remark ?? "").slice(0, 16),
     ]),
@@ -429,10 +454,12 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
             {r.billNo}
           </button>
         : <span className="font-mono text-[11px] text-muted-foreground">—</span> },
-    { key: "material", header: "Material", sortValue: r => r.material,
-      cell: r => <span className="block text-xs text-muted-foreground max-w-[160px] truncate" title={r.material}>{r.material}</span> },
+    { key: "material", header: "Material", sortValue: r => r.material, csv: r => (r.detail ? `${r.material} · ${r.detail}` : r.material),
+      cell: r => <div className="max-w-[240px]" title={r.detail ? `${r.material} · ${r.detail}` : r.material}><CellMain title={r.material} sub={r.detail} /></div> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: r => r.qty,
       cell: r => <span className="font-medium tabular-nums whitespace-nowrap">{r.qty}{r.unit}</span> },
+    { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.rate ?? 0, csv: r => r.rate ?? "",
+      cell: r => (r.rate != null ? <span className="text-xs tabular-nums whitespace-nowrap">{fmtMoneyInr(r.rate)}/{r.unit}</span> : <span className="text-muted-foreground">—</span>) },
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountInr,
       cell: r => (r.amountInr != null ? <CellAmount>{fmtMoneyInr(r.amountInr)}</CellAmount> : <span className="text-muted-foreground">—</span>) },
     { key: "remark", header: "Remark", sortValue: r => r.remark ?? "",
@@ -442,9 +469,11 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   // as on the total — and each line corrected on its own.
   const lineColumns: DataColumn<Item>[] = [
     { key: "material", header: "Item", always: true, sortValue: it => it.material,
-      cell: it => <CellMain title={it.material} sub={it.discountPct ? discountLabel(it.discountPct) : undefined} /> },
+      cell: it => <CellMain title={it.material} sub={[it.detail, it.discountPct ? discountLabel(it.discountPct) : undefined].filter(Boolean).join(" · ") || undefined} /> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: it => it.qty,
       cell: it => <span className="tabular-nums whitespace-nowrap">{it.qty}{it.unit}</span> },
+    { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: it => it.rate ?? 0,
+      cell: it => (it.rate != null ? <span className="text-xs tabular-nums whitespace-nowrap">{fmtMoneyInr(it.rate)}/{it.unit}</span> : <span className="text-muted-foreground">—</span>) },
     { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: it => it.amountInr,
       cell: it => <CellAmount>{fmtMoneyInr(it.amountInr)}</CellAmount> },
   ];

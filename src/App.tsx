@@ -40,6 +40,7 @@ const StarlinkAiPage = lazy(() => import("./pages/StarlinkAi").then(m => ({ defa
 const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.LockerPage })));
 const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
 const SupplierHistoryPage = lazy(() => import("./pages/SupplierHistory").then(m => ({ default: m.SupplierHistoryPage })));
+const BrokerHistoryPage = lazy(() => import("./pages/BrokerHistory").then(m => ({ default: m.BrokerHistoryPage })));
 const StockPage = lazy(() => import("./pages/Stock").then(m => ({ default: m.StockPage })));
 const StockSectionPage = lazy(() => import("./pages/StockSection").then(m => ({ default: m.StockSectionPage })));
 const FactoriesPage = lazy(() => import("./pages/Factories").then(m => ({ default: m.FactoriesPage })));
@@ -176,6 +177,7 @@ export function App() {
           <Route path="ai" element={<StarlinkAiPage />} />
           <Route path="locker" element={<Protected roles={["admin","employee"]}><LockerPage /></Protected>} />
           <Route path="suppliers" element={<Protected roles={["admin","employee"]}><SuppliersPage /></Protected>} />
+          <Route path="suppliers/brokers/:id" element={<Protected roles={["admin","employee"]}><BrokerHistoryPage /></Protected>} />
           <Route path="suppliers/:id" element={<Protected roles={["admin","employee"]}><SupplierHistoryPage /></Protected>} />
           <Route path="stock" element={<Protected roles={["admin","employee"]}><StockPage /></Protected>} />
           <Route path="stock/:section" element={<Protected roles={["admin","employee"]}><StockSectionPage /></Protected>} />

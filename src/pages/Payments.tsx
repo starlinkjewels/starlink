@@ -149,7 +149,7 @@ export function PaymentsPage() {
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
           { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
-          { label: "Pay a broker", icon: Handshake, hint: "Their brokerage", onSelect: () => setTask("broker") },
+          { label: "Pay through broker", icon: Handshake, hint: "One payment — he pays the suppliers", onSelect: () => setTask("broker") },
           { label: "Pay an expense", icon: Receipt, hint: "Rent, salary, courier…", onSelect: () => setTask("expense") },
         ] } : null}
         menuTitle="Accounts"

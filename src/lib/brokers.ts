@@ -9,8 +9,17 @@
 //   "supplier" — recorded on the bill for reference; nothing is owed and no
 //                cost changes.
 // The supplier's own bill (totalInr) and the supplier's due never change.
+//
+// Paying THROUGH a broker (how a Surat broker works): we give the broker one
+// amount; he passes it on to the suppliers whose bills he brought and keeps his
+// brokerage. In the books: one account entry to the broker (lockerTransactions,
+// refType "brokerPayment"), and on each bill he paid, a supplier payment marked
+// `viaBrokerId` with no account of its own (lockerId "") — the supplier's due
+// comes down there. What the broker still holds of ours is what we gave him
+// less what he passed on and his brokerage.
 import type { Broker, DB, Purchase } from "./db";
 import { openingCreditAmt, openingDebitAmt } from "./pure/basics";
+import { purchasePending } from "./manufacturing";
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
@@ -34,12 +43,27 @@ export interface BrokerAccount {
   brokerage: number;
   /** Brokerage the suppliers paid — for reference. */
   bySupplier: number;
+  /** Money we gave the broker (account entries to them). */
   paid: number;
+  /** Of that, what the broker passed on to suppliers (bills paid via them). */
+  passed: number;
   /** Signed opening: + we owed them, − they owed us. */
   opening: number;
-  /** What we still owe (negative = paid ahead). */
+  /** Brokerage still owed to them (negative = they hold money of ours —
+   *  given, not yet passed to a supplier or kept as brokerage). */
   due: number;
+  /** What the broker holds of ours, not yet passed on (0 when nothing). */
+  held: number;
+  /** Suppliers' bills they brought that are still unpaid. */
+  billsPending: number;
+  /** Everything to settle through them: unpaid bills plus brokerage owed, less what they already hold. */
+  toPay: number;
   bills: number;
+}
+
+/** Supplier payments made through this broker. */
+export function brokerPassed(db: Pick<DB, "purchases">, brokerId: string) {
+  return (db.purchases ?? []).flatMap(p => (p.payments ?? []).filter(x => x.viaBrokerId === brokerId).map(pay => ({ purchase: p, pay })));
 }
 
 export function brokerAccount(db: Pick<DB, "purchases" | "lockerTransactions">, broker: Broker): BrokerAccount {
@@ -47,9 +71,50 @@ export function brokerAccount(db: Pick<DB, "purchases" | "lockerTransactions">, 
   const brokerage = r2(ps.reduce((s, p) => s + brokerageWePay(p), 0));
   const bySupplier = r2(ps.filter(p => p.brokeragePaidBy === "supplier").reduce((s, p) => s + (p.brokerageInr || 0), 0));
   const paid = r2(brokerPayments(db, broker.id).reduce((s, t) => s + (t.amountInr || 0), 0));
+  const passed = r2(brokerPassed(db, broker.id).reduce((s, x) => s + (x.pay.amountInr || 0), 0));
   const opening = r2(openingCreditAmt(broker) - openingDebitAmt(broker));
   const bills = new Set(ps.map(p => `${p.supplierId}|${p.invoiceNumber?.trim() || p.createdAt}`)).size;
-  return { brokerage, bySupplier, paid, opening, due: r2(opening + brokerage - paid), bills };
+  const due = r2(opening + brokerage + passed - paid);
+  const billsPending = r2(ps.reduce((s, p) => s + purchasePending(p), 0));
+  return {
+    brokerage, bySupplier, paid, passed, opening, due,
+    held: Math.max(0, r2(-due)), billsPending,
+    toPay: Math.max(0, r2(billsPending + due)), bills,
+  };
+}
+
+/** The suppliers a broker deals with: the ones set on them, and the ones on bills they brought. */
+export function brokerSuppliers(db: Pick<DB, "purchases">, broker: Broker): string[] {
+  return [...new Set([...(broker.supplierIds ?? []), ...(db.purchases ?? []).filter(p => p.brokerId === broker.id).map(p => p.supplierId)])];
+}
+
+/** The broker who usually brings this supplier's goods — set on a broker, or the last bill's. */
+export function usualBrokerFor(db: Pick<DB, "purchases" | "brokers">, supplierId: string): string | undefined {
+  if (!supplierId) return undefined;
+  const active = (db.brokers ?? []).filter(b => b.active !== false);
+  const set = active.find(b => (b.supplierIds ?? []).includes(supplierId));
+  if (set) return set.id;
+  const last = [...(db.purchases ?? [])].filter(p => p.supplierId === supplierId && p.brokerId && active.some(b => b.id === p.brokerId))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+  return last?.brokerId;
+}
+
+/** The unpaid bills a broker brought, oldest first. */
+export function brokerPendingBills(db: Pick<DB, "purchases">, brokerId: string): Purchase[] {
+  return (db.purchases ?? []).filter(p => p.brokerId === brokerId && purchasePending(p) > 0.5)
+    .sort((a, b) => (a.invoiceDate || a.createdAt).localeCompare(b.invoiceDate || b.createdAt));
+}
+
+/** An amount spread over bills, oldest first; what is left over comes back as `rest`. */
+export function allocateOldestFirst(bills: Purchase[], amount: number): { alloc: Record<string, number>; rest: number } {
+  const alloc: Record<string, number> = {};
+  let left = r2(amount);
+  for (const p of bills) {
+    if (left <= 0) break;
+    const take = Math.min(left, r2(purchasePending(p)));
+    if (take > 0) { alloc[p.id] = take; left = r2(left - take); }
+  }
+  return { alloc, rest: left };
 }
 
 /** A bill's brokerage spread over its lines, in proportion to each line's
