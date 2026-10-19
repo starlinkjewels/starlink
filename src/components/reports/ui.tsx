@@ -2,6 +2,7 @@ import { useState, type ReactNode } from "react";
 import { ArrowDownRight, ArrowUpRight, CalendarDays, Check, ChevronDown, Minus, Download, type LucideIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SectionTitle } from "@/components/SectionTitle";
+import { TableBox } from "@/components/TableBox";
 import { dateRangeText } from "@/components/TableToolbar";
 import { PRESETS, presetOf, presetPeriod, type Period } from "@/lib/analytics";
 
@@ -176,14 +177,14 @@ export function Bar({ value, max, tone = C.primary }: { value: number; max: numb
   return <div className="h-1.5 rounded-full bg-secondary overflow-hidden"><div className="h-full rounded-full" style={{ width: `${w}%`, background: tone }} /></div>;
 }
 
-/** A plain sortable-looking table shell with sticky header. */
+/** A report's table — in the app's one table box (see TableBox). */
 export function Table({ head, children, minWidth = 640 }: { head: ReactNode; children: ReactNode; minWidth?: number }) {
   return (
-    <div className="overflow-x-auto -mx-4 sm:-mx-5 px-4 sm:px-5">
+    <TableBox>
       <table className="w-full text-xs" style={{ minWidth }}>
-        <thead className="text-[10px] uppercase tracking-wider text-muted-foreground">{head}</thead>
+        <thead>{head}</thead>
         <tbody className="divide-y divide-border/50">{children}</tbody>
       </table>
-    </div>
+    </TableBox>
   );
 }

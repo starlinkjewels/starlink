@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { TableBox } from "@/components/TableBox";
 import { fmtDate } from "@/lib/db";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -115,7 +116,7 @@ export function FullLedgerTable({
         <FilterChips filters={filters} onClear={clearFilters} />
       </div>
 
-      <div className="overflow-x-auto">
+      <TableBox className="mx-4 sm:mx-5">
         <table className="w-full text-xs min-w-[760px]">
           <thead className="bg-secondary/60 text-muted-foreground">
             <tr>
@@ -146,7 +147,7 @@ export function FullLedgerTable({
             ))}
           </tbody>
         </table>
-      </div>
+      </TableBox>
       <div className="px-5">
         <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage}
           label={filtered.length ? `Showing ${start + 1}–${end} of ${filtered.length}` : undefined} />

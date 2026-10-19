@@ -6,6 +6,7 @@ import { downloadCsv } from "@/lib/ledgerExport";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { ExportMenu, FilterChips, FiltersButton, ViewMenu, activeFilterCount, useNarrow, type Density, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { FloatingScrollbar, useWideScroll } from "@/components/WideScroll";
+import { useHeldHeader } from "@/components/TableBox";
 
 /**
  * The app's one table: sort by any column, search, show or hide columns, row
@@ -327,10 +328,10 @@ export function DataTable<T>({
   const countText = `${filtered.length} ${filtered.length === 1 ? noun : plural ?? (noun.endsWith("s") ? noun : `${noun}s`)}`;
 
   const wide = useWideScroll(boxRef, cardMode);
-  // The header row stays at the top of the page while a long list scrolls
-  // under it — whenever the table fits its width (a box that scrolls sideways
-  // holds it instead), from a tablet up (a phone shows cards).
-  const headStick = !maxHeight && !wide.over ? "md:sticky md:-top-6" : "";
+  // The header row stays in view while a long list scrolls under it — fitting
+  // or wider than the screen alike, inside its own box (see useHeldHeader). A
+  // table given its own height (maxHeight) holds it with CSS in that box.
+  useHeldHeader(boxRef, [cardMode], !maxHeight);
   const searchRef = useRef<HTMLInputElement>(null);
   // "/" jumps to the search, as in most apps — the first table on the page
   // that has one and is in view, and never while typing somewhere else.
@@ -491,7 +492,7 @@ export function DataTable<T>({
           <thead className={`bg-secondary/40 ${maxHeight ? "sticky top-0 z-10" : ""}`}>
             <tr className="border-b border-border/60">
               {ticking && (
-                <th className={`w-10 px-3 py-3 ${stick} left-0 dt-stick-head ${headStick} md:z-[3]`}>
+                <th className={`w-10 px-3 py-3 ${stick} left-0 dt-stick-head md:z-[3]`}>
                   {keysShown.length > 0 && <Tick state={allState} onClick={toggleAll} label={allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`} />}
                 </th>
               )}
@@ -499,7 +500,7 @@ export function DataTable<T>({
                 const on = sort?.key === c.key;
                 return (
                   <th key={c.key} title={hint(c)}
-                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head ${headStick}`}
+                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head`}
                     onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}
@@ -510,8 +511,8 @@ export function DataTable<T>({
                   </th>
                 );
               })}
-              {opener && <th className={`w-10 px-2 py-3 ${stick} ${openerPin} dt-stick-head ${headStick} md:z-[3]`}><span className="sr-only">Details</span></th>}
-              {rowActions && <th className={`w-12 px-2 py-3 ${stick} right-0 ${opener ? "" : "dt-stick-r"} dt-stick-head ${headStick} md:z-[3]`}><span className="sr-only">Actions</span></th>}
+              {opener && <th className={`w-10 px-2 py-3 ${stick} ${openerPin} dt-stick-head md:z-[3]`}><span className="sr-only">Details</span></th>}
+              {rowActions && <th className={`w-12 px-2 py-3 ${stick} right-0 ${opener ? "" : "dt-stick-r"} dt-stick-head md:z-[3]`}><span className="sr-only">Actions</span></th>}
             </tr>
           </thead>
           <tbody>
