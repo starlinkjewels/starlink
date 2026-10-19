@@ -326,6 +326,8 @@ export function ClientsPage() {
   const clientActions = (c: Client): MoreAction[] => {
     const noEdit = mayEdit ? undefined : needsAccess("clients", "edit");
     const delWhy = staff ? deleteWhy(c) : undefined;
+    // A walk-in (B2C) client can be made without a login — nothing to reset.
+    const hasLogin = db.users.some(u => u.clientId === c.id && !!u.authUid);
     return [
       { label: "View", icon: Eye, hint: "Account, invoices and orders", onSelect: () => navigate(`/clients/${c.id}`) },
       { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
@@ -335,7 +337,7 @@ export function ClientsPage() {
         hint: noEdit ?? (c.productPhotoAccess ? "Access is on" : "Access is off"),
         onSelect: () => togglePhotoAccess(c), show: staff, disabled: !mayEdit },
       { label: "Edit details", icon: Pencil, onSelect: () => openEdit(c), show: staff, disabled: !mayEdit, hint: noEdit },
-      { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff, disabled: !mayEdit, hint: noEdit },
+      { label: "Send password reset", icon: KeyRound, onSelect: () => resetPw(c), show: staff, disabled: !mayEdit || !hasLogin, hint: noEdit ?? (hasLogin ? undefined : "No login — created without one") },
       { label: "Delete client", icon: Trash2, danger: true, onSelect: () => del(c.id), show: staff, disabled: !!delWhy, hint: delWhy },
     ];
   };
