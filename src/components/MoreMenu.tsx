@@ -38,7 +38,7 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
   onOpen?: () => void;
   /** A labelled button ("Pay ▾") instead of the ⋯ — for a group of actions
    *  that share a name, beside a page's main button. */
-  button?: { label: string; icon?: LucideIcon };
+  button?: { label: string; icon?: LucideIcon; primary?: boolean };
 }) {
   const shown = actions.filter(a => a.show !== false);
   if (!shown.length) return null;
@@ -64,8 +64,8 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
     <DropdownMenu modal={false} onOpenChange={o => { if (o) onOpen?.(); }}>
       <DropdownMenuTrigger asChild>
         {button ? (
-          <Button type="button" variant="outline" aria-label={label === "More actions" ? button.label : label}
-            className={`h-10 rounded-xl px-3.5 gap-2 shrink-0 ${className}`}>
+          <Button type="button" variant={button.primary ? "default" : "outline"} aria-label={label === "More actions" ? button.label : label}
+            className={`h-10 rounded-xl px-3.5 gap-2 shrink-0 ${button.primary ? "btn-hero px-4" : ""} ${className}`}>
             {button.icon && <button.icon className="h-4 w-4" />}<span>{button.label}</span><ChevronDown className="h-4 w-4 opacity-60" />
           </Button>
         ) : (

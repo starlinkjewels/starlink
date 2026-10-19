@@ -34,7 +34,8 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
   back?: { label: string; to?: string; onClick?: () => void };
   /** A small line above the title — a code, a status. */
   eyebrow?: ReactNode;
-  primary?: HeaderAction | null;
+  /** The page's main button — or a named group of them ("Receive ▾"). */
+  primary?: HeaderAction | { label: string; icon?: LucideIcon; items: MoreAction[] } | null;
   /** One quieter button, or a named group of them shown as a menu button. */
   secondary?: HeaderAction | { label: string; icon?: LucideIcon; items: MoreAction[] } | null;
   /** The rest, in the ⋯. */
@@ -72,7 +73,10 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
               : <Button variant="outline" onClick={secondary.onClick} disabled={secondary.disabled} title={secondary.title} className={`h-10 rounded-xl px-3.5 gap-2 ${tight}`}>
                   {secondary.icon && <secondary.icon className="h-4 w-4" />}{secondary.label}
                 </Button>)}
-            {primary && (
+            {primary && "items" in primary && (
+              <MoreMenu button={{ label: primary.label, icon: primary.icon, primary: true }} actions={primary.items} className={`max-sm:flex-1 ${tight}`} />
+            )}
+            {primary && !("items" in primary) && (
               <Button onClick={primary.onClick} disabled={primary.disabled} title={primary.title} className={`btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1 ${tight}`}>
                 {primary.icon && <primary.icon className="h-4 w-4" />}{primary.label}
               </Button>

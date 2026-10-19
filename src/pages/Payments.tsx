@@ -124,26 +124,34 @@ export function PaymentsPage() {
   const todayOut = sumByCcy(todays.filter(t => t.type === "expense"), t => t.amountInr, t => t.currency ?? db.lockers.find(l => l.id === t.lockerId)?.currency);
   const moved = (m: Map<string, number>) => [...m.values()].some(v => Math.abs(v) > 0.0001);
 
+  // The supplier panel does both ways; which side it opens on comes from the button.
+  const [supplierDir, setSupplierDir] = useState<SupplierDir>("pay");
+
   const sheet = (t: Task): SheetProps => ({ open: task === t, onOpenChange: o => { if (!o) setTask(null); } });
   const openLocker = (a: LockerAction) => { setLockerAction(a); setTask("locker"); };
+  const openSupplier = (d: SupplierDir) => { setSupplierDir(d); setTask("supplier"); };
 
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      {/* One main button (money in), one group for money out, the account
-          moves in the ⋯ — three controls, one row, on every screen. */}
+      {/* Money in (the main button) and money out, each a group of who it is
+          with; the moves between our own accounts in the ⋯ — three controls,
+          one row, on every screen. */}
       <PageHeader
         title="Payments"
         subtitle="Every payment in or out"
-        primary={mayAdd ? { label: "Receive from Client", icon: CreditCard, onClick: () => setTask("client") } : null}
+        primary={mayAdd ? { label: "Receive", icon: CreditCard, items: [
+          { label: "From a client", icon: CreditCard, hint: "Against their invoices, or an advance", onSelect: () => setTask("client") },
+          { label: "From a supplier", icon: Truck, hint: "A refund, or money back on returned goods", onSelect: () => openSupplier("receive") },
+          { label: "Other income", icon: ArrowDownCircle, hint: "Into an account — not a client or supplier", onSelect: () => openLocker("income") },
+        ] } : null}
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
-          { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => setTask("supplier") },
+          { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
           { label: "Pay an expense", icon: Receipt, hint: "Rent, salary, courier…", onSelect: () => setTask("expense") },
         ] } : null}
         menuTitle="Accounts"
         menu={mayAdd ? [
           { label: "Transfer between accounts", icon: ArrowLeftRight, hint: "Any two accounts, any currencies", onSelect: () => openLocker("transfer_out") },
-          { label: "Deposit to an account", icon: ArrowDownCircle, hint: "Not a client's receipt", onSelect: () => openLocker("income") },
           { label: "Withdraw from an account", icon: ArrowUpCircle, hint: "Not a bill or an expense", onSelect: () => openLocker("expense") },
         ] : undefined}
       >
@@ -203,7 +211,7 @@ export function PaymentsPage() {
       {mayAdd && (
         <>
           <ReceiveFromClient {...sheet("client")} />
-          <PaySupplier {...sheet("supplier")} />
+          <PaySupplier {...sheet("supplier")} preset={supplierDir} />
           <PayFactory {...sheet("factory")} />
           <PayExpense {...sheet("expense")} />
           <LockerActions {...sheet("locker")} preset={lockerAction} />
@@ -477,11 +485,18 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
 }
 
 /* ── Pay Supplier — mirrors SupplierHistory.tsx's recordPayment ── */
-function PaySupplier({ open, onOpenChange }: SheetProps) {
+type SupplierDir = "pay" | "receive";
+function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: SupplierDir }) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
-  const [dir, setDir] = useState<"pay" | "receive">("pay");
+  const [dir, setDir] = useState<SupplierDir>(preset);
+  // "Receive ▾ From a supplier" opens it on Receive, "Pay ▾" on Pay; the switch
+  // inside can still change it. Before paint, so it never opens on the old side.
+  useLayoutEffect(() => {
+    if (open && dir !== preset) setDir(preset);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, preset]);
   const [supplierId, setSupplierId] = useState("");
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("__fifo");
@@ -1045,14 +1060,14 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="md"
       icon={action === "transfer_out" ? ArrowLeftRight : action === "income" ? ArrowDownCircle : ArrowUpCircle}
-      title={action === "transfer_out" ? "Transfer between accounts" : action === "income" ? "Deposit to an account" : "Withdraw from an account"}
+      title={action === "transfer_out" ? "Transfer between accounts" : action === "income" ? "Other income" : "Withdraw from an account"}
       description={action === "transfer_out"
         ? "Any two accounts, any currencies"
         : "One account, under a category"}
       footer={
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && selected ? (
           <div className="space-y-1">
-            <MoveSummary label={action === "income" ? "Deposit" : action === "expense" ? "Withdrawal" : "Transfer"} value={fmtCcy(typed, cur)}
+            <MoveSummary label={action === "income" ? "Income" : action === "expense" ? "Withdrawal" : "Transfer"} value={fmtCcy(typed, cur)}
               tone={action === "income" ? "in" : "out"} lockerId={selected.id} change={action === "income" ? typed : -typed} />
             {/* What lands on the other side: the same amount, or amount × rate once there is one. */}
             {target && (!crossCurrency || xferRate > 0) && (
@@ -1063,7 +1078,7 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
           </div>
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving || lockers.length === 0} className={SAVE_BTN}>
-            {saving ? "Saving…" : action === "income" ? "Record Deposit" : action === "expense" ? "Record Withdrawal" : "Record Transfer"}
+            {saving ? "Saving…" : action === "income" ? "Record Income" : action === "expense" ? "Record Withdrawal" : "Record Transfer"}
           </AsyncButton>
         </PanelFooter>
       }>
@@ -1085,7 +1100,7 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
         <Select value={action} onValueChange={v => { setAction(v as LockerAction); setExchangeRate(""); }}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
           <SelectContent>
-            <SelectItem value="income">Deposit (money in)</SelectItem>
+            <SelectItem value="income">Other income (money in)</SelectItem>
             <SelectItem value="expense">Withdraw (money out)</SelectItem>
             <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
           </SelectContent>
