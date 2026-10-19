@@ -9,6 +9,9 @@ import { useDb } from "@/hooks/useDb";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { Purchase } from "@/lib/db";
 import type { PurchaseEdit } from "@/lib/purchaseVoid";
+import { toast } from "sonner";
+import { BillBrokerFields } from "@/components/BillBrokerFields";
+import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, type BillBrokerage } from "@/lib/brokers";
 import { materialUnit, materialName, purchaseQty, purchaseRate, UNIT_LABEL } from "@/lib/materials";
 
 /**
@@ -40,6 +43,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const [certNo, setCertNo] = useState("");
   const [lab, setLab] = useState("");
   const [saving, setSaving] = useState(false);
+  // The broker on this line (lib/brokers.ts).
+  const [brokerage, setBrokerage] = useState<BillBrokerage>(emptyBillBrokerage());
 
   // Reload the form whenever a different purchase is opened.
   useEffect(() => {
@@ -53,6 +58,10 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
     setQuality(purchase.diamond?.quality ?? "");
     setCertNo(purchase.diamond?.certificateNumber ?? "");
     setLab(purchase.diamond?.certificateLab ?? "");
+    setBrokerage(purchase.brokerId ? {
+      brokerId: purchase.brokerId, pct: purchase.brokeragePct != null ? String(purchase.brokeragePct) : "",
+      amount: purchase.brokerageInr != null ? String(purchase.brokerageInr) : "", paidBy: purchase.brokeragePaidBy ?? "us",
+    } : emptyBillBrokerage());
   }, [purchase]);
 
   if (!purchase) return null;
@@ -71,6 +80,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const totalInr = isUsd ? Math.round(net * fx) : Math.round(net);
 
   const submit = async () => {
+    const brokerProblem = billBrokerageProblem(brokerage);
+    if (brokerProblem) { toast.error(brokerProblem); return; }
     setSaving(true);
     try {
       await onSave({
@@ -86,6 +97,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
         quality: purchase.material === "diamond" ? quality : undefined,
         certificateNumber: isCertified ? certNo : undefined,
         certificateLab: isCertified ? lab : undefined,
+        brokerage: brokerage.brokerId ? brokerageForLines(brokerage, [totalInr])[0] : null,
       });
       onClose();
     } finally { setSaving(false); }
@@ -171,6 +183,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
             <Input value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         </div>
+
+        <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={totalInr} />
 
         <div className="rounded-xl bg-secondary/60 border border-border/60 px-4 py-3 text-sm flex items-center justify-between">
           <span className="text-muted-foreground">New total</span>

@@ -1,4 +1,6 @@
 import { PageHeader } from "@/components/PageHeader";
+import { OpeningStock } from "@/pages/BuyAssign";
+import { useCan } from "@/hooks/useCan";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
@@ -6,7 +8,7 @@ import { loadDb } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
 import { deriveStockBalances } from "@/lib/manufacturing";
-import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, type LucideIcon } from "lucide-react";
+import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, Boxes, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
 import { MaterialEditor } from "@/components/MaterialsSettings";
@@ -44,6 +46,9 @@ export function StockPage() {
   const [recomputing, setRecomputing] = useState(false);
   const [addingMaterial, setAddingMaterial] = useState(false);
   const [moving, setMoving] = useState(false);
+  const can = useCan();
+  const mayAddStock = can("buyAssign", "add");
+  const [opening, setOpening] = useState(false);
   const multiCo = useMultiCo();
   const [co, setCo] = useState<string>(() => { try { return localStorage.getItem("stock-company") || "all"; } catch { return "all"; } });
   const pickCo = (v: string) => { setCo(v); try { localStorage.setItem("stock-company", v); } catch { /* ignore */ } };
@@ -128,6 +133,8 @@ export function StockPage() {
       <PageHeader
         title="Stock"
         subtitle="On hand, by material"
+        // Stock already on hand before the app — the same form as Buy & Assign → Opening stock.
+        primary={mayAddStock ? { label: "Opening stock", icon: Boxes, onClick: () => setOpening(true) } : null}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
         menuTitle="Stock"
         menu={[
@@ -161,6 +168,7 @@ export function StockPage() {
         )}
       </div>
       {addingMaterial && <MaterialEditor onClose={() => setAddingMaterial(false)} />}
+      {mayAddStock && <OpeningStock open={opening} onOpenChange={setOpening} />}
     </div>
   );
 }

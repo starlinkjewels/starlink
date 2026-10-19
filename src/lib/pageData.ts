@@ -67,7 +67,8 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/clients/:id": ["clientReceipts", "lockerTransactions"],
   "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments"],
   "/factories/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "factoryPayments"],
-  "/stock": ["diamondPackets", "stockMovements"],
+  // + materialIssuances: its Opening stock form (Buy & Assign's) records opening gold at a factory.
+  "/stock": ["diamondPackets", "stockMovements", "materialIssuances"],
   "/stock/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales"],
   "/buy-assign": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "lockerTransactions"],
   "/locker": ["clientReceipts", "lockerTransactions"],
