@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { choicesOf } from "@/lib/optionLists";
 import { Link } from "react-router-dom";
 import { ReceiptText } from "lucide-react";
 import { toast } from "sonner";
@@ -20,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // Every way a payment is taken across the app (Payments, the client page), so
 // a receipt's own mode is always one of the choices.
-const METHODS = ["Cash", "Bank Transfer", "UPI", "Venmo", "Zelle", "Cheque", "Card", "Other"];
+// Settings → Dropdown lists → Payment methods.
 
 /**
  * Receipts are a heavy record, loaded only by the pages that list them. Any
@@ -120,7 +121,7 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
   const client = rec ? db.clients.find(c => c.id === rec.clientId) : undefined;
   const landed = rec ? db.orders.flatMap(o => (o.advances ?? []).filter(a => a.receiptId === rec.id).map(a => ({ o, a }))) : [];
   const asCredit = rec ? Math.round((rec.amountUsd - receiptApplied(db, rec.id)) * 100) / 100 : 0;
-  const methods = rec && ef.method && !METHODS.includes(ef.method) ? [ef.method, ...METHODS] : METHODS;
+  const methods = choicesOf("paymentMethods", rec ? ef.method : undefined);
   const mayEdit = can("payments", "edit");
   const mayDelete = can("payments", "delete");
 

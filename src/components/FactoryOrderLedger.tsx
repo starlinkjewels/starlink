@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { metalLabel } from "@/lib/metals";
 import { TableBox } from "@/components/TableBox";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
@@ -214,7 +215,7 @@ export function buildFactoryOrderRows(
     const order = orders.find(o => o.id === row.orderId);
     if (!order) continue;
     row.quotedUsd = order.estimatedMakingCharges || 0;
-    row.metalNote = [order.productKarats, order.metal].filter(Boolean).join(" ");
+    row.metalNote = [order.productKarats, metalLabel(order.metal)].filter(Boolean).join(" ");
     // Any other material on the job, named in the item column: "14K Gold + 2.5 g Platinum".
     const extra = Object.entries(row.materials ?? {}).map(([k, v]) => `${Math.round(v.out * 1000) / 1000} ${materialUnit(settings, k)} ${materialName(settings, k)}`);
     if (extra.length) row.metalNote = [row.metalNote, ...extra].filter(Boolean).join(" + ");

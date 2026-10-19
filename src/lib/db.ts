@@ -443,10 +443,12 @@ export interface Order {
   giftCardRedeemed?: number; // USD applied from the gift card to this order
   cashbackIssued?: boolean; // guard so cashback is granted at most once (on delivery)
   contactPerson: string;
-  jewelleryType:
-    "Ring" | "Ring + Band" | "Pendant" | "Necklace" | "Bracelet" | "Earrings" | "Custom" | "Diamond Only";
-  metal: "Gold" | "White Gold" | "Rose Gold" | "Platinum" | "Silver" | "Two Tone Casting" | "None (Diamond only)";
-  diamondType: "Natural" | "Lab Grown";
+  // These three are the business's own words (Settings → Dropdown lists,
+  // lib/optionLists.ts); an order keeps the word it was saved with. Two are
+  // fixed: jewelleryType "Diamond Only" and metal "None (Diamond only)".
+  jewelleryType: string;
+  metal: string;
+  diamondType: string;
   quantity: number;
   diamondWeight: number; // estimated diamond weight (ct) — entered at order creation
   metalWeight: number;
@@ -928,6 +930,10 @@ export interface Settings {
    *  from Settings so every entry is filed under a name the books recognise,
    *  instead of free text that never groups or totals. */
   lockerCategories?: string[];
+  /** Settings → Dropdown lists: the business's own options, per list (lib/optionLists.ts). Absent = the default list. */
+  optionLists?: Partial<Record<string, string[]>>;
+  /** Metals with no karats (the piece is that metal, not gold). Absent = platinum, silver, titanium. */
+  metalsWithoutKarats?: string[];
   // Monotonic counter behind nextDiamondStockNumber() — never reused even if
   // a packet is later deleted, unset = no certified packet has been numbered yet.
   nextDiamondStockNo?: number;
@@ -1290,7 +1296,7 @@ export interface ReadyStockItem {
   grossWeight?: number; // grams
   netWeight?: number; // grams
   diamondWeight?: number; // carats
-  diamondType?: "Natural" | "Lab Grown";
+  diamondType?: string;
   price: number; // USD — sale price, matches client billing currency
   cost?: number; // USD — internal cost basis (materials + making). ADMIN-ONLY: never shown to employees or clients. Drives profit/loss.
   quantity: number; // identical pieces available — "Sold Out" is quantity === 0, never a separate stored flag

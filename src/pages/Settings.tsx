@@ -10,6 +10,7 @@ import { Table2, Palette } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
+import { OptionListsSettings } from "@/components/OptionListsSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
 import { ListOrdered } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -62,6 +63,7 @@ import {
   Lock,
   Boxes,
   SlidersHorizontal,
+  ListChecks,
   Hash,
   Receipt,
   Banknote,
@@ -768,6 +770,7 @@ export function SettingsPage() {
     { id: "pricing", label: "Pricing Rates", icon: DollarSign, show: canEditRates },
     { id: "labels", label: "Labels & Barcode", icon: Tag, show: canEditRates },
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
+    { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
@@ -1477,6 +1480,9 @@ export function SettingsPage() {
 
       {/* Production timeline — admin only */}
       {activeId === "timeline" && <TimelineSettings />}
+
+      {/* The business's own dropdown choices — admin only */}
+      {activeId === "lists" && <OptionListsSettings />}
 
       {/* Expense Categories — admin only */}
       {activeId === "expenses" && (

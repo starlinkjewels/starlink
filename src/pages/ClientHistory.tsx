@@ -1,4 +1,6 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { choicesOf } from "@/lib/optionLists";
+import { metalLabel } from "@/lib/metals";
 import { MAIN_COMPANY_ID, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -446,7 +448,7 @@ function ClientHistoryPageBody() {
         );
       } },
     { key: "item", header: "Item", sortValue: o => o.jewelleryType, cell: o => <span className="font-medium whitespace-nowrap">{o.jewelleryType}</span> },
-    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.metal}</span> },
+    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{metalLabel(o.metal)}</span> },
     { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.diamondType}</span> },
     { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },
     { key: "priority", header: "Priority", sortValue: o => o.priority,
@@ -787,7 +789,7 @@ function ClientHistoryPageBody() {
                     <CreditCard className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m =>
+                    {choicesOf("paymentMethods", payMethod).map(m =>
                       <SelectItem key={m} value={m}>{m}</SelectItem>)}
                   </SelectContent>
                 </Select>

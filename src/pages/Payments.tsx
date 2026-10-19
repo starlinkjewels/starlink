@@ -1,4 +1,5 @@
 import { materialUnit } from "@/lib/materials";
+import { choicesOf } from "@/lib/optionLists";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
@@ -445,7 +446,7 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
           <Label className="text-xs">Method</Label>
           <Select value={method} onValueChange={setMethod}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>{["Cash", "Bank Transfer", "Venmo", "Zelle", "Cheque", "Card", "Other"].map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+            <SelectContent>{choicesOf("paymentMethods", method).map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
           </Select>
         </div>
 

@@ -10,6 +10,8 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
+import { metalHasKarats as hasKarats, metalColour } from "@/lib/metals";
+import { choicesOf, listOf } from "@/lib/optionLists";
 import { receiptForAdvance } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
 import { useSuggestedRate } from "@/components/CurrencyFields";
@@ -88,9 +90,10 @@ export function NewOrderPage() {
 
   const [f, setF] = useState({
     clientId: isClient ? (user!.clientId ?? "") : "",
-    jewelleryType: "Ring",
-    metal: "Gold",
-    diamondType: "Natural",
+    // The first of each of the business's own lists (Settings → Dropdown lists).
+    jewelleryType: listOf("jewelleryTypes")[0] ?? "Ring",
+    metal: listOf("metals")[0] ?? "Yellow Gold",
+    diamondType: listOf("diamondTypes")[0] ?? "Natural",
     quantity: 1,
     diamondWeight: 0.5,
     estimatedGrossWeight: 0,
@@ -146,7 +149,7 @@ export function NewOrderPage() {
   const set = (key: string, value: unknown) =>
     setF(prev => ({ ...prev, [key]: value }));
 
-  const metalHasKarats = !["Silver", "Platinum", "None (Diamond only)"].includes(f.metal);
+  const metalHasKarats = hasKarats(f.metal);
   // A pure diamond sale, no jewellery piece at all — hides every field that
   // only makes sense for a manufactured piece (size, plating, factory, etc.).
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
@@ -165,7 +168,7 @@ export function NewOrderPage() {
     setF(prev => ({
       ...prev,
       metal: v,
-      productKarats: ["Silver", "Platinum", "None (Diamond only)"].includes(v) ? "" : prev.productKarats,
+      productKarats: hasKarats(v) ? prev.productKarats : "",
     }));
   };
 
@@ -208,7 +211,7 @@ export function NewOrderPage() {
     if (!itemId) { setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later" })); return; }
     const item = db.readyStock.find(i => i.id === itemId);
     if (!item) return;
-    const colorGuess = item.metal === "Rose Gold" ? "Rose" : item.metal === "White Gold" ? "White" : "Yellow";
+    const colorGuess = metalColour(item.metal);
     setF(prev => ({
       ...prev,
       readyStockItemId: itemId,
@@ -629,7 +632,7 @@ export function NewOrderPage() {
               <Select value={f.jewelleryType} onValueChange={setJewelleryType}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Ring","Ring + Band","Pendant","Necklace","Bracelet","Earrings","Custom","Diamond Only"].map(x =>
+                  {choicesOf("jewelleryTypes", f.jewelleryType, db.settings).map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -642,7 +645,7 @@ export function NewOrderPage() {
                 <Select value={f.metal} onValueChange={setMetal}>
                   <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["Gold","White Gold","Rose Gold","Platinum","Silver","None (Diamond only)"].map(x =>
+                    {choicesOf("metals", f.metal, db.settings).map(x =>
                       <SelectItem key={x} value={x}>{x}</SelectItem>)}
                   </SelectContent>
                 </Select>
@@ -653,7 +656,7 @@ export function NewOrderPage() {
               <Select value={f.diamondType} onValueChange={v => set("diamondType", v)}>
                 <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {["Natural","Lab Grown"].map(x =>
+                  {choicesOf("diamondTypes", f.diamondType, db.settings).map(x =>
                     <SelectItem key={x} value={x}>{x}</SelectItem>)}
                 </SelectContent>
               </Select>
@@ -776,7 +779,7 @@ export function NewOrderPage() {
                   <Select value={f.productColor} onValueChange={v => set("productColor", v)} required>
                     <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
                     <SelectContent>
-                      {["Yellow","Rose","White"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
+                      {choicesOf("colours", f.productColor, db.settings).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -825,7 +828,7 @@ export function NewOrderPage() {
                 <p className="text-sm font-medium text-foreground mb-2.5">Rhodium *</p>
                 <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {["No Rhodium","Diamond Part White","Full White","Two Tone Casting","Other"].map(opt => (
+                  {choicesOf("rhodium", f.rhodium, db.settings).map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
                         ${f.rhodium === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>
@@ -841,7 +844,7 @@ export function NewOrderPage() {
                 <p className="text-sm font-medium text-foreground mb-2.5">Stamping *</p>
                 <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
                   className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  {["No Stamping","KT Stamping","Diamond Weight + KT Stamp","Special Stamp"].map(opt => (
+                  {choicesOf("stamping", f.stamping, db.settings).map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
                         ${f.stamping === opt ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60 active:bg-secondary/60"}`}>

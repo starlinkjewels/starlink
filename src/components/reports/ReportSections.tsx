@@ -1,4 +1,5 @@
 import { companyOf } from "@/lib/companies";
+import { metalLabel } from "@/lib/metals";
 import { PeriodPicker } from "./ui";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -1590,13 +1591,13 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             details={reportOrderDetails}
             maxHeight="32rem"
             defaultSort={{ key: "date", dir: "desc" }}
-            searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${o.metal} ${o.status}`}
+            searchText={o => `${o.orderNumber} ${o.designNumber ?? ""} ${clients.find(cl => cl.id === o.clientId)?.companyName ?? ""} ${o.jewelleryType} ${metalLabel(o.metal)} ${o.status}`}
             columns={[
               { key: "no", header: "Order #", always: true, sortValue: o => o.orderNumber, cell: o => <span className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</span> },
               { key: "design", header: "Design #", hidden: true, sortValue: o => o.designNumber ?? "", cell: o => o.designNumber || "—" },
               { key: "client", header: "Client", sortValue: o => clients.find(cl => cl.id === o.clientId)?.companyName ?? "", cell: o => <span className="whitespace-nowrap">{clients.find(cl => cl.id === o.clientId)?.companyName ?? "—"}</span> },
               { key: "type", header: "Type", sortValue: o => o.jewelleryType, cell: o => <span className="whitespace-nowrap">{o.jewelleryType}</span> },
-              { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{o.metal}</span> },
+              { key: "metal", header: "Metal", hidden: true, sortValue: o => o.metal, cell: o => <span className="whitespace-nowrap">{metalLabel(o.metal)}</span> },
               { key: "status", header: "Status", sortValue: o => o.status, cell: o => <StatusBadge status={o.status} /> },
               { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => o.quantity },
               { key: "value", header: "Order Value", align: "right", kind: "number", sortValue: o => o.amount || 0, cell: o => <span className="font-semibold text-brand-dark tabular-nums whitespace-nowrap">{fmtMoney(o.amount)}</span> },

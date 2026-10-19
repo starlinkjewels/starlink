@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { metalLabel } from "@/lib/metals";
 import { Link, useNavigate } from "react-router-dom";
 import { Lock, Package, CalendarClock, FileSignature, Truck, PackageCheck, CheckCircle2, BadgeCheck, Boxes, ChevronDown, ArrowRight, Undo2 } from "lucide-react";
 import {
@@ -244,7 +245,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                         </div>
                         <div className="min-w-0 flex-1">
                           <Link to={`/orders/${o.id}`} draggable={false} className="text-sm font-semibold text-brand-dark hover:text-primary hover:underline truncate block">{o.orderNumber}</Link>
-                          <p className="text-[11px] text-muted-foreground truncate">{o.jewelleryType} · {o.metal}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{o.jewelleryType} · {metalLabel(o.metal)}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
                           <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
                         </div>
                       </div>

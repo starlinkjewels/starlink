@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
 import { Mail, UserRound, Wallet } from "lucide-react";
 import { updateDb, type User } from "@/lib/db";
@@ -13,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** The departments the Create Employee form offers (EmployeeCreateDialog). */
-const DEPTS = ["Sales", "CAD", "Design", "Production", "Diamond Setting", "Polishing", "QC", "Packing", "Dispatch", "Accounts"];
+// Departments: Settings → Dropdown lists.
 
 /**
  * Correcting someone's details after they were added — everything the Create
@@ -41,7 +42,7 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
     openingDate: u.openingPaidDate?.slice(0, 10) ?? "",
   });
   const [coIds, setCoIds] = useState<string[]>(u.companyIds ?? []);
-  const depts = f.department && !DEPTS.includes(f.department) ? [...DEPTS, f.department] : DEPTS;
+  const depts = choicesOf("departments", f.department);
 
   const save = () => {
     if (!f.name.trim()) { toast.error("Enter a name"); return; }
