@@ -17,6 +17,7 @@ import { GiftCardPopup } from "@/components/GiftCardPopup";
 import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
@@ -526,6 +527,8 @@ export function AppLayout() {
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
               only while a page's chunk is fetched the first time. */}
+          {/* A page that breaks shows a Reload box here; the menu keeps working. */}
+          <ErrorBoundary resetKey={loc.pathname}>
           <Suspense fallback={<div className="grid place-items-center py-24 text-muted-foreground"><Loader2 className="h-6 w-6 animate-spin" /></div>}>
             {/* The address bar is not a way round the sidebar: a section the
                 role does not allow is refused here, whatever was typed. */}
@@ -546,6 +549,7 @@ export function AppLayout() {
             </div>
             </QuickCreateProvider>
           </Suspense>
+          </ErrorBoundary>
         </motion.main>
 
         <SyncStatus />

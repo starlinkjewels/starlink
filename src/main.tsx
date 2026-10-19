@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { App } from "./App";
 import { AuthProvider } from "./lib/auth";
 import { Toaster } from "@/components/ui/sonner";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "./styles.css";
 import { applyRememberedAppearance } from "@/lib/appearance";
 
@@ -37,7 +38,10 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={qc}>
       <BrowserRouter>
         <AuthProvider>
-          <App />
+          {/* Last line of defence: never an empty page — see ErrorBoundary. */}
+          <ErrorBoundary fullScreen>
+            <App />
+          </ErrorBoundary>
           <Toaster position="top-center" richColors />
         </AuthProvider>
       </BrowserRouter>
