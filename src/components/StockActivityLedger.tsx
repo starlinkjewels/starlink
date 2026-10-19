@@ -1,5 +1,5 @@
 import { useCan } from "@/hooks/useCan";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -62,7 +62,10 @@ interface Row {
  * back and shows them the way the payments tables do: searchable, filterable by
  * date and kind, and downloadable as exactly what is on screen.
  */
-export function StockActivityLedger() {
+/** What the ledger adds up to, for the page's figure strip above it. */
+export interface LedgerTotals { totalIn: number; nBought: number; totalOut: number; nSold: number; filtered: boolean }
+
+export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals) => void } = {}) {
   const db = useDb();
   const { user } = useAuth();
   const can = useCan();
@@ -287,6 +290,11 @@ export function StockActivityLedger() {
   const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const nBought = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").length;
   const nSold = rows.filter(r => r.kind === "Diamond sold").length;
+  // The totals show in the page's figure strip, beside the month's — handed up
+  // whenever the rows (or the filters on them) change.
+  useEffect(() => {
+    onTotals?.({ totalIn, nBought, totalOut, nSold, filtered });
+  }, [onTotals, totalIn, nBought, totalOut, nSold, filtered]);
 
   const HEAD = ["Sr", "Date", "Entry", "Bill no.", "Party", "Material", "Quantity", "Unit", "Amount (INR)", "Remark"];
   const body: (string | number)[][] = [];
@@ -445,11 +453,12 @@ export function StockActivityLedger() {
     <div className="card-luxe p-5">
       <SectionTitle className="mb-4" title="Purchase & stock ledger" />
 
-      {/* Search, filters and downloads sit in the table's own toolbar, what was
-          bought in and sold under it (each only when there is any). A new
-          filter (resetKey) starts it again from the first page. */}
+      {/* Search, filters and downloads sit in the table's own toolbar. What
+          was bought in and sold shows in the page's figure strip when the page
+          asks for it (onTotals), else under the toolbar. A new filter
+          (resetKey) starts it again from the first page. */}
       <DataTable
-        summary={totalIn > 0 || totalOut > 0 ? (
+        summary={!onTotals && (totalIn > 0 || totalOut > 0) ? (
           <StatStrip items={[
             ...(totalIn > 0 ? [{ label: "Bought in", value: fmtMoneyInr(totalIn), icon: ShoppingCart, sub: `${nBought} ${nBought === 1 ? "entry" : "entries"}` }] : []),
             ...(totalOut > 0 ? [{ label: "Sold", value: fmtMoneyInr(totalOut), tone: "in" as const, icon: Gem, sub: `${nSold} ${nSold === 1 ? "sale" : "sales"}` }] : []),

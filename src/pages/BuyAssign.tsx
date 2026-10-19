@@ -3,7 +3,7 @@ import { StatStrip } from "@/components/TableToolbar";
 import { useCan } from "@/hooks/useCan";
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
-import { StockActivityLedger } from "@/components/StockActivityLedger";
+import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivityLedger";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -50,6 +50,8 @@ export function BuyAssignPage() {
   const may = can("buyAssign", "add");
   const [panel, setPanel] = useState<Mode | null>(null);
   const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
+  // The ledger's own total, shown as the fourth figure up top.
+  const [ledgerTotals, setLedgerTotals] = useState<LedgerTotals | null>(null);
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
@@ -65,11 +67,11 @@ export function BuyAssignPage() {
         {!may && <p className="text-xs text-muted-foreground mt-1">View only — your role can't add entries.</p>}
       </PageHeader>
 
-      <MonthFigures />
+      <MonthFigures ledger={ledgerTotals} />
 
       {/* Everything the four entries have done, so a day's work can be checked
           afterwards instead of disappearing into four different places. */}
-      <StockActivityLedger />
+      <StockActivityLedger onTotals={setLedgerTotals} />
 
       {may && (
         <>
@@ -87,7 +89,7 @@ export function BuyAssignPage() {
  * This month at a glance: what was bought, what went to factories, what was
  * sold — counted the way the history below counts them, so the two agree.
  */
-function MonthFigures() {
+function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
   const db = useDb();
   const now = new Date();
   const month = now.toLocaleDateString("en-IN", { month: "long" });
@@ -110,7 +112,9 @@ function MonthFigures() {
   const others = issued.filter(i => i.material !== "gold" && i.material !== "diamond").length;
   const sold = (db.diamondSales ?? []).filter(s => inMonth(s.createdAt));
 
-  // The month's three figures, in the app's one figure strip.
+  // The month's three figures, then the ledger's total below them — in the
+  // app's one figure strip. The ledger's follows its filters, and says so.
+  const all = ledger && ledger.totalIn > 0 ? ledger : null;
   return (
     <StatStrip items={[
       { label: `Bought in ${month}`, value: fmtMoneyInr(total(bought, p => p.totalInr)), icon: ShoppingCart, sub: `${bills} bill${bills !== 1 ? "s" : ""}` },
@@ -122,6 +126,12 @@ function MonthFigures() {
           others ? `${others} other` : ""].filter(Boolean).join(" · "),
       },
       { label: "Diamonds sold", value: fmtQty(total(sold, s => s.carat), "ct"), icon: Tag, sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}` },
+      ...(all ? [{
+        label: all.filtered ? "Bought in · filtered" : "Bought in · all time", icon: ShoppingCart,
+        value: fmtMoneyInr(all.totalIn),
+        sub: [`${all.nBought} ${all.nBought === 1 ? "entry" : "entries"}`,
+          all.totalOut > 0 ? `sold ${fmtMoneyInr(all.totalOut)}` : ""].filter(Boolean).join(" · "),
+      }] : []),
     ]} />
   );
 }
