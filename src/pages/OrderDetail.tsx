@@ -1,4 +1,6 @@
 
+import { choicesOf } from "@/lib/optionLists";
+import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
@@ -1334,7 +1336,7 @@ function OrderDetailPageBody() {
     // to a gold one. The field starts on the order's own metal so its weight can
     // be entered at once; leaving it blank disabled the weight box, which is
     // also the weight labour per gram is charged on.
-    const selfMetal = order.metal === "Platinum" || order.metal === "Silver" ? order.metal : "";
+    const selfMetal = isNonGoldMetal(order.metal) ? order.metal : "";
     setFaOtherMetal(order.otherMetal ?? selfMetal);
     setFaOtherNet(order.otherMetalWeight != null ? String(order.otherMetalWeight) : "");
     setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
@@ -2286,7 +2288,7 @@ function OrderDetailPageBody() {
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
                   })()}
                 </div>
-                <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{order.jewelleryType} in {order.metal}</h1>
+                <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{order.jewelleryType} in {metalLabel(order.metal)}</h1>
                 <p className="text-sm text-muted-foreground mt-1 break-words">
                   {order.forReadyStock ? "Ready Stock — in-house build" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
                   {order.materialSourcing === "readyStock" ? (() => {
@@ -2341,7 +2343,7 @@ function OrderDetailPageBody() {
             <p className="text-sm font-semibold text-foreground mb-3">The piece</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <OrderSpec label="Type" value={order.jewelleryType} />
-              <OrderSpec label="Metal" value={order.metal} />
+              <OrderSpec label="Metal" value={metalLabel(order.metal)} />
               <OrderSpec label="Karats" value={order.productKarats} />
               <OrderSpec label="Color" value={order.productColor} />
               <OrderSpec label="Quantity" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
@@ -4289,7 +4291,7 @@ function OrderDetailPageBody() {
                       <SelectTrigger className="h-9 rounded-lg mt-1"><SelectValue placeholder="None" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none">None</SelectItem>
-                        {["Platinum", "Silver", "White Gold", "Rose Gold", "Yellow Gold", "Other"].map(m => (
+                        {[...choicesOf("metals", faOtherMetal === "Other" ? undefined : faOtherMetal, undefined, { builtIn: false }), "Other"].map(m => (
                           <SelectItem key={m} value={m}>{m}</SelectItem>
                         ))}
                       </SelectContent>

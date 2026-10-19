@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
 import { Check, ChevronLeft, ChevronRight, Clock, Crown, Eye, EyeOff, KeyRound, ShieldCheck, UserRound, Wallet } from "lucide-react";
 import { loadDb, updateDb, flush, uid, rolesStoreReady, type User, type DB } from "@/lib/db";
@@ -18,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { confirmBox } from "@/lib/confirm";
 
-const DEPTS = ["Sales","CAD","Design","Production","Diamond Setting","Polishing","QC","Packing","Dispatch","Accounts"];
+// Departments: Settings → Dropdown lists.
 
 /**
  * The one Create Employee form — the Employees page's, also opened from
@@ -285,7 +286,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                     <Field label="Department">
                       <Select value={f.department} onValueChange={v => setF({ ...f, department: v })}>
                         <SelectTrigger className="h-10 rounded-xl" aria-label="Department"><SelectValue /></SelectTrigger>
-                        <SelectContent>{DEPTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                        <SelectContent>{choicesOf("departments", f.department).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
                       </Select>
                     </Field>
                   )}

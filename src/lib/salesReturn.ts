@@ -32,7 +32,7 @@ import { pieceWeights } from "./weights";
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
-export const RETURN_REASONS = ["Customer didn't like it", "Wrong size", "Quality issue", "Not as ordered"];
+// The quick-pick reasons are the business's own: Settings → Dropdown lists (lib/optionLists.ts).
 
 /** Why pieces of this order cannot be returned; undefined when they can. */
 export function returnBlocker(o: Order): string | undefined {

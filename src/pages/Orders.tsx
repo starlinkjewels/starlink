@@ -1,4 +1,5 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu, FilterChips, FiltersButton, type TableExport, type TableFilter } from "@/components/TableToolbar";
@@ -231,7 +232,7 @@ export function OrdersPage() {
             <div className="min-w-0">
               <p className="font-semibold text-brand-dark leading-snug whitespace-nowrap">{o.orderNumber}</p>
               <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[13rem]">
-                {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
+                {o.jewelleryType} · {metalLabel(o.metal)}{o.productKarats ? ` ${o.productKarats}` : ""} · {o.quantity} pc{o.quantity !== 1 ? "s" : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
               </p>
               {(o.melted || jobFinished(o) || !!o.returns?.length) && (
                 <div className="flex flex-wrap gap-1 mt-0.5">
@@ -574,7 +575,7 @@ export function OrdersPage() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-1">
-                    {o.jewelleryType} · {o.metal}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
+                    {o.jewelleryType} · {metalLabel(o.metal)}{o.productKarats ? ` ${o.productKarats}` : ""}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-xs font-medium text-primary truncate mt-1">Ready Stock</p>

@@ -1,4 +1,5 @@
 import { useCan } from "@/hooks/useCan";
+import { listOf } from "@/lib/optionLists";
 import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
@@ -16,7 +17,7 @@ import { StatStrip } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { oneLine } from "@/components/MoneyEntryEditor";
 
-const METHODS = ["Cash", "Bank Transfer", "UPI", "Cheque", "Other"];
+// The filter offers the business's payment methods (Settings → Dropdown lists).
 
 /**
  * Every payment received, as a numbered receipt book: what came in, from whom,
@@ -196,7 +197,7 @@ export function ReceiptLedger() {
             { label: "Account", value: acct, onChange: setAcct,
               options: db.lockers.map(l => ({ value: l.id, label: l.name })) },
             { label: "Mode", value: mode, onChange: setMode,
-              options: METHODS.map(m => ({ value: m, label: m })) },
+              options: listOf("paymentMethods").map(m => ({ value: m, label: m })) },
           ],
           onPdf: exportPdf, onCsv: exportCsv,
         })}

@@ -1,4 +1,5 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
@@ -210,7 +211,7 @@ export function ReadyStockPage() {
           <div className="min-w-0">
             <p className="font-medium text-brand-dark leading-snug truncate max-w-[16rem]">{item.name}</p>
             <p className="text-[11px] text-muted-foreground leading-snug truncate max-w-[16rem]">
-              {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}{item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
+              {item.jewelleryType} · {metalLabel(item.metal)}{item.productKarats ? ` ${item.productKarats}` : ""}{item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
             </p>
             {canManage && item.fromReturn && <div className="mt-0.5"><CellTag tone="amber">Returned by a client</CellTag></div>}
           </div>
@@ -435,7 +436,7 @@ export function ReadyStockPage() {
             <div className="p-2.5 sm:p-3 flex-1 flex flex-col min-w-0">
               <p className="font-display text-base sm:text-lg text-brand-dark truncate leading-tight"><Link to={pieceHref(item)} className="hover:underline">{item.name}</Link></p>
               <p className="text-xs text-muted-foreground mt-0.5 truncate">
-                {item.jewelleryType} · {item.metal}{item.productKarats ? ` ${item.productKarats}` : ""}
+                {item.jewelleryType} · {metalLabel(item.metal)}{item.productKarats ? ` ${item.productKarats}` : ""}
                 {item.diamondWeight ? ` · ${item.diamondWeight}ct ${item.diamondType || "diamond"}` : ""}
               </p>
               {(item.grossWeight || item.netWeight) && (

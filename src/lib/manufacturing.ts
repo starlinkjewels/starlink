@@ -16,6 +16,7 @@ import {
   factoryPoolBalance, factoryPoolBuckets,
 } from "./pure/accounts";
 import { purchaseQty } from "./materials";
+import { metalHasKarats } from "./metals";
 export {
   purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow, otherFlow,
   factoryFineGoldBalance, factoryAccount, factoryOtherBalances, supplierAccount, lockerBalance,
@@ -55,16 +56,16 @@ export function fmtLockerAmount(n: number, currency?: string): string {
   return fmtCcy(n, currency);
 }
 
-// This module only tracks gold (by karat purity) and diamond — Platinum/Silver
-// orders never need a factory material issuance to proceed.
-const GOLDLESS_METALS = new Set(["Platinum", "Silver", "None (Diamond only)"]);
+// This module only tracks gold (by karat purity) and diamond — a metal with no
+// karats (platinum, silver, titanium, or any the business marks so) never
+// needs gold issued to proceed.
 
 export function orderMaterialRequirements(order: Pick<Order, "metal" | "diamondWeight" | "noDiamond">): {
   needsGold: boolean;
   needsDiamond: boolean;
 } {
   return {
-    needsGold: !GOLDLESS_METALS.has(order.metal),
+    needsGold: metalHasKarats(order.metal),
     // A diamond-only order is FOR the stones, so it needs them whatever the
     // estimated weight says — an estimate of 0 ct is missing, not "no diamond".
     //

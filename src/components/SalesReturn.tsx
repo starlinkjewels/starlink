@@ -1,4 +1,5 @@
 import { readyStockOffices, officeLabel } from "@/lib/offices";
+import { listOf } from "@/lib/optionLists";
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { Undo2, PackageCheck, Truck, Wallet, Gift, Coins, Warehouse, FileText, Minus, Plus, AlertTriangle, Printer, XCircle } from "lucide-react";
@@ -11,7 +12,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
 import { reserveCreditNoteNumber, releaseCreditNoteNumber } from "@/lib/counters";
-import { planReturn, applyReturn, receiveReturn, cancelReturn, cancelReturnBlocker, returnBlocker, returnsComing, RETURN_REASONS, type ReturnPlan } from "@/lib/salesReturn";
+import { planReturn, applyReturn, receiveReturn, cancelReturn, cancelReturnBlocker, returnBlocker, returnsComing, type ReturnPlan } from "@/lib/salesReturn";
 import { printCreditNote } from "@/lib/invoicePrint";
 import { orderCost, rateOn, saleDate } from "@/lib/orderCost";
 import { COST } from "@/lib/pageData";
@@ -205,12 +206,12 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
             <div>
               <p className="text-xs font-semibold text-muted-foreground mb-1.5">Why</p>
               <div className="flex flex-wrap gap-1.5">
-                {RETURN_REASONS.map(r => (
+                {listOf("returnReasons").map(r => (
                   <button key={r} type="button" onClick={() => setReason(reason === r ? "" : r)}
                     className={`h-8 px-3 rounded-lg border text-xs ${reason === r ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border hover:bg-secondary"}`}>{r}</button>
                 ))}
               </div>
-              <Input value={RETURN_REASONS.includes(reason) ? "" : reason} onChange={e => setReason(e.target.value)} placeholder="or write the reason" className="mt-2 h-9 rounded-lg text-sm" />
+              <Input value={listOf("returnReasons").includes(reason) ? "" : reason} onChange={e => setReason(e.target.value)} placeholder="or write the reason" className="mt-2 h-9 rounded-lg text-sm" />
             </div>
 
             <div className="rounded-2xl border border-border/60 p-4 space-y-3">

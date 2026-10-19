@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { metalLabel } from "@/lib/metals";
 import { SectionTitle } from "@/components/SectionTitle";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -329,7 +330,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
             <SectionTitle title="Specifications" />
             <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3">
               <Fact label="Type">{item.jewelleryType}</Fact>
-              <Fact label="Metal">{item.metal}</Fact>
+              <Fact label="Metal">{metalLabel(item.metal)}</Fact>
               {item.productKarats && <Fact label="Karat">{item.productKarats}</Fact>}
               <Fact label="Gross weight">{item.grossWeight ? `${item.grossWeight} g` : <span className="text-muted-foreground/60 font-normal">—</span>}</Fact>
               <Fact label="Net weight">{item.netWeight ? `${item.netWeight} g` : <span className="text-muted-foreground/60 font-normal">—</span>}</Fact>

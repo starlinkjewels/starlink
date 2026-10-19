@@ -8,6 +8,8 @@ import {
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
+import { metalHasKarats, metalOptions } from "@/lib/metals";
+import { choicesOf, listOf } from "@/lib/optionLists";
 import { orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
 import { weightProblem } from "@/lib/weights";
 import { confirmBox } from "@/lib/confirm";
@@ -22,12 +24,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 // The same choices New Order offers; a value an older order carries that is not
 // among them stays pickable, so opening the panel never changes it by itself.
-const TYPES = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
-const METALS = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
 const KARATS = ["9K", "10K", "14K", "18K", "22K", "24K"];
-const COLOURS = ["Yellow", "Rose", "White"];
-const RHODIUM = ["No Rhodium", "Diamond Part White", "Full White", "Two Tone Casting", "Other"];
-const STAMPING = ["No Stamping", "KT Stamping", "Diamond Weight + KT Stamp", "Special Stamp"];
 const PRIORITY = ["Normal", "High Priority", "Urgent"];
 const DIAMOND_ONLY = "Diamond Only";
 const NO_METAL = "None (Diamond only)";
@@ -42,7 +39,6 @@ type Form = {
 };
 
 const numStr = (n?: number) => (n ? String(n) : "");
-const metalHasKarats = (m: string) => !["Silver", "Platinum", NO_METAL].includes(m);
 
 function formOf(o: Order): Form {
   const special = (o.stamping ?? "").startsWith(SPECIAL);
@@ -96,8 +92,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
   const inv = findInvoiceForOrder(db.invoices ?? [], order.id);
 
   const opts = (list: string[], cur: string) => (cur && !list.includes(cur) ? [...list, cur] : list);
-  const typeOpts = opts(diamondOnly ? [DIAMOND_ONLY] : TYPES, f.jewelleryType);
-  const metalOpts = diamondOnly ? [NO_METAL] : opts(METALS, f.metal);
+  const typeOpts = opts(diamondOnly ? [DIAMOND_ONLY] : listOf("jewelleryTypes", db.settings), f.jewelleryType);
+  const metalOpts = diamondOnly ? [NO_METAL] : metalOptions(f.metal, db.settings);
 
   const setMetal = (v: string) => setF(p => ({ ...p, metal: v, productKarats: metalHasKarats(v) ? p.productKarats : "" }));
 
@@ -237,7 +233,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                     ? pick("productKarats", KARATS, matLock)
                     : <div className="h-10 rounded-xl px-3 flex items-center bg-secondary/60 text-xs text-muted-foreground">No karats for {f.metal}</div>}
                 </Field>
-                <Field label="Colour">{pick("productColor", COLOURS, pieceLock)}</Field>
+                <Field label="Colour">{pick("productColor", listOf("colours", db.settings), pieceLock)}</Field>
                 <Field label="Product size" wide>
                   <Input value={f.productSize} onChange={e => set("productSize", e.target.value)} disabled={!!pieceLock} placeholder="e.g. Ring size 7, Bracelet 18cm" className="h-10 rounded-xl" />
                 </Field>
@@ -249,7 +245,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
             <Field label="Diamond type">
               <Select value={f.diamondType} onValueChange={v => set("diamondType", v)} disabled={!!matLock}>
                 <SelectTrigger className="h-10 rounded-xl" title={matLock}><SelectValue /></SelectTrigger>
-                <SelectContent>{["Natural", "Lab Grown"].map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                <SelectContent>{opts(listOf("diamondTypes", db.settings), f.diamondType).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
             <Field label="Est. diamond weight (ct)">
@@ -264,8 +260,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                   <Input type="number" min={0} step="0.001" value={f.estimatedNetWeight} onChange={e => set("estimatedNetWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
                 </Field>
                 <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight) || undefined} net={Number(f.estimatedNetWeight) || undefined} diamondCt={Number(f.diamondWeight) || undefined} />
-                <Field label="Rhodium">{pick("rhodium", RHODIUM, pieceLock)}</Field>
-                <Field label="Stamping">{pick("stamping", STAMPING, pieceLock)}</Field>
+                <Field label="Rhodium">{pick("rhodium", listOf("rhodium", db.settings), pieceLock)}</Field>
+                <Field label="Stamping">{pick("stamping", choicesOf("stamping", undefined, db.settings), pieceLock)}</Field>
                 {f.stamping === "Special Stamp" && (
                   <Field label="Special stamp" wide>
                     <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)} disabled={!!pieceLock} placeholder="Describe the stamp (logo, initials, text…)" className="h-10 rounded-xl" />

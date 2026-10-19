@@ -4,6 +4,8 @@ import { toast } from "sonner";
 import { updateDb, uid, fmtMoney, adminStoreReady, stockCostOf, writeStockCost, type ReadyStockItem, type Order } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { metalHasKarats, metalOptions } from "@/lib/metals";
+import { choicesOf, listOf } from "@/lib/optionLists";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
@@ -19,8 +21,6 @@ import { coField, companyById, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, readyStockOffices } from "@/lib/offices";
 import { describeEdit, logItem, whoOf } from "@/lib/readyStockHistory";
 
-const JEWELLERY_TYPES: Order["jewelleryType"][] = ["Ring", "Ring + Band", "Pendant", "Necklace", "Bracelet", "Earrings", "Custom"];
-const METALS: Order["metal"][] = ["Gold", "White Gold", "Rose Gold", "Platinum", "Silver", "Two Tone Casting"];
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
 /** Compress a File to a base64 JPEG ≤800px — same convention as NewOrder.tsx/OrderDetail.tsx. */
@@ -57,7 +57,7 @@ type ItemForm = {
   grossWeight: string;
   netWeight: string;
   diamondWeight: string;
-  diamondType: "Natural" | "Lab Grown";
+  diamondType: string;
   price: string;
   cost: string;
   quantity: string;
@@ -69,15 +69,14 @@ type ItemForm = {
   companyId: string;
 };
 
-const EMPTY_FORM: ItemForm = {
-  name: "", jewelleryType: "Ring", metal: "Gold", productKarats: "22K",
-  grossWeight: "", netWeight: "", diamondWeight: "", diamondType: "Natural",
+// A new item starts on the first of each of the business's lists.
+const EMPTY_FORM = (): ItemForm => ({
+  name: "", jewelleryType: listOf("jewelleryTypes")[0] ?? "Ring", metal: listOf("metals")[0] ?? "Yellow Gold", productKarats: "22K",
+  grossWeight: "", netWeight: "", diamondWeight: "", diamondType: listOf("diamondTypes")[0] ?? "Natural",
   price: "", cost: "", quantity: "1", sku: "", location: "", notes: "", companyId: "main",
-};
+});
 
-function METALS_NEED_KARAT(metal: Order["metal"]): boolean {
-  return metal !== "Platinum" && metal !== "Silver";
-}
+const METALS_NEED_KARAT = (metal: Order["metal"]): boolean => metalHasKarats(metal);
 
 /**
  * Add a Ready Stock piece, or edit one — the same form on the Ready Stock
@@ -103,10 +102,10 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
     grossWeight: item.grossWeight ? String(item.grossWeight) : "",
     netWeight: item.netWeight ? String(item.netWeight) : "",
     diamondWeight: item.diamondWeight ? String(item.diamondWeight) : "",
-    diamondType: item.diamondType || "Natural",
+    diamondType: item.diamondType || (listOf("diamondTypes")[0] ?? "Natural"),
     price: String(item.price), cost: stockCostOf(db, item) != null ? String(stockCostOf(db, item)) : "", quantity: String(item.quantity),
     sku: item.sku || "", location: officeOf(item), notes: item.notes || "", companyId: companyOf(item),
-  } : { ...EMPTY_FORM, location: defaults?.location ?? "", companyId: defaults?.companyId ?? EMPTY_FORM.companyId });
+  } : { ...EMPTY_FORM(), location: defaults?.location ?? "", companyId: defaults?.companyId ?? "main" });
   const [images, setImages] = useState<string[]>(() => item?.images || []); // existing URLs + new data-urls, mixed until save
   // Video: `video` holds either the existing https URL or a blob: preview URL;
   // `videoFile` holds a freshly-picked File (uploaded raw on save).
@@ -307,14 +306,14 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
             <Label className="text-xs">Jewellery Type</Label>
             <Select value={f.jewelleryType} onValueChange={v => setF({ ...f, jewelleryType: v as Order["jewelleryType"] })}>
               <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{JEWELLERY_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+              <SelectContent>{choicesOf("jewelleryTypes", f.jewelleryType, db.settings, { builtIn: false }).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div>
             <Label className="text-xs">Metal</Label>
             <Select value={f.metal} onValueChange={v => setF({ ...f, metal: v as Order["metal"] })}>
               <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{METALS.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
+              <SelectContent>{metalOptions(f.metal, db.settings).map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           {METALS_NEED_KARAT(f.metal) && (
@@ -349,9 +348,9 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           {Number(f.diamondWeight) > 0 && (
             <div>
               <Label className="text-xs">Diamond Type</Label>
-              <Select value={f.diamondType} onValueChange={v => setF({ ...f, diamondType: v as "Natural" | "Lab Grown" })}>
+              <Select value={f.diamondType} onValueChange={v => setF({ ...f, diamondType: v })}>
                 <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value="Natural">Natural</SelectItem><SelectItem value="Lab Grown">Lab Grown</SelectItem></SelectContent>
+                <SelectContent>{choicesOf("diamondTypes", f.diamondType, db.settings).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
               </Select>
             </div>
           )}

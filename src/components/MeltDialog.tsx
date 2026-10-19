@@ -1,4 +1,5 @@
 import { companyOf, workCompanyOf } from "@/lib/companies";
+import { listOf } from "@/lib/optionLists";
 import { useMemo, useState } from "react";
 import { Flame, AlertTriangle, Coins, Gem, Factory as FactoryIcon, Wallet, Warehouse, Sparkles, ArrowRight } from "lucide-react";
 import { toast } from "sonner";
@@ -14,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-const REASONS = ["Came out wrong", "Customer rejected", "Design changed"];
+// Quick picks: Settings → Dropdown lists → Melt reasons.
 const INHOUSE = "__inhouse";
 
 /**
@@ -117,12 +118,12 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
               <div>
                 <p className="text-xs font-semibold text-muted-foreground mb-1.5">Why</p>
                 <div className="flex flex-wrap gap-1.5">
-                  {REASONS.map(r => (
+                  {listOf("meltReasons").map(r => (
                     <button key={r} type="button" onClick={() => setReason(reason === r ? "" : r)}
                       className={`h-8 px-3 rounded-lg border text-xs ${reason === r ? "border-primary bg-primary/10 text-primary font-semibold" : "border-border hover:bg-secondary"}`}>{r}</button>
                   ))}
                 </div>
-                <Input value={REASONS.includes(reason) ? "" : reason} onChange={e => setReason(e.target.value)} placeholder="or write the reason" className="mt-2 h-9 rounded-lg text-sm" />
+                <Input value={listOf("meltReasons").includes(reason) ? "" : reason} onChange={e => setReason(e.target.value)} placeholder="or write the reason" className="mt-2 h-9 rounded-lg text-sm" />
               </div>
 
               <div className="rounded-2xl border border-border/60 p-4 space-y-3">
