@@ -667,6 +667,11 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
    box's top border when it did. It sits over the rows it passes, the pinned
    first column included. A table given its own height keeps its sticky head. */
 .dt-box > table > thead:not(.sticky) { position: relative; z-index: 4; }
+/* The same rounded corners on every table. A box that scrolls sideways clips
+   to its curve; one that fits used to clip only its sides (overflow-x: clip),
+   so its header's tint ran square past the corners. Clip both ways — the
+   header is held by moving it inside the box, so nothing needs to escape it. */
+.dt-box.overflow-x-clip { overflow: hidden; }
 /* Settings → Table Style's "header stays put" would add a second, CSS offset. */
 :root .dt-box > table > thead > tr > th { top: auto !important; }
 /* While held: a soft shadow under it, so the rows plainly pass beneath. */
