@@ -51,10 +51,12 @@ import {
   createCatalogItem,
   deleteCatalogItem,
   deleteCatalogItemsInFolders,
+  fetchAllCatalogItems,
   CATALOG_SORT_OPTIONS,
   type CatalogSort,
 } from "@/lib/catalogItems";
 import { toast } from "sonner";
+import { downloadAsZip, downloadFile } from "@/lib/zipDownload";
 import type { QueryDocumentSnapshot, DocumentData } from "firebase/firestore";
 
 // Rough initial row-height guess for virtualized grids — corrected
@@ -286,72 +288,6 @@ function Lightbox({
 }
 
 /* ─────────────────────────────────────────────────────────────── */
-/*  Folder action menu                                             */
-/* ─────────────────────────────────────────────────────────────── */
-function FolderMenu({ onRename, onDelete }: { onRename?(): void; onDelete?(): void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open]);
-
-  return (
-    <div className="relative" ref={ref} onClick={(e) => e.stopPropagation()}>
-      <button
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-label="More actions"
-        className="h-8 w-8 rounded-xl bg-white/90 border border-border/60 grid place-items-center shadow-sm text-muted-foreground hover:text-foreground active:bg-secondary transition-colors"
-      >
-        <MoreHorizontal className="h-4 w-4" />
-      </button>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.92, y: -4 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.92, y: -4 }}
-            transition={{ duration: 0.12 }}
-            className="absolute right-0 top-9 z-30 w-36 bg-white rounded-xl border border-border/60 shadow-lg overflow-hidden"
-          >
-            {onRename && (
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onRename();
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-foreground hover:bg-secondary active:bg-secondary"
-              >
-                <Edit2 className="h-3.5 w-3.5 text-muted-foreground" /> Rename
-              </button>
-            )}
-            {onDelete && (
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onDelete();
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2.5 text-sm text-destructive hover:bg-destructive/10 active:bg-destructive/10"
-              >
-                <Trash2 className="h-3.5 w-3.5" /> Delete
-              </button>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/* ─────────────────────────────────────────────────────────────── */
 /*  Upload zone                                                    */
 /* ─────────────────────────────────────────────────────────────── */
 function UploadZone({ onFiles, uploading }: { onFiles(f: FileList): void; uploading?: boolean }) {
@@ -543,6 +479,68 @@ function ItemCard({
         />
       </div>
     </motion.div>
+  );
+}
+
+/** An item's download name, with its file extension — from its name, else its type or its stored file. */
+function downloadName(item: CatalogItem): string {
+  const name = (item.name || "file").replace(/[\\/:*?"<>|]+/g, "-").trim() || "file";
+  if (/\.[a-z0-9]{2,5}$/i.test(name)) return name;
+  const fromUrl = decodeURIComponent(item.data.split("?")[0]).match(/\.([a-z0-9]{2,5})$/i)?.[1];
+  const fromMime = item.mime?.split("/")[1]?.replace("jpeg", "jpg").replace(/[^a-z0-9].*$/i, "");
+  const ext = fromUrl || fromMime || (item.type === "image" ? "jpg" : item.type === "video" ? "mp4" : "");
+  return ext ? `${name}.${ext}` : name;
+}
+
+/**
+ * Move a folder, with everything in it, under another folder or to the top of
+ * the Catalog — one field on the folder; its items and subfolders go with it.
+ * Admin only. A folder can't go inside itself or one of its own subfolders.
+ */
+function FolderMoveSheet({ folder, folders, blocked, onClose }: {
+  folder: CatalogFolder;
+  folders: CatalogFolder[];
+  /** The folder and its subfolders — not places it can go. */
+  blocked: string[];
+  onClose(): void;
+}) {
+  const ROOT = "__root__";
+  const [target, setTarget] = useState(folder.parentId ?? ROOT);
+  const options = [
+    { id: ROOT, label: "Catalog (top level)" },
+    ...folders.filter((f) => !blocked.includes(f.id)).map((f) => ({ id: f.id, label: folderPath(folders, f.id) })).sort((a, b) => a.label.localeCompare(b.label)),
+  ];
+  const here = folder.parentId ?? ROOT;
+  const save = async () => {
+    if (target === here) { onClose(); return; }
+    if (target !== ROOT && blocked.includes(target)) { toast.error("A folder can't go inside itself"); return; }
+    updateDb((db) => {
+      const f = db.catalogFolders.find((x) => x.id === folder.id);
+      if (f) f.parentId = target === ROOT ? null : target;
+    });
+    toast.success(`${folder.name} moved to ${target === ROOT ? "the top of the Catalog" : folderPath(folders, target)}`);
+    onClose();
+  };
+  return (
+    <ActionSheet open onOpenChange={(o) => { if (!o) onClose(); }} icon={FolderInput}
+      title={`Move ${folder.name}`}
+      description={`Now in ${here === ROOT ? "the top of the Catalog" : folderPath(folders, here)}. Everything inside it moves with it.`}
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <AsyncButton onClick={save} className="btn-hero rounded-xl px-6">Move</AsyncButton>
+        </div>
+      }>
+      <div className="space-y-1.5">
+        <Label className="text-xs">Move into</Label>
+        <Select value={target} onValueChange={setTarget}>
+          <SelectTrigger className="h-10 rounded-xl" aria-label="Move into"><SelectValue /></SelectTrigger>
+          <SelectContent>
+            {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}{o.id === here ? " (here now)" : ""}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
+    </ActionSheet>
   );
 }
 
@@ -782,6 +780,9 @@ export function CatalogPage() {
   const canEdit = isStaff && can("catalog", "edit");
   const canDelete = isStaff && can("catalog", "delete");
   const canShare = isStaff && can("catalog", "export");
+  // Moving items and folders changes where everyone finds them — admin only.
+  const isAdmin = user?.role === "admin";
+  const ADMIN_MOVE = "Only an admin can move";
 
   const [folders, setFolders] = useState<CatalogFolder[]>([]);
   const [favIds, setFavIds] = useState<Set<string>>(new Set());
@@ -818,6 +819,8 @@ export function CatalogPage() {
   const [error, setError] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [itemSheet, setItemSheet] = useState<{ item: CatalogItem; mode: "rename" | "move" } | null>(null);
+  const [movingFolder, setMovingFolder] = useState<CatalogFolder | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   /* ── Load folders + favourite ids (small, bounded collections — still the shared cache) ── */
   const reload = useCallback(() => {
@@ -1205,10 +1208,57 @@ export function CatalogPage() {
   // Staff: what can be done to one item — each greyed with the reason when
   // this person's access doesn't reach it.
   const itemMenu = (item: CatalogItem): MoreAction[] => [
+    { label: "Download", icon: Download, hint: canShare ? undefined : needsAccess("catalog", "export"), disabled: !canShare,
+      onSelect: () => downloadFile(item.data, downloadName(item)) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item, mode: "rename" }) },
-    { label: "Move to another folder", icon: FolderInput, hint: canEdit ? (folders.length > 1 ? undefined : "There is no other folder yet") : needsAccess("catalog", "edit"),
-      disabled: !canEdit || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
+    { label: "Move to another folder", icon: FolderInput, hint: !isAdmin ? ADMIN_MOVE : folders.length > 1 ? undefined : "There is no other folder yet",
+      disabled: !isAdmin || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
     { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("catalog", "delete"), disabled: !canDelete, onSelect: () => setDeleteConfirm(item.id) },
+  ];
+  /** A folder and everything under it, as one zip — its subfolders kept as folders inside. */
+  async function downloadFolder(folder: CatalogFolder) {
+    const ids = [folder.id, ...descendantIds(folder.id)];
+    setDownloadingId(folder.id);
+    const t = toast.loading(`Getting ${folder.name} ready…`);
+    try {
+      const all = await fetchAllCatalogItems(ids);
+      if (!all.length) { toast.info(`${folder.name} is empty — nothing to download`, { id: t }); return; }
+      // Where each item sits under the folder: "Bands/2026/ring.jpg".
+      const sub = (id: string): string => {
+        const names: string[] = [];
+        let cur: string | null | undefined = id;
+        for (let guard = 0; cur && cur !== folder.id && guard < 50; guard++) {
+          const f = folders.find((x) => x.id === cur);
+          if (!f) break;
+          names.unshift(f.name.replace(/[\\/:*?"<>|]+/g, "-"));
+          cur = f.parentId;
+        }
+        return names.length ? `${names.join("/")}/` : "";
+      };
+      const files = all
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
+        .map((it) => ({ url: it.data, filename: `${sub(it.folderId)}${downloadName(it)}` }));
+      const { added, failed } = await downloadAsZip(files, folder.name, (done, total) =>
+        toast.loading(`Downloading ${folder.name} — ${done} of ${total}`, { id: t }));
+      if (!added) toast.error(`Couldn't download ${folder.name}`, { id: t });
+      else if (failed.length) toast.warning(`${added} of ${files.length} downloaded — ${failed.length} couldn't be fetched`, { id: t });
+      else toast.success(`${folder.name} downloaded — ${added} file${added !== 1 ? "s" : ""}`, { id: t });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : `Couldn't download ${folder.name}`, { id: t });
+    } finally { setDownloadingId(null); }
+  }
+  // Staff: what can be done to one folder — each greyed with the reason when
+  // this person's access doesn't reach it.
+  const folderMenu = (folder: CatalogFolder): MoreAction[] => [
+    { label: downloadingId === folder.id ? "Downloading…" : "Download", icon: Download,
+      hint: !canShare ? needsAccess("catalog", "export") : "Everything in it, as one zip",
+      disabled: !canShare || downloadingId !== null, onSelect: () => downloadFolder(folder) },
+    { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit,
+      onSelect: () => { setRenamingId(folder.id); setRenameVal(folder.name); } },
+    { label: "Move", icon: FolderInput, hint: isAdmin ? "With everything inside it" : ADMIN_MOVE, disabled: !isAdmin,
+      onSelect: () => setMovingFolder(folder) },
+    { label: "Delete", icon: Trash2, danger: true, hint: canDelete ? undefined : needsAccess("catalog", "delete"), disabled: !canDelete,
+      onSelect: () => setDeleteConfirm(folder.id) },
   ];
   // A renamed or moved item, as the screen holds it: moved out of the folder
   // on screen, it leaves the grid; and a folder's banner doesn't stay pointing
@@ -1323,15 +1373,9 @@ export function CatalogPage() {
                     {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                   </div>
                 </button>
-                {(canEdit || canDelete) && !isRenaming && (
-                  <div className="absolute top-2 right-2">
-                    <FolderMenu
-                      onRename={!canEdit ? undefined : () => {
-                        setRenamingId(folder.id);
-                        setRenameVal(folder.name);
-                      }}
-                      onDelete={canDelete ? () => setDeleteConfirm(folder.id) : undefined}
-                    />
+                {isStaff && !isRenaming && (
+                  <div className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
+                    <MoreMenu size="sm" label={`${folder.name}: more actions`} actions={folderMenu(folder)} />
                   </div>
                 )}
                 {isRenaming && (
@@ -1704,15 +1748,9 @@ export function CatalogPage() {
                         {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                       </div>
                     </button>
-                    {(canEdit || canDelete) && !isRenaming && (
-                      <div className="absolute top-2 right-2">
-                        <FolderMenu
-                          onRename={!canEdit ? undefined : () => {
-                            setRenamingId(folder.id);
-                            setRenameVal(folder.name);
-                          }}
-                          onDelete={canDelete ? () => setDeleteConfirm(folder.id) : undefined}
-                        />
+                    {isStaff && !isRenaming && (
+                      <div className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
+                        <MoreMenu size="sm" label={`${folder.name}: more actions`} actions={folderMenu(folder)} />
                       </div>
                     )}
                     {isRenaming && (
@@ -1798,6 +1836,10 @@ export function CatalogPage() {
 
       {/* ── Modals ── */}
       <DeleteModal />
+      {movingFolder && (
+        <FolderMoveSheet folder={movingFolder} folders={folders}
+          blocked={[movingFolder.id, ...descendantIds(movingFolder.id)]} onClose={() => setMovingFolder(null)} />
+      )}
       {itemSheet && (
         <CatalogItemSheet item={itemSheet.item} mode={itemSheet.mode} folders={folders}
           onClose={() => setItemSheet(null)} onSaved={(next) => itemSaved(next, itemSheet.item)} />

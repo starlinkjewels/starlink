@@ -142,6 +142,17 @@ export async function deleteCatalogItem(id: string): Promise<void> {
   await deleteDoc(doc(fsdb, COL, id));
 }
 
+/** Every item in the given folder ids (a folder and its subfolders) — read only, for a whole-folder download. */
+export async function fetchAllCatalogItems(folderIds: string[]): Promise<CatalogItem[]> {
+  const out: CatalogItem[] = [];
+  for (const c of chunk(folderIds, 30)) {
+    if (!c.length) continue;
+    const snap = await getDocs(query(collection(fsdb, COL), where("folderId", "in", c)));
+    out.push(...snap.docs.map((d) => d.data() as CatalogItem));
+  }
+  return out;
+}
+
 /** Cascade-delete every item in the given folder ids (used when a folder is deleted). Returns the deleted item ids, so the caller can clean up any favourites pointing at them. */
 export async function deleteCatalogItemsInFolders(folderIds: string[]): Promise<string[]> {
   if (!folderIds.length) return [];
