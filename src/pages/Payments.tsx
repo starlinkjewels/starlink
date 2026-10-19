@@ -33,10 +33,11 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen, Wallet,
-  ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered,
+  ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered, Handshake,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
+import { PayBrokerSheet } from "@/components/PayBrokerSheet";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
@@ -46,7 +47,7 @@ import { confirmBox } from "@/lib/confirm";
 /** The ledgers the page reads — one at a time, under the tab bar. */
 type Book = "daybook" | "received" | "supplier" | "factory" | "expense" | "locker";
 /** The forms that slide in over it. */
-type Task = "client" | "supplier" | "factory" | "expense" | "locker";
+type Task = "client" | "supplier" | "factory" | "expense" | "locker" | "broker";
 
 const BOOKS = [
   { key: "daybook", label: "Day book", icon: BookOpen },
@@ -148,6 +149,7 @@ export function PaymentsPage() {
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
           { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
+          { label: "Pay a broker", icon: Handshake, hint: "Their brokerage", onSelect: () => setTask("broker") },
           { label: "Pay an expense", icon: Receipt, hint: "Rent, salary, courier…", onSelect: () => setTask("expense") },
         ] } : null}
         menuTitle="Accounts"
@@ -216,6 +218,7 @@ export function PaymentsPage() {
           <PayFactory {...sheet("factory")} />
           <PayExpense {...sheet("expense")} />
           <LockerActions {...sheet("locker")} preset={lockerAction} />
+          <PayBrokerSheet {...sheet("broker")} />
         </>
       )}
     </div>

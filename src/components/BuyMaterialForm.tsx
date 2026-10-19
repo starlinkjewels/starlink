@@ -1,6 +1,8 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import { BillBrokerFields } from "@/components/BillBrokerFields";
+import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { useDb } from "@/hooks/useDb";
 import {
   updateDb, uid, DIAMOND_SHAPES, nextDiamondStockNumber, todayLocal, stampFor,
@@ -107,6 +109,8 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
   const [xrate, setXrate] = useState("");
   const [roundOff, setRoundOff] = useState("");
   const [notes, setNotes] = useState("");
+  // The broker who brought the bill, if any, and the brokerage (lib/brokers.ts).
+  const [brokerage, setBrokerage] = useState<BillBrokerage>(emptyBillBrokerage());
   const [lines, setLines] = useState<Line[]>([{ ...emptyLine(), kind: "gold" }]);
   const [saving, setSaving] = useState(false);
 
@@ -145,14 +149,14 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
 
   const reset = () => {
     setLines([{ ...emptyLine(), kind: "gold" }]);
-    setBillNo(""); setXrate(""); setRoundOff(""); setNotes("");
+    setBillNo(""); setXrate(""); setRoundOff(""); setNotes(""); setBrokerage(emptyBillBrokerage());
   };
 
   const submit = async () => {
     if (!supplierId) { toast.error("Choose a supplier"); return; }
-    // The bill number is how a purchase book is checked against what is entered:
-    // without it there is no telling which chitthis are done and which are not.
-    if (!billNo.trim()) { toast.error("Enter the supplier's bill number"); return; }
+    // The bill number is optional: not every purchase comes with one.
+    const brokerProblem = billBrokerageProblem(brokerage);
+    if (brokerProblem) { toast.error(brokerProblem); return; }
     if (currency === "USD" && !xrate) { toast.error("Enter the exchange rate"); return; }
     for (const [i, l] of lines.entries()) {
       const q = Number(l.qty);
@@ -164,6 +168,8 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
     const supplier = db.suppliers.find(s => s.id === supplierId);
     const now = stampFor(date);
     const ids = lines.map(() => uid("pur_"));
+    // The bill's brokerage, shared over its lines by amount (lib/brokers.ts).
+    const brokerShares = brokerageForLines(brokerage, lines.map((l, i) => lineInr(l) + (i === 0 ? roundOffInr : 0)));
     setSaving(true);
     try {
       // Gold and loose pool into Stock; a certified stone never pools — it
@@ -206,6 +212,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
             // The bill is rounded once, so it rides on its first line.
             roundOffInr: i === 0 && roundOffInr !== 0 ? roundOffInr : undefined,
             invoiceNumber: billNo.trim() || undefined,
+            ...brokerShares[i],
             notes: notes.trim() || undefined,
             createdBy: user!.id, createdAt: now,
           };
@@ -220,7 +227,8 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               symmetry: l.sym.trim() || undefined, fluorescence: l.fluor.trim() || undefined,
               measurement: l.measure.trim() || undefined,
               certificateNumber: l.certNo.trim(), certificateLab: l.lab.trim() || undefined,
-              ratePerCaratInr: q > 0 ? Math.round((total / q) * 100) / 100 : undefined,
+              // What the stone cost us: the bill line plus any brokerage we pay on it.
+              ratePerCaratInr: q > 0 ? Math.round((landedInr(purchase) / q) * 100) / 100 : undefined,
               supplierId, purchaseId: ids[i], status: "in_stock", ...coField(companyId),
               createdBy: user!.id, createdAt: now,
             });
@@ -290,8 +298,8 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
                 <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
               </Select>
             )}</Field>
-            <Field label="Bill no." required>{id => (
-              <Input id={id} value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10" placeholder="The supplier's bill number" />
+            <Field label="Bill no.">{id => (
+              <Input id={id} value={billNo} onChange={e => setBillNo(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
             <Field label="Date">{id => (
               <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />
@@ -318,6 +326,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
           </div>
+          <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={billTotalInr} className="mt-3" />
         </Group>
 
         <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>

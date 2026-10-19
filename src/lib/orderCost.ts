@@ -1,3 +1,4 @@
+import { brokerageWePay, landedInr } from "./brokers";
 import { ccy, ccyOrder, inrPerUnit, roundCcy, sumByCcy, type CurrencyCode } from "@/lib/currency";
 import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
@@ -168,7 +169,8 @@ function poolAverage(db: DB, material: string, bucket: string, at: string, compa
       const p = purchases.get(m.refId);
       if (p?.orderId) continue; // bought for one order, never in the pool
       const pq = p ? qtyOf(p) : 0;
-      if (p && pq > 0) rate = p.totalInr / pq;
+      // What it cost us: the bill plus any brokerage we pay on it.
+      if (p && pq > 0) rate = landedInr(p) / pq;
     } else if ((m.refType === "opening" || m.refType === "transfer") && m.valueInr != null && q > 0) {
       // Opening stock at the value it was entered with; stock moved in from
       // another of our companies at what it cost there.
@@ -213,7 +215,7 @@ function fineGoldLots(db: DB, at: string, companyId?: string): { rate: number; b
   for (const p of db.purchases ?? []) {
     if (p.material !== "gold" || !p.gold || !(p.totalInr > 0) || !inCo(p, companyId)) continue;
     const fine = toPureGold(p.gold.weightGrams || 0, p.gold.purity);
-    if (fine > 0) lots.push({ at: +new Date(p.createdAt), fine, inr: p.totalInr });
+    if (fine > 0) lots.push({ at: +new Date(p.createdAt), fine, inr: landedInr(p) });
   }
   for (const m of db.stockMovements ?? []) {
     // Opening stock — and, inside one company, gold moved in from another of ours at its cost there.
@@ -329,8 +331,21 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       // The bill's own rate, applied to what was used — a bill for more than
       // the piece took is not all this order's cost.
       bucket.push({
-        label: `${used}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
-        amountInr: r2((p.totalInr / bought) * used),
+        label: `${used}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
+        amountInr: r2((landedInr(p) / bought) * used),
+      });
+      continue;
+    }
+
+    // Loose stones from stock with their price typed in when they went out:
+    // that price, for what stayed in the piece — not the stock's average.
+    const typed = mi.material === "diamond" ? mi.diamondSpec?.amountInr ?? 0 : 0;
+    if (typed > 0 && mi.quantityIssued > 0) {
+      const spec = mi.diamondSpec!;
+      const desc = [spec.mm && `${spec.mm} mm`, spec.color, spec.clarity].filter(Boolean).join(" ");
+      bucket.push({
+        label: `${used}${unit} ${what}${desc ? ` ${desc}` : ""} · from stock, at the price entered${spec.ratePerCaratInr ? ` (${fmtRate(spec.ratePerCaratInr, unit)})` : ""}`,
+        amountInr: r2((typed / mi.quantityIssued) * used),
       });
       continue;
     }
@@ -381,8 +396,8 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const what = p.material === "gold" ? p.gold?.purity ?? "" : p.material === "diamond" ? p.diamond?.shape ?? ""
       : `${p.other?.grade ? `${p.other.grade} ` : ""}${materialName(db.settings, p.material)}`;
     (p.material === "gold" ? out.gold : p.material === "diamond" ? out.diamond : out.materials).push({
-      label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}`,
-      amountInr: r2(p.totalInr),
+      label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
+      amountInr: r2(landedInr(p)),
     });
   }
 

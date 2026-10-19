@@ -15,6 +15,7 @@
 // whenever the purchase can't be cleanly reversed — money already paid, making
 // charges already paid, the factory already finished the piece, or a certified
 // stone already used/sold. Those must be undone at the source first.
+import { landedInr } from "./brokers";
 import { companyOf } from "./companies";
 import { updateDb, uid, loadDb, type DB, type Purchase, type StockMovement } from "./db";
 import { purchaseQty, purchaseBucket, purchaseText, materialUnit } from "./materials";
@@ -216,6 +217,8 @@ export interface PurchaseEdit {
   quality?: string;
   certificateNumber?: string;
   certificateLab?: string;
+  /** The broker on this line and its brokerage (lib/brokers.ts); null takes the broker off. */
+  brokerage?: Pick<Purchase, "brokerId" | "brokeragePct" | "brokerageInr" | "brokeragePaidBy"> | null;
 }
 
 /**
@@ -332,6 +335,13 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     }
     pur.invoiceNumber = edit.invoiceNumber?.trim() || undefined;
     pur.notes = edit.notes?.trim() || undefined;
+    if (edit.brokerage !== undefined) {
+      const b = edit.brokerage;
+      pur.brokerId = b?.brokerId || undefined;
+      pur.brokeragePct = b?.brokerId ? b.brokeragePct : undefined;
+      pur.brokerageInr = b?.brokerId ? b.brokerageInr : undefined;
+      pur.brokeragePaidBy = b?.brokerId ? b.brokeragePaidBy : undefined;
+    }
 
     // 2. The factory issue auto-created from it — otherwise the factory's
     //    outstanding gold/diamond stays on the old figure.
@@ -347,7 +357,8 @@ export async function editPurchase(db: DB, p: Purchase, edit: PurchaseEdit, user
     for (const pk of d.diamondPackets ?? []) {
       if (pk.purchaseId !== p.id) continue;
       pk.carat = newQty;
-      pk.ratePerCaratInr = newQty > 0 ? Math.round((edit.totalInr / newQty) * 100) / 100 : undefined;
+      // What the stone cost us: the corrected bill plus any brokerage we pay on it.
+      pk.ratePerCaratInr = newQty > 0 ? Math.round((landedInr({ ...pur, totalInr: edit.totalInr }) / newQty) * 100) / 100 : undefined;
       if (edit.certificateNumber) pk.certificateNumber = edit.certificateNumber.trim();
       if (edit.certificateLab !== undefined) pk.certificateLab = edit.certificateLab.trim() || undefined;
       if (edit.quality !== undefined) pk.quality = edit.quality.trim() || undefined;

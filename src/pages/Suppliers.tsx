@@ -15,9 +15,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Truck, History, Hash, Rows3, LayoutGrid, Power, Pencil, Handshake } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
-import { PageHeader, ViewSwitch } from "@/components/PageHeader";
+import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
+import { BrokersPanel } from "@/components/BrokersPanel";
 import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
@@ -41,6 +42,12 @@ export function SuppliersPage() {
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Supplier | null>(null);
+  // Suppliers, or the brokers (dalals) who bring purchases — remembered on this device.
+  const [tab, setTab] = useState<"suppliers" | "brokers">(() => {
+    try { return localStorage.getItem("suppliers-tab") === "brokers" ? "brokers" : "suppliers"; } catch { return "suppliers"; }
+  });
+  const pickTab = (t: "suppliers" | "brokers") => { setTab(t); try { localStorage.setItem("suppliers-tab", t); } catch { /* ignore */ } };
+  const [newBroker, setNewBroker] = useState(false);
   const navigate = useNavigate();
 
   // Every supplier's account, worked out once: the rows, the sort and the grand
@@ -174,24 +181,33 @@ export function SuppliersPage() {
       {/* How many there are is the table's (or the grid's) own count. */}
       <PageHeader
         title="Suppliers"
-        subtitle="Purchases, payments and balances"
-        primary={isAdmin ? { label: "New Supplier", icon: Plus, onClick: () => setOpen(true) } : null}
-        actions={<ViewSwitch view={view} onChange={saveView} />}
+        subtitle={tab === "brokers" ? "Brokers who bring purchases, and their brokerage" : "Purchases, payments and balances"}
+        primary={!isAdmin ? null : tab === "brokers"
+          ? { label: "New Broker", icon: Plus, onClick: () => setNewBroker(true) }
+          : { label: "New Supplier", icon: Plus, onClick: () => setOpen(true) }}
+        actions={tab === "suppliers" ? <ViewSwitch view={view} onChange={saveView} /> : undefined}
       />
       {isAdmin && <SupplierCreateDialog open={open} onOpenChange={setOpen} />}
 
-      <AccountSummary
+      <TabBar label="Suppliers and brokers" value={tab} onChange={pickTab} tabs={[
+        { key: "suppliers", label: "Suppliers", icon: Truck, count: db.suppliers.length },
+        { key: "brokers", label: "Brokers", icon: Handshake, count: (db.brokers ?? []).length },
+      ]} />
+
+      {tab === "brokers" && <BrokersPanel isAdmin={isAdmin} creating={newBroker} onCreating={setNewBroker} />}
+
+      {tab === "suppliers" && <AccountSummary
         receivable={totals.receivable}
         payable={totals.payable}
         fmt={fmtMoneyInr}
         receivableSub="suppliers owe us · ughrani"
         payableSub="we owe suppliers · chukavni"
-      />
+      />}
 
       {/* ── List view — the shared table: sort by any heading, Excel, pages.
           The page's own search (the same one the grid uses) sits in its
           toolbar; a new search starts it on page 1. ── */}
-      {view === "list" && (
+      {tab === "suppliers" && view === "list" && (
         <div className="card-luxe p-3 sm:p-4">
           <DataTable
             id="suppliers"
@@ -222,7 +238,7 @@ export function SuppliersPage() {
       )}
 
       {/* The grid's one toolbar row, laid out like the table's. */}
-      {view === "grid" && (
+      {tab === "suppliers" && view === "grid" && (
         <div className="flex flex-wrap items-center gap-2">
           <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -232,7 +248,7 @@ export function SuppliersPage() {
         </div>
       )}
 
-      {view === "grid" && (
+      {tab === "suppliers" && view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(s => {
           const account = accounts.get(s.id)!;
@@ -295,7 +311,7 @@ export function SuppliersPage() {
       )}
 
       {/* The list pages itself; these pages are the grid's. */}
-      {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />}
+      {tab === "suppliers" && view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} suppliers` : undefined} />}
 
       <SupplierEditDialog supplier={editing} onClose={() => setEditing(null)} />
     </div>

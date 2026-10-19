@@ -1,5 +1,7 @@
 
 import { choicesOf } from "@/lib/optionLists";
+import { BillBrokerFields } from "@/components/BillBrokerFields";
+import { billBrokerageProblem, brokerageForLines, brokerageWePay, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -109,9 +111,11 @@ interface BuyLine {
 interface BuyBill {
   key: string;
   supplierId: string;
-  /** The supplier's bill number. One per bill, not per line, and required — it
-   *  is how the purchase book is checked against what is in the software. */
+  /** The supplier's bill number. One per bill, not per line. Optional — not
+   *  every purchase comes with one. */
   billNo: string;
+  /** The broker who brought this bill, if any, and the brokerage (lib/brokers.ts). */
+  brokerage: BillBrokerage;
   lines: BuyLine[];
   /** The odd rupees nobody hands over: one figure for the whole bill, riding on
    *  its first line so the supplier's due matches the cash actually paid. */
@@ -120,7 +124,7 @@ interface BuyBill {
 
 let billSeq = 0;
 function emptyBuyBill(): BuyBill {
-  return { key: `bill_${++billSeq}`, supplierId: "", billNo: "", lines: [emptyBuyLine()], roundOff: "" };
+  return { key: `bill_${++billSeq}`, supplierId: "", billNo: "", lines: [emptyBuyLine()], roundOff: "", brokerage: emptyBillBrokerage() };
 }
 
 const billLinesTotalInr = (b: BuyBill) => b.lines.reduce((s, l) => s + buyLineTotalInr(l), 0);
@@ -355,6 +359,13 @@ function OrderDetailPageBody() {
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueChargeAmount, setIssueChargeAmount] = useState("");
   const [issueNotes, setIssueNotes] = useState("");
+  // Loose diamonds from stock: what the stones were, and their price — for the
+  // record and the order's cost. The stock itself is counted by shape.
+  const [issueDiaMm, setIssueDiaMm] = useState("");
+  const [issueDiaColor, setIssueDiaColor] = useState("");
+  const [issueDiaClarity, setIssueDiaClarity] = useState("");
+  const [issueDiaRate, setIssueDiaRate] = useState("");
+  const [issueDiaAmount, setIssueDiaAmount] = useState("");
   // Rework / alteration — a delivered piece comes back, gold/diamond +/- and a
   // rework charge at a factory. Reflected in stock, factory balance & ledgers.
   const [showRework, setShowRework] = useState(false);
@@ -574,7 +585,8 @@ function OrderDetailPageBody() {
       const bill = buyBills[bi];
       const which = many ? `Bill ${bi + 1}: ` : "";
       if (!bill.supplierId) { toast.error(`${which}choose the supplier`); return; }
-      if (!bill.billNo.trim()) { toast.error(`${which}enter ${supplierName(bill.supplierId)}'s bill number`); return; }
+      const brokerProblem = billBrokerageProblem(bill.brokerage);
+      if (brokerProblem) { toast.error(`${which}${brokerProblem}`); return; }
       for (const line of bill.lines) {
         if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error(`${which}enter gold weight for every line`); return; }
         if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error(`${which}enter diamond carat for every line`); return; }
@@ -590,12 +602,14 @@ function OrderDetailPageBody() {
     // The same bill entered twice is the same bill paid twice.
     const billKey = (supplierId: string, no: string) => `${supplierId}|${no.trim().toLowerCase()}`;
     const seen = new Set<string>();
+    // Only a numbered bill can be told apart — bills without a number are never "the same bill".
     for (const bill of buyBills) {
+      if (!bill.billNo.trim()) continue;
       const k = billKey(bill.supplierId, bill.billNo);
       if (seen.has(k)) { toast.error(`Bill ${bill.billNo.trim()} from ${supplierName(bill.supplierId)} is entered twice — put all its stones in one bill.`); return; }
       seen.add(k);
     }
-    const onFile = buyBills.filter(b => (db.purchases ?? []).some(p => billKey(p.supplierId, p.invoiceNumber ?? "") === billKey(b.supplierId, b.billNo)));
+    const onFile = buyBills.filter(b => b.billNo.trim() && (db.purchases ?? []).some(p => billKey(p.supplierId, p.invoiceNumber ?? "") === billKey(b.supplierId, b.billNo)));
     if (onFile.length && !(await confirmBox(
       `${onFile.map(b => `Bill ${b.billNo.trim()} from ${supplierName(b.supplierId)}`).join(", ")} is already recorded.\n\n` +
       "Save these lines against it as well? Cancel if it is the same purchase being entered again."))) return;
@@ -628,7 +642,7 @@ function OrderDetailPageBody() {
           discountPct: Number(line.discountPct) ? Number(line.discountPct) : undefined,
           roundOffInr: undefined as number | undefined,
           payments: [],
-          invoiceNumber: bill.billNo.trim(),
+          invoiceNumber: bill.billNo.trim() || undefined,
           notes: line.notes.trim() || undefined,
           createdBy: user!.id,
           createdAt: now,
@@ -640,6 +654,10 @@ function OrderDetailPageBody() {
         entries[first].purchase.totalInr += ro;
         entries[first].purchase.roundOffInr = ro;
       }
+      // The bill's brokerage, shared over its lines by amount.
+      const mine = entries.slice(first);
+      const shares = brokerageForLines(bill.brokerage, mine.map(x => x.purchase.totalInr));
+      mine.forEach((x, i) => Object.assign(x.purchase, shares[i]));
     }
     const newPurchases = entries.map(x => x.purchase);
 
@@ -699,7 +717,7 @@ function OrderDetailPageBody() {
           o.manufacturingLog!.push({
             id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
             material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
-            remarks: `Purchased ${label} from ${supplierName(bill.supplierId)} (bill ${bill.billNo.trim()}) for this order — ${fmtMoneyInr(purchase.totalInr)}`,
+            remarks: `Purchased ${label} from ${supplierName(bill.supplierId)}${bill.billNo.trim() ? ` (bill ${bill.billNo.trim()})` : ""} for this order — ${fmtMoneyInr(purchase.totalInr)}${brokerageWePay(purchase) > 0 ? ` + brokerage ${fmtMoneyInr(brokerageWePay(purchase))}` : ""}`,
           });
 
           // Certified diamond → its own packet, going straight to the factory.
@@ -715,7 +733,7 @@ function OrderDetailPageBody() {
               symmetry: line.diaSym.trim() || undefined, fluorescence: line.diaFluor.trim() || undefined,
               measurement: line.diaMeasure.trim() || undefined,
               certificateNumber: line.diaCertNo.trim(), certificateLab: line.diaLab.trim() || undefined,
-              ratePerCaratInr: carat > 0 ? Math.round((purchase.totalInr / carat) * 100) / 100 : undefined,
+              ratePerCaratInr: carat > 0 ? Math.round((landedInr(purchase) / carat) * 100) / 100 : undefined,
               supplierId: bill.supplierId, purchaseId: purchase.id,
               status: "issued", orderId: order.id,
               createdBy: user!.id, createdAt: now,
@@ -774,6 +792,7 @@ function OrderDetailPageBody() {
   const resetIssueForm = () => {
     setIssueFactoryId("");
     setIssuePurity("22K"); setIssueQuality("Round"); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssueDiaMm(""); setIssueDiaColor(""); setIssueDiaClarity(""); setIssueDiaRate(""); setIssueDiaAmount("");
     setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch(""); setIssueGrade("");
   };
 
@@ -1160,6 +1179,16 @@ function OrderDetailPageBody() {
     // purchase, which was leaving stock untouched.
     const resolvedSource: "factoryPool" | "purchase" | "stock" = "stock";
 
+    // Loose diamonds: their details and price, when given (the amount typed, or ct × price/ct).
+    const looseDia = issueMaterial === "diamond" && issueDiaKind === "loose";
+    const diaRate = Number(issueDiaRate) || 0;
+    const diaAmount = issueDiaAmount.trim() !== "" ? Number(issueDiaAmount) || 0 : diaRate > 0 ? Math.round(diaRate * qty * 100) / 100 : 0;
+    const diamondSpec = looseDia && (issueDiaMm.trim() || issueDiaColor.trim() || issueDiaClarity.trim() || diaRate > 0 || diaAmount > 0) ? {
+      mm: issueDiaMm.trim() || undefined, color: issueDiaColor.trim() || undefined, clarity: issueDiaClarity.trim() || undefined,
+      ratePerCaratInr: diaRate > 0 ? diaRate : diaAmount > 0 && qty > 0 ? Math.round((diaAmount / qty) * 100) / 100 : undefined,
+      amountInr: diaAmount > 0 ? diaAmount : undefined,
+    } : undefined;
+
     const issuanceId = uid("mi_");
     const now = new Date().toISOString();
     setIssuing(true);
@@ -1181,6 +1210,7 @@ function OrderDetailPageBody() {
           finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
           makingCharges: { amountInr: chargeAmount, payments: [] },
           notes: issueNotes.trim() || undefined,
+          ...(diamondSpec ? { diamondSpec } : {}),
         };
         d.materialIssuances.unshift(issuance);
         const o = d.orders.find(o => o.id === order.id);
@@ -1191,7 +1221,7 @@ function OrderDetailPageBody() {
           o.manufacturingLog.push({
             id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
             material: issueMaterial, amountMaterial: qty, amountInr: chargeAmount || undefined,
-            remarks: `${qty}${materialUnit(db.settings, issueMaterial)} ${purityOrQuality} ${matWord(issueMaterial)} used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
+            remarks: `${qty}${materialUnit(db.settings, issueMaterial)} ${purityOrQuality} ${matWord(issueMaterial)}${diamondSpec ? ` (${[diamondSpec.mm && `${diamondSpec.mm} mm`, diamondSpec.color, diamondSpec.clarity, diamondSpec.amountInr && fmtMoneyInr(diamondSpec.amountInr)].filter(Boolean).join(" · ")})` : ""} used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
           });
         }
       });
@@ -3622,7 +3652,7 @@ function OrderDetailPageBody() {
                       <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
                     </Select>
                     <Input value={bill.billNo} onChange={e => updateBill(bi, { billNo: e.target.value })}
-                      className="rounded-xl h-10 bg-white" placeholder="Supplier's bill no. *" />
+                      className="rounded-xl h-10 bg-white" placeholder="Supplier's bill no. (optional)" />
                   </div>
 
                   {bill.lines.map((line, idx) => (
@@ -3723,6 +3753,8 @@ function OrderDetailPageBody() {
                   <Button type="button" variant="outline" onClick={() => addBuyLine(bi)} className="rounded-xl gap-2 w-full bg-white">
                     <Plus className="h-4 w-4" /> Another stone on this bill{supplierName ? ` (${supplierName})` : ""}
                   </Button>
+
+                  <BillBrokerFields value={bill.brokerage} onChange={v => updateBill(bi, { brokerage: v })} billTotalInr={billTotalInr(bill)} />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
                     <div>
@@ -3862,6 +3894,28 @@ function OrderDetailPageBody() {
                 />
               )}
 
+              {/* Loose stones: what they were and their price — all optional. The
+                  amount is ct × price/ct unless typed; when given it is what the
+                  order's cost uses for these stones. Stock is still counted by shape. */}
+              {issueMaterial === "diamond" && issueDiaKind === "loose" && (() => {
+                const ct = Number(issueQuantity) || 0;
+                const auto = (Number(issueDiaRate) || 0) * ct;
+                return (
+                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>MM</span>
+                      <Input value={issueDiaMm} onChange={e => setIssueDiaMm(e.target.value)} className="rounded-xl h-10" placeholder="e.g. 1.3" /></label>
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Color</span>
+                      <Input value={issueDiaColor} onChange={e => setIssueDiaColor(e.target.value)} className="rounded-xl h-10" placeholder="e.g. G-H" /></label>
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Clarity</span>
+                      <Input value={issueDiaClarity} onChange={e => setIssueDiaClarity(e.target.value)} className="rounded-xl h-10" placeholder="e.g. VS" /></label>
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Price/ct (₹)</span>
+                      <Input type="number" min={0} value={issueDiaRate} onChange={e => { setIssueDiaRate(e.target.value); setIssueDiaAmount(""); }} className="rounded-xl h-10" placeholder="0" /></label>
+                    <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground col-span-2 sm:col-span-1"><span>Amount (₹)</span>
+                      <Input type="number" min={0} value={issueDiaAmount} onChange={e => setIssueDiaAmount(e.target.value)} className="rounded-xl h-10" placeholder={auto > 0 ? String(Math.round(auto * 100) / 100) : "0"} /></label>
+                  </div>
+                );
+              })()}
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <Input
                   type="number" min={0} value={issueChargeAmount} onChange={e => setIssueChargeAmount(e.target.value)}
@@ -3915,10 +3969,17 @@ function OrderDetailPageBody() {
                   : [];
                 const srcPurchase = mi.source === "purchase" && mi.sourcePurchaseId ? linkedPurchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
                 const srcSupplier = srcPurchase ? db.suppliers.find(s => s.id === srcPurchase.supplierId) : undefined;
-                const srcInfo = srcPurchase ? ` · bought from ${srcSupplier?.name || "supplier"}${srcPurchase.invoiceNumber ? ` (bill ${srcPurchase.invoiceNumber})` : ""}` : mi.source === "stock" ? " · from stock" : "";
+                const srcBroker = srcPurchase?.brokerId ? (db.brokers ?? []).find(x => x.id === srcPurchase.brokerId) : undefined;
+                const srcInfo = srcPurchase ? ` · bought from ${srcSupplier?.name || "supplier"}${srcPurchase.invoiceNumber ? ` (bill ${srcPurchase.invoiceNumber})` : ""}`
+                  + (srcBroker && srcPurchase.brokerageInr ? ` · brokerage ${fmtMoneyInr(srcPurchase.brokerageInr)} to ${srcBroker.name}${srcPurchase.brokeragePaidBy === "supplier" ? " (supplier pays)" : ""}` : "")
+                  : mi.source === "stock" ? " · from stock" : "";
                 const label = (mi.diamondKind === "certified"
                   ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
-                  : `${materialName(db.settings, mi.material)} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`) + srcInfo;
+                  : `${materialName(db.settings, mi.material)} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`)
+                  // Loose stones' details and price, when given.
+                  + (mi.diamondSpec ? ` · ${[mi.diamondSpec.mm && `${mi.diamondSpec.mm} mm`, mi.diamondSpec.color, mi.diamondSpec.clarity,
+                      mi.diamondSpec.ratePerCaratInr && `${fmtMoneyInr(mi.diamondSpec.ratePerCaratInr)}/ct`, mi.diamondSpec.amountInr && fmtMoneyInr(mi.diamondSpec.amountInr)].filter(Boolean).join(" · ")}` : "")
+                  + srcInfo;
                 const srcCost = srcPurchase ? purchasePending(srcPurchase) : 0;
                 const isGold = mi.material === "gold";
                 const liveLabour = labourValue({

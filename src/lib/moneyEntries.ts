@@ -489,7 +489,9 @@ function lockerEntries(db: DB): MoneyEntry[] {
       // beside it): neither may move it alone, so it is corrected here.
       unlinked = `One account movement shared by ${sharers.length} entries on ${sharers[0].party}'s books — ${sharers.map(sharerLabel).join("; ")}`;
       orphan = `${unlinked}. Corrected or cancelled here, it changes the account only. Once it is cancelled, each of those entries shows no account movement and can be cancelled on its own without moving the account again.`;
-    } else if (ref && ref !== "manual" && ref !== "transfer" && !t.pairedLockerId) {
+    // A brokerage payment is the record itself — the broker's due is read from
+    // it (lib/brokers.ts) — so it is corrected here like any entry of our own.
+    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && !t.pairedLockerId) {
       const why = unclaimedRow(db, t);
       if ("gone" in why) {
         orphan = `${why.gone}, so it is corrected here — that changes the account only.`;

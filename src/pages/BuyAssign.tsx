@@ -156,7 +156,8 @@ const SAVE = "btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48";
 /* ── Opening Stock → seed material already owned (migration). No supplier, no
    payable — it just increases Stock and shows an "Opening Stock" line (with its
    ₹ value) in the stock ledger. ── */
-function OpeningStock({ open, onOpenChange }: PanelProps) {
+/** Also on the Stock page (its "Opening stock" button) — the same form, the same records. */
+export function OpeningStock({ open, onOpenChange }: PanelProps) {
   const { user } = useAuth();
   const db = useDb();
   const multiCo = useMultiCo();

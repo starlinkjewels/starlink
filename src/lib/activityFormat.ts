@@ -62,7 +62,7 @@ const NOISE_FIELDS = new Set(["lastActiveAt", "fcmTokens", "updatedAt"]);
 const COL_MODULE: Record<string, ModuleKey> = {
   orders: "orders", clients: "clients", users: "employees", invoices: "invoices",
   expenses: "expenses", lockers: "locker", lockerTransactions: "locker",
-  suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers",
+  suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
   stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
@@ -75,7 +75,7 @@ const COL_NOUN: Record<string, string> = {
   orders: "order", clients: "client", users: "staff member", invoices: "invoice",
   expenses: "expense", lockers: "account", lockerTransactions: "account entry",
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
-  supplierPayments: "supplier payment", factories: "factory", materialIssuances: "material issue",
+  supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", stockMovements: "stock movement", diamondPackets: "certified stone",
   diamondSales: "diamond sale", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
@@ -87,7 +87,7 @@ const COL_NOUN: Record<string, string> = {
  *  the order, the receipt and the account; the receipt is what a person did. */
 const PRIORITY = [
   "orders", "clients", "users", "invoices", "clientReceipts", "purchases", "expenses",
-  "suppliers", "factories", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
+  "suppliers", "brokers", "factories", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
   "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
   "tasks", "meta", "adminRecords", "lockerTransactions", "stockMovements",
