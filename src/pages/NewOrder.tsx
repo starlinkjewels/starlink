@@ -488,7 +488,11 @@ export function NewOrderPage() {
         title="New Order"
       />
 
-      <form onSubmit={submit} className="space-y-4">
+      {/* noValidate: the checks in submit() say what is missing. The browser's
+          own check found an empty dropdown (Karats, Colour) through the hidden
+          select behind it and scrolled the whole page to that — the app slid
+          off screen and Submit looked like a blank page. */}
+      <form onSubmit={submit} noValidate className="space-y-4">
         {/* The whole width of the screen: on a wide one, two columns — who and
             what on the left, how it is made and paid on the right. One column
             below that. */}

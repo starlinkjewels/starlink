@@ -218,6 +218,22 @@ export function AppLayout() {
   const db = useDb();
   // The table style chosen in Settings, on every page. Keyed on its value, so
   // it is applied when it changes and not on every redraw.
+  // The app's frame never scrolls — pages scroll inside <main>. Anything that
+  // moves the frame itself (the browser jumping to a hidden field, a stray
+  // scrollIntoView) slides the whole app off screen and leaves an empty page.
+  // Put it straight back. Not while a text box has the focus: on a phone the
+  // browser moves the page on purpose to keep that box above the keyboard.
+  useEffect(() => {
+    const back = () => {
+      if (!window.scrollY && !window.scrollX) return;
+      const el = document.activeElement as HTMLElement | null;
+      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
+      window.scrollTo(0, 0);
+    };
+    window.addEventListener("scroll", back, { passive: true });
+    back();
+    return () => window.removeEventListener("scroll", back);
+  }, []);
   const tableUiKey = JSON.stringify(db.settings?.tableUi ?? null);
   useEffect(() => { applyTableUi(tableUiOf(db.settings?.tableUi as Partial<TableUi> | undefined)); }, [tableUiKey]); // eslint-disable-line react-hooks/exhaustive-deps
   // The look chosen in Settings → Appearance, the same way — and remembered on
