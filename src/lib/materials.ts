@@ -16,7 +16,7 @@
  * metal like platinum has a purity (‰) but no 24-karat fine conversion, so it
  * never goes down a gold path.
  */
-import type { Settings, Purchase } from "./db";
+import type { Settings, Purchase, DiamondPacket } from "./db";
 import { lotKey } from "./diamondLots";
 
 export type MaterialKind = "metal" | "stone" | "finding";
@@ -122,8 +122,39 @@ export function purchaseBucket(p: Pick<Purchase, "material" | "gold" | "diamond"
 export function purchaseText(s: Pick<Settings, "materials"> | undefined, p: Pick<Purchase, "material" | "gold" | "diamond" | "other">): string {
   const unit = materialUnit(s, p.material);
   if (p.material === "gold") return `${fmtQty(purchaseQty(p), unit)} ${p.gold?.purity ?? ""} gold`;
-  if (p.material === "diamond") return `${fmtQty(purchaseQty(p), unit)} ${p.diamond?.kind === "certified" ? "certified" : (p.diamond?.shape ?? "")} diamond`;
+  if (p.material === "diamond") {
+    const spec = diamondSpec(p.diamond);
+    return `${fmtQty(purchaseQty(p), unit)} ${p.diamond?.kind === "certified" ? "certified diamond" : "diamond"}${spec ? ` · ${spec}` : ""}`;
+  }
   return `${fmtQty(purchaseQty(p), unit)} ${p.other?.grade ? `${p.other.grade} ` : ""}${materialName(s, p.material)}`;
+}
+
+/**
+ * A diamond's own details, in one line, the way a diamond office reads them:
+ * loose "Round · +6.5-7 · G-H · VS · 12 pcs", certified
+ * "Oval · F · VS1 · IGI 52184". A certified stone's colour and clarity are kept
+ * on its packet, so pass the packet when there is one. Older entries show what
+ * they have (a free-text quality, a shape alone).
+ */
+export function diamondSpec(
+  d: Partial<NonNullable<Purchase["diamond"]>> | undefined,
+  pk?: Pick<DiamondPacket, "color" | "clarity" | "quality" | "certificateNumber" | "certificateLab" | "stockNumber"> | null,
+): string {
+  if (!d && !pk) return "";
+  const color = d?.color || pk?.color, clarity = d?.clarity || pk?.clarity;
+  const quality = !color && !clarity ? (d?.quality || pk?.quality) : undefined;
+  const certNo = d?.certificateNumber || pk?.certificateNumber, lab = d?.certificateLab || pk?.certificateLab;
+  return [
+    d?.shape, d?.size, color, clarity, quality,
+    d?.pieces ? `${d.pieces} pcs` : undefined,
+    certNo ? `${lab || "Report"} ${certNo}` : undefined,
+  ].map(x => (typeof x === "string" ? x.trim() : x)).filter(Boolean).join(" · ");
+}
+
+/** The bill's rate per unit in rupees (₹/g, ₹/ct, ₹/pc…), before any discount. */
+export function purchaseUnitInr(p: Pick<Purchase, "material" | "gold" | "diamond" | "other" | "currency" | "exchangeRate">): number | undefined {
+  const r = purchaseRate(p) * (p.currency === "USD" ? Number(p.exchangeRate) || 0 : 1);
+  return r > 0 ? Math.round(r * 100) / 100 : undefined;
 }
 
 /** A new material's id. */

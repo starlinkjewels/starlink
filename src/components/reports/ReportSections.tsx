@@ -4,7 +4,7 @@ import { PeriodPicker } from "./ui";
 import { StatusBadge } from "@/components/StatusBadge";
 import { SectionTitle } from "@/components/SectionTitle";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate } from "@/components/DataTable";
-import { purchaseQty as qtyOfPurchase, materialName, materialUnit } from "@/lib/materials";
+import { purchaseQty as qtyOfPurchase, materialName, materialUnit, diamondSpec } from "@/lib/materials";
 import { useState, useMemo, useEffect } from "react";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, totalAdvance, balanceDue, orderTotal, TIMELINE_STEPS, logEvent, keptValue, findInvoiceForOrder } from "@/lib/db";
 import type { Order, Purchase } from "@/lib/db";
@@ -309,7 +309,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           const c = purchaseCategory(p);
           const qty = purchaseQty(p);
           const unit = materialUnit(db.settings, p.material);
-          const detail = c === "gold" ? (p.gold?.purity || "") : c === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim() : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : ""));
+          const detail = c === "gold" ? (p.gold?.purity || "") : c === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim() : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : ""));
           const rate = qty > 0 ? Math.round(p.totalInr / qty) : "";
           running += p.totalInr;
           return [
@@ -547,7 +547,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const catDetail = (p: Purchase, cat: MatCat) =>
     cat === "gold" ? (p.gold?.purity || "")
     : cat === "other" ? `${materialName(db.settings, p.material)} ${p.other?.grade ?? ""}`.trim()
-    : (p.diamond?.shape || p.diamond?.quality || (cat === "cert" ? "Certified" : ""));
+    : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (cat === "cert" ? "Certified" : ""));
   // Oldest-first for a running-balance ledger.
   const catRows = (cat: MatCat) => (materialReport?.rows ?? [])
     .filter(p => purchaseCategory(p) === cat)
@@ -848,8 +848,8 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       !!order && { label: "For order", value: orderLink(order) },
       p.currency === "USD" && !!p.totalUsd && { label: "Billed in dollars", value: `${fmtMoney(p.totalUsd)}${p.exchangeRate ? ` at ₹${p.exchangeRate} to the $` : ""}` },
       !!(p.diamond?.pieces || p.other?.pieces) && { label: "Stones", value: String(p.diamond?.pieces || p.other?.pieces) },
-      // The Detail column shows the shape, or the quality when there is no shape.
-      !!p.diamond?.shape && { label: "Quality", value: p.diamond.quality },
+      // The whole lot or stone: shape · size · colour · clarity · pcs, or its report.
+      p.material === "diamond" && { label: "Diamond", value: diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || undefined },
       !!p.diamond?.certificateNumber && { label: "Certificate", value: [p.diamond.certificateLab, p.diamond.certificateNumber].filter(Boolean).join(" ") },
       !!p.discountPct && { label: p.discountPct > 0 ? "Discount" : "Charge added", value: `${Math.abs(p.discountPct)}%` },
       !!p.roundOffInr && { label: "Rounded off", value: fmtMoneyInr(p.roundOffInr) },
@@ -1161,7 +1161,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
           {materialReport.rows.length > 0 ? (() => {
             const supplierName = (p: Purchase) => (db.suppliers ?? []).find(s => s.id === p.supplierId)?.name ?? "";
             const labelOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? "Gold" : c === "cert" ? "Cert. Dia" : c === "other" ? materialName(db.settings, p.material) : "Diamond"; };
-            const detailOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (p.diamond?.shape || p.diamond?.quality || (c === "cert" ? "Certified" : "—")); };
+            const detailOf = (p: Purchase) => { const c = purchaseCategory(p); return c === "gold" ? (p.gold?.purity || "—") : c === "other" ? (p.other?.grade || "—") : (diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || (c === "cert" ? "Certified" : "—")); };
             const dateOf = (p: Purchase) => p.invoiceDate || p.createdAt;
             const TONE = { gold: "amber", cert: "blue", other: "green", diamond: "violet" } as const;
             return (

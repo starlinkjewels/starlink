@@ -1054,6 +1054,9 @@ export interface Broker {
   phone?: string;
   /** Their usual brokerage, % of the bill — filled in on a purchase, changeable there. */
   brokeragePct?: number;
+  /** The suppliers they deal with — picking one of these on a bill brings this broker in.
+   *  Suppliers on bills they brought count too (brokerSuppliers in lib/brokers.ts). */
+  supplierIds?: string[];
   notes?: string;
   createdAt: string;
   active: boolean;
@@ -1171,10 +1174,14 @@ export interface DiamondSale {
 export interface PurchasePayment {
   id: string;
   amountInr: number;
-  lockerId: string; // which Locker this payment came from
+  lockerId: string; // which Locker this payment came from — "" when a broker paid it from money we gave him
   recordedBy: string;
   createdAt: string;
   note?: string;
+  /** Paid through a broker (lib/brokers.ts): we gave him the money, he passed it to the supplier. */
+  viaBrokerId?: string;
+  /** The account entry (to the broker) the money came from, when paid in the same step. */
+  brokerPaymentId?: string;
 }
 
 

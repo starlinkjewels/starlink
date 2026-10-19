@@ -703,7 +703,7 @@ function FactoryHistoryPageBody() {
       // accounted for before the issue closes.
       if (mi.material === "diamond") {
         const flow = diamondFlow(mi);
-        if (flow.out > 0) rows.push({ ...zero(), id: mi.id + "-din", date: mi.issuedAt, ref, particular: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}`, drDia: flow.out });
+        if (flow.out > 0) rows.push({ ...zero(), id: mi.id + "-din", date: mi.issuedAt, ref, particular: `Diamond issued — ${mi.quantityIssued}ct ${mi.diamondKind === "certified" ? "certified" : mi.purityOrQuality}${mi.piecesIssued ? ` · ${mi.piecesIssued} pcs` : ""}`, drDia: flow.out });
         if (mi.source === "factoryPool" || mi.status !== "closed") {
           if (flow.in > 0) rows.push({ ...zero(), id: mi.id + "-dused", date: mi.issuedAt, ref, particular: mi.source === "factoryPool" ? "Diamond from the factory's pool set in piece" : "Diamond set in received piece", crDia: flow.in });
         } else {

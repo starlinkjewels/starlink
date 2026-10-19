@@ -278,7 +278,8 @@ export function DataTable<T>({
   };
   const navigate = useNavigate();
   const auto = !expand && details !== false;
-  const opener = !!expand || auto;
+  // No empty column of openers when no row in the table has anything to open.
+  const opener = (!!expand && (!expand.can || rows.some(r => expand.can!(r)))) || auto;
   const canOpen = (r: T) => expand ? (expand.can ? expand.can(r) : true) : auto;
   // A blank value is left out of the details rather than shown as an empty heading.
   const blank = (c: DataColumn<T>, r: T) => {

@@ -338,7 +338,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               <Input id={id} value={notes} onChange={e => setNotes(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />
             )}</Field>
           </div>
-          <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={billTotalInr} className="mt-3" />
+          <BillBrokerFields value={brokerage} onChange={setBrokerage} billTotalInr={billTotalInr} supplierId={supplierId} className="mt-3" />
         </Group>
 
         <Group title="Items" aside={<span className="text-xs text-muted-foreground">{lines.length} line{lines.length !== 1 ? "s" : ""}</span>}>

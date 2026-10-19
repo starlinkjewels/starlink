@@ -3782,7 +3782,7 @@ function OrderDetailPageBody() {
                     <Plus className="h-4 w-4" /> Another stone on this bill{supplierName ? ` (${supplierName})` : ""}
                   </Button>
 
-                  <BillBrokerFields value={bill.brokerage} onChange={v => updateBill(bi, { brokerage: v })} billTotalInr={billTotalInr(bill)} />
+                  <BillBrokerFields value={bill.brokerage} onChange={v => updateBill(bi, { brokerage: v })} billTotalInr={billTotalInr(bill)} supplierId={bill.supplierId} />
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
                     <div>
@@ -3980,7 +3980,7 @@ function OrderDetailPageBody() {
                   <Link key={p.id} to={`/suppliers/${p.supplierId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
                     <span className="flex items-center gap-2 min-w-0">
                       {p.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : p.material === "diamond" ? `${p.diamond?.carat}ct` : purchaseText(db.settings, p)} from {supplier?.name || "supplier"}{p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}</span>
+                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : purchaseText(db.settings, p)} from {supplier?.name || "supplier"}{p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}</span>
                     </span>
                     <span className="flex items-center gap-2 shrink-0">
                       <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>

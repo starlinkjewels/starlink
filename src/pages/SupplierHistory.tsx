@@ -1,3 +1,4 @@
+import { brokerSuppliers } from "@/lib/brokers";
 import { ListSelect } from "@/components/LotFields";
 import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { useCan, useMayExport } from "@/hooks/useCan";
@@ -8,7 +9,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
 import { coField, workCompanyOf } from "@/lib/companies";
-import { isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
+import { diamondSpec, isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, KARAT_PURITY, nextDiamondStockNumber, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type LedgerDir, type Supplier } from "@/lib/db";
@@ -38,6 +39,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Truck, Mail, Phone, MapPin, Hash, Plus, CreditCard,
   Download, FileText, FileSpreadsheet, X, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
+  Handshake,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -607,11 +609,9 @@ function SupplierHistoryPageBody() {
     }
     const d = p.diamond;
     const bits = [
-      d?.shape || "Diamond",
-      d?.kind === "certified" ? "certified" : "loose",
-      d?.quality,
-      d?.pieces ? `${d.pieces} pcs` : undefined,
-      d?.certificateNumber ? `${d.certificateLab || "Cert"} ${d.certificateNumber}` : undefined,
+      d?.kind === "certified" ? "Certified diamond" : "Loose diamond",
+      // Shape · size · colour · clarity · pcs, or the stone's report.
+      diamondSpec(d, d?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined),
       p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
     ].filter(Boolean);
     return bits.join(" · ");
@@ -767,13 +767,16 @@ function SupplierHistoryPageBody() {
   const orderOf = (p: Purchase) => (p.orderId ? db.orders.find(o => o.id === p.orderId) : undefined);
   const purchaseTitle = (p: Purchase) =>
     p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity} Gold`
-    : p.material === "diamond" ? `${p.diamond?.carat}ct Diamond${p.diamond?.quality ? ` (${p.diamond.quality})` : ""}`
+    : p.material === "diamond" ? `${p.diamond?.carat}ct ${p.diamond?.kind === "certified" ? "certified" : "loose"} diamond`
     : purchaseText(db.settings, p);
+  /** A diamond's lot or report under its title: "Round · +6.5-7 · G-H · VS · 12 pcs". */
+  const purchaseSub = (p: Purchase) => p.material !== "diamond" ? undefined
+    : diamondSpec(p.diamond, p.diamond?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined) || undefined;
   const purchaseColumns: DataColumn<Purchase>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: p => +new Date(p.createdAt), csv: p => fmtDate(p.createdAt),
       cell: p => <CellDate>{fmtDate(p.createdAt)}</CellDate> },
     { key: "purchase", header: "Purchase", always: true, sortValue: p => purchaseTitle(p), csv: p => purchaseTitle(p),
-      cell: p => <CellMain title={purchaseTitle(p)} sub={p.currency === "USD" ? `$${p.totalUsd} @ ₹${p.exchangeRate}/$` : undefined} /> },
+      cell: p => <CellMain title={purchaseTitle(p)} sub={[purchaseSub(p), p.currency === "USD" ? `$${p.totalUsd} @ ₹${p.exchangeRate}/$` : undefined].filter(Boolean).join(" · ") || undefined} /> },
     { key: "for", header: "For", sortValue: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}` : "Stock"),
       csv: p => (p.purpose === "order" ? `Order ${orderOf(p)?.orderNumber ?? ""}`.trim() : "Stock"),
       cell: p => {
@@ -871,7 +874,26 @@ function SupplierHistoryPageBody() {
           { label: "Delete supplier", icon: Trash2, danger: true, onSelect: deleteSupplier, disabled: !isAdmin || !deleteGuard.ok,
             hint: !isAdmin ? "Only an admin can change suppliers" : deleteGuard.reason },
         ]}
-      />
+      >
+        {/* The brokers who bring this supplier's goods — and what is still pending through each. */}
+        {(() => {
+          const linked = (db.brokers ?? []).filter(b => brokerSuppliers(db, b).includes(supplier.id));
+          if (!linked.length) return null;
+          return (
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+              <Handshake className="h-3.5 w-3.5" />
+              {linked.map(b => {
+                const pending = (db.purchases ?? []).filter(p => p.brokerId === b.id && p.supplierId === supplier.id).reduce((t, p) => t + purchasePending(p), 0);
+                return (
+                  <Link key={b.id} to={`/suppliers/brokers/${b.id}`} className="text-primary hover:underline">
+                    Broker {b.name}{pending > 0.5 ? ` · ${fmtMoneyInr(pending)} pending through them` : ""}
+                  </Link>
+                );
+              })}
+            </p>
+          );
+        })()}
+      </PageHeader>
 
       {/* Who they are. Where the account stands is the statement's, below. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
