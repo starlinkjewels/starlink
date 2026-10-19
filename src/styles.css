@@ -662,6 +662,41 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
 .dt-scrolled .dt-stick-l { box-shadow: 8px 0 10px -8px rgb(15 23 42 / 0.22); }
 .dt-more .dt-stick-r { box-shadow: -8px 0 10px -8px rgb(15 23 42 / 0.22); }
 .dt-box { scroll-behavior: auto; overscroll-behavior-x: contain; }
+
+/* ── One table, everywhere ─────────────────────────────────────────────────
+   The header row is held in view by moving it down inside its box while the
+   page scrolls (components/TableBox.tsx → useHeldHeader) — never `sticky` to
+   the page, which only worked for tables that fit the screen and dropped the
+   box's top border when it did. It sits over the rows it passes, the pinned
+   first column included. A table given its own height keeps its sticky head. */
+.dt-box > table > thead:not(.sticky) { position: relative; z-index: 4; }
+/* Settings → Table Style's "header stays put" would add a second, CSS offset. */
+:root .dt-box > table > thead > tr > th { top: auto !important; }
+/* While held: a soft shadow under it, so the rows plainly pass beneath. */
+.dt-box[data-stuck] > table > thead > tr > th { box-shadow: 0 1px 0 var(--color-border), 0 12px 14px -12px rgb(15 23 42 / 0.28); }
+.dt-box[data-stuck] > table > thead > tr > th.dt-sorted { box-shadow: inset 0 -2px 0 var(--color-primary), 0 12px 14px -12px rgb(15 23 42 / 0.28); }
+
+/* A hand-built table (TableBox) looks like a DataTable: the same header row —
+   tinted, small capitals, the same height — rows that light up under the
+   pointer, and figures in even-width digits. Size and spacing are set outright;
+   colour only by default, so a header a table colours on purpose (money in
+   green, out red) keeps it. Settings → Table Style still applies on top. */
+.tbl-box > table { width: 100%; border-collapse: collapse; }
+.tbl-box > table > thead > tr > th {
+  padding: 0.75rem; font-size: 11px; line-height: 1rem; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.05em; white-space: nowrap;
+  background: linear-gradient(color-mix(in oklab, var(--color-secondary) 40%, transparent), color-mix(in oklab, var(--color-secondary) 40%, transparent)), white;
+  border-bottom: 1px solid color-mix(in oklab, var(--color-border) 60%, transparent);
+}
+:root[data-tbl] .tbl-box > table:not(.tbl-plain) > thead > tr > th { background: var(--tbl-head-bg); }
+:root[data-tbl="minimal"] .tbl-box > table:not(.tbl-plain) > thead > tr > th,
+:root[data-tbl="cards"] .tbl-box > table:not(.tbl-plain) > thead > tr > th { background: white; }
+@layer components {
+  .tbl-box > table > thead > tr > th { color: color-mix(in oklab, var(--color-brand-dark) 70%, transparent); }
+  .tbl-box > table > tbody > tr { transition: background-color .15s; }
+  .tbl-box > table > tbody > tr:hover { background-color: color-mix(in oklab, var(--color-secondary) 30%, transparent); }
+  .tbl-box > table > tbody > tr > td { font-variant-numeric: tabular-nums; }
+}
 /* A card that clips its corners with overflow: hidden becomes a scroll box of
    its own, and a table header inside it can no longer stay at the top of the
    page. Clipping without becoming a scroll box looks the same and lets it. */
@@ -701,7 +736,9 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
 /* Wide pages fill the frame — they were capped at 1152–1280px, leaving empty
    bands on a PC. Form-like pages keep a readable width that grows with the screen. */
 .app-page > :is(.max-w-6xl, .max-w-7xl) { max-width: none; }
-.app-page > .max-w-3xl { max-width: clamp(48rem, 52vw, 64rem); }
+/* Every page uses the whole frame — the narrower ones (Alerts, Search, the
+   assistant, the gift card) left empty bands down both sides on a PC. */
+.app-page > :is(.max-w-xl, .max-w-2xl, .max-w-3xl) { max-width: none; }
 
 /* ── Dialogs (components/ui/dialog.tsx): a title bar and a row of actions that
    stay put, and a middle that scrolls on its own — so the scrollbar runs

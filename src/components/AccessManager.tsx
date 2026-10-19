@@ -5,6 +5,7 @@ import { updateDbAs, uid, currentUserOrders, currentUserClients, type DB, type U
 import { confirmBox } from "@/lib/confirm";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
+import { TableBox } from "@/components/TableBox";
 import {
   ACTION_LABEL, MODULE_ACTIONS, PERM_ACTIONS, ROLE_MODULES, STANDARD_STAFF, REACH_LABEL, ROLE_TEMPLATES,
   roleOf, rolesOnly, accessOf, userAccessId, applyOwn, diffFromRole, countCells, tempState, normalisePerms,
@@ -96,8 +97,9 @@ export function PermGrid({ value, onChange, role, timed, scroll = false }: {
    *  grid in a dialog. Off: the grid is as tall as its rows (as before). */
   scroll?: boolean;
 }) {
+  // The app's one table box; in a dialog it scrolls in its own height instead.
   return (
-    <div className={`overflow-x-auto rounded-xl border border-border/60 ${scroll ? "overflow-y-auto max-h-[min(22rem,55dvh)]" : ""}`}>
+    <TableBox ownScroll={scroll} className={scroll ? "overflow-y-auto max-h-[min(22rem,55dvh)]" : ""}>
       <table className="w-full text-sm tbl-plain">
         {/* Held at the top it needs a solid colour, or the rows show through it. */}
         <thead className={scroll ? "sticky top-0 z-10 bg-[color-mix(in_oklab,var(--color-secondary)_50%,var(--color-card))] shadow-[0_1px_0_var(--color-border)]" : "bg-secondary/50"}>
@@ -141,7 +143,7 @@ export function PermGrid({ value, onChange, role, timed, scroll = false }: {
           })}
         </tbody>
       </table>
-    </div>
+    </TableBox>
   );
 }
 

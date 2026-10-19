@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { TableBox } from "@/components/TableBox";
 import { Link } from "react-router-dom";
 import {
   fmtMoney, fmtDate, orderTotal, orderGrossTotal, totalAdvance, balanceDue, returnedCredit,
@@ -267,7 +268,7 @@ export function ClientInvoiceLedger({
           spacing — but kept as its own table: an invoice opens into its pieces,
           credit notes and payments, which are rows of this table, not a panel. */}
       <div className="px-5 pb-4">
-      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white">
+      <TableBox>
         <table className="w-full text-sm min-w-[900px]">
           <thead className="bg-secondary/40">
             <tr className="border-b border-border/60">
@@ -379,7 +380,7 @@ export function ClientInvoiceLedger({
             </tr>
           </tfoot>
         </table>
-      </div>
+      </TableBox>
       </div>
     </div>
   );

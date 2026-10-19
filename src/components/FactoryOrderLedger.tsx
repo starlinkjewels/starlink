@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { TableBox } from "@/components/TableBox";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
 import { fmtMoneyInr, diamondFlow, otherFlow } from "@/lib/manufacturing";
@@ -417,7 +418,7 @@ export function FactoryOrderLedger({
       })()}
 
       <div className="px-5 py-4">
-      <div className="relative overflow-x-auto rounded-xl border border-border/60 bg-white">
+      <TableBox>
         <table className="w-full text-xs">
           {/* The line under the header sits on the whole header, so it runs
               under the cells that span both header rows as well. */}
@@ -572,7 +573,7 @@ export function FactoryOrderLedger({
             </tfoot>
           )}
         </table>
-      </div>
+      </TableBox>
       </div>
       <LoadOlder w={w} noun="orders" />
     </div>

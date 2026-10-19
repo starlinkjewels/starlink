@@ -106,7 +106,8 @@ export function TableStyleSettings() {
           {toggle("zebra", "Striped rows", "Every other row lightly tinted")}
           {toggle("hover", "Highlight row under the pointer", "Easier to read across a wide row")}
           {toggle("lines", "Column lines", "A thin line between columns")}
-          {toggle("sticky", "Header stays at the top", "When a long table scrolls inside its box")}
+          {/* No "header stays at the top" any more: every table's header now
+              stays in view on its own (components/TableBox.tsx). */}
         </div>
       </div>
 
