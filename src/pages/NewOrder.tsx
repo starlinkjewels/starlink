@@ -477,7 +477,7 @@ export function NewOrderPage() {
   const willRedeem = redeemGift && !!giftCard && giftMax > 0;
 
   return (
-    <div className="max-w-3xl mx-auto space-y-4">
+    <div className="space-y-4">
 
       {/* ── Page header ── */}
       <PageHeader
@@ -486,6 +486,11 @@ export function NewOrderPage() {
       />
 
       <form onSubmit={submit} className="space-y-4">
+        {/* The whole width of the screen: on a wide one, two columns — who and
+            what on the left, how it is made and paid on the right. One column
+            below that. */}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] items-start">
+        <div className="space-y-4 min-w-0">
 
         {/* ══ 1. Client selector (admin / employee only) ══ */}
         {(isAdmin || isEmployee) && (
@@ -856,6 +861,9 @@ export function NewOrderPage() {
         </SectionCard>
         )}
 
+        </div>
+        <div className="space-y-4 min-w-0">
+
         {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
         {!isClient && f.materialSourcing === "readyStock" ? (
           <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Not needed — the piece already exists">
@@ -863,7 +871,7 @@ export function NewOrderPage() {
           </SectionCard>
         ) : !isClient && (
           <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional">
-            <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+            <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 min-[1600px]:grid-cols-3 gap-2.5">
               {[
                 { v: "later", label: "Decide later", icon: HelpCircle },
                 { v: "stock", label: "Use from Stock", icon: Boxes },
@@ -1150,6 +1158,8 @@ export function NewOrderPage() {
             )}
           </SectionCard>
         )}
+        </div>
+        </div>
 
         {/* ── Submit / Cancel — always reachable on a long form. On a phone the
             tab bar is put away on this page (AppLayout) and the bar is pinned

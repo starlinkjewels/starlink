@@ -37,17 +37,22 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
   });
 
   const create = async () => {
-    if (!f.companyName || !f.email || !f.password) { toast.error("Fill company, email and password"); return; }
+    if (!f.companyName?.trim()) { toast.error("Fill the company name"); return; }
+    // The login is optional — a walk-in (B2C) client gets none. Email alone is
+    // kept as a contact; a login needs both.
+    const email = (f.email ?? "").trim().toLowerCase();
+    const withLogin = !!f.password;
+    if (withLogin && !email) { toast.error("Add their email to give them a login — or leave the password empty"); return; }
+    if (withLogin && f.password!.length < 6) { toast.error("The password needs at least 6 characters"); return; }
     // Which of our companies sells to them. One to choose from: that one.
     const sellerId = f.companyId || (myCompanies.length === 1 ? myCompanies[0].id : "");
     if (multiCo && !sellerId) { toast.error("Choose which of our companies this client buys from"); return; }
     if (multiCo && !myCompanies.some(c => c.id === sellerId)) { toast.error("You don't sell for that company"); return; }
-    const email = f.email!.trim().toLowerCase();
-    if (loadDb().users.some(u => u.email.toLowerCase() === email)) { toast.error("That email is already in use"); return; }
+    if (withLogin && loadDb().users.some(u => (u.email ?? "").toLowerCase() === email)) { toast.error("That email is already in use"); return; }
     setSaving(true);
     try {
       // Create the client's Firebase Auth account (password lives in Auth).
-      const authUid = await createAuthUser(email, f.password!);
+      const authUid = withLogin ? await createAuthUser(email, f.password!) : null;
       const id = uid("c_");
       // An employee who creates a client becomes its account manager (so they
       // can see and work with it). Admin keeps whatever manager was selected.
@@ -56,10 +61,10 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
         const { companyId: _picked, ...rest } = f;
         void _picked;
         d.clients.unshift({
-          ...rest, id, accountManagerId, username: email, email, status: "active", createdAt: new Date().toISOString(),
+          ...rest, id, accountManagerId, username: authUid ? email : "", email, status: "active", createdAt: new Date().toISOString(),
           ...(sellerId && sellerId !== MAIN_COMPANY_ID ? { companyId: sellerId } : {}),
         } as Client);
-        d.users.push({
+        if (authUid) d.users.push({
           id: uid("u_"), authUid, username: email, password: "", role: "client",
           name: f.ownerName || f.companyName!, email, phone: f.phone,
           status: "active", clientId: id, createdAt: new Date().toISOString(),
@@ -69,7 +74,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       // saying it is done. It goes up just after the profile; close the tab in
       // between and the account can sign in to nothing.
       await flush();
-      toast.success(`Client created — they can sign in with their email & password${f.accountManagerId ? "" : " · handled by Admin"}`);
+      toast.success(`${authUid ? "Client created — they can sign in with their email & password" : "Client created — no login"}${f.accountManagerId ? "" : " · handled by Admin"}`);
       onOpenChange(false);
       onCreated?.(id);
       setF({ companyName: "", ownerName: "", email: "", phone: "", country: "USA", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: undefined });
@@ -91,7 +96,9 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">New client</p>
             <p className="text-sm font-semibold text-brand-dark truncate">{f.companyName?.trim() || "—"}</p>
-            {f.email?.trim() && <p className="text-[11px] text-muted-foreground truncate">Signs in as {f.email.trim().toLowerCase()}</p>}
+            {f.email?.trim() && f.password
+              ? <p className="text-[11px] text-muted-foreground truncate">Signs in as {f.email.trim().toLowerCase()}</p>
+              : <p className="text-[11px] text-muted-foreground truncate">No login</p>}
           </div>
           <div className="flex gap-2 sm:shrink-0">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="rounded-xl flex-1 sm:flex-none">Cancel</Button>
@@ -105,6 +112,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize">
               {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)" : k.replace(/([A-Z])/g, " $1")}
+              {(k === "email" || k === "password") && <span className="normal-case font-normal text-muted-foreground"> · optional</span>}
             </Label>
             <Input
               value={(f as Record<string, string>)[k] || ""}
@@ -115,6 +123,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
           </div>
         ))}
       </div>
+      <p className="text-[11px] text-muted-foreground mt-2">Leave the password empty for a walk-in (B2C) client — they are saved without a login.</p>
       <div className="mt-4">
         <OpeningBalanceFields
           amount={f.openingBalance != null ? String(f.openingBalance) : ""}
