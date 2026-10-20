@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { auth, isAdminEmail, clearDeviceCache } from "./firebase";
+import { useBrand, brandName, BUILTIN } from "./brand";
 import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, type User } from "./db";
 import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
@@ -32,19 +33,20 @@ const Ctx = createContext<AuthCtx>({} as AuthCtx);
  *    an admin (which sets their `authUid`), otherwise they get no access.
  */
 function Splash({ label = "Loading…" }: { label?: string }) {
+  const brand = useBrand();
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{ background: "radial-gradient(circle at 30% 25%, oklch(0.34 0.12 265) 0%, oklch(0.16 0.05 265) 55%, oklch(0.11 0.03 265) 100%)" }}
+      style={{ background: "var(--splash-bg)" }}
     >
       <div className="flex flex-col items-center gap-6">
         <img
-          src="/starlink-logo.png"
-          alt="Starlink Jewels"
+          src={brand.logoDark || brand.logo || BUILTIN.white || BUILTIN.logo}
+          alt={brandName(brand)}
           className="h-16 w-auto object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.4)] animate-pulse"
           onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
         />
-        <div className="text-white/90 font-display tracking-[0.3em] text-sm">STARLINK JEWELS</div>
+        <div className="text-white/90 font-display tracking-[0.3em] text-sm">{brandName(brand).toUpperCase()}</div>
         <div className="flex items-center gap-2 text-white/60 text-xs">
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
           <span>{label}</span>

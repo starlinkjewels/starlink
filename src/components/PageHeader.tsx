@@ -61,7 +61,7 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
         <div className="min-w-0 flex-[1_1_16rem]">
           {eyebrow && <div className="text-xs text-muted-foreground mb-1">{eyebrow}</div>}
-          <h1 className="font-display text-[26px] sm:text-[30px] leading-[1.15] text-brand-dark [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{title}{info && <span className="ml-2 align-middle"><InfoTip text={info} /></span>}</h1>
+          <h1 className="ui-page-title font-display text-[26px] sm:text-[30px] leading-[1.15] text-brand-dark [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{title}{info && <span className="ml-2 align-middle"><InfoTip text={info} /></span>}</h1>
           {subtitle && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{subtitle}</p>}
           {children}
         </div>

@@ -501,7 +501,7 @@ export function DataTable<T>({
                 const on = sort?.key === c.key;
                 return (
                   <th key={c.key} title={hint(c)}
-                    className={`px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head`}
+                    className={`ui-th px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap ${alignCls(c.align)} ${on ? "dt-sorted text-primary shadow-[inset_0_-2px_0_var(--color-primary)]" : "text-brand-dark/70"} ${c.sortValue ? "group/th cursor-pointer select-none hover:text-primary transition-colors" : ""} ${c.key === firstKey ? `${stick} ${stickLeft} md:z-[3]` : "md:z-[2]"} dt-stick-head`}
                     onClick={() => clickSort(c)} aria-sort={on ? (sort!.dir === "asc" ? "ascending" : "descending") : undefined}>
                     <span className={`inline-flex items-center gap-1 ${c.align === "right" ? "flex-row-reverse" : ""}`}>
                       {c.header}

@@ -2,6 +2,7 @@ import type { Order, Client, Settings, DB } from "./db";
 import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb } from "./db";
 import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
+import { getBrand, brandName, BUILTIN } from "./brand";
 
 function dd(n: number) { return String(n).padStart(2, "0"); }
 function localDate(iso: string) {
@@ -355,7 +356,7 @@ function buildInvoiceDoc(opts: {
   <!-- Header -->
   <div class="hdr">
     ${settings.companyLogoUrl || isMain
-      ? `<img src="${settings.companyLogoUrl || "/starlink-logo.png"}" alt="${esc(settings.companyName || "Starlink Jewels")}" class="logo" />`
+      ? `<img src="${esc(settings.companyLogoUrl || getBrand().logo || BUILTIN.wide || BUILTIN.logo)}" alt="${esc(settings.companyName || brandName())}" class="logo" />`
       // Another company with no logo yet prints its name — never the first company's logo.
       : `<div style="font-size:22px;font-weight:800;letter-spacing:1.5px;color:#1e3a8a;line-height:1.1;max-width:60%;">${esc((settings.companyName || "").toUpperCase())}</div>`}
     <div class="addr">

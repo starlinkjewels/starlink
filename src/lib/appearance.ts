@@ -4,6 +4,8 @@
  * The defaults set nothing at all, so the app looks exactly as it was built
  * until an admin picks something else.
  */
+import { studioOn } from "./studio";
+
 export type UiLook = "classic" | "glass" | "flat" | "ivory";
 export type UiAccent = "royal" | "sapphire" | "emerald" | "gold" | "ruby" | "graphite";
 export type UiCorners = "sharp" | "default" | "round";
@@ -156,8 +158,15 @@ export const isDefaultAppearance = (a: AppearanceUi) => JSON.stringify(a) === JS
 
 const CACHE_KEY = "ui:appearance";
 
+/** The look last put on the page, so switching the new look on or off can put it back. */
+let lastApplied: AppearanceUi | null = null;
+
 /** Put a look on the page. Each default removes its attribute. */
 export function applyAppearance(a: AppearanceUi, root: HTMLElement = document.documentElement): void {
+  if (root === document.documentElement) lastApplied = a;
+  // The new look (preview) brings its own type and surfaces; the business
+  // keeps its brand colour, light/dark, corners, motion and width.
+  if (studioOn()) a = { ...a, look: "classic", headings: "sans", font: "inter", headingFont: "same" };
   const set = (k: string, v: string | null) => (v === null ? root.removeAttribute(k) : root.setAttribute(k, v));
   set("data-ui", a.look === "classic" ? null : a.look);
   set("data-accent", a.accent === "royal" ? null : a.accent);
@@ -193,9 +202,15 @@ export function rememberAppearance(a: AppearanceUi): void {
 }
 
 /** At start-up, before any data: the look this device last showed. */
+/** Put the last look back on the page (after the new look is switched on or off). */
+export function reapplyAppearance(): void {
+  applyAppearance(lastApplied ?? DEFAULT_APPEARANCE);
+}
+
 export function applyRememberedAppearance(): void {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (raw) applyAppearance(appearanceOf(JSON.parse(raw)));
+    else if (studioOn()) applyAppearance(DEFAULT_APPEARANCE);
   } catch { /* nothing remembered */ }
 }

@@ -1,4 +1,6 @@
 import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
+import { BrandLogo, useBrandMark } from "@/components/BrandLogo";
+import { useBrand, brandName } from "@/lib/brand";
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
@@ -337,7 +339,12 @@ export function AppLayout() {
   const initials = user?.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 
   /* Is the current path one of the More items? (highlight "More" tab) */
+  // A page that has its own tab (Catalog) lights that tab, not More as well.
+  const brand = useBrand();
+  const brandMark = useBrandMark();
+
   const isMoreActive = moreNav.some(item => {
+    if (MOBILE_NAV.some(t => t.to === item.to)) return false;
     if (item.to === "/") return loc.pathname === "/";
     return loc.pathname === item.to || loc.pathname.startsWith(item.to + "/");
   });
@@ -349,7 +356,10 @@ export function AppLayout() {
           page keeps its width; from 1280px the full list with its names. */}
       <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen w-[4.5rem] xl:w-60">
         <div className="px-3 xl:px-5 py-5 flex items-center justify-center xl:justify-start">
-          <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-10 w-10 object-cover object-left xl:w-auto xl:object-contain" />
+          {/* The rail shows the square icon when there is one (the logo's left edge otherwise); the full list, the logo. */}
+          {brandMark
+            ? <><img src={brandMark} alt={brandName(brand)} className="h-10 w-10 object-contain xl:hidden" /><BrandLogo wide className="h-10 w-auto max-w-full object-contain max-xl:hidden" /></>
+            : <BrandLogo wide className="h-10 w-10 object-cover object-left xl:w-auto xl:max-w-full xl:object-contain" />}
         </div>
         <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
@@ -358,7 +368,7 @@ export function AppLayout() {
               <div key={group.title} className="mb-1.5">
                 <button
                   onClick={() => toggleGroup(group.title)}
-                  className="hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
+                  className="app-nav-group hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
                 >
                   <span>{group.title}</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
@@ -371,7 +381,7 @@ export function AppLayout() {
                     {group.items.map(item => (
                       <NavLink key={item.to} to={item.to} end={item.to === "/"} title={item.label} aria-label={item.label}
                         className={({ isActive }) =>
-                          `relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all justify-center xl:justify-start
+                          `app-nav-item ${isActive ? "is-active" : ""} relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all justify-center xl:justify-start
                            ${isActive
                              ? "bg-primary text-primary-foreground shadow-soft"
                              : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
@@ -416,7 +426,7 @@ export function AppLayout() {
 
           {/* Mobile logo */}
           <div className="md:hidden flex items-center shrink-0">
-            <img src="/starlink-logo.png" alt="Starlink Jewels" className="h-8 w-auto object-contain" />
+            <BrandLogo wide className="h-8 w-auto max-w-[9rem] object-contain" />
           </div>
 
           {/* Search bar */}

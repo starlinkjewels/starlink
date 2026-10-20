@@ -93,11 +93,12 @@ export function TableStyleSettings() {
       </div>
 
       <div className="space-y-3">
-        <div className={`flex flex-wrap items-center gap-3 ${disabled ? "opacity-50" : ""}`}>
+        {/* Row spacing works on every style, the tables as built included. */}
+        <div className="flex flex-wrap items-center gap-3">
           <span className="text-sm font-medium text-brand-dark">Row spacing</span>
           <div className="inline-flex gap-0.5 p-0.5 rounded-lg bg-secondary">
             {([["compact", "Compact"], ["default", "Normal"], ["spacious", "Spacious"]] as [TableDensity, string][]).map(([k, l]) => (
-              <button key={k} type="button" disabled={disabled} onClick={() => setUi(prev => ({ ...prev, density: k }))}
+              <button key={k} type="button" onClick={() => setUi(prev => ({ ...prev, density: k }))}
                 className={`h-8 px-3 rounded-md text-xs font-medium ${ui.density === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>{l}</button>
             ))}
           </div>
