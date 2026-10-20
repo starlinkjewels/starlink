@@ -2000,7 +2000,7 @@ function OrderDetailPageBody() {
   return (
     <>
     <div className="max-w-7xl mx-auto space-y-4">
-      <Link to="/orders" className="inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
+      <Link to="/orders" className="ui-back inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
 
       <div className="card-luxe p-0 overflow-hidden">
       {/* Order Header — the piece at a glance: its picture, where it stands,

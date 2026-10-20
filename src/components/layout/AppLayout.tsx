@@ -1,6 +1,8 @@
 import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
 import { BrandLogo, useBrandMark } from "@/components/BrandLogo";
 import { useBrand, brandName } from "@/lib/brand";
+import { useStudio } from "@/lib/studio";
+import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from "@/components/layout/StudioShell";
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
@@ -247,6 +249,8 @@ export function AppLayout() {
   }, [appearanceKey]); // eslint-disable-line react-hooks/exhaustive-deps
   const navigate = useNavigate();
   const loc = useLocation();
+  // The new look (preview) is on on this device: its own menus and tab bar (StudioShell).
+  const studio = useStudio();
   // A page that is one task from start to finish (placing an order) puts the
   // tab bar away on a phone, so its own Cancel / Submit bar owns the bottom edge.
   const focusPage = /^\/orders\/new\/?$/.test(loc.pathname);
@@ -279,6 +283,16 @@ export function AppLayout() {
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, []);
+
+  // The new look: Ctrl K (⌘K on a Mac) opens search from anywhere.
+  useEffect(() => {
+    if (!studio) return;
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === "k") { e.preventDefault(); navigate("/search"); }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [studio]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* Close More drawer when route changes */
   useEffect(() => { setMoreOpen(false); }, [loc.pathname]);
@@ -313,8 +327,11 @@ export function AppLayout() {
 
   const nav = NAV.filter(navFilter);
   const moreNav = MORE_NAV.filter(navFilter);
+  // The new look (preview) arranges the same pages its own way (StudioShell).
+  const allItems = [...NAV_GROUPS.flatMap(g => g.items), ...MORE_NAV]
+    .filter((n, i, a) => a.findIndex(x => x.to === n.to) === i).filter(navFilter);
   // Desktop grouped sidebar (role-filtered, empty groups dropped) + collapse state.
-  const navGroups = NAV_GROUPS
+  const navGroups = studio ? studioSidebarGroups(allItems) : NAV_GROUPS
     .map(g => ({ ...g, items: g.items.filter(navFilter) }))
     .filter(g => g.items.length > 0);
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
@@ -365,14 +382,14 @@ export function AppLayout() {
           {navGroups.map(group => {
             const isCollapsed = collapsedGroups.has(group.title);
             return (
-              <div key={group.title} className="mb-1.5">
-                <button
+              <div key={group.title || "top"} className="mb-1.5">
+                {group.title && <button
                   onClick={() => toggleGroup(group.title)}
                   className="app-nav-group hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
                 >
                   <span>{group.title}</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
-                </button>
+                </button>}
                 {/* On the rail a thin line marks where a group starts. */}
                 <div className="xl:hidden mx-2 my-2 border-t border-border/70" />
                 {/* The rail shows every item (it has no group headings to open). */}
@@ -402,7 +419,7 @@ export function AppLayout() {
         </nav>
 
         {/* Sidebar user card */}
-        <div className="p-2.5 xl:p-3 border-t">
+        <div className="app-signout p-2.5 xl:p-3 border-t">
           <button
             onClick={() => { logout(); navigate("/login"); }} title="Sign out" aria-label="Sign out"
             className="w-full flex items-center justify-center xl:justify-start gap-3 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
@@ -424,10 +441,11 @@ export function AppLayout() {
         <header className="app-header fixed inset-x-0 top-0 md:sticky md:inset-auto shrink-0 z-30 glass border-b px-4 md:px-6 flex items-center gap-4"
           style={{ paddingTop: "calc(env(safe-area-inset-top) + 0px)", height: "calc(env(safe-area-inset-top) + 4rem)" }}>
 
-          {/* Mobile logo */}
+          {/* Mobile logo — in the new look, a back arrow on an inner page */}
+          {studio && parentPath(loc.pathname) ? <StudioBackButton items={allItems} /> : (
           <div className="md:hidden flex items-center shrink-0">
             <BrandLogo wide className="h-8 w-auto max-w-[9rem] object-contain" />
-          </div>
+          </div>)}
 
           {/* Search bar */}
           <button
@@ -437,6 +455,7 @@ export function AppLayout() {
               max-sm:flex-none max-sm:w-9 max-sm:px-0 max-sm:justify-center max-sm:border-transparent max-sm:bg-transparent max-sm:text-foreground max-sm:hover:bg-secondary">
             <Search className="h-[18px] w-[18px] sm:h-3.5 sm:w-3.5 shrink-0" />
             <span className="hidden sm:inline truncate">Search orders, clients…</span>
+            {studio && <kbd className="ml-auto hidden md:inline-flex items-center h-5 px-1.5 rounded border border-border bg-secondary text-[10px] font-medium text-muted-foreground">{/Mac|iPhone|iPad/.test(navigator.platform) ? "⌘K" : "Ctrl K"}</kbd>}
           </button>
 
           {/* Spacer */}
@@ -549,7 +568,7 @@ export function AppLayout() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
-          className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
+          className="app-main flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
               only while a page's chunk is fetched the first time. */}
@@ -581,6 +600,11 @@ export function AppLayout() {
         <SyncStatus />
 
         {/* ── Bottom nav (mobile) — 5 items: 4 tabs + More ── */}
+        {studio ? (
+          <StudioTabBar items={allItems} isClient={user?.role === "client"} hidden={focusPage}
+            user={{ name: user?.name ?? "", role: ROLE_LABEL[user?.role ?? ""] ?? user?.role ?? "" }}
+            onSignOut={() => { logout(); navigate("/login"); }} />
+        ) : (
         <nav
           className={`app-tabbar md:hidden fixed bottom-0 inset-x-0 z-40 glass border-t flex items-center justify-around ${focusPage ? "hidden" : ""}`}
           style={{ paddingBottom: "calc(env(safe-area-inset-bottom) + 0.5rem)", paddingTop: "0.5rem" }}>
@@ -611,6 +635,7 @@ export function AppLayout() {
             More
           </button>
         </nav>
+        )}
 
       </div>
 
