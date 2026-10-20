@@ -1,19 +1,25 @@
 import { useMemo, useState } from "react";
 import { useDb } from "@/hooks/useDb";
+import { useAuth } from "@/lib/auth";
+import { bagNoOf, giveBags, printBagLabels } from "@/lib/diamondBags";
+import { companyById, hasCompanies } from "@/lib/companies";
+import { toast } from "sonner";
 import { deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { toPureGold } from "@/lib/db";
-import { lotBalances, lotLabel } from "@/lib/diamondLots";
+import { lotBalances, lotLabel, sizeOrder } from "@/lib/diamondLots";
 import { stockAverageRate } from "@/lib/orderCost";
 import { materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
-import { Coins, Gem, Layers, Wallet } from "lucide-react";
+import { Coins, Gem, Layers, Package, Printer, Wallet } from "lucide-react";
 
 /** One line of stock: a gold purity, a loose-diamond lot, or a material's grade. */
 interface Row {
   key: string;
-  shape?: string; size?: string; color?: string; clarity?: string;
+  /** Loose diamonds: the bag this lot is kept in ("BAG-0007"). */
+  bag?: string;
+  shape?: string; size?: string; mm?: string; color?: string; clarity?: string;
   qty: number;
   pcs: number | null;
   /** Fine (24K) grams, for gold. */
@@ -37,9 +43,11 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   material: MaterialKey; companyId: string; selected: string | null; onSelect: (key: string | null) => void;
 }) {
   const db = useDb();
+  const { user } = useAuth();
   const unit = materialUnit(db.settings, material);
   const diamond = material === "diamond";
   const [shape, setShape] = useState(ALL);
+  const [mm, setMm] = useState(ALL);
   const [size, setSize] = useState(ALL);
   const [color, setColor] = useState(ALL);
   const [clarity, setClarity] = useState(ALL);
@@ -53,7 +61,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     };
     if (diamond) {
       return lotBalances(db.stockMovements ?? [], companyId).filter(l => l.ct > 0).map(l => ({
-        key: l.key, ...l.spec, qty: l.ct, pcs: l.pcs, ...priced(l.key, l.ct),
+        key: l.key, bag: bagNoOf(db, l.key), ...l.spec, qty: l.ct, pcs: l.pcs, ...priced(l.key, l.ct),
       }));
     }
     return Object.entries(deriveStockBalances(db.stockMovements, material, companyId))
@@ -64,28 +72,32 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         ...priced(key, q),
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.stockMovements, db.purchases, companyId, material]);
+  }, [db.stockMovements, db.purchases, db.diamondBags, companyId, material]);
 
   // Each filter offers only what is in stock now.
   const opts = (pick: (r: Row) => string | undefined, none = "Not recorded") => {
-    const vals = [...new Set(rows.map(r => pick(r) || ""))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+    const vals = [...new Set(rows.map(r => pick(r) || ""))].sort(sizeOrder);
     return vals.map(v => ({ value: v || "__none", label: v || none }));
   };
   const match = (want: string, have?: string) => want === ALL || (want === "__none" ? !have : have === want);
-  const shown = rows.filter(r => match(shape, r.shape) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
+  const shown = rows.filter(r => match(shape, r.shape) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
 
   const filters: TableFilter[] = diamond ? [
     { kind: "select", label: "Shape", value: shape, onChange: setShape, options: opts(r => r.shape), allLabel: "All shapes" },
-    { kind: "select", label: "Size", value: size, onChange: setSize, options: opts(r => r.size), allLabel: "All sizes" },
+    { kind: "select", label: "MM", value: mm, onChange: setMm, options: opts(r => r.mm), allLabel: "All mm" },
+    { kind: "select", label: "Sieve", value: size, onChange: setSize, options: opts(r => r.size), allLabel: "All sieves" },
     { kind: "select", label: "Colour", value: color, onChange: setColor, options: opts(r => r.color), allLabel: "All colours" },
     { kind: "select", label: "Clarity", value: clarity, onChange: setClarity, options: opts(r => r.clarity), allLabel: "All clarities" },
   ] : [];
 
   const dash = <span className="text-muted-foreground/50">—</span>;
   const columns: DataColumn<Row>[] = diamond ? [
-    { key: "lot", header: "Lot", always: true, sortValue: r => r.key, csv: r => lotLabel(r.key),
+    { key: "bag", header: "Bag", always: true, sortValue: r => r.bag ?? "~", csv: r => r.bag ?? "",
+      cell: r => (r.bag ? <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{r.bag}</span> : dash) },
+    { key: "lot", header: "Shape", sortValue: r => `${r.shape ?? ""}`, csv: r => lotLabel(r.key),
       cell: r => <CellMain title={r.shape} sub={r.key.includes(" · ") ? undefined : "size not recorded"} /> },
-    { key: "size", header: "Size", sortValue: r => r.size ?? "", cell: r => (r.size ? <CellTag tone="blue">{r.size}</CellTag> : dash) },
+    { key: "mm", header: "MM", sortValue: r => parseFloat(r.mm ?? "") || 0, cell: r => (r.mm ? <CellTag tone="blue">{r.mm}</CellTag> : dash) },
+    { key: "size", header: "Sieve", sortValue: r => r.size ?? "", cell: r => (r.size ? <CellTag tone="violet">{r.size}</CellTag> : dash) },
     { key: "color", header: "Colour", sortValue: r => r.color ?? "", cell: r => r.color ?? dash },
     { key: "clarity", header: "Clarity", sortValue: r => r.clarity ?? "", cell: r => r.clarity ?? dash },
     { key: "pcs", header: "Pcs", align: "right", kind: "number", sortValue: r => r.pcs,
@@ -114,13 +126,40 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const totalPcs = pcsKnown.reduce((s, r) => s + (r.pcs ?? 0), 0);
   const totalValue = shown.reduce((s, r) => s + (r.value ?? 0), 0);
   const unpriced = shown.filter(r => r.value == null).length;
-  const filtered = shape !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
+  const filtered = shape !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
+  // In the order a diamond office keeps its bags: shape, then mm, then sieve, then grade.
+  const ordered = diamond
+    ? [...shown].sort((a, b) => (a.shape ?? "").localeCompare(b.shape ?? "") || (parseFloat(a.mm ?? "") || 0) - (parseFloat(b.mm ?? "") || 0)
+        || sizeOrder(a.size, b.size) || (a.color ?? "").localeCompare(b.color ?? "") || (a.clarity ?? "").localeCompare(b.clarity ?? ""))
+    : shown;
+  const noBag = diamond ? rows.filter(r => !r.bag) : [];
+  const isStaff = user?.role === "admin" || user?.role === "employee";
+  const coName = hasCompanies(db.settings) && companyId !== "all" ? companyById(db.settings, companyId).name : undefined;
+  const print = (list: Row[]) => {
+    const withBag = list.filter(r => r.bag);
+    if (!withBag.length) { toast.error("These lots have no bag number yet"); return; }
+    if (!printBagLabels(withBag.map(r => ({ no: r.bag!, key: r.key, ct: r.qty, pcs: r.pcs })), coName)) toast.error("Allow pop-ups to print the labels");
+  };
 
   return (
     <div className="card-luxe p-3 sm:p-4 space-y-3">
-      <SectionTitle className="px-1" title={diamond ? "Lots in stock" : "In stock"}
-        sub={selected ? `Showing the history of ${diamond ? lotLabel(selected) : selected} below` : diamond ? "Shape · size · colour · clarity — open a lot for its history" : "Open a line for its history"}
-        actions={selected ? <button type="button" onClick={() => onSelect(null)} className="text-xs text-primary hover:underline">Show all history</button> : undefined} />
+      <SectionTitle className="px-1" title={diamond ? "Bags in stock" : "In stock"}
+        sub={selected ? `Showing the history of ${diamond ? (bagNoOf(db, selected) ? `${bagNoOf(db, selected)} · ` : "") + lotLabel(selected) : selected} below` : diamond ? "Shape · mm · sieve · colour · clarity — open a bag for its history" : "Open a line for its history"}
+        actions={selected
+          ? <button type="button" onClick={() => onSelect(null)} className="text-xs text-primary hover:underline">Show all history</button>
+          : diamond && ordered.some(r => r.bag)
+            ? <button type="button" onClick={() => print(ordered)} className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1"><Printer className="h-3.5 w-3.5" /> Print labels{filtered ? " (filtered)" : ""}</button>
+            : undefined} />
+      {diamond && isStaff && noBag.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap rounded-xl border border-primary/25 bg-primary/[0.04] px-3 py-2 text-xs">
+          <Package className="h-4 w-4 text-primary shrink-0" />
+          <span className="text-foreground">{noBag.length} lot{noBag.length === 1 ? "" : "s"} in stock {noBag.length === 1 ? "has" : "have"} no bag number yet.</span>
+          <button type="button" className="ml-auto font-semibold text-primary hover:underline"
+            onClick={() => { const n = giveBags(noBag.map(r => r.key), user?.id); toast.success(`${n} bag number${n === 1 ? "" : "s"} given`); }}>
+            Give bag numbers
+          </button>
+        </div>
+      )}
       <StatStrip items={[
         { label: filtered ? "In stock · filtered" : "In stock", value: fmtQty(totalQty, unit), icon: diamond ? Gem : material === "gold" ? Coins : Layers,
           sub: `${shown.length} ${diamond ? (shown.length === 1 ? "lot" : "lots") : (shown.length === 1 ? "line" : "lines")}` },
@@ -133,17 +172,20 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
       <DataTable
         id={`stock-lots-${diamond ? "diamond" : material === "gold" ? "gold" : "material"}`}
         noun={diamond ? "lot" : "line"}
-        rows={shown}
+        rows={ordered}
         rowKey={r => r.key}
+        rowActions={diamond ? (r => [
+          { label: "Print bag label", icon: Printer, disabled: !r.bag, hint: r.bag ? `${r.bag} · ${lotLabel(r.key)}` : "Give this lot a bag number first", onSelect: () => print([r]) },
+        ]) : undefined}
         columns={columns}
         filters={filters}
-        onClearFilters={() => { setShape(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
-        searchText={r => [r.key, r.size, r.color, r.clarity].filter(Boolean).join(" ")}
-        searchPlaceholder={diamond ? "Search lots — e.g. +6.5-7, G-H, VS" : "Search"}
-        defaultSort={{ key: "qty", dir: "desc" }}
+        onClearFilters={() => { setShape(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
+        searchText={r => [r.bag, r.key, r.mm, r.size, r.color, r.clarity].filter(Boolean).join(" ")}
+        searchPlaceholder={diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search"}
+        defaultSort={diamond ? null : { key: "qty", dir: "desc" }}
         onRowClick={r => onSelect(selected === r.key ? null : r.key)}
         rowClassName={r => (r.key === selected ? "dt-on bg-primary/[0.05]" : "")}
-        exportName={`Stock-${diamond ? "Loose-Diamond-Lots" : material}`}
+        exportName={`Stock-${diamond ? "Loose-Diamond-Bags" : material}`}
         details={false}
         emptyText={rows.length ? "No lot matches these filters." : "Nothing in stock."}
       />

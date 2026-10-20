@@ -2,7 +2,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
-import { ListSelect } from "@/components/LotFields";
+import { ListSelect, LooseLotFields, CertGradeFields } from "@/components/LotFields";
 import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { useDb } from "@/hooks/useDb";
@@ -20,7 +20,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, ChevronRight, type LucideIcon } from "lucide-react";
+import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, type MaterialKey, type MaterialUnit } from "@/lib/materials";
@@ -52,8 +52,9 @@ interface Line {
   kind: BuyKind;
   purity: string;
   shape: string;
-  /** Loose: the lot's size — sieve or mm (lib/diamondLots.ts); its colour and clarity are below. */
+  /** Loose: the lot's sieve size and mm size (lib/diamondLots.ts); its colour and clarity are below. */
   size: string;
+  mm: string;
   qty: string;      // grams (gold) or carats (diamond)
   rate: string;     // per gram / per carat
   quality: string;
@@ -66,13 +67,13 @@ interface Line {
 }
 
 const emptyLine = (): Line => ({
-  kind: "loose", purity: "22K", shape: "Round", size: "", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
+  kind: "loose", purity: "22K", shape: "Round", size: "", mm: "", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
   color: "", clarity: "", cut: "", polish: "", sym: "", fluor: "", measure: "", lab: "", certNo: "",
   materialId: "", grade: "",
 });
 
-/** A loose line's lot: shape · size · colour · clarity. */
-const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", size: l.size || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
+/** A loose line's lot: shape · sieve · mm · colour · clarity. */
+const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
 
 /** The stock material a line buys. */
 const lineMaterial = (l: Line): MaterialKey => (l.kind === "gold" ? "gold" : l.kind === "other" ? (l.materialId as MaterialKey) : "diamond");
@@ -183,7 +184,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
       // becomes its own packet below.
       for (const [i, l] of lines.entries()) {
         if (l.kind === "certified") continue;
-        // Loose stones go into their lot: shape · size · colour · clarity (lib/diamondLots.ts).
+        // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
         const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
         await increaseStock({
           material: lineMaterial(l), companyId,
@@ -212,7 +213,8 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               carat: q, quality: (l.kind === "loose" ? [l.color, l.clarity].map(x => x.trim()).filter(Boolean).join(" ") : l.quality.trim()) || undefined, ratePerCarat: Number(l.rate) || 0,
               pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
               kind: l.kind === "certified" ? "certified" : "loose", shape: l.shape,
-              ...(l.kind === "loose" ? { size: l.size || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined } : {}),
+              ...(l.kind === "loose" ? { size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }
+                : { color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }),
               certificateNumber: l.kind === "certified" ? l.certNo.trim() : undefined,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
@@ -377,18 +379,14 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
   base: number; inr: number;
 }) {
   const db = useDb();
-  // A certified stone's grading is optional, so it waits folded under a one-line summary.
-  const [grading, setGrading] = useState(false);
   const unit = lineUnit(l, db.settings);
   const usd = currency === "USD";
   const disc = Number(l.discountPct) || 0;
   const Icon = KIND[l.kind].icon;
   const name = l.kind === "other" && l.materialId ? materialName(db.settings, l.materialId) : KIND[l.kind].label;
-  const qtyLabel = l.kind === "gold" ? "Weight (g)" : l.kind === "loose" ? "Carat" : l.kind === "certified" ? "Size (ct)" : `Quantity (${unit})`;
+  const qtyLabel = l.kind === "gold" ? "Weight (g)" : l.kind === "loose" || l.kind === "certified" ? "Carat" : `Quantity (${unit})`;
   const qtyStep = l.kind === "gold" ? "0.001" : l.kind === "other" ? (unit === "pcs" ? "1" : "0.001") : "0.01";
   const sub = [disc !== 0 ? discountLabel(disc) : "", usd && inr > 0 ? fmtMoneyInr(inr) : ""].filter(Boolean).join(" · ");
-  const gradingText = [l.color, l.clarity, l.cut, l.polish, l.sym, l.fluor, l.measure].map(s => s.trim()).filter(Boolean).join(" · ");
-  const box = "h-9 rounded-xl bg-card";
 
   return (
     <div className="rounded-xl border border-border/60 bg-card p-3">
@@ -411,59 +409,17 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         )}
       </div>
 
-      <div className={LINE_GRID}>
-        {/* What it is — the first three columns. */}
-        {l.kind === "gold" ? (
-          <Field label="Purity">{id => (
-            <Select value={l.purity} onValueChange={v => onChange({ purity: v })}>
-              <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-            </Select>
-          )}</Field>
-        ) : l.kind === "other" ? (
-          <>
-            <Field label="Material"><OtherMaterialSelect value={l.materialId} onChange={v => onChange({ materialId: v, grade: "" })} /></Field>
-            <Field label="Grade"><GradeInput material={l.materialId} value={l.grade} onChange={v => onChange({ grade: v })} /></Field>
-            {unit !== "pcs"
-              ? <Field label="Pcs">{id => <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />}</Field>
-              : <p className="self-end pb-1 text-[11px] leading-snug text-muted-foreground">{l.materialId ? `Counted in pieces — stock of ${materialName(db.settings, l.materialId)} per grade.` : ""}</p>}
-          </>
-        ) : (
-          <>
-            <Field label="Shape">{id => (
-              <ListSelect id={id} list="diamondShapes" value={l.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} />
+      {l.kind === "loose" ? (
+        // A loose lot: what it is (it names the bag), then how much at what.
+        <div className="space-y-2.5">
+          <LooseLotFields idPrefix={`line${n}`} compact
+            value={{ shape: l.shape, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
+            onChange={p => onChange(p)} />
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+            <Field label="Pcs">{id => (
+              <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />
             )}</Field>
-            {l.kind === "loose" ? (
-              <>
-                {/* The lot it goes into: shape · size · colour · clarity (lib/diamondLots.ts). */}
-                <Field label="Size">{id => (
-                  <ListSelect id={id} list="diamondSizes" value={l.size} onChange={v => onChange({ size: v })} />
-                )}</Field>
-                <Field label="Colour">{id => (
-                  <ListSelect id={id} list="diamondColors" value={l.color} onChange={v => onChange({ color: v })} />
-                )}</Field>
-                <Field label="Clarity">{id => (
-                  <ListSelect id={id} list="diamondClarities" value={l.clarity} onChange={v => onChange({ clarity: v })} />
-                )}</Field>
-                <Field label="Pcs">{id => (
-                  <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />
-                )}</Field>
-              </>
-            ) : (
-              <>
-                <Field label="Report no." required>{id => (
-                  <Input id={id} value={l.certNo} onChange={e => onChange({ certNo: e.target.value })} className="rounded-xl h-10" placeholder="Report number *" />
-                )}</Field>
-                <Field label="Lab">{id => (
-                  <Input id={id} value={l.lab} onChange={e => onChange({ lab: e.target.value })} className="rounded-xl h-10" placeholder="GIA / IGI" />
-                )}</Field>
-              </>
-            )}
-          </>
-        )}
-
-        {/* How much, at what, less what — always the last three columns. */}
-        <Field label={qtyLabel} className="@xl:col-start-4">{id => (
+        <Field label={qtyLabel}>{id => (
           <UnitInput id={id} min={0} step={qtyStep} unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
         )}</Field>
         <Field label={`Rate / ${unit} (${currency})`}>{id => (
@@ -473,28 +429,69 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
           <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
             placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
         )}</Field>
-      </div>
-
-      {l.kind === "certified" && (
-        <div className="mt-2.5 rounded-xl border border-border/50 bg-secondary/40">
-          <button type="button" onClick={() => setGrading(o => !o)} aria-expanded={grading}
-            className="w-full flex items-center gap-2 px-3 h-9 text-left min-w-0">
-            <ChevronRight className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${grading ? "rotate-90" : ""}`} />
-            <span className="text-xs font-medium text-foreground shrink-0">Grading</span>
-            <span className="text-xs text-muted-foreground truncate">{gradingText || "colour, clarity, cut, measurement — optional"}</span>
-          </button>
-          {grading && (
-            <div className="grid grid-cols-2 @md:grid-cols-4 gap-2 px-3 pb-3">
-              <ListSelect list="diamondColors" value={l.color} onChange={v => onChange({ color: v })} placeholder="Colour" className={box} />
-              <ListSelect list="diamondClarities" value={l.clarity} onChange={v => onChange({ clarity: v })} placeholder="Clarity" className={box} />
-              <Input value={l.cut} onChange={e => onChange({ cut: e.target.value })} className={box} placeholder="Cut" />
-              <Input value={l.polish} onChange={e => onChange({ polish: e.target.value })} className={box} placeholder="Polish" />
-              <Input value={l.sym} onChange={e => onChange({ sym: e.target.value })} className={box} placeholder="Symmetry" />
-              <Input value={l.fluor} onChange={e => onChange({ fluor: e.target.value })} className={box} placeholder="Fluorescence" />
-              <Input value={l.measure} onChange={e => onChange({ measure: e.target.value })} className={`${box} col-span-2`} placeholder="Measurement" />
-            </div>
-          )}
+          </div>
         </div>
+      ) : l.kind === "certified" ? (
+        // A certified stone: shape and weight at a rate, then its report.
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+            <Field label="Shape">{id => (
+              <ListSelect id={id} list="diamondShapes" value={l.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} />
+            )}</Field>
+        <Field label={qtyLabel}>{id => (
+          <UnitInput id={id} min={0} step={qtyStep} unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
+        )}</Field>
+        <Field label={`Rate / ${unit} (${currency})`}>{id => (
+          <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/${unit}`} value={l.rate} onChange={e => onChange({ rate: e.target.value })} />
+        )}</Field>
+        <Field label="Discount %">{id => (
+          <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
+            placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
+        )}</Field>
+          </div>
+          <CertGradeFields idPrefix={`line${n}`} compact
+            value={{ color: l.color, clarity: l.clarity, cut: l.cut, polish: l.polish, symmetry: l.sym, fluorescence: l.fluor, measurement: l.measure, lab: l.lab, certNo: l.certNo }}
+            onChange={p => onChange({
+              ...(p.color !== undefined ? { color: p.color } : {}), ...(p.clarity !== undefined ? { clarity: p.clarity } : {}),
+              ...(p.cut !== undefined ? { cut: p.cut } : {}), ...(p.polish !== undefined ? { polish: p.polish } : {}),
+              ...(p.symmetry !== undefined ? { sym: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { fluor: p.fluorescence } : {}),
+              ...(p.measurement !== undefined ? { measure: p.measurement } : {}), ...(p.lab !== undefined ? { lab: p.lab } : {}),
+              ...(p.certNo !== undefined ? { certNo: p.certNo } : {}),
+            })} />
+        </div>
+      ) : (
+      <div className={LINE_GRID}>
+          {/* What it is — the first three columns. */}
+          {l.kind === "gold" ? (
+            <Field label="Purity">{id => (
+              <Select value={l.purity} onValueChange={v => onChange({ purity: v })}>
+                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+              </Select>
+            )}</Field>
+          ) : (
+            <>
+              <Field label="Material"><OtherMaterialSelect value={l.materialId} onChange={v => onChange({ materialId: v, grade: "" })} /></Field>
+              <Field label="Grade"><GradeInput material={l.materialId} value={l.grade} onChange={v => onChange({ grade: v })} /></Field>
+              {unit !== "pcs"
+                ? <Field label="Pcs">{id => <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />}</Field>
+                : <p className="self-end pb-1 text-[11px] leading-snug text-muted-foreground">{l.materialId ? `Counted in pieces — stock of ${materialName(db.settings, l.materialId)} per grade.` : ""}</p>}
+            </>
+          )}
+  
+          {/* How much, at what, less what — always the last three columns. */}
+          <Field label={qtyLabel} className="@xl:col-start-4">{id => (
+            <UnitInput id={id} min={0} step={qtyStep} unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
+          )}</Field>
+          <Field label={`Rate / ${unit} (${currency})`}>{id => (
+            <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/${unit}`} value={l.rate} onChange={e => onChange({ rate: e.target.value })} />
+          )}</Field>
+          <Field label="Discount %">{id => (
+            <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
+              placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
+          )}</Field>
+        </div>
+  
       )}
     </div>
   );

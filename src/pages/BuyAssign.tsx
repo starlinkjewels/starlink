@@ -4,7 +4,7 @@ import { useCan } from "@/hooks/useCan";
 import { useState, type ReactNode } from "react";
 import { useAuth } from "@/lib/auth";
 import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivityLedger";
-import { ListSelect, LotPicker } from "@/components/LotFields";
+import { ListSelect, LotPicker, LooseLotFields, CertGradeFields, lotFromDraft } from "@/components/LotFields";
 import { lotKey, lotParts, lotShape } from "@/lib/diamondLots";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { updateDb, uid, DIAMOND_SHAPES, toPureGold, nextDiamondStockNumber, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
@@ -152,7 +152,6 @@ function PanelFooter({ figures, onCancel, children }: { figures: ReactNode; onCa
 type BuyKind = "gold" | "loose" | "certified" | "other";
 const KINDS = [["gold", "Gold", Coins], ["loose", "Loose Dia.", Gem], ["certified", "Certified", BadgeCheck], ["other", "Other", Layers]] as const;
 /** The certificate boxes of a certified stone. */
-const GRADING = "h-9 rounded-xl bg-card";
 const SAVE = "btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48";
 
 /* ── Opening Stock → seed material already owned (migration). No supplier, no
@@ -169,8 +168,9 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
   const [grade, setGrade] = useState("");
   const [purity, setPurity] = useState("22K");
   const [shape, setShape] = useState("Round");
-  // Loose: the lot's size, its pieces and its price per carat (colour and clarity are below).
+  // Loose: the lot's sieve and mm sizes, its pieces and its price per carat (colour and clarity are below).
   const [size, setSize] = useState("");
+  const [mm, setMm] = useState("");
   const [pcs, setPcs] = useState("");
   const [rate, setRate] = useState("");
   const [qty, setQty] = useState("");     // grams (gold) / carats (diamond)
@@ -192,9 +192,9 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
     if (kind === "other" && !materialDef(db.settings, materialId)) { toast.error("Choose the material"); return; }
     if (!q || q <= 0) { toast.error(`Enter the opening ${kind === "gold" ? "weight (g)" : kind === "other" ? "quantity" : "carats"}`); return; }
     if (kind === "certified" && !certNo.trim()) { toast.error("Enter the report / certificate number"); return; }
-    // The value typed — or, for loose stones, carats × the price per carat.
+    // The value typed — or, for diamonds, carats × the price per carat.
     const val = Number(value) > 0 ? Math.round(Number(value))
-      : kind === "loose" && Number(rate) > 0 ? Math.round(q * Number(rate)) : undefined;
+      : (kind === "loose" || kind === "certified") && Number(rate) > 0 ? Math.round(q * Number(rate)) : undefined;
     // Carries the time of day, so several opening entries on one date keep the
     // order they were typed in rather than all landing at midnight.
     const createdAt = stampFor(asOf);
@@ -213,18 +213,19 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
             fluorescence: fluor.trim() || undefined, measurement: measure.trim() || undefined,
             certificateNumber: certNo.trim(), certificateLab: lab.trim() || undefined,
             ratePerCaratInr: val && q > 0 ? Math.round((val / q) * 100) / 100 : undefined,
+            note: note.trim() || undefined,
             status: "in_stock", createdBy: user!.id, createdAt,
           });
         });
         toast.success(`Opening certified diamond added: ${q}ct ${shape} (${certNo.trim()})`);
-        setQty(""); setValue(""); setAsOf(""); setNote(""); resetGrading();
+        setQty(""); setValue(""); setAsOf(""); setNote(""); setRate(""); resetGrading();
         onOpenChange(false);
         return;
       }
       // Gold, loose diamond or another material pools into Stock.
       const material: MaterialKey = kind === "gold" ? "gold" : kind === "other" ? (materialId as MaterialKey) : "diamond";
-      // Loose stones go into their lot: shape · size · colour · clarity (lib/diamondLots.ts).
-      const lot = kind === "loose" ? { shape, size: size || undefined, color: color.trim() || undefined, clarity: clarity.trim() || undefined } : undefined;
+      // Loose stones go into their lot (and its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
+      const lot = kind === "loose" ? lotFromDraft({ shape, size, mm, color, clarity }) : undefined;
       const bucket = kind === "gold" ? purity : kind === "other" ? (grade.trim() || "—") : lotKey(lot!);
       await increaseStock({
         material, companyId,
@@ -238,7 +239,7 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
         note: note.trim() || undefined,
       });
       toast.success(`Opening stock added: ${fmtQty(q, materialUnit(db.settings, material))} ${bucket}${kind === "other" ? ` ${materialName(db.settings, material)}` : ""}`);
-      setQty(""); setValue(""); setAsOf(""); setNote(""); setSize(""); setPcs(""); setRate(""); setColor(""); setClarity("");
+      setQty(""); setValue(""); setAsOf(""); setNote(""); setSize(""); setMm(""); setPcs(""); setRate(""); setColor(""); setClarity("");
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't add opening stock");
@@ -248,7 +249,7 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
   // For the footer's figures only.
   const unit: MaterialUnit = kind === "gold" ? "g" : kind === "other" ? materialUnit(db.settings, materialId) : "ct";
   const shown = Number(qty) || 0;
-  const what = kind === "gold" ? `${purity} gold` : kind === "loose" ? lotKey({ shape, size, color, clarity }) : kind === "certified" ? `${shape} certified`
+  const what = kind === "gold" ? `${purity} gold` : kind === "loose" ? lotKey({ shape, size, mm, color, clarity }) : kind === "certified" ? `${shape} certified`
     : `${grade.trim() ? `${grade.trim()} ` : ""}${materialId ? materialName(db.settings, materialId) : "material"}`;
 
   return (
@@ -257,7 +258,7 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
       footer={(
         <PanelFooter onCancel={() => onOpenChange(false)} figures={<>
           <Stat label="Adds to stock" value={shown > 0 ? fmtQty(shown, unit) : "—"} sub={`${what}${multiCo ? ` · ${companyById(db.settings, companyId).name}` : ""}`} />
-          <Stat label="Valued at" value={Number(value) > 0 ? fmtMoneyInr(Math.round(Number(value))) : kind === "loose" && Number(rate) > 0 && shown > 0 ? fmtMoneyInr(Math.round(shown * Number(rate))) : "No value"} />
+          <Stat label="Valued at" value={Number(value) > 0 ? fmtMoneyInr(Math.round(Number(value))) : (kind === "loose" || kind === "certified") && Number(rate) > 0 && shown > 0 ? fmtMoneyInr(Math.round(shown * Number(rate))) : "No value"} />
           <Stat label="As of" value={asOf ? fmtDay(asOf) : "Today"} />
         </>}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE}>{saving ? "Saving…" : "Add Opening Stock"}</AsyncButton>
@@ -294,56 +295,62 @@ export function OpeningStock({ open, onOpenChange }: PanelProps) {
               </>
             ) : (
               <>
-                <Field label={kind === "gold" ? "Purity" : "Shape"}>{id => kind === "gold" ? (
-                  <Select value={purity} onValueChange={setPurity}>
-                    <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                    <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                  </Select>
+                {/* Loose: the lot (its bag) — shape · mm · sieve · colour · clarity — the same fields as a purchase. */}
+                {kind === "loose" ? (
+                  <div className="col-span-2">
+                    <LooseLotFields idPrefix="open" companyId={companyId}
+                      value={{ shape, mm, size, color, clarity }}
+                      onChange={p => {
+                        if (p.shape !== undefined) setShape(p.shape); if (p.mm !== undefined) setMm(p.mm); if (p.size !== undefined) setSize(p.size);
+                        if (p.color !== undefined) setColor(p.color); if (p.clarity !== undefined) setClarity(p.clarity);
+                      }} />
+                  </div>
                 ) : (
-                  <ListSelect id={id} list="diamondShapes" value={shape} onChange={v => setShape(v || "Round")} optional={false} />
-                )}</Field>
+                  <Field label={kind === "gold" ? "Purity" : "Shape"}>{id => kind === "gold" ? (
+                    <Select value={purity} onValueChange={setPurity}>
+                      <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
+                      <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                    </Select>
+                  ) : (
+                    <ListSelect id={id} list="diamondShapes" value={shape} onChange={v => setShape(v || "Round")} optional={false} />
+                  )}</Field>
+                )}
+                {kind === "loose" && (
+                  <Field label="Pcs">{id => (
+                    <UnitInput id={id} min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} placeholder="Optional" />
+                  )}</Field>
+                )}
                 <Field label={`Opening ${kind === "gold" ? "Weight (g)" : "Carats"}`} required>{id => (
                   <UnitInput id={id} min={0} step="0.001" unit={unit} value={qty} onChange={e => setQty(e.target.value)} placeholder="0" />
                 )}</Field>
-                {/* Loose: the lot — size · colour · clarity — its pieces and price per carat. */}
-                {kind === "loose" && (
-                  <>
-                    <Field label="Size">{id => <ListSelect id={id} list="diamondSizes" value={size} onChange={setSize} />}</Field>
-                    <Field label="Colour">{id => <ListSelect id={id} list="diamondColors" value={color} onChange={setColor} />}</Field>
-                    <Field label="Clarity">{id => <ListSelect id={id} list="diamondClarities" value={clarity} onChange={setClarity} />}</Field>
-                    <Field label="Pcs">{id => (
-                      <UnitInput id={id} min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} placeholder="Optional" />
-                    )}</Field>
-                    <Field label="Price / ct (₹)">{id => (
-                      <UnitInput id={id} min={0} value={rate} onChange={e => setRate(e.target.value)} unit="₹/ct" placeholder="Optional" />
-                    )}</Field>
-                  </>
+                {(kind === "loose" || kind === "certified") && (
+                  <Field label="Price / ct (₹)">{id => (
+                    <UnitInput id={id} min={0} value={rate} onChange={e => setRate(e.target.value)} unit="₹/ct" placeholder="Optional" />
+                  )}</Field>
                 )}
               </>
             )}
             <Field label="Opening Value (₹, optional)" className={kind === "other" ? "" : "col-span-2"}>{id => (
               <UnitInput id={id} min={0} value={value} onChange={e => setValue(e.target.value)}
-                placeholder={kind === "loose" && Number(rate) > 0 && Number(qty) > 0 ? String(Math.round(Number(qty) * Number(rate))) : kind === "certified" ? "Cost basis for this stone" : "Valuation for the ledger"} />
+                placeholder={(kind === "loose" || kind === "certified") && Number(rate) > 0 && Number(qty) > 0 ? String(Math.round(Number(qty) * Number(rate))) : kind === "certified" ? "Cost basis for this stone" : "Valuation for the ledger"} />
             )}</Field>
           </div>
 
-          {/* Certified grading */}
+          {/* Certified: its report — the same fields as a purchase. */}
           {kind === "certified" && (
             <div className="mt-3 rounded-xl border border-border/50 bg-secondary/40 p-2.5">
               <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
                 <BadgeCheck className="h-3.5 w-3.5" /> Certificate &amp; grading
               </p>
-              <div className="grid grid-cols-2 @md:grid-cols-3 gap-2">
-                <Input value={certNo} onChange={e => setCertNo(e.target.value)} className={`${GRADING} col-span-2`} placeholder="Report number *" />
-                <Input value={lab} onChange={e => setLab(e.target.value)} className={GRADING} placeholder="Lab (GIA/IGI)" />
-                <ListSelect list="diamondColors" value={color} onChange={setColor} placeholder="Colour" className={GRADING} />
-                <ListSelect list="diamondClarities" value={clarity} onChange={setClarity} placeholder="Clarity" className={GRADING} />
-                <Input value={cut} onChange={e => setCut(e.target.value)} className={GRADING} placeholder="Cut" />
-                <Input value={polish} onChange={e => setPolish(e.target.value)} className={GRADING} placeholder="Polish" />
-                <Input value={sym} onChange={e => setSym(e.target.value)} className={GRADING} placeholder="Symmetry" />
-                <Input value={fluor} onChange={e => setFluor(e.target.value)} className={GRADING} placeholder="Fluorescence" />
-                <Input value={measure} onChange={e => setMeasure(e.target.value)} className={`${GRADING} col-span-2 @md:col-span-3`} placeholder="Measurement" />
-              </div>
+              <CertGradeFields idPrefix="open-cert" compact
+                value={{ color, clarity, cut, polish, symmetry: sym, fluorescence: fluor, measurement: measure, lab, certNo }}
+                onChange={p => {
+                  if (p.color !== undefined) setColor(p.color); if (p.clarity !== undefined) setClarity(p.clarity);
+                  if (p.cut !== undefined) setCut(p.cut); if (p.polish !== undefined) setPolish(p.polish);
+                  if (p.symmetry !== undefined) setSym(p.symmetry); if (p.fluorescence !== undefined) setFluor(p.fluorescence);
+                  if (p.measurement !== undefined) setMeasure(p.measurement); if (p.lab !== undefined) setLab(p.lab);
+                  if (p.certNo !== undefined) setCertNo(p.certNo);
+                }} />
             </div>
           )}
         </Group>

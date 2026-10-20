@@ -1,5 +1,6 @@
 import { LotPicker, lotStockText } from "@/components/LotFields";
 import { lotBalances, lotLabel, lotParts } from "@/lib/diamondLots";
+import { bagNoOf } from "@/lib/diamondBags";
 import { purchaseBucket } from "@/lib/materials";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
@@ -201,7 +202,7 @@ function FactoryHistoryPageBody() {
 
   const resetIssueForm = () => {
     setIssueOrderNumber("");
-    setIssuePurity("22K"); setIssueQuality(""); setIssuePcs(""); setIssueGrade(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality(""); setIssueFrom(""); setIssuePcs(""); setIssueGrade(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
   };
 
   const issueMaterialToFactory = async () => {
@@ -254,9 +255,17 @@ function FactoryHistoryPageBody() {
     // The order's company: its share of the pool, its stock.
     const orderCo = workCompanyOf(db, matchedOrder);
     const poolBalance = factoryPoolBalance(db.materialIssuances, id!, issueMaterial, purityOrQuality, orderCo);
-    const eligiblePurchase = eligiblePurchases[0];
+    // A loose bag picked from a place says where it comes from; otherwise (gold,
+    // another material) this factory's pool first, then the order's purchase, then stock.
+    const picked = issueMaterial === "diamond" ? issueFrom : "";
+    const eligiblePurchase = picked === "buy"
+      ? eligiblePurchases.find(p => p.diamond?.kind !== "certified" && purchaseBucket(p) === purityOrQuality)
+      : picked ? undefined : eligiblePurchases[0];
+    if (picked === "pool" && poolBalance < qty) { toast.error(`${factory.name} holds only ${poolBalance} ct of this bag`); return; }
+    if (picked === "buy" && !eligiblePurchase) { toast.error("That purchase is already used — choose again"); return; }
     const resolvedSource: "factoryPool" | "purchase" | "stock" =
-      poolBalance >= qty ? "factoryPool" : eligiblePurchase ? "purchase" : "stock";
+      picked === "pool" ? "factoryPool" : picked === "buy" ? "purchase" : picked === "stock" ? "stock"
+      : poolBalance >= qty ? "factoryPool" : eligiblePurchase ? "purchase" : "stock";
 
     setIssuing(true);
     try {
@@ -275,6 +284,8 @@ function FactoryHistoryPageBody() {
         const issuance: MaterialIssuance = {
           id: issuanceId, factoryId: id!, orderId: matchedOrder.id, material: issueMaterial, ...coField(orderCo),
           purityOrQuality, quantityIssued: qty,
+          ...(issueMaterial === "diamond" ? { diamondKind: "loose" as const } : {}),
+          ...(diaLot.pieces ? { piecesIssued: diaLot.pieces } : {}),
           source: resolvedSource, sourcePurchaseId: resolvedSource === "purchase" ? eligiblePurchase!.id : undefined,
           issuedAt: now, issuedBy: user!.id, status: "open",
           finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
@@ -313,6 +324,10 @@ function FactoryHistoryPageBody() {
   const [payLockerId, setPayLockerId] = useState("");
   const [returnQty, setReturnQty] = useState("");
   const [returnNote, setReturnNote] = useState("");
+  const [returnPcs, setReturnPcs] = useState("");
+  // An order's loose stones: where the bag picked comes from — this factory's pool,
+  // a purchase made for the order, or stock. The same bag can be in more than one.
+  const [issueFrom, setIssueFrom] = useState<"" | "pool" | "buy" | "stock">("");
   const [returning, setReturning] = useState(false);
   const closeAction = () => setActiveIssuance(a => ({ ...a, open: false }));
   // Shown in the Pay panel's footer only; the save looks the locker up afresh.
@@ -321,7 +336,7 @@ function FactoryHistoryPageBody() {
   const openAction = (issuanceId: string, action: IssuanceAction) => {
     setActiveIssuance({ id: issuanceId, action, open: true });
     setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayLockerId("");
-    setReturnQty(""); setReturnNote("");
+    setReturnQty(""); setReturnNote(""); setReturnPcs("");
   };
 
   const recordPiece = (issuance: MaterialIssuance) => {
@@ -448,6 +463,8 @@ function FactoryHistoryPageBody() {
         await increaseStock({
           material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: qty,
           refType: "manual", createdBy: user!.id,
+          // Loose stones go back into the bag they came out of, counted.
+          ...(issuance.material === "diamond" && Number(returnPcs) > 0 ? { pieces: Math.round(Number(returnPcs)) } : {}),
           note: `Returned from ${factory.name} issuance${returnNote.trim() ? ` — ${returnNote.trim()}` : ""}`,
         });
       }
@@ -1263,15 +1280,17 @@ function FactoryHistoryPageBody() {
                 const pool = poolKeys.map(k => ({ k, ct: factoryPoolBalance(db.materialIssuances, id!, "diamond", k, co) })).filter(x => x.ct > 0);
                 const bought = eligiblePurchases.filter(p => p.diamond?.kind !== "certified").map(p => purchaseBucket(p));
                 const stock = lotBalances(db.stockMovements ?? [], co).filter(l => l.ct > 0);
-                const seen = new Set<string>();
-                const item = (k: string, text: string) => { if (seen.has(k)) return null; seen.add(k); return <SelectItem key={k} value={k}>{text}</SelectItem>; };
+                // Each option carries where it comes from as well as the bag.
+                const bagOf = (k: string) => (bagNoOf(db, k) ? `${bagNoOf(db, k)} · ` : "");
+                const item = (from: "pool" | "buy" | "stock", k: string, text: string) => <SelectItem key={`${from}|${k}`} value={`${from}|${k}`}>{text}</SelectItem>;
                 return (
-                  <Select value={issueQuality} onValueChange={setIssueQuality}>
+                  <Select value={issueQuality ? `${issueFrom}|${issueQuality}` : ""}
+                    onValueChange={v => { const at = v.indexOf("|"); setIssueFrom(v.slice(0, at) as "pool" | "buy" | "stock"); setIssueQuality(v.slice(at + 1)); }}>
                     <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="Choose the lot" /></SelectTrigger>
                     <SelectContent className="max-h-80">
-                      {pool.map(x => item(x.k, `At ${factory.name}: ${lotLabel(x.k)} — ${x.ct} ct`))}
-                      {bought.map(k => item(k, `Bought for this order: ${lotLabel(k)}`))}
-                      {stock.map(l => item(l.key, `In stock: ${lotLabel(l.key)} — ${lotStockText(l, null)}`))}
+                      {pool.map(x => item("pool", x.k, `At ${factory.name}: ${bagOf(x.k)}${lotLabel(x.k)} — ${x.ct} ct`))}
+                      {[...new Set(bought)].map(k => item("buy", k, `Bought for this order: ${bagOf(k)}${lotLabel(k)}`))}
+                      {stock.map(l => item("stock", l.key, `In stock: ${bagOf(l.key)}${lotLabel(l.key)} — ${lotStockText(l, null)}`))}
                     </SelectContent>
                   </Select>
                 );
@@ -1419,9 +1438,13 @@ function FactoryHistoryPageBody() {
             <div className="space-y-3">
               <p className="text-xs text-muted-foreground">
                 Back to stock — a swapped stone or leftover gold. Unused: {remainder}{unit}
+                {mi.material === "diamond" && mi.diamondKind !== "certified" && <> · into <span className="font-semibold text-primary">{bagNoOf(db, mi.purityOrQuality) ?? "its bag"}</span> ({lotLabel(mi.purityOrQuality)})</>}
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className={`grid grid-cols-1 gap-2.5 ${mi.material === "diamond" ? "sm:grid-cols-3" : "sm:grid-cols-2"}`}>
                 <Input type="number" min={0} value={returnQty} onChange={e => setReturnQty(e.target.value)} autoFocus className="rounded-xl h-10" placeholder={`Return qty (${unit})`} />
+                {mi.material === "diamond" && (
+                  <Input type="number" min={0} step="1" value={returnPcs} onChange={e => setReturnPcs(e.target.value)} className="rounded-xl h-10" placeholder="Pcs (optional)" aria-label="Pcs returned" />
+                )}
                 <Input value={returnNote} onChange={e => setReturnNote(e.target.value)} className="rounded-xl h-10" placeholder="Reason (e.g. diamond replaced)" />
               </div>
             </div>

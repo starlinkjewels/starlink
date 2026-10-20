@@ -1048,6 +1048,22 @@ export interface Supplier {
  * what has been paid (lockerTransactions refType "brokerPayment"). See
  * lib/brokers.ts.
  */
+/**
+ * A bag (packet) of loose diamonds: one lot — shape · sieve · mm · colour ·
+ * clarity — with its own number, as a diamond office labels its parcels
+ * (lib/diamondBags.ts). The stones themselves are counted by the stock
+ * movements of that lot; the bag only names it.
+ */
+export interface DiamondBag {
+  id: string;
+  /** "BAG-0001" */
+  no: string;
+  /** The lot — the stock bucket (StockMovement.purityOrQuality). */
+  key: string;
+  createdBy?: string;
+  createdAt: string;
+}
+
 export interface Broker {
   id: string;
   name: string;
@@ -1092,8 +1108,10 @@ export interface DiamondPurchaseDetail {
   // packet (see DiamondPacket). Older records without this are treated as loose.
   kind?: "loose" | "certified";
   shape?: string; // one of DIAMOND_SHAPES — the loose-stock bucket key
-  /** Loose: the lot it goes into with the shape (lib/diamondLots.ts) — sieve or mm size, colour, clarity. */
+  /** Loose: the lot it goes into with the shape (lib/diamondLots.ts) — sieve size (older
+   *  entries: sieve or mm), mm size, colour, clarity. */
   size?: string;
+  mm?: string;
   color?: string;
   clarity?: string;
   certificateNumber?: string;
@@ -1130,6 +1148,8 @@ export interface DiamondPacket {
   symmetry?: string;
   fluorescence?: string; // "FL"
   measurement?: string;  // e.g. "6.5 x 6.5 x 4.0 mm"
+  /** A note typed when the stone was entered (opening stock). */
+  note?: string;
   certificateNumber: string; // report number
   certificateLab?: string;
   ratePerCaratInr?: number; // cost basis (INR) for reference
@@ -1482,7 +1502,7 @@ export interface StockMovement {
   quantity: number; // always positive; direction implied by `type`
   /** Loose diamonds: the lot's parts (lib/diamondLots.ts), for filtering — the
    *  bucket above is already the lot's label. Absent on older movements. */
-  lot?: { shape: string; size?: string; color?: string; clarity?: string };
+  lot?: { shape: string; size?: string; mm?: string; color?: string; clarity?: string };
   /** Loose diamonds: how many stones moved, when known. */
   pieces?: number;
   /** "transfer": moved between our companies (in at the sending company's average cost). */
@@ -1523,6 +1543,8 @@ export interface DB {
   supplierPayments: SupplierPayment[];
   /** Suppliers → Brokers (staff only). */
   brokers: Broker[];
+  /** Loose-diamond bags, one per lot (staff only). */
+  diamondBags: DiamondBag[];
   factoryPayments: FactoryPayment[];
   clientReceipts: ClientReceipt[];
   factories: Factory[];
@@ -1602,6 +1624,7 @@ function emptyDb(): DB {
     supplierReceipts: [],
     supplierPayments: [],
     brokers: [],
+    diamondBags: [],
     factoryPayments: [],
     clientReceipts: [],
     factories: [],
@@ -2082,6 +2105,7 @@ type ArrayCol =
   | "supplierReceipts"
   | "supplierPayments"
   | "brokers"
+  | "diamondBags"
   | "factoryPayments"
   | "clientReceipts"
   | "factories"
@@ -2114,6 +2138,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "supplierReceipts",
   "supplierPayments",
   "brokers",
+  "diamondBags",
   "factoryPayments",
   "clientReceipts",
   "factories",
@@ -3093,6 +3118,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         col === "supplierReceipts" ||
         col === "supplierPayments" ||
         col === "brokers" ||
+        col === "diamondBags" ||
         col === "factoryPayments" ||
         col === "clientReceipts" ||
         col === "factories" ||

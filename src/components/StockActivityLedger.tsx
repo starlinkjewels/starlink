@@ -27,6 +27,7 @@ import { confirmBox } from "@/lib/confirm";
 import { materialName, materialUnit, purchaseQty, materialDefs, diamondSpec, purchaseUnitInr, type MaterialUnit } from "@/lib/materials";
 import { companyOf, companiesOf, hasCompanies } from "@/lib/companies";
 import { oneLine } from "@/components/MoneyEntryEditor";
+import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 
 const ISSUE_ADMIN_ONLY = "Only an admin can change this";
 const STOCK_ADMIN_ONLY = "Only an admin can change stock";
@@ -207,7 +208,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       ? (p.diamond?.kind === "certified" ? "Certified diamond" : "Loose diamond")
       : `${materialName(db.settings, p.material)} ${p.other?.grade && p.other.grade !== "—" ? p.other.grade : ""}`.trim();
     const detail = p.material === "diamond"
-      ? diamondSpec(p.diamond, p.diamond?.kind === "certified" ? packetOf(p.id) : undefined) || undefined
+      ? [bagNoOfPurchase(db, p), diamondSpec(p.diamond, p.diamond?.kind === "certified" ? packetOf(p.id) : undefined)].filter(Boolean).join(" · ") || undefined
       : p.material !== "gold" && p.other?.pieces ? `${p.other.pieces} pcs` : undefined;
     const rate = purchaseUnitInr(p);
     const qty = purchaseQty(p);
@@ -254,7 +255,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       id: m.id, date: m.createdAt, kind: "Opening stock", party: "—",
       material: m.material === "diamond" ? "Loose diamond" : `${materialName(db.settings, m.material)} ${m.purityOrQuality}`.trim(),
       detail: m.material === "diamond"
-        ? [m.purityOrQuality, m.pieces ? `${m.pieces} pcs` : undefined].filter(Boolean).join(" · ")
+        ? [bagNoOf(db, m.purityOrQuality), m.purityOrQuality, m.pieces ? `${m.pieces} pcs` : undefined].filter(Boolean).join(" · ")
         : m.pieces ? `${m.pieces} pcs` : undefined,
       rate: m.valueInr && m.quantity ? Math.round((m.valueInr / m.quantity) * 100) / 100 : undefined,
       mats: [m.material], co: companyOf(m),
@@ -283,7 +284,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       material: s.kind === "certified" ? "Certified diamond" : "Loose diamond",
       detail: s.kind === "certified"
         ? diamondSpec({ shape: s.shape }, (db.diamondPackets ?? []).find(x => x.id === s.packetId))
-        : [s.bucket || s.shape, s.pieces ? `${s.pieces} pcs` : undefined].filter(Boolean).join(" · "),
+        : [bagNoOf(db, s.bucket || s.shape), s.bucket || s.shape, s.pieces ? `${s.pieces} pcs` : undefined].filter(Boolean).join(" · "),
       rate: s.ratePerCarat || undefined,
       mats: ["diamond"], co: companyOf(s),
       qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,

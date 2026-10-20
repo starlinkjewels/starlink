@@ -1,5 +1,5 @@
 import { brokerSuppliers } from "@/lib/brokers";
-import { ListSelect } from "@/components/LotFields";
+import { ListSelect, LooseLotFields, CertGradeFields } from "@/components/LotFields";
 import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -9,6 +9,7 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { CompanyPicker, useDefaultCompany } from "@/components/CompanyFields";
 import { coField, workCompanyOf } from "@/lib/companies";
+import { bagNoOfPurchase } from "@/lib/diamondBags";
 import { diamondSpec, isOtherMaterial, materialDef, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
@@ -72,6 +73,7 @@ interface PurchaseLine {
   diaQuality: string;
   /** Loose: the lot's size — sieve or mm (lib/diamondLots.ts); colour and clarity are diaColor / diaClarity. */
   diaSize: string;
+  diaMm: string;
   diaRate: string;
   diaKind: "loose" | "certified";
   diaShape: string;
@@ -99,7 +101,7 @@ function emptyPurchaseLine(): PurchaseLine {
   return {
     material: "gold", purpose: "stock", orderNumber: "",
     goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaPcs: "", diaQuality: "", diaSize: "", diaRate: "",
+    diaCarat: "", diaPcs: "", diaQuality: "", diaSize: "", diaMm: "", diaRate: "",
     diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
     diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
     otherQty: "", otherGrade: "", otherRate: "",
@@ -126,8 +128,8 @@ function purchaseLineTotalInr(line: PurchaseLine): number {
  * next crashed (React #310) whenever it was opened or refreshed directly.
  */
 /** A loose line's lot: shape · size · colour · clarity (lib/diamondLots.ts). */
-const lineLot = (l: { diaShape: string; diaSize: string; diaColor: string; diaClarity: string }): LotSpec =>
-  ({ shape: l.diaShape || "Round", size: l.diaSize || undefined, color: l.diaColor.trim() || undefined, clarity: l.diaClarity.trim() || undefined });
+const lineLot = (l: { diaShape: string; diaSize: string; diaMm: string; diaColor: string; diaClarity: string }): LotSpec =>
+  ({ shape: l.diaShape || "Round", size: l.diaSize || undefined, mm: l.diaMm || undefined, color: l.diaColor.trim() || undefined, clarity: l.diaClarity.trim() || undefined });
 
 export function SupplierHistoryPage() {
   const { id } = useParams();
@@ -296,7 +298,7 @@ function SupplierHistoryPageBody() {
               kind: line.diaKind,
               shape: line.diaShape,
               ...(line.diaKind === "loose" ? {
-                size: line.diaSize || undefined, color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
+                size: line.diaSize || undefined, mm: line.diaMm || undefined, color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
                 pieces: Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
               } : {}),
               certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
@@ -611,6 +613,7 @@ function SupplierHistoryPageBody() {
     const bits = [
       d?.kind === "certified" ? "Certified diamond" : "Loose diamond",
       // Shape · size · colour · clarity · pcs, or the stone's report.
+      bagNoOfPurchase(db, p),
       diamondSpec(d, d?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined),
       p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
     ].filter(Boolean);
@@ -771,7 +774,7 @@ function SupplierHistoryPageBody() {
     : purchaseText(db.settings, p);
   /** A diamond's lot or report under its title: "Round · +6.5-7 · G-H · VS · 12 pcs". */
   const purchaseSub = (p: Purchase) => p.material !== "diamond" ? undefined
-    : diamondSpec(p.diamond, p.diamond?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined) || undefined;
+    : [bagNoOfPurchase(db, p), diamondSpec(p.diamond, p.diamond?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined)].filter(Boolean).join(" · ") || undefined;
   const purchaseColumns: DataColumn<Purchase>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: p => +new Date(p.createdAt), csv: p => fmtDate(p.createdAt),
       cell: p => <CellDate>{fmtDate(p.createdAt)}</CellDate> },
@@ -1097,53 +1100,54 @@ function SupplierHistoryPageBody() {
                 </div>
               ) : (
                 <div className="space-y-2.5">
-                  <div className="grid grid-cols-2 gap-2.5">
-                    <Select value={line.diaKind} onValueChange={v => updatePurchaseLine(idx, { diaKind: v as "loose" | "certified" })}>
-                      <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="loose">Loose (by shape)</SelectItem>
-                        <SelectItem value="certified">Certified (own packet)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <ListSelect list="diamondShapes" value={line.diaShape} onChange={v => updatePurchaseLine(idx, { diaShape: v || "Round" })} optional={false} />
+                  {/* Loose vs Certified — the same fields as every other purchase. */}
+                  <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+                    {(["loose", "certified"] as const).map(k => (
+                      <button key={k} type="button" onClick={() => updatePurchaseLine(idx, { diaKind: k })}
+                        className={`h-8 rounded-lg text-xs font-medium transition-colors ${line.diaKind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+                        {k === "loose" ? "Loose (into a bag)" : "Certified (one stone)"}
+                      </button>
+                    ))}
                   </div>
-                  {/* Loose: the lot — size · colour · clarity (lib/diamondLots.ts). */}
-                  {line.diaKind === "loose" && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Size</span>
-                        <ListSelect list="diamondSizes" value={line.diaSize} onChange={v => updatePurchaseLine(idx, { diaSize: v })} /></label>
-                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Colour</span>
-                        <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updatePurchaseLine(idx, { diaColor: v })} /></label>
-                      <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Clarity</span>
-                        <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updatePurchaseLine(idx, { diaClarity: v })} /></label>
-                    </div>
-                  )}
-                  {/* Four across on a laptop, two by two on a phone — the old
-                      three-column row squeezed quality and pieces into one cell. */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                    <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="Carat" />
-                    {line.diaKind === "certified" && <Input value={line.diaQuality} onChange={e => updatePurchaseLine(idx, { diaQuality: e.target.value })} className="rounded-xl h-10" placeholder="Quality (optional)" />}
-                    <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Pcs (how many stones)" />
-                    <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder={`Rate/ct (${line.currency})`} />
-                  </div>
-                  {line.diaKind === "certified" && (
+                  {line.diaKind === "loose" ? (
                     <>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        <Input value={line.diaCertNo} onChange={e => updatePurchaseLine(idx, { diaCertNo: e.target.value })} className="rounded-xl h-10" placeholder="Report / Certificate #" />
-                        <Input value={line.diaLab} onChange={e => updatePurchaseLine(idx, { diaLab: e.target.value })} className="rounded-xl h-10" placeholder="Lab — GIA / IGI (optional)" />
+                      <LooseLotFields idPrefix={`sup${idx}`} compact companyId={billCompany}
+                        value={{ shape: line.diaShape, mm: line.diaMm, size: line.diaSize, color: line.diaColor, clarity: line.diaClarity }}
+                        onChange={p => updatePurchaseLine(idx, {
+                          ...(p.shape !== undefined ? { diaShape: p.shape } : {}), ...(p.mm !== undefined ? { diaMm: p.mm } : {}),
+                          ...(p.size !== undefined ? { diaSize: p.size } : {}), ...(p.color !== undefined ? { diaColor: p.color } : {}),
+                          ...(p.clarity !== undefined ? { diaClarity: p.clarity } : {}),
+                        })} />
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Pcs</span>
+                          <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updatePurchaseLine(idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Optional" /></label>
+                        <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Carat</span>
+                          <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
+                        <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate / ct (${line.currency})`}</span>
+                          <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                        <ListSelect list="diamondColors" value={line.diaColor} onChange={v => updatePurchaseLine(idx, { diaColor: v })} placeholder="Colour" />
-                        <ListSelect list="diamondClarities" value={line.diaClarity} onChange={v => updatePurchaseLine(idx, { diaClarity: v })} placeholder="Clarity" />
-                        <Input value={line.diaCut} onChange={e => updatePurchaseLine(idx, { diaCut: e.target.value })} className="rounded-xl h-10" placeholder="Cut" />
-                        <Input value={line.diaFluor} onChange={e => updatePurchaseLine(idx, { diaFluor: e.target.value })} className="rounded-xl h-10" placeholder="FL (fluor.)" />
+                    </>
+                  ) : (
+                    <>
+                      <div className="grid grid-cols-3 gap-2.5">
+                        <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Shape</span>
+                          <ListSelect list="diamondShapes" value={line.diaShape} onChange={v => updatePurchaseLine(idx, { diaShape: v || "Round" })} optional={false} /></div>
+                        <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Carat</span>
+                          <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updatePurchaseLine(idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
+                        <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate / ct (${line.currency})`}</span>
+                          <Input type="number" min={0} value={line.diaRate} onChange={e => updatePurchaseLine(idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
                       </div>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                        <Input value={line.diaPolish} onChange={e => updatePurchaseLine(idx, { diaPolish: e.target.value })} className="rounded-xl h-10" placeholder="Polish" />
-                        <Input value={line.diaSym} onChange={e => updatePurchaseLine(idx, { diaSym: e.target.value })} className="rounded-xl h-10" placeholder="Symmetry" />
-                        <Input value={line.diaMeasure} onChange={e => updatePurchaseLine(idx, { diaMeasure: e.target.value })} className="rounded-xl h-10" placeholder="Measurement (mm)" />
-                      </div>
-                      <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one packet. Add another line for another stone.</p>
+                      <CertGradeFields idPrefix={`sup${idx}`} compact
+                        value={{ color: line.diaColor, clarity: line.diaClarity, cut: line.diaCut, polish: line.diaPolish, symmetry: line.diaSym,
+                          fluorescence: line.diaFluor, measurement: line.diaMeasure, lab: line.diaLab, certNo: line.diaCertNo }}
+                        onChange={p => updatePurchaseLine(idx, {
+                          ...(p.color !== undefined ? { diaColor: p.color } : {}), ...(p.clarity !== undefined ? { diaClarity: p.clarity } : {}),
+                          ...(p.cut !== undefined ? { diaCut: p.cut } : {}), ...(p.polish !== undefined ? { diaPolish: p.polish } : {}),
+                          ...(p.symmetry !== undefined ? { diaSym: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { diaFluor: p.fluorescence } : {}),
+                          ...(p.measurement !== undefined ? { diaMeasure: p.measurement } : {}), ...(p.lab !== undefined ? { diaLab: p.lab } : {}),
+                          ...(p.certNo !== undefined ? { diaCertNo: p.certNo } : {}),
+                        })} />
+                      <p className="text-[11px] text-muted-foreground">Each certified stone is one line = one stone with its report. Add another line for another stone.</p>
                     </>
                   )}
                 </div>
