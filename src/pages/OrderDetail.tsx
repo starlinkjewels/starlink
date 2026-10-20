@@ -1,12 +1,9 @@
-
+import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { choicesOf } from "@/lib/optionLists";
-import { BillBrokerFields } from "@/components/BillBrokerFields";
-import { ListSelect, LotPicker, LooseLotFields, CertGradeFields, BagSelect } from "@/components/LotFields";
+import { LotPicker, BagSelect } from "@/components/LotFields";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
-import { lotBalances, lotLabel, lotParts, lotShape, tidySpec } from "@/lib/diamondLots";
-import { purchaseBucket } from "@/lib/materials";
+import { lotBalances, lotParts } from "@/lib/diamondLots";
 import { stockAverageRate } from "@/lib/orderCost";
-import { billBrokerageProblem, brokerageForLines, brokerageWePay, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -31,8 +28,8 @@ import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import { collectionLoaded,
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, DIAMOND_SHAPES, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, nextDiamondStockNumber, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
-  type Order, type Purchase, type PurchaseMaterial, type PurchaseCurrency, type MaterialIssuance,
+  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
+  type Order, type Purchase, type MaterialIssuance,
   mainDiamondShape,
   isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder, orderImage,
 } from "@/lib/db";
@@ -52,7 +49,7 @@ import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
-import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, purchaseText, diamondSpec, type MaterialKey } from "@/lib/materials";
+import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, diamondSpec, type MaterialKey } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
 import { StatStrip } from "@/components/TableToolbar";
@@ -65,10 +62,9 @@ import { AsyncButton } from "@/components/AsyncButton";
 import {
   fmtMoneyInr, purchasePending, issuancePending, manufacturingReadiness,
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
-  applyDiscountPct, discountLabel,
   deriveStockBalances,
 } from "@/lib/manufacturing";
-import { decreaseStockSelfHealing, increaseStock, logOrderDirectPurchase } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
@@ -82,94 +78,6 @@ import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesRetu
 import { returnBlocker } from "@/lib/salesReturn";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
-
-// One line = one Purchase doc on save — lets a single supplier invoice that
-// covers several sizes/qualities (e.g. two diamond parcels) be entered in one
-// sitting instead of reopening the form for each variety.
-interface BuyLine {
-  material: PurchaseMaterial;
-  goldWeight: string;
-  goldPurity: string;
-  goldRate: string;
-  diaCarat: string;
-  diaPcs: string;
-  diaQuality: string;
-  /** Loose: the lot's sieve and mm sizes (lib/diamondLots.ts); colour and clarity are diaColor / diaClarity. */
-  diaSize: string;
-  diaMm: string;
-  diaRate: string;
-  // Diamond kind + certified grading (mirrors the Supplier purchase form).
-  diaKind: "loose" | "certified";
-  diaShape: string;
-  diaCertNo: string;
-  diaLab: string;
-  diaColor: string;
-  diaClarity: string;
-  diaCut: string;
-  diaPolish: string;
-  diaSym: string;
-  diaFluor: string;
-  diaMeasure: string;
-  /** Supplier discount on this line, in % off the weight x rate amount. */
-  discountPct: string;
-  currency: PurchaseCurrency;
-  exchangeRate: string;
-  invoiceNumber: string;
-  notes: string;
-}
-
-/** One supplier's bill in the order's Buy form. */
-interface BuyBill {
-  key: string;
-  supplierId: string;
-  /** The supplier's bill number. One per bill, not per line. Optional — not
-   *  every purchase comes with one. */
-  billNo: string;
-  /** The broker who brought this bill, if any, and the brokerage (lib/brokers.ts). */
-  brokerage: BillBrokerage;
-  lines: BuyLine[];
-  /** The odd rupees nobody hands over: one figure for the whole bill, riding on
-   *  its first line so the supplier's due matches the cash actually paid. */
-  roundOff: string;
-}
-
-let billSeq = 0;
-function emptyBuyBill(): BuyBill {
-  return { key: `bill_${++billSeq}`, supplierId: "", billNo: "", lines: [emptyBuyLine()], roundOff: "", brokerage: emptyBillBrokerage() };
-}
-
-const billLinesTotalInr = (b: BuyBill) => b.lines.reduce((s, l) => s + buyLineTotalInr(l), 0);
-const billRoundOffInr = (b: BuyBill) => Math.round(Number(b.roundOff) || 0);
-const billTotalInr = (b: BuyBill) => billLinesTotalInr(b) + billRoundOffInr(b);
-
-function emptyBuyLine(): BuyLine {
-  return {
-    material: "diamond", goldWeight: "", goldPurity: "22K", goldRate: "",
-    diaCarat: "", diaPcs: "", diaQuality: "", diaSize: "", diaMm: "", diaRate: "",
-    diaKind: "loose", diaShape: "Round", diaCertNo: "", diaLab: "",
-    diaColor: "", diaClarity: "", diaCut: "", diaPolish: "", diaSym: "", diaFluor: "", diaMeasure: "",
-    discountPct: "", currency: "INR", exchangeRate: "",
-    invoiceNumber: "", notes: "",
-  };
-}
-
-/** Weight × rate less the supplier discount, in the line’s own billing
- *  currency — always the source of truth for the amount (never manually typed). */
-function buyLineBaseAmount(line: BuyLine): number {
-  const gross = line.material === "gold"
-    ? (Number(line.goldWeight) || 0) * (Number(line.goldRate) || 0)
-    : (Number(line.diaCarat) || 0) * (Number(line.diaRate) || 0);
-  // A supplier discount ("less 5%") comes off the line before anything else —
-  // the stock value, the supplier bill and the order cost all use this figure.
-  return applyDiscountPct(gross, line.discountPct);
-}
-
-function buyLineTotalInr(line: BuyLine): number {
-  const base = buyLineBaseAmount(line);
-  return line.currency === "USD"
-    ? Math.round(base * (Number(line.exchangeRate) || 0))
-    : Math.round(base);
-}
 
 /** Compress a File to a base64 JPEG ≤800px */
 async function compressImage(file: File): Promise<string> {
@@ -373,8 +281,6 @@ function OrderDetailPageBody() {
   // from one dealer and a certified stone from another. Each supplier's bill is
   // its own document (supplier, bill number, lines, round-off), so the form
   // holds a list of bills and saves them together.
-  const [buyBills, setBuyBills] = useState<BuyBill[]>(() => [emptyBuyBill()]);
-  const [buying, setBuying] = useState(false);
 
   const [showIssueForm, setShowIssueForm] = useState(false);
   const [issueMaterial, setIssueMaterial] = useState<MaterialKey>("gold");
@@ -592,232 +498,8 @@ function OrderDetailPageBody() {
     return check.ok ? undefined : check.reason;
   };
 
-  const buyGrandTotalInr = buyBills.reduce((s, b) => s + billTotalInr(b), 0);
-  const buyLineCount = buyBills.reduce((s, b) => s + b.lines.length, 0);
-
-  const updateBill = (bi: number, patch: Partial<BuyBill>) =>
-    setBuyBills(prev => prev.map((b, i) => (i === bi ? { ...b, ...patch } : b)));
-  const updateBuyLine = (bi: number, li: number, patch: Partial<BuyLine>) =>
-    setBuyBills(prev => prev.map((b, i) => (i === bi ? { ...b, lines: b.lines.map((l, j) => (j === li ? { ...l, ...patch } : l)) } : b)));
-  const addBuyLine = (bi: number) =>
-    setBuyBills(prev => prev.map((b, i) => (i === bi ? { ...b, lines: [...b.lines, emptyBuyLine()] } : b)));
-  const removeBuyLine = (bi: number, li: number) =>
-    setBuyBills(prev => prev.map((b, i) => (i === bi && b.lines.length > 1 ? { ...b, lines: b.lines.filter((_, j) => j !== li) } : b)));
-  const addBuyBill = () => setBuyBills(prev => [...prev, emptyBuyBill()]);
-  const removeBuyBill = (bi: number) => setBuyBills(prev => (prev.length > 1 ? prev.filter((_, i) => i !== bi) : prev));
-  const allBuyLinesDiamond = () =>
-    setBuyBills(bs => bs.map(b => ({ ...b, lines: b.lines.map(l => ({ ...l, material: "diamond" as const })) })));
-
-  const resetBuyForm = () => setBuyBills([emptyBuyBill()]);
-
-  const recordPurchaseForOrder = async () => {
-    const supplierName = (id: string) => db.suppliers.find(s => s.id === id)?.name || "supplier";
-    const many = buyBills.length > 1;
-    for (let bi = 0; bi < buyBills.length; bi++) {
-      const bill = buyBills[bi];
-      const which = many ? `Bill ${bi + 1}: ` : "";
-      if (!bill.supplierId) { toast.error(`${which}choose the supplier`); return; }
-      const brokerProblem = billBrokerageProblem(bill.brokerage);
-      if (brokerProblem) { toast.error(`${which}${brokerProblem}`); return; }
-      for (const line of bill.lines) {
-        if (line.material === "gold" && (!line.goldWeight || Number(line.goldWeight) <= 0)) { toast.error(`${which}enter gold weight for every line`); return; }
-        if (line.material === "diamond" && (!line.diaCarat || Number(line.diaCarat) <= 0)) { toast.error(`${which}enter diamond carat for every line`); return; }
-        if (line.material === "diamond" && line.diaKind === "certified" && !line.diaCertNo.trim()) { toast.error(`${which}enter the report number for every certified diamond`); return; }
-        if (line.currency === "USD" && !line.exchangeRate) { toast.error(`${which}enter the exchange rate for every USD line`); return; }
-        if (buyLineTotalInr(line) <= 0) { toast.error(`${which}a line's total comes to ₹0 — check its weight/rate fields`); return; }
-      }
-    }
-    // Client's flow: assign the factory first, then buy — the purchased material
-    // goes STRAIGHT to that factory, no separate "issue" step. A diamond-only
-    // order has no factory: the stones are bought for the client, not to be set.
-    if (!order.assignedFactoryId && !isDiamondOnlyOrder(order)) { toast.error("Assign a factory first (Stage ① above) — the material goes straight to it."); return; }
-    // The same bill entered twice is the same bill paid twice.
-    const billKey = (supplierId: string, no: string) => `${supplierId}|${no.trim().toLowerCase()}`;
-    const seen = new Set<string>();
-    // Only a numbered bill can be told apart — bills without a number are never "the same bill".
-    for (const bill of buyBills) {
-      if (!bill.billNo.trim()) continue;
-      const k = billKey(bill.supplierId, bill.billNo);
-      if (seen.has(k)) { toast.error(`Bill ${bill.billNo.trim()} from ${supplierName(bill.supplierId)} is entered twice — put all its stones in one bill.`); return; }
-      seen.add(k);
-    }
-    const onFile = buyBills.filter(b => b.billNo.trim() && (db.purchases ?? []).some(p => billKey(p.supplierId, p.invoiceNumber ?? "") === billKey(b.supplierId, b.billNo)));
-    if (onFile.length && !(await confirmBox(
-      `${onFile.map(b => `Bill ${b.billNo.trim()} from ${supplierName(b.supplierId)}`).join(", ")} is already recorded.\n\n` +
-      "Save these lines against it as well? Cancel if it is the same purchase being entered again."))) return;
-
-    const now = new Date().toISOString();
-    // Every line of every bill becomes its own Purchase; each carries its bill's
-    // supplier and number, exactly as one bill entered on its own would.
-    const entries: { purchase: Purchase; line: BuyLine; bill: BuyBill }[] = [];
-    for (const bill of buyBills) {
-      const first = entries.length;
-      for (const line of bill.lines) {
-        entries.push({ bill, line, purchase: {
-          id: uid("pur_"), ...coField(workCo),
-          supplierId: bill.supplierId,
-          material: line.material,
-          gold: line.material === "gold" ? { weightGrams: Number(line.goldWeight), purity: line.goldPurity, ratePerGram: Number(line.goldRate) || 0 } : undefined,
-          diamond: line.material === "diamond" ? {
-            carat: Number(line.diaCarat), ratePerCarat: Number(line.diaRate) || 0,
-            // Loose: its lot — size, colour, clarity — and those read as its quality where one is shown.
-            quality: (line.diaKind === "loose" ? [line.diaColor, line.diaClarity].map(x => x.trim()).filter(Boolean).join(" ") : line.diaQuality) || undefined,
-            ...(line.diaKind === "loose" ? { size: line.diaSize || undefined, mm: line.diaMm || undefined, color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined }
-              : { color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined }),
-            pieces: line.diaKind === "loose" && Number(line.diaPcs) > 0 ? Math.round(Number(line.diaPcs)) : undefined,
-            kind: line.diaKind, shape: line.diaShape,
-            certificateNumber: line.diaKind === "certified" ? line.diaCertNo.trim() : undefined,
-            certificateLab: line.diaKind === "certified" ? (line.diaLab.trim() || undefined) : undefined,
-          } : undefined,
-          purpose: "order",
-          orderId: order.id,
-          currency: line.currency,
-          totalUsd: line.currency === "USD" ? Math.round(buyLineBaseAmount(line) * 100) / 100 : undefined,
-          exchangeRate: line.currency === "USD" ? Number(line.exchangeRate) : undefined,
-          totalInr: buyLineTotalInr(line),
-          discountPct: Number(line.discountPct) ? Number(line.discountPct) : undefined,
-          roundOffInr: undefined as number | undefined,
-          payments: [],
-          invoiceNumber: bill.billNo.trim() || undefined,
-          notes: line.notes.trim() || undefined,
-          createdBy: user!.id,
-          createdAt: now,
-        } });
-      }
-      // Each bill is rounded once, not per line, so it rides on its first purchase.
-      const ro = billRoundOffInr(bill);
-      if (ro !== 0 && entries.length > first) {
-        entries[first].purchase.totalInr += ro;
-        entries[first].purchase.roundOffInr = ro;
-      }
-      // The bill's brokerage, shared over its lines by amount.
-      const mine = entries.slice(first);
-      const shares = brokerageForLines(bill.brokerage, mine.map(x => x.purchase.totalInr));
-      mine.forEach((x, i) => Object.assign(x.purchase, shares[i]));
-    }
-    const newPurchases = entries.map(x => x.purchase);
-
-    // Precompute each line's pooled-stock bucket up front — needed both for the
-    // stock-movement logging below (which must happen before updateDb, so a
-    // failed write there fails the whole action instead of leaving an orphaned
-    // purchase with no stock trail) and inside updateDb itself.
-    const lineMeta = entries.map(({ purchase, line }) => {
-      const isCertified = purchase.material === "diamond" && line.diaKind === "certified";
-      const qty = purchase.material === "gold" ? purchase.gold!.weightGrams : purchase.diamond!.carat;
-      // Loose diamonds are pooled by SHAPE (Round/Oval/…), same as the Supplier
-      // and Buy & Assign flows — NOT by quality grade — so the Stock ledger and
-      // balances stay consistent across every purchase path.
-      const purityOrQuality = purchase.material === "gold" ? purchase.gold!.purity
-        : isCertified ? "Certified" : purchaseBucket(purchase);
-      return { isCertified, qty, purityOrQuality };
-    });
-
-    setBuying(true);
-    try {
-      const factoryId = order.assignedFactoryId || "";
-      const factory = db.factories.find(f => f.id === factoryId);
-
-      // Material bought for this order goes straight to the factory and never
-      // enters the shared stock pool — but log it (paired in+out, nets to zero)
-      // so it still shows up on the Stock report. Certified diamonds are tracked
-      // individually via DiamondPacket instead and are never pooled.
-      for (let i = 0; i < newPurchases.length; i++) {
-        const { isCertified, qty, purityOrQuality } = lineMeta[i];
-        if (isCertified) continue;
-        const loose = newPurchases[i].material === "diamond" && newPurchases[i].diamond?.kind !== "certified";
-        await logOrderDirectPurchase({ companyId: workCo,
-          material: newPurchases[i].material, purityOrQuality, quantity: qty,
-          lot: loose ? tidySpec({ ...newPurchases[i].diamond!, shape: newPurchases[i].diamond!.shape || "Round" }) : undefined,
-          pieces: loose ? newPurchases[i].diamond?.pieces : undefined,
-          purchaseId: newPurchases[i].id, orderId: order.id, createdBy: user!.id,
-          // Same instant as the purchase itself, so the two legs stay findable.
-          createdAt: now,
-        });
-      }
-
-      updateDb(d => {
-        if (!d.purchases) d.purchases = [];
-        if (!d.materialIssuances) d.materialIssuances = [];
-        const o = d.orders.find(o => o.id === order.id);
-        if (o) {
-          if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
-          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
-          if (!o.manufacturingLog) o.manufacturingLog = [];
-        }
-        for (let i = 0; i < entries.length; i++) {
-          const { purchase, line, bill } = entries[i];
-          d.purchases.unshift(purchase);
-          if (!o) continue;
-          o.linkedPurchaseIds!.push(purchase.id);
-          const { isCertified, qty, purityOrQuality } = lineMeta[i];
-          const label = purchase.material === "gold"
-            ? `${qty}g ${purityOrQuality} gold`
-            : `${qty}ct ${line.diaShape} diamond${isCertified ? ` (Certified ${line.diaCertNo.trim()})` : purchase.diamond!.quality ? ` (${purchase.diamond!.quality})` : ""}`;
-          o.manufacturingLog!.push({
-            id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
-            material: purchase.material, amountMaterial: qty, amountInr: purchase.totalInr,
-            remarks: `Purchased ${label} from ${supplierName(bill.supplierId)}${bill.billNo.trim() ? ` (bill ${bill.billNo.trim()})` : ""} for this order — ${fmtMoneyInr(purchase.totalInr)}${brokerageWePay(purchase) > 0 ? ` + brokerage ${fmtMoneyInr(brokerageWePay(purchase))}` : ""}`,
-          });
-
-          // Certified diamond → its own packet, going straight to the factory.
-          let packetIds: string[] | undefined;
-          if (isCertified) {
-            if (!d.diamondPackets) d.diamondPackets = [];
-            const packetId = uid("dp_");
-            const carat = Number(line.diaCarat) || 0;
-            d.diamondPackets.unshift({ ...coField(workCo),
-              id: packetId, stockNumber: nextDiamondStockNumber(d), shape: line.diaShape, carat, quality: line.diaQuality || undefined,
-              color: line.diaColor.trim() || undefined, clarity: line.diaClarity.trim() || undefined,
-              cut: line.diaCut.trim() || undefined, polish: line.diaPolish.trim() || undefined,
-              symmetry: line.diaSym.trim() || undefined, fluorescence: line.diaFluor.trim() || undefined,
-              measurement: line.diaMeasure.trim() || undefined,
-              certificateNumber: line.diaCertNo.trim(), certificateLab: line.diaLab.trim() || undefined,
-              ratePerCaratInr: carat > 0 ? Math.round((landedInr(purchase) / carat) * 100) / 100 : undefined,
-              supplierId: bill.supplierId, purchaseId: purchase.id,
-              status: "issued", orderId: order.id,
-              createdBy: user!.id, createdAt: now,
-            });
-            packetIds = [packetId];
-          }
-
-          // Auto-issue straight to the assigned factory (source "purchase" — the
-          // pooled stockLevels balance is untouched, though it's now logged in
-          // stockMovements for reporting; see logOrderDirectPurchase above). One step.
-          // Skipped when there is no factory: a diamond-only order's stones are
-          // bought for the client and dispatched, never sent out to be set.
-          if (!factoryId) continue;
-          const issuanceId = uid("mi_");
-          d.materialIssuances.unshift({
-            id: issuanceId, factoryId, orderId: order.id, material: purchase.material, ...coField(workCo),
-            purityOrQuality, quantityIssued: qty, source: "purchase", sourcePurchaseId: purchase.id,
-            diamondKind: purchase.material === "diamond" ? line.diaKind : undefined,
-            piecesIssued: purchase.material === "diamond" && line.diaKind === "loose" && Number(line.diaPcs) > 0
-              ? Math.round(Number(line.diaPcs)) : undefined,
-            diamondPacketIds: packetIds,
-            issuedAt: now, issuedBy: user!.id, status: "open",
-            finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-            makingCharges: { amountInr: 0, payments: [] },
-          });
-          o.materialIssuanceIds!.push(issuanceId);
-          o.manufacturingLog!.push({
-            id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId,
-            material: purchase.material, amountMaterial: qty,
-            remarks: `${qty}${purchase.material === "gold" ? "g" : "ct"} ${isCertified ? `certified ${line.diaShape}` : purityOrQuality} ${purchase.material} sent to ${factory?.name || "factory"} (bought for this order)`,
-          });
-        }
-      });
-      const what = buyBills.length > 1
-        ? `${buyBills.length} bills (${newPurchases.length} items)`
-        : newPurchases.length > 1 ? `${newPurchases.length} purchases` : "Purchase";
-      toast.success(factoryId
-        ? `${what} recorded (${fmtMoneyInr(buyGrandTotalInr)}) & sent to ${factory?.name || "the factory"}`
-        : `${what} recorded (${fmtMoneyInr(buyGrandTotalInr)}) against ${order.orderNumber}`);
-      setShowBuyForm(false); setShowDiamond(false);
-      resetBuyForm();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : "Failed to record purchase");
-    } finally { setBuying(false); }
-  };
+  // "Buy new" opens New purchase (components/BuyMaterialForm) set to this order: the
+  // same form as every purchase, and what is bought goes straight to the order's factory.
 
   // Purchases bought specifically for this order, of the selected material, not
   // already drawn on by an earlier issuance — lets material go straight to the
@@ -3471,7 +3153,7 @@ function OrderDetailPageBody() {
             const openDiamond = (s: "stock" | "buy") => {
               setDiaSource(s); setShowDiamond(true);
               if (s === "stock") { setShowIssueForm(true); setShowBuyForm(false); setIssueMaterial("diamond"); setIssueFactoryId(order.assignedFactoryId ?? ""); }
-              else { setShowBuyForm(true); setShowIssueForm(false); allBuyLinesDiamond(); }
+              else { setShowBuyForm(true); setShowIssueForm(false); }
             };
             const openOther = () => {
               setShowIssueForm(true); setShowBuyForm(false); setShowDiamond(false);
@@ -3520,7 +3202,7 @@ function OrderDetailPageBody() {
                   {editable && (
                     <div className="flex items-center gap-2">
                       {diamondOnly ? (
-                        <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); allBuyLinesDiamond(); }}
+                        <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); }}
                           className="btn-hero rounded-xl h-10 gap-2">
                           <Plus className="h-4 w-4" /> Buy Diamond
                         </Button>
@@ -3788,204 +3470,8 @@ function OrderDetailPageBody() {
             </div>
           </ActionSheet>
 
-          {/* Buy for this order — the supplier's bill, its lines and any broker. */}
-          <ActionSheet open={showBuyForm} onOpenChange={o => { if (!o) { setShowBuyForm(false); setShowDiamond(false); } }} size="lg" icon={ShoppingCart}
-            title={`Buy for ${order.orderNumber}`}
-            description={diamondOnly
-              ? "Held against this order and billed to the supplier — no factory involved."
-              : `Goes straight to ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.`}
-            footer={
-              <div className="flex items-end justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Grand total</p>
-                  <p className="font-display text-xl font-bold tabular-nums leading-tight text-brand-dark">{fmtMoneyInr(buyGrandTotalInr)}</p>
-                  {buyBills.length > 1 && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {buyBills.map((b, i) => `${db.suppliers.find(s => s.id === b.supplierId)?.name ?? `Bill ${i + 1}`} ${fmtMoneyInr(billTotalInr(b))}`).join(" + ")}
-                    </p>
-                  )}
-                </div>
-                <div className="flex gap-2 ml-auto">
-                  <Button variant="outline" onClick={() => { setShowDiamond(false); setShowBuyForm(false); resetBuyForm(); }} className="rounded-xl h-10">Cancel</Button>
-                  <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10 px-6">
-                    {buying ? "Saving…" : buyBills.length > 1 ? `Save ${buyBills.length} Bills (${buyLineCount} items)` : buyLineCount > 1 ? `Save ${buyLineCount} Purchases` : "Save Purchase"}
-                  </AsyncButton>
-                </div>
-              </div>
-            }>
-            <div className="space-y-3">
-              {buyBills.map((bill, bi) => {
-                const linesInr = billLinesTotalInr(bill);
-                const roInr = billRoundOffInr(bill);
-                const supplierName = db.suppliers.find(s => s.id === bill.supplierId)?.name;
-                return (
-                <div key={bill.key} className="rounded-2xl border border-primary/25 bg-primary/[0.02] p-3 space-y-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-primary">
-                      {buyBills.length > 1 ? `Bill ${bi + 1}` : "Supplier's bill"}{supplierName ? ` · ${supplierName}` : ""}
-                    </p>
-                    {buyBills.length > 1 && (
-                      <button type="button" onClick={() => removeBuyBill(bi)} className="text-[11px] text-muted-foreground hover:text-destructive inline-flex items-center gap-1">
-                        <X className="h-3.5 w-3.5" /> Remove this bill
-                      </button>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <Select value={bill.supplierId} onValueChange={addNew("supplier", v => updateBill(bi, { supplierId: v }))}>
-                      <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
-                      <SelectContent>{db.suppliers.filter(s => s.active !== false).map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
-                    </Select>
-                    <Input value={bill.billNo} onChange={e => updateBill(bi, { billNo: e.target.value })}
-                      className="rounded-xl h-10 bg-white" placeholder="Supplier's bill no. (optional)" />
-                  </div>
-
-                  {bill.lines.map((line, idx) => (
-                    <div key={idx} className="p-3 rounded-xl border border-border/60 bg-white space-y-2.5 relative">
-                      {bill.lines.length > 1 && (
-                        <button type="button" onClick={() => removeBuyLine(bi, idx)} className="absolute top-2 right-2 h-6 w-6 rounded-lg grid place-items-center text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
-                          <X className="h-3.5 w-3.5" />
-                        </button>
-                      )}
-                      <p className="text-xs font-medium text-muted-foreground">Diamond {idx + 1}</p>
-                      {line.material === "gold" ? (
-                        // Two to a row on a phone, each named above it, so nothing is cut short.
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Weight (g)</span>
-                            <Input type="number" min={0} value={line.goldWeight} onChange={e => updateBuyLine(bi, idx, { goldWeight: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                          <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Purity</span>
-                            <Select value={line.goldPurity} onValueChange={v => updateBuyLine(bi, idx, { goldPurity: v })}>
-                              <SelectTrigger className="h-10 rounded-xl" aria-label="Purity"><SelectValue /></SelectTrigger>
-                              <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
-                            </Select></div>
-                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate/g (${line.currency})`}</span>
-                            <Input type="number" min={0} value={line.goldRate} onChange={e => updateBuyLine(bi, idx, { goldRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                          <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Discount %</span>
-                            <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
-                        </div>
-                      ) : (
-                        <div className="space-y-2.5">
-                          {/* Loose vs Certified */}
-                          <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
-                            {(["loose", "certified"] as const).map(k => (
-                              <button key={k} type="button" onClick={() => updateBuyLine(bi, idx, { diaKind: k })}
-                                className={`h-8 rounded-lg text-xs font-medium transition-colors ${line.diaKind === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-                                {k === "loose" ? "Loose" : "Certified"}
-                              </button>
-                            ))}
-                          </div>
-                          {line.diaKind === "loose" ? (
-                            // The lot it goes into (its bag) — the same fields as every purchase.
-                            <>
-                              <LooseLotFields idPrefix={`buy${bi}-${idx}`} compact companyId={workCo}
-                                value={{ shape: line.diaShape, mm: line.diaMm, size: line.diaSize, color: line.diaColor, clarity: line.diaClarity }}
-                                onChange={p => updateBuyLine(bi, idx, {
-                                  ...(p.shape !== undefined ? { diaShape: p.shape } : {}), ...(p.mm !== undefined ? { diaMm: p.mm } : {}),
-                                  ...(p.size !== undefined ? { diaSize: p.size } : {}), ...(p.color !== undefined ? { diaColor: p.color } : {}),
-                                  ...(p.clarity !== undefined ? { diaClarity: p.clarity } : {}),
-                                })} />
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                                <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Pcs</span>
-                                  <Input type="number" min={0} step="1" value={line.diaPcs} onChange={e => updateBuyLine(bi, idx, { diaPcs: e.target.value })} className="rounded-xl h-10" placeholder="Optional" /></label>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Carat</span>
-                              <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(bi, idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate/ct (${line.currency})`}</span>
-                              <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(bi, idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Discount %</span>
-                              <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
-                              </div>
-                            </>
-                          ) : (
-                            // A certified stone: shape and weight at a rate, then its report.
-                            <>
-                              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                                <div className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Shape</span>
-                                  <ListSelect list="diamondShapes" value={line.diaShape} onChange={v => updateBuyLine(bi, idx, { diaShape: v || "Round" })} optional={false} /></div>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Carat</span>
-                              <Input type="number" min={0} step="0.01" value={line.diaCarat} onChange={e => updateBuyLine(bi, idx, { diaCarat: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>{`Rate/ct (${line.currency})`}</span>
-                              <Input type="number" min={0} value={line.diaRate} onChange={e => updateBuyLine(bi, idx, { diaRate: e.target.value })} className="rounded-xl h-10" placeholder="0" /></label>
-                            <label className="block min-w-0 space-y-1 text-[11px] font-medium text-muted-foreground"><span>Discount %</span>
-                              <Input type="number" min={-100} max={100} step="0.01" value={line.discountPct} onChange={e => updateBuyLine(bi, idx, { discountPct: e.target.value })} className="rounded-xl h-10" placeholder="0" title="A minus figure adds instead" /></label>
-                              </div>
-                              <CertGradeFields idPrefix={`buy${bi}-${idx}`} compact
-                                value={{ color: line.diaColor, clarity: line.diaClarity, cut: line.diaCut, polish: line.diaPolish, symmetry: line.diaSym,
-                                  fluorescence: line.diaFluor, measurement: line.diaMeasure, lab: line.diaLab, certNo: line.diaCertNo }}
-                                onChange={p => updateBuyLine(bi, idx, {
-                                  ...(p.color !== undefined ? { diaColor: p.color } : {}), ...(p.clarity !== undefined ? { diaClarity: p.clarity } : {}),
-                                  ...(p.cut !== undefined ? { diaCut: p.cut } : {}), ...(p.polish !== undefined ? { diaPolish: p.polish } : {}),
-                                  ...(p.symmetry !== undefined ? { diaSym: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { diaFluor: p.fluorescence } : {}),
-                                  ...(p.measurement !== undefined ? { diaMeasure: p.measurement } : {}), ...(p.lab !== undefined ? { diaLab: p.lab } : {}),
-                                  ...(p.certNo !== undefined ? { diaCertNo: p.certNo } : {}),
-                                })} />
-                            </>
-                          )}
-                        </div>
-                      )}
-
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <Select value={line.currency} onValueChange={v => updateBuyLine(bi, idx, { currency: v as PurchaseCurrency })}>
-                          <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                          <SelectContent><SelectItem value="INR">Billed in INR</SelectItem><SelectItem value="USD">Billed in USD</SelectItem></SelectContent>
-                        </Select>
-                        {line.currency === "USD" && (
-                          <>
-                            <div className="rounded-xl h-10 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">
-                              Total: <span className="font-semibold text-foreground ml-1">${buyLineBaseAmount(line).toFixed(2)}</span>
-                            </div>
-                            <Input type="number" min={0} step="0.01" value={line.exchangeRate} onChange={e => updateBuyLine(bi, idx, { exchangeRate: e.target.value })} className="rounded-xl h-10" placeholder="Exchange rate (₹/$)" />
-                          </>
-                        )}
-                      </div>
-
-                      <Input value={line.notes} onChange={e => updateBuyLine(bi, idx, { notes: e.target.value })} className="rounded-xl h-10" placeholder="Notes (optional)" />
-
-                      <p className="text-xs text-muted-foreground text-right">
-                        {!!Number(line.discountPct) && (
-                          <span className="mr-2">{discountLabel(Number(line.discountPct))} · </span>
-                        )}
-                        Line total: <span className="font-semibold text-foreground">{fmtMoneyInr(buyLineTotalInr(line))}</span>
-                      </p>
-                    </div>
-                  ))}
-
-                  <Button type="button" variant="outline" onClick={() => addBuyLine(bi)} className="rounded-xl gap-2 w-full bg-white">
-                    <Plus className="h-4 w-4" /> Another stone on this bill{supplierName ? ` (${supplierName})` : ""}
-                  </Button>
-
-                  <BillBrokerFields value={bill.brokerage} onChange={v => updateBill(bi, { brokerage: v })} billTotalInr={billTotalInr(bill)} supplierId={bill.supplierId} />
-
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 items-end">
-                    <div>
-                      <Label className="text-[11px]">Round off ₹ (this bill)</Label>
-                      <Input type="number" step="1" value={bill.roundOff} onChange={e => updateBill(bi, { roundOff: e.target.value })}
-                        className="rounded-xl h-10 mt-1 bg-white" placeholder="e.g. -3" />
-                    </div>
-                    {linesInr > 0 && roInr === 0 && linesInr % 10 !== 0 && (
-                      <button type="button" onClick={() => updateBill(bi, { roundOff: String(-(linesInr % 10)) })}
-                        className="text-xs text-primary hover:underline text-left h-10 flex items-end pb-2.5">
-                        Round {fmtMoneyInr(linesInr)} down to {fmtMoneyInr(linesInr - (linesInr % 10))}
-                      </button>
-                    )}
-                  </div>
-                  <p className="text-xs text-muted-foreground text-right">
-                    {buyBills.length > 1 ? `Bill ${bi + 1} total` : "Bill total"}
-                    {roInr !== 0 && <> ({fmtMoneyInr(linesInr)} {roInr < 0 ? "less" : "plus"} {fmtMoneyInr(Math.abs(roInr))} rounding)</>}
-                    : <span className="font-semibold text-foreground">{fmtMoneyInr(billTotalInr(bill))}</span>
-                  </p>
-                </div>
-                );
-              })}
-
-              {/* Stones for one order often come from two or three dealers. Each
-                  dealer's bill is entered on its own — its own supplier, bill
-                  number and round-off — and all are saved together. */}
-              <button type="button" onClick={addBuyBill}
-                className="w-full rounded-2xl border-2 border-dashed border-primary/30 hover:border-primary/60 hover:bg-primary/5 p-3 text-sm font-medium text-primary inline-flex items-center justify-center gap-2 transition-colors">
-                <Plus className="h-4 w-4" /> Add another supplier's bill
-              </button>
-
-            </div>
-          </ActionSheet>
+          {/* Buy for this order — New purchase, set to this order; goes straight to its factory. */}
+          <BuyMaterialForm open={showBuyForm} onOpenChange={o => { setShowBuyForm(o); if (!o) setShowDiamond(false); }} order={order} />
 
           {/* From our stock to the factory — a diamond lot, certified stones, or another material. */}
           <ActionSheet open={showIssueForm} onOpenChange={o => { if (!o) { setShowIssueForm(false); setShowDiamond(false); } }} size="lg" icon={isOtherMaterial(issueMaterial) ? Box : Gem}
