@@ -46,12 +46,15 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, type LucideIcon } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
-import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, purchaseText, type MaterialKey } from "@/lib/materials";
+import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, purchaseText, diamondSpec, type MaterialKey } from "@/lib/materials";
+import { ActionSheet } from "@/components/ActionSheet";
+import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
+import { StatStrip } from "@/components/TableToolbar";
 import { motion, AnimatePresence } from "framer-motion";
 import { toast } from "sonner";
 import { printInvoice, printBatchInvoice } from "@/lib/invoicePrint";
@@ -240,6 +243,24 @@ function RowAction({ icon: Icon, label, why, onRun, danger, busy }: {
       className={`h-7 w-7 rounded-lg grid place-items-center shrink-0 disabled:opacity-50 ${why ? "opacity-40 cursor-not-allowed text-muted-foreground" : danger ? "text-destructive hover:bg-destructive/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}>
       <Icon className="h-3.5 w-3.5" />
     </button>
+  );
+}
+
+/** One step of making the piece: a number, a name, where it stands, and what it holds. */
+function MfgStep({ n, title, state, children }: { n: number; title: string; state: "done" | "ready" | "todo" | "blocked"; children: ReactNode }) {
+  const tone = state === "done" ? "border-success/30 bg-success/[0.04]"
+    : state === "ready" ? "border-primary/30 bg-primary/[0.03]"
+    : state === "blocked" ? "border-border/70 bg-white" : "border-border/70 bg-white";
+  return (
+    <div className={`rounded-2xl border p-3.5 ${tone}`}>
+      <div className="flex items-center gap-2 mb-2">
+        <span className={`h-6 w-6 rounded-full grid place-items-center text-[11px] font-bold shrink-0 ${state === "done" ? "bg-success text-white" : state === "ready" ? "bg-primary text-white" : "bg-secondary text-muted-foreground"}`}>
+          {state === "done" ? <CheckCircle2 className="h-3.5 w-3.5" /> : n}
+        </span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-brand-dark">{title}</span>
+      </div>
+      {children}
+    </div>
   );
 }
 
@@ -3435,224 +3456,354 @@ function OrderDetailPageBody() {
           internal sourcing cost, never shown to the client). Hidden for a
           Ready-Stock sale — the piece already exists, nothing is manufactured. */}
       {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
-        <div className="card-luxe p-6 space-y-4">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <SectionTitle title={diamondOnly ? "Diamond" : "Manufacturing"}
-              sub={diamondOnly ? "Bought for this order — nothing is made"
-                : order.materialSourcing === "stock" ? "Plan: use from stock"
-                : order.materialSourcing === "purchase" ? "Plan: buy new for this order"
-                : "No sourcing plan"} />
-          </div>
+        <div className="card-luxe p-6 space-y-5">
+          {(() => {
+            const editable = canEditStage();
+            const needsDia = orderMaterialRequirements(order).needsDiamond;
+            const noFactoryWhy = !order.assignedFactoryId ? "Choose the factory first" : undefined;
+            const afterFaWhy = faDone ? "Final Approval is done — use Rework for changes" : undefined;
+            const blockWhy = afterFaWhy ?? noFactoryWhy;
+            const openDiamond = (s: "stock" | "buy") => {
+              setDiaSource(s); setShowDiamond(true);
+              if (s === "stock") { setShowIssueForm(true); setShowBuyForm(false); setIssueMaterial("diamond"); setIssueFactoryId(order.assignedFactoryId ?? ""); }
+              else { setShowBuyForm(true); setShowIssueForm(false); allBuyLinesDiamond(); }
+            };
+            const openOther = () => {
+              setShowIssueForm(true); setShowBuyForm(false); setShowDiamond(false);
+              setIssueMaterial(otherMaterials[0].id); setIssueGrade(""); setIssueFactoryId(order.assignedFactoryId ?? "");
+            };
+            const openRework = () => { setRwFactoryId(order.assignedFactoryId || ""); setShowRework(true); };
+            const addActions: MoreAction[] = [
+              { label: "Diamond from stock", icon: Gem, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "A lot or a certified stone we hold", onSelect: () => openDiamond("stock") },
+              { label: "Buy new from a supplier", icon: ShoppingCart, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "Bought for this order, sent to the factory", onSelect: () => openDiamond("buy") },
+              { label: "Other material from stock", icon: Box, show: otherMaterials.length > 0, disabled: !!blockWhy,
+                hint: blockWhy ?? `${otherMaterials.map(m => m.name).slice(0, 4).join(", ")}${otherMaterials.length > 4 ? "…" : ""}`, onSelect: openOther },
+            ];
+            const hasEstimate = order.estimatedMakingCharges != null || order.estimatedGrossWeight != null;
+            const moreActions: MoreAction[] = [
+              { label: hasEstimate ? "Edit estimate" : "Add estimate", icon: Calculator, show: !faDone, onSelect: openEstimate },
+              { label: faDone || hasActuals ? "Edit actual details" : "Record actual details", icon: PackageCheck, show: faDone || faStepIdx < 0,
+                onSelect: () => openFinalApproval(faDone ? faStepIdx : -1) },
+              { label: "No diamond in this piece", icon: XCircle, show: !faDone && needsDia, hint: "Gold only", onSelect: () => setNoDiamond(true) },
+              { label: "This piece has diamond", icon: Gem, show: !faDone && !!order.noDiamond, onSelect: () => setNoDiamond(false) },
+              { label: "Rework / Alteration", icon: RotateCcw, show: !faDone, hint: "The piece came back for changes", onSelect: openRework },
+            ];
 
-          {/* Diamond-only: nothing to assign, estimate or approve — just buy
-              the stones the order is for. */}
-          {diamondOnly && canEditStage() && !showBuyForm && (
-            <Button variant="outline"
-              onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); allBuyLinesDiamond(); }}
-              className="rounded-xl h-10 gap-2 w-full sm:w-auto">
-              <Plus className="h-4 w-4" /> Buy Diamond for this order
-            </Button>
-          )}
+            // ① factory · ② material · ③ Final Approval — what is done and what is next.
+            const diaIssues = linkedIssuances.filter(i => i.material === "diamond");
+            const diaCt = Math.round(diaIssues.reduce((t, i) => t + (i.quantityIssued || 0), 0) * 1000) / 1000;
+            const otherIssues = linkedIssuances.filter(i => isOtherMaterial(i.material));
+            const diaMissing = readiness.missing.includes("diamond");
+            const faActive = faStepIdx >= 0 && order.timeline[faStepIdx].status === "in_progress";
+            const blockedText = `${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && diaMissing ? " and " : ""}${diaMissing ? "add the diamond" : ""}`;
+            const finish = faDone ? finishRecord() : undefined;
+            const est = (v: number | undefined | null, unit: string) => (v ? `${v} ${unit}` : "—");
 
-          {/* Stage ① — Assign the factory and quote an estimate before the piece is made. */}
-          {!diamondOnly && (
-          <div className="rounded-xl border border-border/60 bg-secondary/40 p-3 space-y-3">
-            <div className="flex items-center justify-between gap-2 flex-wrap">
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-semibold text-brand-dark shrink-0">{faDone ? "Manufacturing (actual)" : "① Assign & Estimate"}</span>
-                <Select disabled={!canEditStage()} value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
-                  <SelectTrigger className="h-8 w-52 rounded-lg text-xs"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="__none">Not assigned</SelectItem>
-                    {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
-                  <AddNewItem kind="factory" /></SelectContent>
-                </Select>
-              </div>
-              {canEditStage() && faStepIdx < 0 && (
-                <Button size="sm" variant="outline" onClick={() => openFinalApproval(-1)} className="rounded-lg h-8 gap-1.5 text-xs">
-                  {hasActuals ? "Edit actual details" : "Record actual details"}
-                </Button>
-              )}
-              {canEditStage() && (faDone ? (
-                <Button size="sm" variant="outline" onClick={() => openFinalApproval(faStepIdx)} className="rounded-lg h-8 gap-1.5 text-xs">Edit actual details</Button>
-              ) : (
-                <Button size="sm" variant="outline" onClick={() => (showEstimate ? setShowEstimate(false) : openEstimate())} className="rounded-lg h-8 gap-1.5 text-xs">
-                  {showEstimate ? "Close" : (order.estimatedMakingCharges != null || order.estimatedGrossWeight != null ? "Edit Estimate" : "Add Estimate")}
-                </Button>
-              ))}
-            </div>
-
-            {/* Reserved gold sitting at the assigned factory (gold is held there, not bought per order) */}
-            {order.assignedFactoryId && (
-              <div className="flex items-center gap-1.5 text-xs">
-                <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" />
-                <span className="text-muted-foreground">Reserved gold at this factory:</span>
-                <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, order.assignedFactoryId, db.factories.find(f => f.id === order.assignedFactoryId)?.openingFineGold).toLocaleString()} g fine (24KT)</span>
-              </div>
-            )}
-
-            {/* After Final Approval: what was ACTUALLY used + the factory (editable). Before: the estimate. */}
-            {!showEstimate && (faDone ? (() => {
-              const finish = finishRecord();
-              const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
-              return (
-                <div className="space-y-1 text-xs">
-                  <div className="flex flex-wrap gap-x-5 gap-y-1 text-muted-foreground">
-                    <span>Gold used: <span className="font-semibold text-foreground">{finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g ${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")}g fine` : "—"}</span></span>
-                    <span>Labour: <span className="font-semibold text-foreground">{finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—"}</span></span>
-                    {order.factoryBillNo && (
-                      <span>Factory bill: <span className="font-semibold text-foreground font-mono">{order.factoryBillNo}</span></span>
-                    )}
-                  </div>
-                  {dias.map(i => {
-                    const packs = i.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(p => i.diamondPacketIds?.includes(p.id)) : [];
-                    const lbl = i.diamondKind === "certified" ? (packs.map(p => `${p.shape} ${p.carat}ct`).join(", ") || "certified") : `${i.purityOrQuality} ${i.quantityIssued}ct`;
-                    if (i.diamondKind !== "certified" && (i.finishReturnedCt ?? 0) > 0) {
-                      const used = Math.round((i.quantityIssued - (i.finishReturnedCt ?? 0)) * 1000) / 1000;
-                      return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className="text-success font-medium">{used} ct used</span>, <span className="text-amber-600 font-medium">{i.finishReturnedCt} ct returned</span></div>;
-                    }
-                    return <div key={i.id} className="text-muted-foreground">Diamond: <span className="font-semibold text-foreground">{lbl}</span> — <span className={i.finishDisposition === "returned" ? "text-amber-600 font-medium" : "text-success font-medium"}>{i.finishDisposition === "returned" ? "returned to stock" : "used in piece"}</span></div>;
-                  })}
-                  {/* The figure the factory bills handling on — their scale, not
-                      ours — with the stone count from the same bill. Editable here
-                      so it can be set without reopening Final Approval. */}
-                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1.5 mt-1 border-t border-border/50">
-                    <span className="text-muted-foreground">Total diamond weight:</span>
-                    {canEditStage() ? (
-                      <Input type="number" step="0.001" min={0} value={diaTotW}
-                        onChange={e => setDiaTotW(e.target.value)} onBlur={saveDiamondTotals}
-                        className="h-7 w-24 rounded-lg text-xs" placeholder="ct" />
-                    ) : (
-                      <span className="font-semibold text-foreground">{order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : "—"}</span>
-                    )}
-                    <span className="text-muted-foreground">Total diamond pcs:</span>
-                    {canEditStage() ? (
-                      <Input type="number" step="1" min={0} value={diaTotPcs}
-                        onChange={e => setDiaTotPcs(e.target.value)} onBlur={saveDiamondTotals}
-                        className="h-7 w-20 rounded-lg text-xs" placeholder="pcs" />
-                    ) : (
-                      <span className="font-semibold text-foreground">{order.actualDiamondPcs ?? "—"}</span>
-                    )}
-                    {issuedDiaCt > 0 && (
-                      <span className="text-[11px] text-muted-foreground">issued {issuedDiaCt} ct</span>
-                    )}
-                  </div>
-                  {hasActuals && (
-                    <p className="font-bold text-destructive pt-1">Job finish — the factory’s actual details are recorded</p>
+            return (
+              <>
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <SectionTitle title={diamondOnly ? "Diamond" : "Manufacturing"}
+                    sub={diamondOnly ? "Bought for this order — nothing is made"
+                      : order.materialSourcing === "stock" ? "Plan: use from stock"
+                      : order.materialSourcing === "purchase" ? "Plan: buy new for this order"
+                      : "No sourcing plan"} />
+                  {editable && (
+                    <div className="flex items-center gap-2">
+                      {diamondOnly ? (
+                        <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); allBuyLinesDiamond(); }}
+                          className="btn-hero rounded-xl h-10 gap-2">
+                          <Plus className="h-4 w-4" /> Buy Diamond
+                        </Button>
+                      ) : faDone ? (
+                        <Button onClick={openRework} className="btn-hero rounded-xl h-10 gap-2"><RotateCcw className="h-4 w-4" /> Rework / Alteration</Button>
+                      ) : addActions.some(a => a.show !== false) ? (
+                        <MoreMenu button={{ label: "Add material", icon: Plus, primary: true }} actions={addActions} label="Add material" />
+                      ) : null}
+                      {!diamondOnly && <MoreMenu actions={moreActions} label="More manufacturing actions" />}
+                    </div>
                   )}
                 </div>
-              );
-            })() : (
-              <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-muted-foreground">
-                <span>Est. gross: <span className="font-semibold text-foreground">{order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : "—"}</span></span>
-                <span>Est. net (gold): <span className="font-semibold text-foreground">{(order.estimatedNetWeight || order.metalWeight) ? `${order.estimatedNetWeight || order.metalWeight} g` : "—"}</span></span>
-                <span>Est. diamond: <span className="font-semibold text-foreground">{order.diamondWeight ? `${order.diamondWeight} ct` : "—"}</span></span>
-                <span>Est. making: <span className="font-semibold text-foreground">{order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—"}</span></span>
-              </div>
-            ))}
 
-            {/* Estimate editor */}
-            {showEstimate && !faDone && (
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                <div>
-                  <Label className="text-[11px]">Est. Gross Weight (g)</Label>
-                  <Input type="number" min={0} step="0.001" value={estGold} onChange={e => setEstGold(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
-                </div>
-                <div>
-                  <Label className="text-[11px]">Est. Net Weight — gold (g)</Label>
-                  <Input type="number" min={0} step="0.001" value={estNet} onChange={e => setEstNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
-                </div>
-                <div>
-                  <Label className="text-[11px]">Est. Diamond (ct)</Label>
-                  <Input type="number" min={0} step="0.01" value={estDia} onChange={e => setEstDia(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
-                </div>
-                <div>
-                  <Label className="text-[11px]">Est. Making Charge ($)</Label>
-                  <Input type="number" min={0} step="0.01" value={estMaking} onChange={e => setEstMaking(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="0" />
-                </div>
-                <WeightCheck className="col-span-2 sm:col-span-4" gross={Number(estGold)} net={Number(estNet)} diamondCt={Number(estDia || order.diamondWeight)} />
-                <div className="col-span-2 sm:col-span-4 flex justify-end">
-                  <Button size="sm" onClick={saveEstimate} className="btn-hero rounded-lg h-9 gap-1.5 text-xs">Save Estimate</Button>
-                </div>
-              </div>
-            )}
-
-            {/* ② Diamond — from our stock, or buy new. (Gold stays reserved at the factory.) */}
-            {canEditStage() && !faDone && !diamondOnly && order.noDiamond && (
-              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
-                <span className="text-xs text-muted-foreground">Gold only — no diamond in this piece.</span>
-                <button type="button" onClick={() => setNoDiamond(false)} className="text-xs text-primary hover:underline">
-                  this piece does have diamond
-                </button>
-              </div>
-            )}
-            {canEditStage() && !faDone && orderMaterialRequirements(order).needsDiamond && (
-              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-brand-dark">② Diamond</span>
-                <div className="inline-flex items-center gap-1 p-1 rounded-lg bg-secondary">
-                  {(["stock", "buy"] as const).map(s => (
-                    <button key={s} type="button"
-                      onClick={() => {
-                        if (!order.assignedFactoryId) { toast.error("Choose the factory first"); return; }
-                        setDiaSource(s); setShowDiamond(true);
-                        if (s === "stock") { setShowIssueForm(true); setShowBuyForm(false); setIssueMaterial("diamond"); setIssueFactoryId(order.assignedFactoryId); }
-                        else { setShowBuyForm(true); setShowIssueForm(false); allBuyLinesDiamond(); }
-                      }}
-                      className={`h-7 px-3 rounded-md text-xs font-medium transition-colors ${showDiamond && diaSource === s ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
-                      {s === "stock" ? "From Stock" : "Buy New"}
-                    </button>
-                  ))}
-                </div>
-                {showDiamond && (
-                  <button type="button" onClick={() => { setShowDiamond(false); setShowIssueForm(false); setShowBuyForm(false); }} className="text-xs text-muted-foreground underline">cancel</button>
-                )}
-                {/* Some pieces are plain gold. Saying so is a third answer to
-                    "where is the diamond coming from", not an override. */}
                 {!diamondOnly && (
-                  <button type="button" onClick={() => setNoDiamond(true)}
-                    className="text-xs text-primary hover:underline ml-auto">
-                    No diamond in this piece
-                  </button>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <MfgStep n={1} title="Factory" state={order.assignedFactoryId ? "done" : "todo"}>
+                      <Select disabled={!editable} value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
+                        <SelectTrigger className="h-9 w-full rounded-lg text-sm bg-white" aria-label="Factory"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none">Not assigned</SelectItem>
+                          {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+                        <AddNewItem kind="factory" /></SelectContent>
+                      </Select>
+                      {order.assignedFactoryId && (
+                        <p className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1">
+                          <Coins className="h-3 w-3 text-amber-600 shrink-0" /> Our gold there:
+                          <span className="font-semibold text-amber-700">{factoryFineGoldBalance(db.materialIssuances, order.assignedFactoryId, db.factories.find(f => f.id === order.assignedFactoryId)?.openingFineGold).toLocaleString()} g fine</span>
+                        </p>
+                      )}
+                    </MfgStep>
+                    <MfgStep n={2} title="Material" state={diaMissing ? "todo" : "done"}>
+                      {order.noDiamond ? (
+                        <p className="text-sm font-medium text-brand-dark">Gold only</p>
+                      ) : diaIssues.length > 0 ? (
+                        <p className="text-sm font-medium text-brand-dark">{diaIssues.length} diamond {diaIssues.length === 1 ? "entry" : "entries"} · {diaCt} ct</p>
+                      ) : needsDia ? (
+                        <p className="text-sm font-medium text-destructive">Diamond still needed</p>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">Nothing to add</p>
+                      )}
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        {order.noDiamond ? "No diamond in this piece"
+                          : diaMissing && needsDia ? "Add material → from stock or buy new"
+                          : otherIssues.length ? `+ ${otherIssues.length} other material${otherIssues.length === 1 ? "" : "s"}`
+                          : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
+                      </p>
+                    </MfgStep>
+                    <MfgStep n={3} title="Final Approval" state={faDone ? "done" : readiness.ready ? "ready" : "blocked"}>
+                      {faDone ? (
+                        <>
+                          <p className="text-sm font-medium text-success">Done</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">Actual details recorded</p>
+                        </>
+                      ) : readiness.ready ? (
+                        <>
+                          <p className="text-sm font-medium text-success">Ready</p>
+                          {editable && faActive ? (
+                            <AsyncButton size="sm" onClick={() => openFinalApproval(faStepIdx)} className="btn-hero mt-1.5 h-8 rounded-lg text-xs">Final Approval — enter actuals</AsyncButton>
+                          ) : (
+                            <p className="text-[11px] text-muted-foreground mt-0.5">{faStepIdx >= 0 ? "Comes after the earlier steps on the timeline" : "Factory assigned and material in place"}</p>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p className="text-sm font-medium text-destructive">Not yet</p>
+                          <p className="text-[11px] text-muted-foreground mt-0.5">First {blockedText || "add the material"}</p>
+                        </>
+                      )}
+                    </MfgStep>
+                  </div>
                 )}
-              </div>
-            )}
-            {/* ③ Anything else the piece uses — platinum, a gemstone, a lock (Settings → Materials). */}
-            {canEditStage() && !faDone && otherMaterials.length > 0 && (
-              <div className="pt-3 border-t border-border/50 flex items-center gap-2 flex-wrap">
-                <span className="text-xs font-semibold text-brand-dark">③ Other material</span>
-                <span className="text-xs text-muted-foreground">{otherMaterials.map(m => m.name).slice(0, 4).join(", ")}{otherMaterials.length > 4 ? "…" : ""}</span>
-                <button type="button"
-                  onClick={() => {
-                    if (!order.assignedFactoryId) { toast.error("Choose the factory first"); return; }
-                    setShowIssueForm(true); setShowBuyForm(false); setShowDiamond(false);
-                    setIssueMaterial(otherMaterials[0].id); setIssueGrade(""); setIssueFactoryId(order.assignedFactoryId);
-                  }}
-                  className={`h-7 px-3 rounded-md text-xs font-medium bg-secondary hover:bg-secondary/70 ${showIssueForm && isOtherMaterial(issueMaterial) ? "ring-2 ring-primary/30 text-brand-dark" : "text-muted-foreground"}`}>
-                  From Stock
-                </button>
-              </div>
-            )}
-          </div>
-          )}
 
-          {!diamondOnly && (
-          <div className={`flex items-center gap-2 p-2.5 rounded-xl text-xs font-medium ${readiness.ready ? "bg-success/8 text-success" : "bg-destructive/5 text-destructive"}`}>
-            {readiness.ready ? <CheckCircle2 className="h-4 w-4 shrink-0" /> : <AlertCircle className="h-4 w-4 shrink-0" />}
-            {readiness.ready
-              ? "Ready for Final Approval — factory assigned and diamond sourced"
-              : `Final Approval blocked — ${readiness.missing.includes("gold") && !order.assignedFactoryId ? "assign a factory" : ""}${readiness.missing.includes("gold") && !order.assignedFactoryId && readiness.missing.includes("diamond") ? " and " : ""}${readiness.missing.includes("diamond") ? "add the diamond (from stock or buy)" : ""} first`}
-          </div>
-          )}
+                {!diamondOnly && !faDone && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Estimate</p>
+                      {editable && <button type="button" onClick={openEstimate} className="text-xs font-medium text-primary hover:underline">{hasEstimate ? "Edit" : "Add estimate"}</button>}
+                    </div>
+                    <StatStrip items={[
+                      { label: "Gross weight", value: est(order.estimatedGrossWeight, "g"), icon: Scale },
+                      { label: "Net (gold)", value: est(order.estimatedNetWeight || order.metalWeight, "g"), icon: Coins },
+                      { label: "Diamond", value: est(order.diamondWeight, "ct"), icon: Gem },
+                      { label: "Making", value: order.estimatedMakingCharges != null ? fmtMoney(order.estimatedMakingCharges) : "—", icon: FactoryIcon },
+                    ]} />
+                  </div>
+                )}
 
-          {showBuyForm && (
-            <div className="pt-2 border-t border-border/60 space-y-3">
-              <p className="text-sm font-medium text-brand-dark">Buy for {order.orderNumber}</p>
-              <p className="text-xs text-muted-foreground -mt-1">
-                {diamondOnly
-                  ? "Held against this order and billed to the supplier — no factory involved."
-                  : `Goes straight to ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.`}
-              </p>
+                {!diamondOnly && faDone && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Actual — from Final Approval</p>
+                      {editable && <button type="button" onClick={() => openFinalApproval(faStepIdx)} className="text-xs font-medium text-primary hover:underline">Edit</button>}
+                    </div>
+                    <StatStrip items={[
+                      { label: "Gold used", icon: Coins,
+                        value: finish?.finishedNetWeight != null ? `${finish.finishedNetWeight} g` : "—",
+                        sub: finish?.finishedNetWeight != null
+                          ? `${finish.finishedPurity != null ? `@ ${finish.finishedPurity}‰` : (finish.finishedKarat || "")} · ${finish.finishedPurity != null ? pureFromPurity(finish.finishedNetWeight, finish.finishedPurity) : toPureGold(finish.finishedNetWeight, finish.finishedKarat || "24K")} g fine`
+                          : undefined },
+                      { label: "Labour", icon: FactoryIcon, value: finish?.makingCharges?.amountInr ? fmtMoneyInr(finish.makingCharges.amountInr) : "—" },
+                      { label: "Factory bill", icon: Tag, value: order.factoryBillNo || "—" },
+                    ]} />
+                    {/* The figure the factory bills handling on — their scale, not
+                        ours — with the stone count from the same bill. Editable here
+                        so it can be set without reopening Final Approval. */}
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 rounded-xl border border-border/60 bg-secondary/30 px-3 py-2.5 text-xs">
+                      <span className="text-muted-foreground">Total diamond weight</span>
+                      {editable ? (
+                        <Input type="number" step="0.001" min={0} value={diaTotW} aria-label="Total diamond weight"
+                          onChange={e => setDiaTotW(e.target.value)} onBlur={saveDiamondTotals}
+                          className="h-8 w-24 rounded-lg text-xs bg-white" placeholder="ct" />
+                      ) : (
+                        <span className="font-semibold text-foreground">{order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : "—"}</span>
+                      )}
+                      <span className="text-muted-foreground">Total diamond pcs</span>
+                      {editable ? (
+                        <Input type="number" step="1" min={0} value={diaTotPcs} aria-label="Total diamond pcs"
+                          onChange={e => setDiaTotPcs(e.target.value)} onBlur={saveDiamondTotals}
+                          className="h-8 w-20 rounded-lg text-xs bg-white" placeholder="pcs" />
+                      ) : (
+                        <span className="font-semibold text-foreground">{order.actualDiamondPcs ?? "—"}</span>
+                      )}
+                      {issuedDiaCt > 0 && <span className="text-[11px] text-muted-foreground">issued {issuedDiaCt} ct</span>}
+                      {hasActuals && (
+                        <span className="ml-auto inline-flex items-center gap-1 font-semibold text-success">
+                          <CheckCircle2 className="h-3.5 w-3.5" /> Job finish — the factory’s actual details are recorded
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </>
+            );
+          })()}
+
+          {/* Everything bought or issued for this order, in one table. */}
+          {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (() => {
+            type MatRow = { id: string; href: string; gold: boolean; title: string; detail?: string; qty: string; source: string; sourceSub?: string;
+              costInr?: number; dueInr: number; labourDueInr: number; status: string; tone: "blue" | "green" | "amber" | "neutral"; actions: MoreAction[] };
+            const rowAct = (icon: LucideIcon, label: string, hint: string, why: string | undefined, busy: boolean, onRun: () => unknown, danger = false): MoreAction =>
+              ({ label, icon, danger, disabled: !!why || busy, hint: why ?? hint, onSelect: () => { void onRun(); } });
+            const purchaseActs = (p: Purchase): MoreAction[] => isStaffUser ? [
+              rowAct(Pencil, "Edit purchase", "Wrong carat, rate or bill no.", purchaseWhy(p, "edit"), false, () => openEditPurchase(p)),
+              rowAct(Trash2, "Remove purchase", "Reverses the supplier due, stock and factory issue", purchaseWhy(p, "remove"), removingPurchaseId === p.id, () => removeLinkedPurchase(p), true),
+            ] : [];
+            const supplierText = (p: Purchase) => `${db.suppliers.find(s => s.id === p.supplierId)?.name || "Supplier"}${p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}`;
+            const brokerText = (p: Purchase) => {
+              const br = p.brokerId ? (db.brokers ?? []).find(x => x.id === p.brokerId) : undefined;
+              return br && p.brokerageInr ? `brokerage ${fmtMoneyInr(p.brokerageInr)} to ${br.name}${p.brokeragePaidBy === "supplier" ? " (supplier pays)" : ""}` : undefined;
+            };
+            const kindTitle = (material: string, kind: string | undefined, grade: string) =>
+              material === "gold" ? `Gold ${grade}`.trim()
+              : material === "diamond" ? (kind === "certified" ? "Certified diamond" : "Loose diamond")
+              : materialName(db.settings, material as MaterialKey);
+            const rows: MatRow[] = [];
+            // Purchases not yet shown as an issue below — a bought diamond is one row, not two.
+            for (const p of linkedPurchases.filter(x => !linkedIssuances.some(i => i.sourcePurchaseId === x.id))) {
+              rows.push({
+                id: p.id, href: `/suppliers/${p.supplierId}`, gold: p.material === "gold",
+                title: kindTitle(p.material, p.diamond?.kind, p.gold?.purity ?? ""),
+                detail: p.material === "diamond" ? diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id)) || undefined
+                  : isOtherMaterial(p.material) && p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
+                qty: fmtQty(purchaseQty(p), materialUnit(db.settings, p.material)),
+                source: supplierText(p), sourceSub: brokerText(p),
+                costInr: p.totalInr, dueInr: purchasePending(p), labourDueInr: 0,
+                status: "Bought", tone: "neutral", actions: purchaseActs(p),
+              });
+            }
+            for (const mi of linkedIssuances) {
+              const unit = materialUnit(db.settings, mi.material);
+              const used = issuanceUsed(mi);
+              const packs = mi.diamondKind === "certified" ? (db.diamondPackets ?? []).filter(x => mi.diamondPacketIds?.includes(x.id)) : [];
+              const srcPurchase = mi.source === "purchase" && mi.sourcePurchaseId ? linkedPurchases.find(x => x.id === mi.sourcePurchaseId) : undefined;
+              const factory = db.factories.find(f => f.id === mi.factoryId);
+              const spec = mi.diamondSpec;
+              const lot = mi.material === "diamond" && mi.diamondKind !== "certified" ? mi.purityOrQuality : "";
+              const detail = mi.diamondKind === "certified"
+                ? packs.map(x => [x.shape, `${x.carat}ct`, x.color, x.clarity, `${x.certificateLab || "Cert"} ${x.certificateNumber}`].filter(Boolean).join(" · ")).join("; ")
+                : mi.material === "diamond"
+                ? [lot, mi.piecesIssued ? `${mi.piecesIssued} pcs` : undefined, spec?.mm && `${spec.mm} mm`,
+                    spec?.color && !lot.includes(spec.color) ? spec.color : undefined, spec?.clarity && !lot.includes(spec.clarity) ? spec.clarity : undefined,
+                    spec?.ratePerCaratInr ? `${fmtMoneyInr(spec.ratePerCaratInr)}/ct` : undefined].filter(Boolean).join(" · ")
+                : isOtherMaterial(mi.material) ? mi.purityOrQuality : undefined;
+              // After Final Approval a stone was either set in the piece or went back to stock.
+              const returnedCt = mi.finishReturnedCt ?? 0;
+              const [status, tone]: [string, MatRow["tone"]] = faDone && mi.material === "diamond"
+                ? (mi.diamondKind !== "certified" && returnedCt > 0
+                    ? [`${Math.round((mi.quantityIssued - returnedCt) * 1000) / 1000} ct used · ${returnedCt} ct back`, "amber"]
+                    : mi.finishDisposition === "returned" ? ["Back to stock", "amber"] : ["Used in piece", "green"])
+                : mi.status === "open" ? ["In progress", "blue"] : ["Closed", "green"];
+              const check = !srcPurchase && isStockIssuance(mi) && isStaffUser ? canEditIssuance(db, mi) : undefined;
+              const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason)) : undefined;
+              rows.push({
+                id: mi.id, href: `/factories/${mi.factoryId}`, gold: mi.material === "gold",
+                title: mi.diamondKind === "certified" && packs.length > 1 ? `${packs.length} certified diamonds` : kindTitle(mi.material, mi.diamondKind, mi.purityOrQuality),
+                detail: detail || undefined,
+                qty: `${used}${unit}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${mi.quantityIssued}${unit}` : ""}`,
+                source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : "—",
+                sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, `to ${factory?.name || "factory"}`].filter(Boolean).join(" · "),
+                costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
+                status, tone,
+                actions: srcPurchase ? purchaseActs(srcPurchase) : check ? [
+                  rowAct(Pencil, "Edit", "Wrong carat or shape taken from stock", issueWhy, false, () => openEditIssuance(mi)),
+                  rowAct(Trash2, "Cancel this issue", "The material goes back into stock", issueWhy, removingIssuanceId === mi.id, () => removeIssuance(mi), true),
+                ] : [],
+              });
+            }
+            const columns: DataColumn<MatRow>[] = [
+              { key: "material", header: "Material", always: true, sortValue: r => r.title, csv: r => [r.title, r.detail].filter(Boolean).join(" · "),
+                cell: r => (
+                  <div className="flex items-start gap-2 min-w-0 max-w-[340px]">
+                    {r.gold ? <Coins className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" /> : <Gem className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />}
+                    <CellMain title={r.title} sub={r.detail} />
+                  </div>
+                ) },
+              { key: "qty", header: "Qty", align: "right", sortValue: r => r.qty, cell: r => <span className="tabular-nums whitespace-nowrap font-medium">{r.qty}</span> },
+              { key: "from", header: "From", sortValue: r => r.source, csv: r => [r.source, r.sourceSub].filter(Boolean).join(" · "),
+                cell: r => <div className="max-w-[260px]"><CellMain title={<span className="text-sm font-normal text-foreground">{r.source}</span>} sub={r.sourceSub} /></div> },
+              { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: r => r.costInr ?? 0,
+                cell: r => (
+                  <div className="text-right whitespace-nowrap">
+                    {r.costInr != null ? <CellAmount>{fmtMoneyInr(r.costInr)}</CellAmount> : <span className="text-muted-foreground">—</span>}
+                    {r.dueInr > 0 && <p className="text-[11px] font-medium text-destructive">{fmtMoneyInr(r.dueInr)} to supplier</p>}
+                    {r.labourDueInr > 0 && <p className="text-[11px] font-medium text-destructive">{fmtMoneyInr(r.labourDueInr)} labour due</p>}
+                  </div>
+                ) },
+              { key: "status", header: "Status", sortValue: r => r.status, cell: r => <CellTag tone={r.tone}>{r.status}</CellTag> },
+            ];
+            return (
+              <div className="space-y-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Material for this order · {rows.length}</p>
+                <DataTable id="order-materials" controls="none" noun="material" rows={rows} columns={columns} rowKey={r => r.id}
+                  rowHref={r => r.href} details={false} rowActions={r => r.actions} />
+              </div>
+            );
+          })()}
+
+          {/* Estimate — before the piece is made. */}
+          <ActionSheet open={showEstimate && !faDone} onOpenChange={o => { if (!o) setShowEstimate(false); }} icon={Calculator}
+            title="Estimate" description={`What ${order.orderNumber} should weigh and cost to make`}
+            footer={
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowEstimate(false)} className="rounded-xl h-10">Cancel</Button>
+                <Button onClick={saveEstimate} className="btn-hero rounded-xl h-10 px-6">Save Estimate</Button>
+              </div>
+            }>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="est-gross" className="text-xs">Gross weight (g)</Label>
+                <Input id="est-gross" type="number" min={0} step="0.001" value={estGold} onChange={e => setEstGold(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+              </div>
+              <div>
+                <Label htmlFor="est-net" className="text-xs">Net weight — gold (g)</Label>
+                <Input id="est-net" type="number" min={0} step="0.001" value={estNet} onChange={e => setEstNet(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+              </div>
+              <div>
+                <Label htmlFor="est-dia" className="text-xs">Diamond (ct)</Label>
+                <Input id="est-dia" type="number" min={0} step="0.01" value={estDia} onChange={e => setEstDia(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+              </div>
+              <div>
+                <Label htmlFor="est-making" className="text-xs">Making charge ($)</Label>
+                <Input id="est-making" type="number" min={0} step="0.01" value={estMaking} onChange={e => setEstMaking(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="0" />
+              </div>
+              <WeightCheck className="sm:col-span-2" gross={Number(estGold)} net={Number(estNet)} diamondCt={Number(estDia || order.diamondWeight)} />
+            </div>
+          </ActionSheet>
+
+          {/* Buy for this order — the supplier's bill, its lines and any broker. */}
+          <ActionSheet open={showBuyForm} onOpenChange={o => { if (!o) { setShowBuyForm(false); setShowDiamond(false); } }} size="lg" icon={ShoppingCart}
+            title={`Buy for ${order.orderNumber}`}
+            description={diamondOnly
+              ? "Held against this order and billed to the supplier — no factory involved."
+              : `Goes straight to ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the assigned factory"} and is billed to the supplier.`}
+            footer={
+              <div className="flex items-end justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Grand total</p>
+                  <p className="font-display text-xl font-bold tabular-nums leading-tight text-brand-dark">{fmtMoneyInr(buyGrandTotalInr)}</p>
+                  {buyBills.length > 1 && (
+                    <p className="text-[11px] text-muted-foreground">
+                      {buyBills.map((b, i) => `${db.suppliers.find(s => s.id === b.supplierId)?.name ?? `Bill ${i + 1}`} ${fmtMoneyInr(billTotalInr(b))}`).join(" + ")}
+                    </p>
+                  )}
+                </div>
+                <div className="flex gap-2 ml-auto">
+                  <Button variant="outline" onClick={() => { setShowDiamond(false); setShowBuyForm(false); resetBuyForm(); }} className="rounded-xl h-10">Cancel</Button>
+                  <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10 px-6">
+                    {buying ? "Saving…" : buyBills.length > 1 ? `Save ${buyBills.length} Bills (${buyLineCount} items)` : buyLineCount > 1 ? `Save ${buyLineCount} Purchases` : "Save Purchase"}
+                  </AsyncButton>
+                </div>
+              </div>
+            }>
+            <div className="space-y-3">
               {buyBills.map((bill, bi) => {
                 const linesInr = billLinesTotalInr(bill);
                 const roInr = billRoundOffInr(bill);
@@ -3814,30 +3965,20 @@ function OrderDetailPageBody() {
                 <Plus className="h-4 w-4" /> Add another supplier's bill
               </button>
 
-              <div className="flex items-center justify-between p-3 rounded-xl bg-primary/5 border border-primary/20">
-                <span className="text-sm text-muted-foreground">
-                  Grand Total (INR)
-                  {buyBills.length > 1 && (
-                    <span className="block text-xs">
-                      {buyBills.map((b, i) => `${db.suppliers.find(s => s.id === b.supplierId)?.name ?? `Bill ${i + 1}`} ${fmtMoneyInr(billTotalInr(b))}`).join(" + ")}
-                    </span>
-                  )}
-                </span>
-                <span className="font-display text-lg font-bold text-brand-dark">{fmtMoneyInr(buyGrandTotalInr)}</span>
-              </div>
-
-              <div className="flex gap-2.5">
-                <AsyncButton onClick={recordPurchaseForOrder} disabled={buying} className="btn-hero rounded-xl h-10">
-                  {buying ? "Saving…" : buyBills.length > 1 ? `Save ${buyBills.length} Bills (${buyLineCount} items)` : buyLineCount > 1 ? `Save ${buyLineCount} Purchases` : "Save Purchase"}
-                </AsyncButton>
-                <Button variant="outline" onClick={() => { setShowDiamond(false); setShowBuyForm(false); resetBuyForm(); }} className="rounded-xl h-10">Cancel</Button>
-              </div>
             </div>
-          )}
+          </ActionSheet>
 
-          {showIssueForm && (
-            <div className="pt-2 border-t border-border/60 space-y-2.5">
-              <p className="text-sm font-medium text-brand-dark">{isOtherMaterial(issueMaterial) ? "Other material" : "Diamond"} from stock → {db.factories.find(f => f.id === order.assignedFactoryId)?.name || "factory"}</p>
+          {/* From our stock to the factory — a diamond lot, certified stones, or another material. */}
+          <ActionSheet open={showIssueForm} onOpenChange={o => { if (!o) { setShowIssueForm(false); setShowDiamond(false); } }} size="lg" icon={isOtherMaterial(issueMaterial) ? Box : Gem}
+            title={`${isOtherMaterial(issueMaterial) ? "Other material" : "Diamond"} from stock`}
+            description={`To ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the factory"}, for ${order.orderNumber}`}
+            footer={
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => { setShowDiamond(false); setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
+                <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10 px-6">{issuing ? "Saving…" : "Save Usage & Charge"}</AsyncButton>
+              </div>
+            }>
+            <div className="space-y-3">
               {isOtherMaterial(issueMaterial) ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <OtherMaterialSelect value={issueMaterial} onChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }} />
@@ -3960,124 +4101,19 @@ function OrderDetailPageBody() {
                 <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
               </div>
 
-              <div className="flex gap-2.5">
-                <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10">{issuing ? "Saving…" : "Save Usage & Charge"}</AsyncButton>
-                <Button variant="outline" onClick={() => { setShowDiamond(false); setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
-              </div>
             </div>
-          )}
-
-          {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (
-            <div className="pt-2 border-t border-border/60 space-y-2">
-              {/* Only purchases NOT already shown as an issuance below — avoids the
-                  same bought diamond appearing twice (once as a purchase, once as
-                  the auto-created issuance). The purchase's cost/₹-due is folded
-                  onto its issuance row instead. */}
-              {linkedPurchases.filter(p => !linkedIssuances.some(i => i.sourcePurchaseId === p.id)).map(p => {
-                const pending = purchasePending(p);
-                const supplier = db.suppliers.find(s => s.id === p.supplierId);
-                return (
-                  <Link key={p.id} to={`/suppliers/${p.supplierId}`} className="flex items-center justify-between gap-2 p-2.5 rounded-xl bg-secondary hover:bg-secondary/70 transition-colors text-sm">
-                    <span className="flex items-center gap-2 min-w-0">
-                      {p.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                      <span className="truncate">{p.material === "gold" ? `${p.gold?.weightGrams}g ${p.gold?.purity}` : purchaseText(db.settings, p)} from {supplier?.name || "supplier"}{p.invoiceNumber ? ` · bill ${p.invoiceNumber}` : ""}</span>
-                    </span>
-                    <span className="flex items-center gap-2 shrink-0">
-                      <span className={`font-medium ${pending > 0 ? "text-destructive" : "text-success"}`}>{fmtMoneyInr(p.totalInr)}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                      {isStaffUser && (
-                        <>
-                        <RowAction icon={Pencil} label="Correct this purchase (wrong carat / rate / invoice)" why={purchaseWhy(p, "edit")} onRun={() => openEditPurchase(p)} />
-                        <RowAction icon={Trash2} danger label="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
-                          why={purchaseWhy(p, "remove")} busy={removingPurchaseId === p.id} onRun={() => removeLinkedPurchase(p)} />
-                        </>
-                      )}
-                    </span>
-                  </Link>
-                );
-              })}
-              {linkedIssuances.map(mi => {
-                const pending = issuancePending(mi);
-                const factory = db.factories.find(f => f.id === mi.factoryId);
-                const used = issuanceUsed(mi);
-                const unit = materialUnit(db.settings, mi.material);
-                const certPackets = mi.diamondKind === "certified"
-                  ? (db.diamondPackets ?? []).filter(p => mi.diamondPacketIds?.includes(p.id))
-                  : [];
-                const srcPurchase = mi.source === "purchase" && mi.sourcePurchaseId ? linkedPurchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
-                const srcSupplier = srcPurchase ? db.suppliers.find(s => s.id === srcPurchase.supplierId) : undefined;
-                const srcBroker = srcPurchase?.brokerId ? (db.brokers ?? []).find(x => x.id === srcPurchase.brokerId) : undefined;
-                const srcInfo = srcPurchase ? ` · bought from ${srcSupplier?.name || "supplier"}${srcPurchase.invoiceNumber ? ` (bill ${srcPurchase.invoiceNumber})` : ""}`
-                  + (srcBroker && srcPurchase.brokerageInr ? ` · brokerage ${fmtMoneyInr(srcPurchase.brokerageInr)} to ${srcBroker.name}${srcPurchase.brokeragePaidBy === "supplier" ? " (supplier pays)" : ""}` : "")
-                  : mi.source === "stock" ? " · from stock" : "";
-                const label = (mi.diamondKind === "certified"
-                  ? `${certPackets.length} certified diamond${certPackets.length !== 1 ? "s" : ""} (${mi.quantityIssued}ct) — ${certPackets.map(p => `${p.shape} ${p.carat}ct, Cert ${p.certificateNumber}`).join("; ")}`
-                  : `${materialName(db.settings, mi.material)} — ${mi.purityOrQuality}, ${used}${unit} used${Math.abs(used - mi.quantityIssued) > 0.001 ? ` (${mi.quantityIssued}${unit} issued)` : ""}`)
-                  // Loose stones' details and price, when given.
-                  + (mi.diamondSpec ? ` · ${[mi.diamondSpec.mm && `${mi.diamondSpec.mm} mm`, mi.diamondSpec.color, mi.diamondSpec.clarity,
-                      mi.diamondSpec.ratePerCaratInr && `${fmtMoneyInr(mi.diamondSpec.ratePerCaratInr)}/ct`, mi.diamondSpec.amountInr && fmtMoneyInr(mi.diamondSpec.amountInr)].filter(Boolean).join(" · ")}` : "")
-                  + srcInfo;
-                const srcCost = srcPurchase ? purchasePending(srcPurchase) : 0;
-                const isGold = mi.material === "gold";
-                const liveLabour = labourValue({
-                  perGramRate: rcvPerGram ? Number(rcvPerGram) : undefined,
-                  diamondHandlingRate: rcvDiaHandling ? Number(rcvDiaHandling) : undefined,
-                  cadCharge: rcvCad ? Number(rcvCad) : undefined,
-                  otherCharges: rcvOther ? Number(rcvOther) : undefined,
-                  metalByFactoryGrams: rcvMetalG ? Number(rcvMetalG) : undefined,
-                  metalByFactoryRate: rcvMetalRate ? Number(rcvMetalRate) : undefined,
-                }, Math.round(((Number(rcvNetW) || 0)
-                  + (order.otherMetal ? (order.otherMetalWeight || 0) : 0)) * 1000) / 1000,
-                  order.actualDiamondWeight || order.diamondWeight || 0);
-                return (
-                  <div key={mi.id} className="rounded-xl bg-secondary text-sm">
-                    <div className="flex items-center justify-between gap-2 p-2.5">
-                      <Link to={`/factories/${mi.factoryId}`} className="flex items-center gap-2 min-w-0 hover:underline">
-                        {isGold ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-blue-500 shrink-0" />}
-                        <span className="truncate" title={label}>{label} · {factory?.name || "factory"}</span>
-                      </Link>
-                      <span className="flex items-center gap-2 shrink-0">
-                        {srcCost > 0 && <span className="text-xs text-destructive font-medium">{fmtMoneyInr(srcCost)} to supplier</span>}
-                        <span className={`font-medium ${mi.status === "open" ? "text-primary" : "text-success"}`}>{mi.status === "open" ? "In progress" : "Closed"}{pending > 0 ? ` · ${fmtMoneyInr(pending)} due` : ""}</span>
-                        {!srcPurchase && isStockIssuance(mi) && isStaffUser && (() => {
-                          // The same reasons the page gives on a click, shown before it.
-                          const check = canEditIssuance(db, mi);
-                          const why = orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason);
-                          return (
-                            <>
-                            <RowAction icon={Pencil} label="Correct what was taken from stock (wrong carat / shape)" why={why} onRun={() => openEditIssuance(mi)} />
-                            <RowAction icon={Trash2} danger label="Cancel this issue — the material goes back into stock" why={why} busy={removingIssuanceId === mi.id} onRun={() => removeIssuance(mi)} />
-                            </>
-                          );
-                        })()}
-                        {srcPurchase && isStaffUser && (
-                          <>
-                          <RowAction icon={Pencil} label="Correct this purchase (wrong carat / rate / invoice)" why={purchaseWhy(srcPurchase, "edit")} onRun={() => openEditPurchase(srcPurchase)} />
-                          <RowAction icon={Trash2} danger label="Remove this purchase (e.g. entered twice) — reverses the supplier due, stock and factory issue"
-                            why={purchaseWhy(srcPurchase, "remove")} busy={removingPurchaseId === srcPurchase.id} onRun={() => removeLinkedPurchase(srcPurchase)} />
-                          </>
-                        )}
-                      </span>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          </ActionSheet>
 
           {/* Rework / Alteration — a delivered piece came back for changes */}
-          {!diamondOnly && canEditStage() && (
-            <div className="pt-3 border-t border-border/60">
-              {!showRework ? (
-                <button onClick={() => { setRwFactoryId(order.assignedFactoryId || ""); setShowRework(true); }}
-                  className="text-xs font-medium text-primary inline-flex items-center gap-1.5 hover:underline">
-                  <RotateCcw className="h-3.5 w-3.5" /> Rework / Alteration — piece came back for changes
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <p className="text-sm font-semibold text-brand-dark">Rework / Alteration</p>
-                    <button onClick={() => setShowRework(false)} className="text-xs text-muted-foreground underline">cancel</button>
-                  </div>
+          <ActionSheet open={showRework && !diamondOnly} onOpenChange={o => { if (!o) setShowRework(false); }} icon={RotateCcw}
+            title="Rework / Alteration" description="The piece came back for changes"
+            footer={
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={() => setShowRework(false)} className="rounded-xl h-10">Cancel</Button>
+                <AsyncButton onClick={recordRework} disabled={rwSaving} className="btn-hero rounded-xl h-10 px-6">{rwSaving ? "Saving…" : "Record rework"}</AsyncButton>
+              </div>
+            }>
+            <div className="space-y-3">
                   <p className="text-xs text-muted-foreground">Added gold comes from what the factory holds of ours; removed material goes back to stock.</p>
                   <div>
                     <Label className="text-xs">Factory</Label>
@@ -4143,11 +4179,8 @@ function OrderDetailPageBody() {
                     <div><Label className="text-xs">Rework charge (₹)</Label><Input type="number" min={0} value={rwCharge} onChange={e => setRwCharge(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="factory labour" /></div>
                     <div><Label className="text-xs">Note (optional)</Label><Input value={rwNote} onChange={e => setRwNote(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. resize, add stone" /></div>
                   </div>
-                  <AsyncButton onClick={recordRework} disabled={rwSaving} className="btn-hero rounded-xl w-full h-10">{rwSaving ? "Saving…" : "Record rework"}</AsyncButton>
-                </div>
-              )}
             </div>
-          )}
+          </ActionSheet>
         </div>
       )}
 
