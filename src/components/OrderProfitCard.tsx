@@ -32,6 +32,8 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
   const rateSet = p.costUsd !== null;
   const stockBuild = !!order.forReadyStock;
   const losing = p.profitUsd !== null && p.profitUsd < 0;
+  // The same figures in rupees, at the rate the sale is booked at.
+  const inr = (usd: number | null | undefined) => (p.fx && usd != null ? fmtMoneyInr(Math.round(usd * p.fx.rate)) : null);
 
   const section = (title: string, lines: CostLine[]) =>
     lines.length > 0 && (
@@ -72,13 +74,15 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         <div className="rounded-xl bg-secondary p-3">
           <p className="text-[10px] text-muted-foreground mb-0.5">Selling price</p>
           <p className="font-semibold">{stockBuild ? "—" : fmtMoney(p.sellingUsd)}</p>
-          {stockBuild && <p className="text-[11px] text-muted-foreground">stock build — not sold yet</p>}
+          {stockBuild ? <p className="text-[11px] text-muted-foreground">stock build — not sold yet</p>
+            : inr(p.sellingUsd) && <p className="text-[11px] text-muted-foreground">{inr(p.sellingUsd)}</p>}
         </div>
         <div className={`rounded-xl p-3 ${losing ? "bg-destructive/10" : "bg-success/10"}`}>
           <p className="text-[10px] text-muted-foreground mb-0.5">Profit</p>
           <p className={`font-semibold ${losing ? "text-destructive" : "text-success"}`}>
             {stockBuild || p.profitUsd === null ? "—" : `${!cost.complete ? "≤ " : ""}${fmtMoney(p.profitUsd)}`}
           </p>
+          {!stockBuild && inr(p.profitUsd) && <p className={`text-[11px] font-medium ${losing ? "text-destructive/80" : "text-success/80"}`}>{!cost.complete ? "≤ " : ""}{inr(p.profitUsd)}</p>}
         </div>
         <div className={`rounded-xl p-3 ${losing ? "bg-destructive/10" : "bg-success/10"}`}>
           <p className="text-[10px] text-muted-foreground mb-0.5">Margin</p>

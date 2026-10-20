@@ -572,6 +572,9 @@ export interface ProfitGroup {
   costUsd: number | null;
   profitUsd: number | null;
   marginPct: number | null;
+  /** The same in rupees: each sale at its own day's rate, the cost as paid. Null when any sale has no rate. */
+  sellingInr: number | null;
+  profitInr: number | null;
   /** Orders in the group whose cost is not fully known. */
   incomplete: number;
 }
@@ -587,7 +590,9 @@ function summarise(key: string, rows: ProfitRow[]): ProfitGroup {
     : null;
   const profitUsd = costUsd === null ? null : r2(sellingUsd - costUsd);
   const marginPct = profitUsd === null || sellingUsd <= 0 ? null : Math.round((profitUsd / sellingUsd) * 1000) / 10;
-  return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, incomplete: rows.filter(r => !r.complete).length };
+  const sellingInr = rows.length && rows.every(r => r.fx) ? Math.round(rows.reduce((s, r) => s + r.sellingUsd * r.fx!.rate, 0)) : rows.length ? null : 0;
+  const profitInr = sellingInr === null ? null : Math.round(sellingInr - costInr);
+  return { key, count: rows.length, sellingUsd, costInr, costUsd, profitUsd, marginPct, sellingInr, profitInr, incomplete: rows.filter(r => !r.complete).length };
 }
 
 function groupBy(rows: ProfitRow[], keyOf: (r: ProfitRow) => string): ProfitGroup[] {

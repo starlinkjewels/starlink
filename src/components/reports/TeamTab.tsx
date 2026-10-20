@@ -87,7 +87,7 @@ export function TeamTab({ ctx }: { ctx: ReportCtx }) {
             { key: "sales", header: "Sales", sortValue: r => r.salesUsd, cell: r => (
               <div className="flex items-center gap-2 min-w-[150px]"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div>
             ) },
-            ...(withProfit ? [{ key: "profit", header: "Profit", align: "right" as const, sortValue: (r: TeamRow) => (r.sold ? r.profitUsd : null), cell: (r: TeamRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</span> }] : []),
+            ...(withProfit ? [{ key: "profit", header: "Profit", align: "right" as const, sortValue: (r: TeamRow) => (r.sold ? r.profitUsd : null), cell: (r: TeamRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}{r.sold && r.profitInr != null && <span className="block text-[11px] font-normal text-muted-foreground whitespace-nowrap">{inr(r.profitInr, true)}</span>}</span> }] : []),
             { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },
             { key: "expenses", header: "Expenses", align: "right", sortValue: r => r.expensesInr, cell: r => (r.expensesInr ? inr(r.expensesInr, true) : "—") },
             { key: "open", header: "Open", align: "right", sortValue: r => r.open, cell: r => r.open || "—" },

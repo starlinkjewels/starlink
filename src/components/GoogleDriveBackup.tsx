@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  driveConfigured, driveStatus, connectDrive, disconnectDrive, backupToDrive,
+  driveConfigured, driveStatus, connectDrive, disconnectDrive, backupToDrive, driveTokenValid,
   setDriveFrequency, listDriveBackups, driveOrigin, type Frequency, type DriveBackup,
 } from "@/lib/googleDrive";
 import { updateDb } from "@/lib/db";
@@ -53,8 +53,10 @@ export function GoogleDriveBackup() {
     } finally { setBusy(false); }
   };
 
+  // Lists what is in Drive only while Google's permission still holds — opening
+  // this page must never pop Google's account chooser by itself.
   const refreshFiles = useCallback(async () => {
-    if (!driveStatus().connected) { setFiles(null); return; }
+    if (!driveStatus().connected || !driveTokenValid()) { setFiles(null); return; }
     try { setFiles(await listDriveBackups()); } catch { setFiles(null); }
   }, []);
 
@@ -207,10 +209,10 @@ export function GoogleDriveBackup() {
           </div>
 
           <p className="mt-2 text-[11px] text-muted-foreground">
-            The backup runs when an admin opens the app and one is due, so it needs someone to open it
-            at least that often. Google only keeps permission for about an hour at a time; if it has
-            lapsed, pressing <span className="font-medium text-foreground">Back up now</span> here renews it.
-            The app can only ever see files it put in Drive itself, never anything else in the account.
+            The backup runs when you (the main admin) open the app and one is due. Google only keeps
+            permission for about an hour at a time — when it has lapsed, the app tells you and
+            <span className="font-medium text-foreground"> Back up now</span> renews it. Google's window
+            never opens on its own. The app can only ever see files it put in Drive itself.
           </p>
 
           {files && files.length > 0 && (

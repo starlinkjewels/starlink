@@ -1337,12 +1337,13 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
             const tone = (v: number | null) => (v === null ? "muted" : v < 0 ? "neg" : "pos") as "pos" | "neg" | "muted";
             return (
               <div className="rounded-2xl border border-border/70 bg-secondary/20 px-4 py-2">
-                {line(`Sales — ${profit.totals.count} order${profit.totals.count !== 1 ? "s" : ""} shipped`, fmtMoney(profit.totals.sellingUsd))}
+                {line(`Sales — ${profit.totals.count} order${profit.totals.count !== 1 ? "s" : ""} shipped`, fmtMoney(profit.totals.sellingUsd),
+                  profit.totals.sellingInr != null ? { sub: fmtMoneyInr(profit.totals.sellingInr) } : undefined)}
                 {line("Cost of goods sold", usd(profit.totals.costUsd, "− "),
                   { sub: `material, factory, freight · ${fmtMoneyInr(profit.totals.costInr)}`, indent: true })}
                 {line("Gross profit", profit.totals.profitUsd === null ? "—" : le + fmtMoney(profit.totals.profitUsd),
                   { strong: true, tone: tone(profit.totals.profitUsd),
-                    sub: profit.totals.marginPct === null ? undefined : `${le}${profit.totals.marginPct}% gross margin` })}
+                    sub: [profit.totals.profitInr != null ? `${le}${fmtMoneyInr(profit.totals.profitInr)}` : "", profit.totals.marginPct === null ? "" : `${le}${profit.totals.marginPct}% gross margin`].filter(Boolean).join(" · ") || undefined })}
                 {line(
                   profit.fx.usd !== null && profit.fx.usd < 0 ? "Exchange loss on collections" : "Exchange gain on collections",
                   profit.fx.usd === null ? "—" : `${profit.fx.usd < 0 ? "− " : "+ "}${fmtMoney(Math.abs(profit.fx.usd))}`,
@@ -1404,12 +1405,13 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                     cell: g => <CellMain title={profitBy === "month" ? monthLabel(g.key) : g.key} /> },
                   { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: g => g.count,
                     cell: g => <span className="tabular-nums whitespace-nowrap">{g.count}{g.incomplete > 0 && <span className="text-amber-600" title="cost not fully known"> · {g.incomplete}?</span>}</span> },
-                  { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd, cell: g => <CellAmount>{fmtMoney(g.sellingUsd)}</CellAmount> },
+                  { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd,
+                    cell: g => <div className="text-right leading-tight"><CellAmount>{fmtMoney(g.sellingUsd)}</CellAmount>{g.sellingInr != null && <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">{fmtMoneyInr(g.sellingInr)}</div>}</div> },
                   // Dollars when every order converted; rupees otherwise — so it sorts by the dollars.
                   { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: g => g.costUsd,
-                    cell: g => <span className="tabular-nums whitespace-nowrap">{g.costUsd !== null ? fmtMoney(g.costUsd) : fmtMoneyInr(g.costInr)}</span> },
+                    cell: g => <div className="text-right leading-tight"><span className="tabular-nums whitespace-nowrap">{g.costUsd !== null ? fmtMoney(g.costUsd) : fmtMoneyInr(g.costInr)}</span>{g.costUsd !== null && <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">{fmtMoneyInr(g.costInr)}</div>}</div> },
                   { key: "profit", header: "Profit", align: "right", kind: "number", sortValue: g => g.profitUsd,
-                    cell: g => <CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{g.profitUsd === null ? "—" : (g.incomplete ? "≤ " : "") + fmtMoney(g.profitUsd)}</CellAmount> },
+                    cell: g => <div className="text-right leading-tight"><CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{g.profitUsd === null ? "—" : (g.incomplete ? "≤ " : "") + fmtMoney(g.profitUsd)}</CellAmount>{g.profitInr != null && <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">{(g.incomplete ? "≤ " : "") + fmtMoneyInr(g.profitInr)}</div>}</div> },
                   { key: "margin", header: "Margin", align: "right", kind: "number", sortValue: g => g.marginPct,
                     cell: g => <span className={`tabular-nums whitespace-nowrap ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{g.marginPct === null ? "—" : `${g.incomplete ? "≤ " : ""}${g.marginPct}%`}</span> },
                 ]}
