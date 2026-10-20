@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { useState } from "react";
 import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
@@ -97,13 +98,7 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
           {isEmployee && (
             <div>
               <Label className="text-xs">Department</Label>
-              <Select value={f.department || "__none"} onValueChange={v => setF({ ...f, department: v === "__none" ? "" : v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Department"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">No department</SelectItem>
-                  {depts.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <ListCombo list="departments" value={f.department} onChange={v => setF({ ...f, department: v })} placeholder="No department" className="h-10 rounded-xl mt-1" ariaLabel="Department" />
             </div>
           )}
         </div>

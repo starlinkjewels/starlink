@@ -1,6 +1,7 @@
 import { useDb } from "@/hooks/useDb";
 import { choicesOf, listOf, type ListKey } from "@/lib/optionLists";
-import { lotBalances, lotKey, lotLabel, mmChoices, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
+import { lotBalances, lotKey, lotLabel, mmChoices, normalizeMm, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
+import { ListCombo } from "@/components/ListCombo";
 import { bagNoOf } from "@/lib/diamondBags";
 import { stockAverageRate } from "@/lib/orderCost";
 import { fmtMoneyInr } from "@/lib/manufacturing";
@@ -16,25 +17,17 @@ const NONE = "__none";
  * the diamond shapes, sizes, colours and clarities on every stock form. A
  * value a record already has stays offered. `optional` adds "—" (not recorded).
  */
-export function ListSelect({ list, value, onChange, id, optional = true, placeholder = "—", className = "h-10 rounded-xl", choices }: {
+export function ListSelect({ list, value, onChange, id, optional = true, placeholder = "—", className = "h-10 rounded-xl", choices, normalize }: {
   list: ListKey; value: string; onChange: (v: string) => void; id?: string;
   optional?: boolean; placeholder?: string; className?: string;
   /** The options, when they are not the list as it stands (the mm and sieve sizes). */
   choices?: string[];
+  /** Tidies a typed word before it is used and remembered. */
+  normalize?: (typed: string) => string;
 }) {
-  const db = useDb();
-  const base = choices ?? choicesOf(list, undefined, db.settings);
-  const options = value && !base.includes(value) ? [...base, value] : base;
-  return (
-    <Select value={value || (optional ? NONE : "")} onValueChange={v => onChange(v === NONE ? "" : v)}>
-      <SelectTrigger id={id} className={className}><SelectValue placeholder={placeholder} /></SelectTrigger>
-      <SelectContent className="max-h-72">
-        {/* "—": not recorded. Short, so a narrow box never cuts it off. */}
-        {optional && <SelectItem value={NONE}><span className="text-muted-foreground">—</span></SelectItem>}
-        {options.map(o => <SelectItem key={o} value={o}>{o}</SelectItem>)}
-      </SelectContent>
-    </Select>
-  );
+  // Pick, or type something new — it is used and remembered in the list (ListCombo).
+  return <ListCombo list={list} value={value} onChange={onChange} id={id} optional={optional} placeholder={placeholder}
+    className={className} choices={choices} normalize={normalize} />;
 }
 
 /** "2.35 ct · 120 pcs · ₹3,200/ct" — what a lot holds and what it cost. */
@@ -107,7 +100,7 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
         </div>
         <div>
           <Label htmlFor={`${idPrefix}-mm`} className={lbl}>MM</Label>
-          <ListSelect id={`${idPrefix}-mm`} list="diamondMm" choices={mm} value={value.mm} onChange={v => onChange({ mm: v })} className={box} />
+          <ListSelect id={`${idPrefix}-mm`} list="diamondMm" choices={mm} value={value.mm} onChange={v => onChange({ mm: v })} className={box} normalize={t => normalizeMm(t) ?? t} />
         </div>
         <div>
           <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve</Label>

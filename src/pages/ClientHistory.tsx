@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { choicesOf } from "@/lib/optionLists";
 import { metalLabel } from "@/lib/metals";
@@ -784,15 +785,7 @@ function ClientHistoryPageBody() {
                   </Select>
                 )}
                 {/* Method */}
-                <Select value={payMethod} onValueChange={setPayMethod}>
-                  <SelectTrigger className="h-10 rounded-xl">
-                    <CreditCard className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {choicesOf("paymentMethods", payMethod).map(m =>
-                      <SelectItem key={m} value={m}>{m}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <ListCombo list="paymentMethods" value={payMethod} onChange={setPayMethod} optional={false} className="h-10 rounded-xl" ariaLabel="Payment method" />
               </div>
               {/* Remark */}
               <Input

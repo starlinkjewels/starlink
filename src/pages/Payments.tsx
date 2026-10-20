@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { materialUnit } from "@/lib/materials";
 import { choicesOf } from "@/lib/optionLists";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -447,10 +448,7 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
 
         <div>
           <Label className="text-xs">Method</Label>
-          <Select value={method} onValueChange={setMethod}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-            <SelectContent>{choicesOf("paymentMethods", method).map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-          </Select>
+          <ListCombo list="paymentMethods" value={method} onChange={setMethod} optional={false} className="h-10 rounded-xl mt-1" ariaLabel="Method" />
         </div>
 
         <div>

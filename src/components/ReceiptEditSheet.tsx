@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { useState } from "react";
 import { choicesOf } from "@/lib/optionLists";
 import { Link } from "react-router-dom";
@@ -244,10 +245,7 @@ export function ReceiptEditSheet({ receiptId, onClose }: { receiptId: string | n
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">Mode</Label>
-              <Select value={ef.method} disabled={!mayEdit} onValueChange={v => setEf({ ...ef, method: v })}>
-                <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Mode"><SelectValue /></SelectTrigger>
-                <SelectContent>{methods.map(m => <SelectItem key={m} value={m}>{m}</SelectItem>)}</SelectContent>
-              </Select>
+              <ListCombo list="paymentMethods" value={ef.method} onChange={v => setEf({ ...ef, method: v })} disabled={!mayEdit} optional={false} className="h-10 rounded-xl mt-1" ariaLabel="Mode" />
             </div>
             <div>
               <Label className="text-xs" htmlFor="rcpt-edit-remarks">Remarks</Label>
