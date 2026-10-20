@@ -23,9 +23,10 @@ const NONE = "__none__";
  */
 export function ListCombo({
   list, value, onChange, id, optional = true, placeholder = "—", className = "h-10 rounded-xl",
-  choices, normalize, disabled, ariaLabel,
+  choices, normalize, disabled, ariaLabel, remember, listTitle,
 }: {
-  list: ListKey; value: string; onChange: (v: string) => void; id?: string;
+  /** The business list it reads and remembers into — or give `choices` and `remember`. */
+  list?: ListKey; value: string; onChange: (v: string) => void; id?: string;
   /** Adds "—" (not recorded). */
   optional?: boolean; placeholder?: string; className?: string;
   /** The options, when they are not the list as it stands (the mm and sieve sizes). */
@@ -34,12 +35,16 @@ export function ListCombo({
   normalize?: (typed: string) => string;
   disabled?: boolean;
   ariaLabel?: string;
+  /** Where a new word is remembered, when it is not one of the dropdown lists (a material's grades). */
+  remember?: (word: string) => void;
+  /** What the list is called, for "added to …". */
+  listTitle?: string;
 }) {
   const db = useDb();
   const { user } = useAuth();
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
-  const base = choices ?? choicesOf(list, undefined, db.settings);
+  const base = choices ?? (list ? choicesOf(list, undefined, db.settings) : []);
   const options = value && !base.includes(value) ? [...base, value] : base;
   const typed = q.trim();
   const word = typed ? (normalize ? normalize(typed) : typed) : "";
@@ -54,14 +59,16 @@ export function ListCombo({
     if (!word) return;
     if (known) { pick(known); return; }
     // Remembered in the business's list — staff only; a client's word stays on their record.
-    if (user && user.role !== "client") {
-      updateDb(d => {
-        const cur = listOf(list, d.settings);
+    if (user && user.role !== "client" && (remember || list)) {
+      if (remember) remember(word);
+      else updateDb(d => {
+        const cur = listOf(list!, d.settings);
         if (cur.some(x => x.toLowerCase() === word.toLowerCase())) return;
         if (!d.settings.optionLists) d.settings.optionLists = {};
-        d.settings.optionLists[list] = [...cur, word];
+        d.settings.optionLists[list!] = [...cur, word];
       });
-      toast.success(`"${word}" added to ${listDef(list).title}`, { description: "It's in the list from now on — change it in Settings → Dropdown lists." });
+      toast.success(`"${word}" added to ${listTitle ?? (list ? listDef(list).title : "the list")}`,
+        { description: remember ? "It's in the list from now on." : "It's in the list from now on — change it in Settings → Dropdown lists." });
     }
     pick(word);
   };
