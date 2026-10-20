@@ -180,7 +180,7 @@ export function MaterialsSettings() {
               <Icon className="h-5 w-5 text-primary shrink-0" />
               <div className="min-w-0 flex-1">
                 <p className="font-semibold text-brand-dark text-sm truncate">{m.name}{m.active === false && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground uppercase">not offered</span>}</p>
-                <p className="text-xs text-muted-foreground truncate">{KIND_LABEL[m.kind]} · {UNIT_LABEL[m.unit]}{m.grades.length ? ` · ${m.grades.join(", ")}` : ""}{uses ? ` · ${uses} record${uses !== 1 ? "s" : ""}` : ""}</p>
+                <p className="text-xs text-muted-foreground truncate">{[KIND_LABEL[m.kind], UNIT_LABEL[m.unit]].filter(Boolean).join(" · ")}{m.grades.length ? ` · ${m.grades.join(", ")}` : ""}{uses ? ` · ${uses} record${uses !== 1 ? "s" : ""}` : ""}</p>
               </div>
               <div className="flex items-center gap-1 shrink-0">
                 <Button size="icon" variant="ghost" className="h-8 w-8 rounded-lg" aria-label={`Edit ${m.name}`} onClick={() => setEditing(m)}><Pencil className="h-3.5 w-3.5" /></Button>

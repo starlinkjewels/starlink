@@ -222,6 +222,22 @@ service cloud.firestore {
       allow write: if isStaff();
     }
 
+    // The company's brand (Settings → Brand Studio): logo, name, icon, colour —
+    // exactly what the sign-in page shows, so anyone may read it (it shows
+    // before sign-in). Only an admin may change it, only the one record, and
+    // only these fields, each a string of bounded size (pictures are small
+    // inline images, resized on upload).
+    match /brand/{doc} {
+      allow read: if true;
+      allow write: if isAdmin() && doc == 'public'
+        && request.resource.data.keys().hasOnly(['name', 'logo', 'logoDark', 'mark', 'color', 'updatedAt', 'updatedBy'])
+        && (!('name' in request.resource.data) || (request.resource.data.name is string && request.resource.data.name.size() <= 60))
+        && (!('logo' in request.resource.data) || (request.resource.data.logo is string && request.resource.data.logo.size() <= 300000 && request.resource.data.logo.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')))
+        && (!('logoDark' in request.resource.data) || (request.resource.data.logoDark is string && request.resource.data.logoDark.size() <= 300000 && request.resource.data.logoDark.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')))
+        && (!('mark' in request.resource.data) || (request.resource.data.mark is string && request.resource.data.mark.size() <= 130000 && request.resource.data.mark.matches('^data:image/(png|webp|jpeg);base64,[A-Za-z0-9+/=]+$')))
+        && (!('color' in request.resource.data) || (request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-fA-F]{6}$')));
+    }
+
     // Deny everything else by default.
     match /{document=**} { allow read, write: if false; }
   }

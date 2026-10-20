@@ -7,10 +7,18 @@ import { AuthProvider } from "./lib/auth";
 import { Toaster } from "@/components/ui/sonner";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import "./styles.css";
+import "./studio.css";
 import { applyRememberedAppearance } from "@/lib/appearance";
+import { applyStudio } from "@/lib/studio";
+import { applyBrand, getBrand, loadBrand } from "@/lib/brand";
 
 // Open in the look this device last showed, before any data arrives — no flash of the default.
+// The new look (preview) first, so the appearance below knows whether to step aside.
+applyStudio();
 applyRememberedAppearance();
+// The company's own brand: as this device remembers it at once, then as saved (readable before sign-in).
+applyBrand(getBrand());
+void loadBrand();
 
 const qc = new QueryClient();
 

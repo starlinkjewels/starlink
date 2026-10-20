@@ -6,6 +6,7 @@ import {
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { auth, isAdminEmail, clearDeviceCache } from "./firebase";
+import { useBrand, brandName, BUILTIN } from "./brand";
 import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, type User } from "./db";
 import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
@@ -32,15 +33,16 @@ const Ctx = createContext<AuthCtx>({} as AuthCtx);
  *    an admin (which sets their `authUid`), otherwise they get no access.
  */
 function Splash({ label = "Loading…" }: { label?: string }) {
+  const brand = useBrand();
   return (
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{ background: "radial-gradient(circle at 30% 25%, oklch(0.34 0.006 75) 0%, oklch(0.17 0.004 75) 55%, oklch(0.11 0.003 75) 100%)" }}
+      style={{ background: "var(--splash-bg)" }}
     >
       <div className="flex flex-col items-center gap-6">
         <img
-          src="/brand-logo-white.png"
-          alt="Shree Suktam Diamond"
+          src={brand.logoDark || brand.logo || BUILTIN.white || BUILTIN.logo}
+          alt={brandName(brand)}
           className="h-24 w-auto object-contain drop-shadow-[0_2px_12px_rgba(0,0,0,0.4)] animate-pulse"
           onError={e => { (e.currentTarget as HTMLImageElement).style.display = "none"; }}
         />

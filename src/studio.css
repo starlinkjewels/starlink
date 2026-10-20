@@ -1,0 +1,145 @@
+/* ══════════════════════════════════════════════════════════════════════
+   The new look (preview) — Settings → Appearance → "New look (preview)".
+
+   Everything here sits under :root[data-studio], set only on a device where
+   the preview is switched on (lib/studio.ts). Without it nothing in this file
+   applies and the app looks exactly as before.
+
+   Principles (from the redesign plan):
+   • One sans UI font, a short size scale, aligned (tabular) figures. The
+     serif stays only for the brand (logo, sign-in headline: .brand-serif).
+   • Calm neutral ink; the brand colour only for the main action, the active
+     place and real links.
+   • Structure felt, not seen: one level of container, soft hairlines, small
+     shadows only on what floats.
+   • Colour carries meaning only — no decorative icon tiles.
+   ══════════════════════════════════════════════════════════════════════ */
+
+/* ── Foundations ─────────────────────────────────────────────────────── */
+:root[data-studio] {
+  /* Corners: 6 / 8 / 12 / 16 — firm, not bubbly. */
+  --radius: 0.5rem;
+  /* Warm, quiet neutrals (Linear's 2026 refresh: warmer, less saturated greys). */
+  --background: oklch(0.984 0.0025 85);
+  --card: oklch(1 0 0);
+  --popover: oklch(1 0 0);
+  --foreground: oklch(0.22 0.012 265);
+  --card-foreground: oklch(0.22 0.012 265);
+  --popover-foreground: oklch(0.22 0.012 265);
+  --muted-foreground: oklch(0.52 0.012 265);
+  --border: oklch(0.912 0.004 85);
+  --input: oklch(0.875 0.005 85);
+  --secondary: oklch(0.963 0.003 85);
+  --muted: oklch(0.963 0.003 85);
+  --secondary-foreground: oklch(0.3 0.012 265);
+  --sidebar: oklch(0.976 0.003 85);
+  --sidebar-border: oklch(0.912 0.004 85);
+  /* Surfaces read these (styles.css: card-luxe, btn-hero). */
+  --card-bg: var(--color-card);
+  --card-radius: 12px;
+  --card-shadow: none;
+  --card-line: var(--color-border);
+  --card-lift: none;
+  --card-hover-shadow: 0 1px 2px rgb(16 24 40 / 0.05);
+  --hero-bg: linear-gradient(var(--color-primary), var(--color-primary));
+  --hero-shadow: 0 1px 2px rgb(16 24 40 / 0.12);
+  --shadow-luxe: 0 1px 2px rgb(16 24 40 / 0.04);
+  --shadow-soft: 0 1px 2px rgb(16 24 40 / 0.06);
+}
+:root[data-studio].dark {
+  --background: oklch(0.17 0.008 265);
+  --card: oklch(0.205 0.008 265);
+  --popover: oklch(0.22 0.008 265);
+  --foreground: oklch(0.95 0.004 265);
+  --card-foreground: oklch(0.95 0.004 265);
+  --popover-foreground: oklch(0.95 0.004 265);
+  --muted-foreground: oklch(0.7 0.01 265);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --secondary: oklch(0.25 0.008 265);
+  --muted: oklch(0.25 0.008 265);
+  --secondary-foreground: oklch(0.9 0.004 265);
+  --sidebar: oklch(0.19 0.008 265);
+}
+
+/* Corners as the business chose them in Brand Studio. */
+:root[data-studio][data-corners="sharp"] { --radius: 0.3rem; --card-radius: 8px; }
+:root[data-studio][data-corners="round"] { --radius: 0.75rem; --card-radius: 16px; }
+
+/* ── Type: one font, one short scale, figures that line up ──────────── */
+:root[data-studio] body {
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "cv11", "ss01";
+  letter-spacing: -0.006em;
+}
+:root[data-studio] :is(h1, h2, h3, .font-display):not(.brand-serif) {
+  font-family: "Inter", ui-sans-serif, system-ui, sans-serif;
+  font-weight: 600;
+  letter-spacing: -0.018em;
+  font-variant-numeric: tabular-nums;
+}
+/* The brand keeps its serif (sign-in headline). */
+:root[data-studio] .brand-serif.brand-serif.font-display { font-family: var(--font-display); letter-spacing: -0.01em; font-weight: 500; }
+/* Page title 24 (phone 22) · section 16 · body 14 · caption 12. */
+:root[data-studio] .ui-page-title { font-size: 24px; line-height: 1.25; }
+@media (max-width: 639px) { :root[data-studio] .ui-page-title { font-size: 22px; } }
+:root[data-studio] .ui-section-title { font-size: 16px; line-height: 1.35; }
+/* Titles, names and figures in ink, not brand colour. */
+:root[data-studio] .text-brand-dark { color: var(--color-foreground); }
+:root[data-studio] .text-brand-dark\/70 { color: var(--color-muted-foreground); }
+
+/* ── Decorative icon tiles go; the label says what it is ─────────────── */
+:root[data-studio] :is(.ui-stat-icon, .ui-title-icon) { display: none; }
+
+/* ── Figure strips: one quiet row of figures ─────────────────────────── */
+:root[data-studio] .ui-stats { box-shadow: none; border-color: var(--color-border); background: var(--color-card); border-radius: var(--card-radius); }
+/* Inside a card it is part of the card — no second box. */
+:root[data-studio] .card-luxe .ui-stats { border-color: transparent; background: transparent; }
+:root[data-studio] .card-luxe .ui-stats > div > div { padding-left: 0.25rem; }
+/* KPI figures in ink; colour stays for money in/out inside ledgers. */
+:root[data-studio] .ui-stat-value:not(.text-muted-foreground) { color: var(--color-foreground); }
+:root[data-studio] .ui-stat-value { font-weight: 600; letter-spacing: -0.02em; }
+:root[data-studio] .ui-stat-label { color: var(--color-muted-foreground); font-weight: 500; }
+
+/* ── Tables: quiet headers in sentence case, hairlines ───────────────── */
+:root[data-studio] .ui-th {
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-muted-foreground);
+}
+:root[data-studio] .ui-th.dt-sorted { color: var(--color-foreground); }
+:root[data-studio] .ui-caps { text-transform: none; letter-spacing: 0; }
+/* The table style the preview uses ("clean"), in neutral greys. */
+:root[data-studio][data-tbl] {
+  --tbl-head-bg: var(--color-card);
+  --tbl-line: color-mix(in oklab, var(--color-border) 75%, transparent);
+  --tbl-head-line: var(--color-border);
+  --tbl-hover: color-mix(in oklab, var(--color-foreground) 3.5%, transparent);
+}
+
+/* ── Sidebar: it recedes, the page leads ─────────────────────────────── */
+:root[data-studio] .app-nav-item { color: var(--color-muted-foreground); font-weight: 500; }
+:root[data-studio] .app-nav-item:hover { color: var(--color-foreground); background: color-mix(in oklab, var(--color-foreground) 5%, transparent); }
+:root[data-studio] .app-nav-item.is-active {
+  background: color-mix(in oklab, var(--color-primary) 10%, transparent);
+  color: var(--color-primary);
+  box-shadow: none;
+}
+:root[data-studio] .app-nav-group { color: color-mix(in oklab, var(--color-muted-foreground) 75%, transparent); letter-spacing: 0.04em; }
+
+/* ── Buttons and fields: firm corners, solid colour, no glow ─────────── */
+:root[data-studio] .btn-hero { font-weight: 600; }
+:root[data-studio] .btn-hero:hover { filter: brightness(1.06); }
+
+/* ── Motion: quick and quiet (100–250 ms), never in the way ──────────── */
+:root[data-studio] .card-hover { transition: box-shadow 0.15s ease, border-color 0.15s ease; }
+:root[data-studio] .card-hover:hover { transform: none; border-color: color-mix(in oklab, var(--color-foreground) 18%, transparent); }
+@media (prefers-reduced-motion: reduce) {
+  :root[data-studio] * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ── The Gujarati words (ughrani, chukavni) stay, but quieter ───────── */
+:root[data-studio] .ui-local { opacity: 0.6; font-style: italic; }

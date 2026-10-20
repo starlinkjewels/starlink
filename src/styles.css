@@ -429,6 +429,17 @@
 :root[data-tbl][data-tbl-density="compact"] table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.32rem; padding-bottom: 0.32rem; }
 :root[data-tbl][data-tbl-density="spacious"] table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.95rem; padding-bottom: 0.95rem; }
 
+/* The sign-in page and the loading screen: deep brand-coloured grounds (Brand Studio retints them). */
+:root {
+  --login-bg: radial-gradient(circle at 20% 20%, oklch(0.34 0.006 75) 0%, oklch(0.19 0.004 75) 60%, oklch(0.12 0.003 75) 100%);
+  --login-glow: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.14), transparent 40%), radial-gradient(circle at 70% 60%, rgba(200,184,158,0.22), transparent 50%);
+  --splash-bg: radial-gradient(circle at 30% 25%, oklch(0.34 0.006 75) 0%, oklch(0.17 0.004 75) 55%, oklch(0.11 0.003 75) 100%);
+}
+
+/* Compact or spacious rows on tables as built too (no table style chosen). */
+:root[data-tbl-density="compact"]:not([data-tbl]) table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.32rem; padding-bottom: 0.32rem; }
+:root[data-tbl-density="spacious"]:not([data-tbl]) table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.95rem; padding-bottom: 0.95rem; }
+
 /* The column a data table is sorted by stays marked under any style. */
 :root[data-tbl] table:not(.tbl-plain) > thead > tr > th.dt-sorted { box-shadow: inset 0 -2px 0 var(--color-primary); }
 :root[data-tbl]:not([data-tbl="bold"]) table:not(.tbl-plain) > thead > tr > th.dt-sorted { color: var(--color-primary); }

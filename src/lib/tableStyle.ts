@@ -4,6 +4,8 @@
  * styles.css). "Classic" sets nothing at all, so tables look exactly as they
  * were built.
  */
+import { studioOn } from "./studio";
+
 export type TableStyleKey = "classic" | "clean" | "minimal" | "grid" | "striped" | "bold" | "cards";
 export type TableDensity = "default" | "compact" | "spacious";
 
@@ -38,11 +40,24 @@ export function tableUiOf(v: Partial<TableUi> | undefined | null): TableUi {
   };
 }
 
+/** The table style last put on the page, so switching the new look on or off can put it back. */
+let lastApplied: TableUi | null = null;
+
+/** Put the last table style back on the page (after the new look is switched on or off). */
+export function reapplyTableUi(): void {
+  applyTableUi(lastApplied ?? DEFAULT_TABLE_UI);
+}
+
 /** Put a table style on the page. Classic clears everything. */
 export function applyTableUi(ui: TableUi, root: HTMLElement = document.documentElement): void {
+  if (root === document.documentElement) lastApplied = ui;
+  // The new look (preview) has its own quiet table; density and the sticky header stay as chosen.
+  if (studioOn()) ui = { ...ui, style: "clean", zebra: false, hover: true, lines: false };
   const set = (k: string, v: string | null) => (v === null ? root.removeAttribute(k) : root.setAttribute(k, v));
   if (ui.style === "classic") {
-    for (const k of ["data-tbl", "data-tbl-density", "data-tbl-zebra", "data-tbl-hover", "data-tbl-lines", "data-tbl-sticky"]) root.removeAttribute(k);
+    for (const k of ["data-tbl", "data-tbl-zebra", "data-tbl-hover", "data-tbl-lines", "data-tbl-sticky"]) root.removeAttribute(k);
+    // Row spacing is the one choice that also applies to tables as built (Brand Studio → Density).
+    set("data-tbl-density", ui.density === "default" ? null : ui.density);
     return;
   }
   set("data-tbl", ui.style);

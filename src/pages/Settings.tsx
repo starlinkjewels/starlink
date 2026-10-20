@@ -4,9 +4,10 @@ import { PageHeader, TabBar } from "@/components/PageHeader";
 import { materialUnit } from "@/lib/materials";
 import { TableStyleSettings } from "@/components/TableStyleSettings";
 import { AppearanceSettings } from "@/components/AppearanceSettings";
+import { BrandStudio } from "@/components/BrandStudio";
 import { ServerTotalsCheck } from "@/components/ServerTotalsCheck";
 import { DataSizePanel } from "@/components/DataSizePanel";
-import { Table2, Palette } from "lucide-react";
+import { Table2, Palette, Sparkles } from "lucide-react";
 import { MAIN_COMPANY_ID, companyIdOfInvoice } from "@/lib/companies";
 import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
@@ -776,6 +777,7 @@ export function SettingsPage() {
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
+    { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin },
     { id: "appearance", label: "Appearance", icon: Palette, show: isAdmin },
     { id: "tables", label: "Table Style", icon: Table2, show: isAdmin },
     { id: "logins", label: "Secure Logins", icon: ShieldCheck, show: isAdmin && pendingLogins.length > 0 },
@@ -1517,6 +1519,7 @@ export function SettingsPage() {
       )}
 
       {/* Table style — admin only */}
+      {activeId === "brand" && <BrandStudio />}
       {activeId === "appearance" && <AppearanceSettings />}
       {activeId === "tables" && <TableStyleSettings />}
 

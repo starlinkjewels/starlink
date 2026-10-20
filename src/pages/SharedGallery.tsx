@@ -4,6 +4,8 @@ import { doc, getDoc } from "firebase/firestore";
 import { db as fsdb } from "@/lib/firebase";
 import type { Share, ShareItem, ShareFolder } from "@/lib/db";
 import { SHARE_MAIN_SITE, shareIsExpired, loadShareItems } from "@/lib/share";
+import { BrandLogo } from "@/components/BrandLogo";
+import { useBrand, brandName } from "@/lib/brand";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, ChevronRight as Crumb } from "lucide-react";
 
@@ -70,6 +72,7 @@ function Lightbox({ items, startIndex, onClose }: { items: ShareItem[]; startInd
 
 export function SharedGalleryPage() {
   const { id } = useParams();
+  const brand = useBrand();
   const [share, setShare] = useState<Share | null>(null);
   const [status, setStatus] = useState<"loading" | "ok" | "missing" | "expired">("loading");
   const [lightbox, setLightbox] = useState<number | null>(null);
@@ -143,7 +146,7 @@ export function SharedGalleryPage() {
       <header className="sticky top-0 z-20 bg-white/90 backdrop-blur border-b border-border/60">
         <div className="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
-            <img src="/brand-logo-wide.png" alt="Shree Suktam Diamond" className="h-8 w-auto object-contain" />
+            <BrandLogo wide className="h-8 w-auto object-contain" />
           </div>
           {status === "ok" && items.length > 0 && (
             <button onClick={downloadAll} disabled={downloading}

@@ -338,7 +338,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · mm · sieve · colour · clarity" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · mm · sieve · colour · clarity" : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 

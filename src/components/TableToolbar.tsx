@@ -259,7 +259,7 @@ const STAT_TONE = {
 export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode }) {
   const n = Math.max(1, items.length);
   return (
-    <div className="rounded-2xl border border-border/70 bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)] overflow-clip">
+    <div className="ui-stats rounded-2xl border border-border/70 bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)] overflow-clip">
       <div className="grid grid-cols-2 sm:[grid-template-columns:repeat(var(--n),minmax(0,1fr))]" style={{ ["--n" as string]: n }}>
         {items.map((it, i) => {
           // Colour says money in, money owed: a figure of nothing says neither.
@@ -279,11 +279,11 @@ export function StatStrip({ items, note }: { items: StatItem[]; note?: ReactNode
                 <span aria-hidden className="max-sm:hidden absolute -left-[11px] top-1/2 -translate-y-1/2 z-[1] h-[22px] w-[22px] grid place-items-center rounded-full bg-white border border-border text-[13px] font-semibold text-muted-foreground leading-none">{it.op}</span>
               )}
               {/* The picture only where there is room for it beside the figure. */}
-              <span className={`h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip} @max-[14rem]:hidden`}><Icon className="h-[18px] w-[18px]" /></span>
+              <span className={`ui-stat-icon h-9 w-9 shrink-0 rounded-xl grid place-items-center ${t.chip} @max-[14rem]:hidden`}><Icon className="h-[18px] w-[18px]" /></span>
               <div className="min-w-0 flex-1">
-                <p className="text-xs font-medium text-muted-foreground leading-snug line-clamp-2">{it.label}</p>
+                <p className="ui-stat-label text-xs font-medium text-muted-foreground leading-snug line-clamp-2">{it.label}</p>
                 {/* A figure is never split across lines: it sizes to its tile instead. */}
-                <p className={`mt-1 text-[clamp(0.95rem,11cqi,1.375rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
+                <p className={`ui-stat-value mt-1 text-[clamp(0.95rem,11cqi,1.375rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${zero ? "text-muted-foreground" : t.value}`}>{it.value}</p>
                 {it.sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">{it.sub}</p>}
               </div>
             </div>

@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { SectionTitle } from "@/components/SectionTitle";
-import { Palette, Check, RotateCcw, TrendingUp, Package } from "lucide-react";
+import { Palette, Check, RotateCcw, TrendingUp, Package, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { loadDb, updateDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { studioOn, setStudio } from "@/lib/studio";
+import { reapplyTableUi } from "@/lib/tableStyle";
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectSeparator, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   UI_LOOKS, UI_ACCENTS, DEFAULT_APPEARANCE, TEXT_FONTS, HEADING_SERIFS, appearanceOf, applyAppearance, isDefaultAppearance, loadFontPreviews,
@@ -66,6 +69,33 @@ function Segmented<T extends string>({ value, options, onChange }: { value: T; o
 }
 
 /**
+ * The new look, as a preview on this device only — try it on the real app,
+ * switch back any time. Nothing is saved for anyone else.
+ */
+function NewLookPreview({ onChange }: { onChange: () => void }) {
+  const [on, setOn] = useState(studioOn);
+  const flip = (v: boolean) => {
+    setStudio(v);
+    setOn(v);
+    onChange();
+    reapplyTableUi();
+    toast.success(v ? "New look on — only on this device" : "Back to the current look");
+  };
+  return (
+    <div className="card-luxe p-4 sm:p-5 flex items-start sm:items-center justify-between gap-4">
+      <div className="min-w-0 flex items-start gap-3">
+        <span className="ui-title-icon h-9 w-9 shrink-0 rounded-xl bg-primary/10 text-primary grid place-items-center"><Sparkles className="h-[18px] w-[18px]" /></span>
+        <div className="min-w-0">
+          <label htmlFor="new-look" className="text-sm font-semibold text-brand-dark cursor-pointer">New look (preview)</label>
+          <p className="text-xs text-muted-foreground mt-0.5">One clean font, calm colours and flat cards. Only on this device — switch back any time. Your brand colour, light/dark and corners stay; the look and font choices below rest while it is on.</p>
+        </div>
+      </div>
+      <Switch id="new-look" checked={on} onCheckedChange={flip} />
+    </div>
+  );
+}
+
+/**
  * Settings → Appearance. A choice shows at once on the whole app; Save keeps
  * it for everyone. Leaving without saving puts back what was saved.
  */
@@ -98,6 +128,8 @@ export function AppearanceSettings() {
   );
 
   return (
+    <div className="space-y-4">
+    <NewLookPreview onChange={() => applyAppearance(ui)} />
     <div className="card-luxe p-5 sm:p-6 space-y-5">
       <SectionTitle icon={Palette} title="Appearance" sub="For everyone, once saved" />
 
@@ -210,6 +242,7 @@ export function AppearanceSettings() {
         {dirty && <Button type="button" variant="outline" onClick={() => setUi(saved)} className="rounded-xl">Discard</Button>}
         <Button type="button" onClick={save} disabled={!dirty} className="btn-hero rounded-xl">Save for everyone</Button>
       </div>
+    </div>
     </div>
   );
 }

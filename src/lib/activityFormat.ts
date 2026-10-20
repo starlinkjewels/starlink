@@ -94,7 +94,7 @@ const PRIORITY = [
 ];
 
 /** Records that follow from an action rather than stand for one. */
-const BOOKKEEPING = new Set(["lockerTransactions", "stockMovements", "meta", "adminRecords", "tasks"]);
+const BOOKKEEPING = new Set(["lockerTransactions", "stockMovements", "diamondBags", "meta", "adminRecords", "tasks"]);
 
 export function moduleOfCol(col: string, doc?: Record<string, unknown> | null): ModuleKey {
   if (col === "users" && doc && doc.role === "client") return "clients";
@@ -132,6 +132,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "stockMovements": return `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
+    case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;
     case "giftCards": return `$${num(d.amount)}`;
     case "clientReceipts": return `${s(d.receiptNo)} · $${num(d.amountUsd)}`;

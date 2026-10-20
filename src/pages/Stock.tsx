@@ -158,7 +158,7 @@ export function StockPage() {
           value={`${inStockPackets.length} packet${inStockPackets.length !== 1 ? "s" : ""}`} to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`} />
         {others.map(({ m, total, grades }) => (
           <MaterialCard key={m.id} name={m.name} icon={m.kind === "stone" ? Gem : m.kind === "finding" ? Link2 : Layers}
-            sub={`${KIND_LABEL[m.kind]} · ${grades} grade${grades === 1 ? "" : "s"} in stock`} value={fmtQty(total, m.unit)}
+            sub={`${KIND_LABEL[m.kind] ? `${KIND_LABEL[m.kind]} · ` : ""}${grades} grade${grades === 1 ? "" : "s"} in stock`} value={fmtQty(total, m.unit)}
             to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`} dim={m.active === false} />
         ))}
 

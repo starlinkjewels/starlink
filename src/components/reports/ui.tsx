@@ -65,12 +65,12 @@ export function KpiCard({ icon: Icon, label, value, sub, delta, goodWhenDown, to
     rose: "bg-rose-500/10 text-rose-600", sky: "bg-sky-500/10 text-sky-600", violet: "bg-violet-500/10 text-violet-600",
   };
   return (
-    <div className="card-luxe p-4 flex flex-col gap-2 min-w-0" title={hint}>
+    <div className="ui-kpi card-luxe p-4 flex flex-col gap-2 min-w-0" title={hint}>
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-medium text-muted-foreground truncate">{label}</p>
-        <span className={`h-8 w-8 rounded-xl grid place-items-center shrink-0 ${tones[tone]}`}><Icon className="h-4 w-4" /></span>
+        <span className={`ui-stat-icon h-8 w-8 rounded-xl grid place-items-center shrink-0 ${tones[tone]}`}><Icon className="h-4 w-4" /></span>
       </div>
-      <p className="font-display text-2xl text-brand-dark leading-none truncate">{value}</p>
+      <p className="ui-stat-value font-display text-2xl text-brand-dark leading-none truncate">{value}</p>
       {/* Stacked on a phone, side by side when there is room. */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 sm:gap-2 min-h-[14px]">
         {sub ? <p className="text-[10px] text-muted-foreground leading-snug line-clamp-2 min-w-0">{sub}</p> : <span />}

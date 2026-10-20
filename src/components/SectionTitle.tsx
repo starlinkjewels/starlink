@@ -45,9 +45,9 @@ export function SectionTitle({ title, sub, info, icon: Icon, actions, className 
   return (
     <div className={`flex items-start justify-between gap-3 ${className}`}>
       <div className="min-w-0 flex items-center gap-3">
-        {Icon && <span className="h-9 w-9 shrink-0 rounded-xl bg-primary/10 text-primary grid place-items-center"><Icon className="h-[18px] w-[18px]" /></span>}
+        {Icon && <span className="ui-title-icon h-9 w-9 shrink-0 rounded-xl bg-primary/10 text-primary grid place-items-center"><Icon className="h-[18px] w-[18px]" /></span>}
         <div className="min-w-0">
-          <h2 className="font-display text-lg sm:text-xl text-brand-dark leading-tight flex items-center gap-1.5 min-w-0">
+          <h2 className="ui-section-title font-display text-lg sm:text-xl text-brand-dark leading-tight flex items-center gap-1.5 min-w-0">
             <span className="truncate">{title}</span>{info && <InfoTip text={info} />}
           </h2>
           {sub && <p className="text-xs text-muted-foreground mt-0.5 truncate">{sub}</p>}
