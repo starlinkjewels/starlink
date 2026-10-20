@@ -391,7 +391,8 @@ export function IncomePage() {
             noun="transaction"
             rows={filtered}
             columns={columns}
-            rowKey={r => r.id}
+            // A payment's id is only unique within its order — keyed with the order, so no two rows can share a key.
+            rowKey={r => `${r.editable?.orderId ?? ""}|${r.id}`}
             defaultSort={{ key: "date", dir: "desc" }}
             searchText={r => [r.party, r.link?.label, r.type, r.description].filter(Boolean).join(" ")}
             searchPlaceholder="Search party, reference, description"
