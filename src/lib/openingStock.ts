@@ -9,9 +9,11 @@
 // 5 g without the history running below zero. That is refused, with how much
 // can still come off.
 import { updateDb, loadDb, dayOf, type DB, type StockMovement } from "./db";
-import { fmtQty, materialName, materialUnit } from "./materials";
+import { fmtQty, materialName, materialUnit, purchaseBucket } from "./materials";
 import { fmtMoneyInr } from "./manufacturing";
 import { adjustStockCounter } from "./stock";
+import { lotKey, tidySpec, type LotSpec } from "./diamondLots";
+import { addBags } from "./diamondBags";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const EPS = 0.0005;
@@ -264,4 +266,141 @@ export async function deleteOpeningStock(db: DB, m: StockMovement, deps: Opening
   await carryOut(plan, d => planOpeningDelete(d, m), d => {
     d.stockMovements = (d.stockMovements ?? []).filter(x => x.id !== plan.id);
   }, live, deps);
+}
+
+/**
+ * Move a loose-diamond opening entry into another bag — its shape, mm, sieve,
+ * colour or clarity were entered wrong (or not at all) — and set its piece
+ * count. The stones leave the old lot and join the new one; the old lot must
+ * still hold them (nothing issued, used or sold out of it since), exactly as
+ * removing the entry would require. Pieces alone change nothing else.
+ */
+export async function refileOpeningLot(opened: StockMovement, spec: LotSpec, pieces: number | undefined, deps: OpeningDeps & { userId?: string } = {}): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const m = liveOpening(live, opened, "This opening stock was removed by someone else — reopen and try again.");
+  if (typeof m === "string") throw new Error(m);
+  if (m.material !== "diamond" || m.purityOrQuality === "Certified") throw new Error("Only loose diamonds are kept in bags.");
+  const key = lotKey(spec);
+  const parts = tidySpec(spec);
+  const lotRow = Object.fromEntries(Object.entries(parts).filter(([, v]) => v)) as StockMovement["lot"];
+  const pcs = pieces != null && pieces > 0 ? Math.round(pieces) : undefined;
+  const update = deps.update ?? updateDb;
+
+  // Same lot: only the parts kept on the row and the piece count — no stones move.
+  if (key === m.purityOrQuality) {
+    update(d => {
+      const row = (d.stockMovements ?? []).find(x => x.id === m.id);
+      if (!row) return;
+      row.lot = lotRow;
+      if (pcs) row.pieces = pcs; else delete row.pieces;
+    });
+    return;
+  }
+
+  // Into another bag: the old one must still hold these stones.
+  const refused = openingRefusal(live, m, null);
+  if (refused) throw new Error(refused.replace("Correct it down to what is left, or cancel those first.", "Only what is still in the bag can move to another one."));
+  const adjust = deps.adjust ?? adjustStockCounter;
+  const moves = live.stockMovements ?? [];
+  // Out of the old bag first (floor-checked); if the entry moved on meanwhile, give it back.
+  await adjust({ material: "diamond", companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: -m.quantity }, moves);
+  let changed = false;
+  update(d => {
+    const row = (d.stockMovements ?? []).find(x => x.id === m.id);
+    if (!row || openingBasis(row) !== openingBasis(m)) { changed = true; return; }
+    row.purityOrQuality = key;
+    row.lot = lotRow;
+    if (pcs) row.pieces = pcs; else delete row.pieces;
+    addBags(d, [key], deps.userId);
+  });
+  if (changed) {
+    await adjust({ material: "diamond", companyId: m.companyId, purityOrQuality: m.purityOrQuality, delta: m.quantity }, moves);
+    throw new Error(OPENING_CHANGED);
+  }
+  try {
+    await adjust({ material: "diamond", companyId: m.companyId, purityOrQuality: key, delta: m.quantity }, moves);
+  } catch (e) {
+    throw new Error(`Moved — but the stock counter for the new bag did not go up (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
+  }
+}
+
+/**
+ * Move a loose-diamond PURCHASE into another bag — its shape, mm, sieve, colour
+ * or clarity were entered wrong — and set its piece count. Every stock entry the
+ * purchase made (the purchase itself and any later corrections of it) moves
+ * with it, and the purchase's own details change to match. The old bag must
+ * still hold the stones: nothing issued, used or sold out of them since.
+ *
+ * Bought for an order, the stones never sat in stock — that purchase is
+ * corrected on the order itself.
+ */
+export async function refilePurchaseLot(purchaseId: string, spec: LotSpec, pieces: number | undefined, deps: OpeningDeps & { userId?: string } = {}): Promise<void> {
+  const live = (deps.load ?? loadDb)();
+  const p = (live.purchases ?? []).find(x => x.id === purchaseId);
+  if (!p) throw new Error("This purchase was removed by someone else.");
+  if (p.material !== "diamond" || p.diamond?.kind === "certified") throw new Error("Only loose diamonds are kept in bags.");
+  if (p.purpose === "order" || p.orderId) throw new Error("Bought for an order — correct its stones on the order.");
+  const oldKey = purchaseBucket(p);
+  const key = lotKey(spec);
+  const parts = tidySpec(spec);
+  const lotRow = Object.fromEntries(Object.entries(parts).filter(([, v]) => v)) as StockMovement["lot"];
+  const pcs = pieces != null && pieces > 0 ? Math.round(pieces) : undefined;
+  const update = deps.update ?? updateDb;
+  const setDetails = (d: DB) => {
+    const row = (d.purchases ?? []).find(x => x.id === p.id);
+    if (!row?.diamond) return;
+    row.diamond.shape = parts.shape;
+    for (const k of ["size", "mm", "color", "clarity"] as const) { if (parts[k]) row.diamond[k] = parts[k]; else delete row.diamond[k]; }
+    row.diamond.quality = [parts.color, parts.clarity].filter(Boolean).join(" ") || undefined;
+    if (!row.diamond.quality) delete row.diamond.quality;
+    if (pcs) row.diamond.pieces = pcs; else delete row.diamond.pieces;
+  };
+  const mine = (d: DB) => (d.stockMovements ?? []).filter(x => x.material === "diamond" && x.refId === p.id && x.refType === "purchase" && x.purityOrQuality === oldKey);
+  const rows = mine(live);
+  const co = rows[0]?.companyId ?? p.companyId;
+
+  // Same bag: only the details and the count.
+  if (key === oldKey) {
+    update(d => {
+      setDetails(d);
+      for (const r of mine(d)) { r.lot = lotRow; if (r.type === "purchase_in") { if (pcs) r.pieces = pcs; else delete r.pieces; } }
+    });
+    return;
+  }
+  if (!rows.length) throw new Error("This purchase's stock entry isn't on file, so its stones can't be moved to another bag.");
+
+  // The old bag without this purchase's stones must never have run below zero.
+  const ids = new Set(rows.map(r => r.id));
+  const sample = rows[0];
+  const all = bucketMoves(live, sample);
+  if (lowest(all.filter(x => !ids.has(x.id))) < Math.min(0, lowest(all)) - EPS) {
+    throw new Error("Some of these stones have since been issued, used or sold out of their bag — cancel those first, then move the purchase.");
+  }
+  const net = r3(rows.reduce((t, x) => t + signOf(x) * Math.abs(x.quantity), 0));
+  const adjust = deps.adjust ?? adjustStockCounter;
+  const moves = live.stockMovements ?? [];
+  if (net > 0) await adjust({ material: "diamond", companyId: co, purityOrQuality: oldKey, delta: -net }, moves);
+  let changed = false;
+  update(d => {
+    const now = mine(d);
+    if (now.length !== rows.length || r3(now.reduce((t, x) => t + signOf(x) * Math.abs(x.quantity), 0)) !== net) { changed = true; return; }
+    for (const r of now) {
+      r.purityOrQuality = key;
+      r.lot = lotRow;
+      if (r.type === "purchase_in") { if (pcs) r.pieces = pcs; else delete r.pieces; }
+    }
+    setDetails(d);
+    addBags(d, [key], deps.userId);
+  });
+  if (changed) {
+    if (net > 0) await adjust({ material: "diamond", companyId: co, purityOrQuality: oldKey, delta: net }, moves);
+    throw new Error("This purchase was changed by someone else — reopen and try again.");
+  }
+  if (net > 0) {
+    try {
+      await adjust({ material: "diamond", companyId: co, purityOrQuality: key, delta: net }, moves);
+    } catch (e) {
+      throw new Error(`Moved — but the stock counter for the new bag did not go up (${e instanceof Error ? e.message : String(e)}). Use Recompute from history on the Stock page.`);
+    }
+  }
 }

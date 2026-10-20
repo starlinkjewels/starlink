@@ -31,8 +31,9 @@ import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PageHeader } from "@/components/PageHeader";
 import { lotShape } from "@/lib/diamondLots";
+import { bagNoOf } from "@/lib/diamondBags";
 import { StockLotsTable } from "@/components/StockLotsTable";
-import { ListSelect } from "@/components/LotFields";
+import { ListSelect, CertGradeFields } from "@/components/LotFields";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { listOf } from "@/lib/optionLists";
 
@@ -175,8 +176,11 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const movementColumns: DataColumn<Movement>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: m => +new Date(m.createdAt),
       cell: m => <CellDate>{fmtDate(m.createdAt)}</CellDate> },
-    { key: "bucket", header: bucketLabel, sortValue: m => String(m.purityOrQuality),
-      cell: m => <CellTag tone="blue">{m.purityOrQuality}</CellTag> },
+    { key: "bucket", header: material === "diamond" ? "Bag" : bucketLabel, sortValue: m => String(m.purityOrQuality),
+      csv: m => [material === "diamond" ? bagNoOf(db, m.purityOrQuality) : undefined, m.purityOrQuality].filter(Boolean).join(" · "),
+      cell: m => material === "diamond" && bagNoOf(db, m.purityOrQuality)
+        ? <span className="inline-flex items-center gap-1.5 whitespace-nowrap"><span className="font-mono text-xs font-semibold text-primary">{bagNoOf(db, m.purityOrQuality)}</span><CellTag tone="blue">{m.purityOrQuality}</CellTag></span>
+        : <CellTag tone="blue">{m.purityOrQuality}</CellTag> },
     // Loose diamonds: how many stones moved, when counted.
     ...(material === "diamond" ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (m: Movement) => m.pieces ?? null,
       cell: (m: Movement) => (m.pieces != null ? <span className="tabular-nums">{m.type === "purchase_in" ? "+" : "−"}{m.pieces}</span> : dash) }] : []),
@@ -334,7 +338,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By lot — shape · size · colour · clarity" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · mm · sieve · colour · clarity" : `${def ? KIND_LABEL[def.kind] : ""} · by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 
@@ -912,41 +916,20 @@ function CertifiedSection() {
                   {editPacket.purchaseId ? " Changing the carat or rate corrects the supplier’s bill for this stone too." : ""}
                 </p>
               </div>
-              <div>
-                <Label className="text-xs">Color</Label>
-                <ListSelect list="diamondColors" value={editPacket.color ?? ""} onChange={v => setEditPacket({ ...editPacket, color: v || undefined })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Clarity</Label>
-                <ListSelect list="diamondClarities" value={editPacket.clarity ?? ""} onChange={v => setEditPacket({ ...editPacket, clarity: v || undefined })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Cut</Label>
-                <Input value={editPacket.cut ?? ""} onChange={e => setEditPacket({ ...editPacket, cut: e.target.value })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Polish</Label>
-                <Input value={editPacket.polish ?? ""} onChange={e => setEditPacket({ ...editPacket, polish: e.target.value })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Symmetry</Label>
-                <Input value={editPacket.symmetry ?? ""} onChange={e => setEditPacket({ ...editPacket, symmetry: e.target.value })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Fluorescence</Label>
-                <Input value={editPacket.fluorescence ?? ""} onChange={e => setEditPacket({ ...editPacket, fluorescence: e.target.value })} className="rounded-xl mt-1" />
-              </div>
+              {/* Its report — the same fields as when it was bought. */}
               <div className="col-span-2">
-                <Label className="text-xs">Measurement</Label>
-                <Input value={editPacket.measurement ?? ""} onChange={e => setEditPacket({ ...editPacket, measurement: e.target.value })} className="rounded-xl mt-1" placeholder="6.5 x 6.5 x 4.0 mm" />
-              </div>
-              <div>
-                <Label className="text-xs">Report Number</Label>
-                <Input value={editPacket.certificateNumber} onChange={e => setEditPacket({ ...editPacket, certificateNumber: e.target.value })} className="rounded-xl mt-1" />
-              </div>
-              <div>
-                <Label className="text-xs">Lab</Label>
-                <Input value={editPacket.certificateLab ?? ""} onChange={e => setEditPacket({ ...editPacket, certificateLab: e.target.value })} className="rounded-xl mt-1" placeholder="GIA / IGI" />
+                <CertGradeFields idPrefix="edit-pk"
+                  value={{ color: editPacket.color ?? "", clarity: editPacket.clarity ?? "", cut: editPacket.cut ?? "", polish: editPacket.polish ?? "",
+                    symmetry: editPacket.symmetry ?? "", fluorescence: editPacket.fluorescence ?? "", measurement: editPacket.measurement ?? "",
+                    lab: editPacket.certificateLab ?? "", certNo: editPacket.certificateNumber }}
+                  onChange={p => setEditPacket({
+                    ...editPacket,
+                    ...(p.color !== undefined ? { color: p.color || undefined } : {}), ...(p.clarity !== undefined ? { clarity: p.clarity || undefined } : {}),
+                    ...(p.cut !== undefined ? { cut: p.cut } : {}), ...(p.polish !== undefined ? { polish: p.polish } : {}),
+                    ...(p.symmetry !== undefined ? { symmetry: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { fluorescence: p.fluorescence } : {}),
+                    ...(p.measurement !== undefined ? { measurement: p.measurement } : {}), ...(p.lab !== undefined ? { certificateLab: p.lab } : {}),
+                    ...(p.certNo !== undefined ? { certificateNumber: p.certNo } : {}),
+                  })} />
               </div>
             </div>
             <DialogFooter>

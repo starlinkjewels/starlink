@@ -2,12 +2,16 @@ import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { Boxes, Pencil, Trash2 } from "lucide-react";
 import { useDb } from "@/hooks/useDb";
+import { loadDb } from "@/lib/db";
+import { lotKey, lotParts } from "@/lib/diamondLots";
+import { bagNoOf } from "@/lib/diamondBags";
+import { LooseLotFields, lotFromDraft, type LooseLotDraft } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
 import { dayOf, type DB, type StockMovement } from "@/lib/db";
 import { fmtQty, materialName, materialUnit } from "@/lib/materials";
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import {
-  deleteOpeningStock, editOpeningStock, openingDeleteImpact, openingRefusal, openingRoom,
+  deleteOpeningStock, editOpeningStock, openingDeleteImpact, openingRefusal, openingRoom, refileOpeningLot,
 } from "@/lib/openingStock";
 import { confirmBox } from "@/lib/confirm";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -68,16 +72,28 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
   const db = useDb();
   const { user } = useAuth();
   const [f, setF] = useState({ qty: "", value: "", date: "", note: "" });
+  // Loose diamonds: the bag it is in (shape · mm · sieve · colour · clarity) and its pieces.
+  const [lot, setLot] = useState<LooseLotDraft>({ shape: "Round", mm: "", size: "", color: "", clarity: "" });
+  const [pcs, setPcs] = useState("");
   useEffect(() => {
-    if (movement) setF({
-      qty: String(movement.quantity), value: movement.valueInr ? String(movement.valueInr) : "",
-      date: dayOf(movement.createdAt), note: movement.note ?? "",
-    });
+    if (movement) {
+      setF({
+        qty: String(movement.quantity), value: movement.valueInr ? String(movement.valueInr) : "",
+        date: dayOf(movement.createdAt), note: movement.note ?? "",
+      });
+      const p = lotParts(movement.purityOrQuality, movement.lot);
+      setLot({ shape: p.shape, mm: p.mm ?? "", size: p.size ?? "", color: p.color ?? "", clarity: p.clarity ?? "" });
+      setPcs(movement.pieces != null ? String(movement.pieces) : "");
+    }
   }, [movement]);
 
   const m = movement;
   const unit = materialUnit(db.settings, m?.material);
   const room = m ? openingRoom(db, m) : 0;
+  const loose = !!m && m.material === "diamond" && m.purityOrQuality !== "Certified";
+  const newKey = lotKey(lotFromDraft(lot));
+  const bagMoves = loose && newKey !== m!.purityOrQuality;
+  const pcsNow = m?.pieces != null ? String(m.pieces) : "";
 
   const save = async () => {
     if (!m) return;
@@ -86,9 +102,17 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
     if (user?.role !== "admin") { toast.error("Only an admin can change stock"); return; }
     const qty = Number(f.qty);
     if (!qty || qty <= 0) { toast.error("Enter the opening quantity"); return; }
+    const figuresChanged = qty !== m.quantity || (Number(f.value) || 0) !== (m.valueInr ?? 0) || f.date !== dayOf(m.createdAt) || f.note.trim() !== (m.note ?? "");
+    const lotChanged = loose && (bagMoves || pcs !== pcsNow
+      || JSON.stringify(lotFromDraft(lot)) !== JSON.stringify(lotParts(m.purityOrQuality, m.lot)));
     try {
-      await editOpeningStock(db, m, { quantity: qty, valueInr: Number(f.value) || 0, date: f.date, note: f.note });
-      toast.success("Opening stock corrected — stock moved by the difference");
+      if (figuresChanged) await editOpeningStock(db, m, { quantity: qty, valueInr: Number(f.value) || 0, date: f.date, note: f.note });
+      if (lotChanged) {
+        // Worked out from the entry as it now stands (the figures may just have changed).
+        const fresh = (loadDb().stockMovements ?? []).find(x => x.id === m.id) ?? m;
+        await refileOpeningLot(fresh, lotFromDraft(lot), Number(pcs) > 0 ? Number(pcs) : undefined, { userId: user?.id });
+      }
+      toast.success(bagMoves ? `Moved into ${bagNoOf(loadDb(), newKey) ?? "its bag"} · ${newKey}` : "Opening stock corrected — stock moved by the difference");
       onClose();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Couldn't correct this.");
@@ -124,6 +148,23 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
       }
     >
       <div className="space-y-3">
+        {loose && (
+          <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
+            <p className="text-xs font-semibold text-brand-dark">Bag · now {bagNoOf(db, m!.purityOrQuality) ?? "no bag no."} · {m!.purityOrQuality}</p>
+            <LooseLotFields idPrefix="open-edit" compact companyId={m!.companyId || "main"} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="opening-pcs" className="text-xs">Pcs</Label>
+                <Input id="opening-pcs" type="number" min={0} step="1" value={pcs} onChange={e => setPcs(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional" />
+              </div>
+            </div>
+            {bagMoves && (
+              <p className="text-[11px] text-primary font-medium">
+                These {m!.quantity} ct move out of {m!.purityOrQuality} into {newKey}{room < m!.quantity - 0.0005 ? " — but only what is still in the bag can move" : ""}.
+              </p>
+            )}
+          </div>
+        )}
         <div className="grid grid-cols-2 gap-3">
           <div>
             <Label htmlFor="opening-qty" className="text-xs">Quantity ({unit})</Label>

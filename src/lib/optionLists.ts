@@ -9,12 +9,13 @@
 // Lists the app's logic runs on — gold karats, order status, priority — are
 // deliberately not here.
 import { loadDb, type Settings } from "./db";
-import { DEFAULT_DIAMOND_CLARITIES, DEFAULT_DIAMOND_COLORS, DEFAULT_DIAMOND_SIZES } from "./diamondLots";
+import { DEFAULT_DIAMOND_CLARITIES, DEFAULT_DIAMOND_COLORS, DEFAULT_DIAMOND_MM, DEFAULT_DIAMOND_SIZES } from "./diamondLots";
 
 export type ListKey =
   | "jewelleryTypes" | "metals" | "diamondTypes" | "colours" | "rhodium" | "stamping"
   | "paymentMethods" | "departments" | "meltReasons" | "returnReasons"
-  | "diamondShapes" | "diamondSizes" | "diamondColors" | "diamondClarities";
+  | "diamondShapes" | "diamondSizes" | "diamondMm" | "diamondColors" | "diamondClarities"
+  | "diamondFinish" | "diamondFluorescence" | "diamondLabs";
 
 export interface ListDef {
   key: ListKey;
@@ -41,15 +42,24 @@ export const LIST_DEFS: readonly ListDef[] = [
     defaults: ["No Rhodium", "Diamond Part White", "Full White", "Two Tone Casting", "Other"] },
   { key: "stamping", group: "Orders", title: "Stamping", hint: "Stamp choices on an order",
     defaults: ["No Stamping", "KT Stamping", "Diamond Weight + KT Stamp"], builtIn: ["Special Stamp"] },
-  // Loose diamond lots in stock: shape · size · colour · clarity (lib/diamondLots.ts).
+  // Loose diamond lots in stock: shape · sieve · mm · colour · clarity (lib/diamondLots.ts),
+  // and a certified stone's grading.
   { key: "diamondShapes", group: "Diamonds", title: "Shapes", hint: "Loose and certified stones",
     defaults: ["Round", "Oval", "Pear", "Princess", "Emerald", "Marquise", "Cushion", "Radiant", "Heart", "Asscher", "Baguette", "Mix", "Other"] },
-  { key: "diamondSizes", group: "Diamonds", title: "Sizes", hint: "Sieve sizes and mm, for loose lots",
+  { key: "diamondMm", group: "Diamonds", title: "MM sizes", hint: "Millimetre sizes, for loose lots",
+    defaults: DEFAULT_DIAMOND_MM },
+  { key: "diamondSizes", group: "Diamonds", title: "Sieve sizes", hint: "Sieve sizes, for loose lots (mm ones here show under MM too)",
     defaults: DEFAULT_DIAMOND_SIZES },
   { key: "diamondColors", group: "Diamonds", title: "Colours", hint: "Single grades and ranges, for loose lots",
     defaults: DEFAULT_DIAMOND_COLORS },
-  { key: "diamondClarities", group: "Diamonds", title: "Clarities", hint: "Single grades and groups, for loose lots",
+  { key: "diamondClarities", group: "Diamonds", title: "Clarities", hint: "Single grades and groups, loose and certified",
     defaults: DEFAULT_DIAMOND_CLARITIES },
+  { key: "diamondFinish", group: "Diamonds", title: "Cut · polish · symmetry", hint: "A certified stone's finish grades",
+    defaults: ["EX", "VG", "G", "F", "P", "Ideal"] },
+  { key: "diamondFluorescence", group: "Diamonds", title: "Fluorescence", hint: "A certified stone's fluorescence",
+    defaults: ["None", "Faint", "Medium", "Strong", "Very Strong"] },
+  { key: "diamondLabs", group: "Diamonds", title: "Labs", hint: "Who graded a certified stone",
+    defaults: ["GIA", "IGI", "HRD", "GCAL", "SGL", "EGL"] },
   { key: "paymentMethods", group: "Payments", title: "Payment methods", hint: "How a client paid",
     defaults: ["Cash", "Bank Transfer", "UPI", "Venmo", "Zelle", "Cheque", "Card", "Other"] },
   { key: "departments", group: "Team", title: "Departments", hint: "A staff member's department",

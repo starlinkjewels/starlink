@@ -64,7 +64,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   expenses: "expenses", lockers: "locker", lockerTransactions: "locker",
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
-  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock",
+  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", diamondBags: "stock",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
   productPhotoFolders: "productPhotos", productPhotoItems: "productPhotos",
@@ -77,7 +77,7 @@ const COL_NOUN: Record<string, string> = {
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", stockMovements: "stock movement", diamondPackets: "certified stone",
-  diamondSales: "diamond sale", readyStock: "ready-stock item", giftCards: "gift card",
+  diamondSales: "diamond sale", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
   tasks: "task", meta: "settings", adminRecords: "admin figure",
@@ -90,7 +90,7 @@ const PRIORITY = [
   "suppliers", "brokers", "factories", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
   "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
-  "tasks", "meta", "adminRecords", "lockerTransactions", "stockMovements",
+  "tasks", "meta", "adminRecords", "lockerTransactions", "diamondBags", "stockMovements",
 ];
 
 /** Records that follow from an action rather than stand for one. */

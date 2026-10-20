@@ -19,6 +19,8 @@ import {
 } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
 import { uid, type StockMovement, type MaterialKey } from "./db";
+import { ensureBag } from "./diamondBags";
+import { lotParts } from "./diamondLots";
 
 const STOCK_COL = "stockLevels";
 const MAIN_DOC = "current";
@@ -106,12 +108,22 @@ function pruneUndefined<T extends Record<string, unknown>>(o: T): T {
 /** A lot's parts without the empty ones — Firestore refuses an undefined field, nested ones too. */
 function cleanLot(lot: StockMovement["lot"]): StockMovement["lot"] {
   if (!lot?.shape) return undefined;
-  return pruneUndefined({ shape: lot.shape, size: lot.size || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
+  return pruneUndefined({ shape: lot.shape, size: lot.size || undefined, mm: lot.mm || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
+}
+
+/** A loose-diamond movement's lot parts: as given, else read from its lot label — so
+ *  every way stones come back (a return, a melt, a cancel, a correction) files them
+ *  with their shape, mm, sieve, colour and clarity, not just a label. */
+function lotOf(material: MaterialKey, key: string, lot: StockMovement["lot"]): StockMovement["lot"] {
+  if (lot?.shape) return cleanLot(lot);
+  return material === "diamond" && key && key !== "Certified" && key !== "unspecified" ? cleanLot(lotParts(key)) : undefined;
 }
 
 async function addStockMovement(m: Omit<StockMovement, "id">): Promise<void> {
   const id = uid("sm_");
-  await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, lot: cleanLot(m.lot), id }));
+  await setDoc(doc(fsdb, "stockMovements", id), pruneUndefined({ ...m, lot: lotOf(m.material, m.purityOrQuality, m.lot), id }));
+  // Loose stones into a lot: the lot gets its bag number if it has none yet.
+  if (m.material === "diamond" && m.type === "purchase_in") ensureBag(m.purityOrQuality, m.createdBy);
 }
 
 /** Purchase → stock: a plain atomic increment is safe, since additions can never go negative. */
@@ -212,7 +224,7 @@ export async function decreaseStock(args: {
       quantity: args.quantity,
       refType: args.refType,
       refId: args.refId,
-      lot: cleanLot(args.lot),
+      lot: lotOf(args.material, args.purityOrQuality, args.lot),
       pieces: args.pieces,
       createdBy: args.createdBy,
       createdAt: new Date().toISOString(),
