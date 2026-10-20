@@ -1,8 +1,8 @@
-import { useId } from "react";
+import { ListCombo } from "@/components/ListCombo";
+import { updateDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { activeMaterials, materialDef, UNIT_LABEL } from "@/lib/materials";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
-import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 /** The admin-defined materials offered for a new entry (plus the one already chosen). */
@@ -36,12 +36,14 @@ export function GradeInput({ material, value, onChange, className = "h-10 rounde
 }) {
   const db = useDb();
   const def = materialDef(db.settings, material);
-  const listId = useId();
+  // Pick one of the material's grades, or type a new one — used at once and
+  // remembered with the material (Settings → Materials), like every other list.
   return (
-    <>
-      <Input list={listId} value={value} onChange={e => onChange(e.target.value)} className={className}
-        placeholder={placeholder ?? (def?.grades.length ? def.grades.slice(0, 3).join(", ") : "Grade (optional)")} aria-label="Grade" />
-      <datalist id={listId}>{(def?.grades ?? []).map(g => <option key={g} value={g} />)}</datalist>
-    </>
+    <ListCombo value={value === "—" ? "" : value} onChange={onChange} choices={def?.grades ?? []} className={className}
+      placeholder={placeholder ?? "Grade (optional)"} ariaLabel="Grade" listTitle={def ? `${def.name} grades` : "grades"}
+      remember={!def ? undefined : word => updateDb(d => {
+        const m = (d.settings.materials ?? []).find(x => x.id === material);
+        if (m && !m.grades.some(g => g.toLowerCase() === word.toLowerCase())) m.grades = [...m.grades, word];
+      })} />
   );
 }

@@ -7,7 +7,7 @@ import { lotKey, type LotSpec } from "@/lib/diamondLots";
 import { billBrokerageProblem, brokerageForLines, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { useDb } from "@/hooks/useDb";
 import {
-  updateDb, uid, DIAMOND_SHAPES, nextDiamondStockNumber, todayLocal, stampFor,
+  updateDb, uid, nextDiamondStockNumber, todayLocal, stampFor,
   type Purchase, type PurchaseCurrency,
 } from "@/lib/db";
 import { increaseStock } from "@/lib/stock";
@@ -20,12 +20,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, type LucideIcon } from "lucide-react";
+import { Coins, Gem, BadgeCheck, Plus, X, Layers, ShoppingCart, ChevronDown, type LucideIcon } from "lucide-react";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, type MaterialKey, type MaterialUnit } from "@/lib/materials";
 import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
-import { coField, companyById } from "@/lib/companies";
+import { coField, companyById, workCompanyOf } from "@/lib/companies";
 import { Field, Group, PanelActions, Stat, UnitInput } from "@/components/BillLayout";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
@@ -103,11 +105,19 @@ const lineUnit = (l: Line, settings: Parameters<typeof materialUnit>[0]): Materi
  * is shared — supplier, date, bill number, currency and the rounding — is
  * entered once, and the lines saved together are one bill afterwards.
  */
-export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier }: {
+  open: boolean; onOpenChange: (open: boolean) => void;
+  /** Opened from a supplier's page: the bill is theirs, already chosen. */
+  supplierId?: string;
+}) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
-  const [supplierId, setSupplierId] = useState("");
+  const [supplierChosen, setSupplierId] = useState("");
+  const supplierId = fixedSupplier ?? supplierChosen;
+  // What the bill is for: stock (the usual), or one order — bought for it, kept off stock.
+  const [forWhat, setForWhat] = useState<"stock" | "order">("stock");
+  const [orderId, setOrderId] = useState("");
   // Whose stock the bill goes into — each company holds its own.
   const defaultCompany = useDefaultCompany();
   const [companyId, setCompanyId] = useState(defaultCompany);
@@ -157,11 +167,20 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
 
   const reset = () => {
     setLines([{ ...emptyLine(), kind: "gold" }]);
+    setForWhat("stock"); setOrderId("");
     setBillNo(""); setXrate(""); setRoundOff(""); setNotes(""); setBrokerage(emptyBillBrokerage());
   };
 
+  // For an order: open orders, newest first; the bill goes on the order's own company.
+  const openOrders = db.orders.filter(o => !["Delivered", "Rejected", "Cancelled"].includes(o.status) && !o.melted)
+    .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  const forOrder = forWhat === "order" ? db.orders.find(o => o.id === orderId) : undefined;
+
   const submit = async () => {
     if (!supplierId) { toast.error("Choose a supplier"); return; }
+    if (forWhat === "order" && !forOrder) { toast.error("Choose the order this bill is for"); return; }
+    // Bought for an order: the order's company, not the stock picker's.
+    const co = forOrder ? workCompanyOf(db, forOrder) : companyId;
     // The bill number is optional: not every purchase comes with one.
     const brokerProblem = billBrokerageProblem(brokerage);
     if (brokerProblem) { toast.error(brokerProblem); return; }
@@ -182,12 +201,13 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
     try {
       // Gold and loose pool into Stock; a certified stone never pools — it
       // becomes its own packet below.
-      for (const [i, l] of lines.entries()) {
+      // Bought for an order, nothing goes into stock — the order's factory takes it from the bill.
+      for (const [i, l] of (forOrder ? [] : lines).entries()) {
         if (l.kind === "certified") continue;
         // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
         const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
         await increaseStock({
-          material: lineMaterial(l), companyId,
+          material: lineMaterial(l), companyId: co,
           purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
           quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
           lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
@@ -202,7 +222,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
           const isOther = l.kind === "other";
           const total = lineInr(l) + (i === 0 ? roundOffInr : 0);
           const purchase: Purchase = {
-            id: ids[i], supplierId, material: lineMaterial(l), ...coField(companyId),
+            id: ids[i], supplierId, material: lineMaterial(l), ...coField(co),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
             other: isOther ? {
               qty: q, grade: l.grade.trim() || "—", ratePerUnit: Number(l.rate) || 0,
@@ -218,7 +238,7 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               certificateNumber: l.kind === "certified" ? l.certNo.trim() : undefined,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
-            purpose: "stock", currency,
+            purpose: forOrder ? "order" : "stock", ...(forOrder ? { orderId: forOrder.id } : {}), currency,
             totalUsd: currency === "USD" ? Math.round(lineBase(l) * 100) / 100 : undefined,
             exchangeRate: currency === "USD" ? Number(xrate) : undefined,
             totalInr: total, payments: [],
@@ -243,13 +263,37 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
               certificateNumber: l.certNo.trim(), certificateLab: l.lab.trim() || undefined,
               // What the stone cost us: the bill line plus any brokerage we pay on it.
               ratePerCaratInr: q > 0 ? Math.round((landedInr(purchase) / q) * 100) / 100 : undefined,
-              supplierId, purchaseId: ids[i], status: "in_stock", ...coField(companyId),
+              supplierId, purchaseId: ids[i], status: "in_stock", ...coField(co),
+              // For an order: kept in stock, reserved to it, so it goes through the normal issue to the factory.
+              ...(forOrder ? { orderId: forOrder.id } : {}),
               createdBy: user!.id, createdAt: now,
             });
           }
         });
+        // The order: its purchases, and a line in its manufacturing log for each.
+        if (forOrder) {
+          const o = d.orders.find(x => x.id === forOrder.id);
+          if (o) {
+            if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
+            if (!o.manufacturingLog) o.manufacturingLog = [];
+            lines.forEach((l, i) => {
+              o.linkedPurchaseIds!.push(ids[i]);
+              const q = Number(l.qty);
+              const what = l.kind === "gold" ? `${q}g ${l.purity} gold`
+                : l.kind === "other" ? `${q} ${materialUnit(db.settings, l.materialId)} ${l.grade.trim() ? `${l.grade.trim()} ` : ""}${materialName(db.settings, l.materialId)}`
+                : l.kind === "certified" ? `${q}ct ${l.shape} diamond (Certified ${l.certNo.trim()})`
+                : `${q}ct ${lotKey(lotOfLine(l))} diamond`;
+              const amt = lineInr(l) + (i === 0 ? roundOffInr : 0);
+              o.manufacturingLog!.push({
+                id: uid("mlog_"), type: "material_purchased", at: now, employeeId: user!.id,
+                material: lineMaterial(l), amountMaterial: q, amountInr: amt,
+                remarks: `Purchased ${what} from ${supplier?.name || "supplier"} for this order — ${fmtMoneyInr(amt)}`,
+              });
+            });
+          }
+        }
       });
-      toast.success(`${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${companyId !== "main" ? `${companyById(db.settings, companyId).name}'s ` : ""}stock · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
+      toast.success(`${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${forOrder ? `order ${forOrder.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}stock`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
       reset();
       onOpenChange(false);
     } catch (e) {
@@ -288,11 +332,12 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
         </div>
       </div>
       <PanelActions onCancel={() => onOpenChange(false)}
-        note={chosenSupplier
-          ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}stock${certifiedLines ? " — each certified stone as its own packet" : ""}.`
-          : "Choose the supplier the bill is from."}>
+        note={!chosenSupplier ? "Choose the supplier the bill is from."
+          : forWhat === "order"
+            ? (forOrder ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, for order ${forOrder.orderNumber} — not into stock${certifiedLines ? "; certified stones kept for the order" : ""}.` : "Choose the order this bill is for.")
+            : `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}stock${certifiedLines ? " — each certified stone as its own packet" : ""}.`}>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-52">
-          {saving ? "Saving…" : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : "Buy → Stock"}
+          {saving ? "Saving…" : forWhat === "order" ? (forOrder ? `Buy for ${forOrder.orderNumber}` : "Buy for the order") : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : "Buy → Stock"}
         </AsyncButton>
       </PanelActions>
     </div>
@@ -300,13 +345,17 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
 
   return (
     <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={ShoppingCart} title="New purchase"
-      description="A supplier's bill into stock: a line for each size, quality or material, and the total onto the supplier's account."
+      description={forWhat === "order"
+        ? "A supplier's bill for one order: kept off stock, on the order's cost, and the total onto the supplier's account."
+        : "A supplier's bill into stock: a line for each size, quality or material, and the total onto the supplier's account."}
       footer={footer}>
       <div className="@container space-y-5">
         {/* The bill's head: who it is from, its number and date, the currency, whose stock. */}
         <Group title="Bill">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Supplier" required className="col-span-2 @md:col-span-1">{id => (
+            <Field label="Supplier" required className="col-span-2 @md:col-span-1">{id => fixedSupplier ? (
+              <div id={id} className="h-10 rounded-xl px-3 flex items-center bg-secondary/60 text-sm font-medium truncate">{chosenSupplier?.name ?? "Supplier"}</div>
+            ) : (
               <Select value={supplierId} onValueChange={addNew("supplier", setSupplierId)}>
                 <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
                 <SelectContent>{suppliers.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}<AddNewItem kind="supplier" /></SelectContent>
@@ -331,7 +380,23 @@ export function BuyMaterialForm({ open, onOpenChange }: { open: boolean; onOpenC
                 )}
               </div>
             )}</Field>
-            {multiCo && (
+            {/* What the bill is for: stock, or one order (kept off stock, on the order's own cost). */}
+            <Field label="For" className="col-span-2 @md:col-span-1">{id => (
+              <div id={id} className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl h-10">
+                {(["stock", "order"] as const).map(k => (
+                  <button key={k} type="button" onClick={() => setForWhat(k)} aria-pressed={forWhat === k}
+                    className={`rounded-lg text-xs font-medium transition-colors ${forWhat === k ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
+                    {k === "stock" ? "Stock" : "An order"}
+                  </button>
+                ))}
+              </div>
+            )}</Field>
+            {forWhat === "order" && (
+              <Field label="Order" required className="col-span-2 @md:col-span-1">{id => (
+                <OrderPick id={id} value={orderId} onChange={setOrderId} orders={openOrders} clientName={cid => db.clients.find(c => c.id === cid)?.companyName ?? ""} />
+              )}</Field>
+            )}
+            {multiCo && forWhat === "stock" && (
               <div className="col-span-2 @md:col-span-1">
                 <CompanyPicker value={companyId} onChange={setCompanyId} label="Company — whose stock this is" />
               </div>
@@ -494,5 +559,39 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
   
       )}
     </div>
+  );
+}
+
+/** Pick an open order by number or client — searchable, newest first. */
+function OrderPick({ id, value, onChange, orders, clientName }: {
+  id?: string; value: string; onChange: (id: string) => void;
+  orders: { id: string; orderNumber: string; clientId: string; jewelleryType?: string }[]; clientName: (id: string) => string;
+}) {
+  const [open, setOpen] = useState(false);
+  const chosen = orders.find(o => o.id === value);
+  return (
+    <Popover open={open} onOpenChange={setOpen} modal>
+      <PopoverTrigger asChild>
+        <button type="button" id={id} role="combobox" aria-expanded={open}
+          className="flex w-full h-10 items-center justify-between gap-2 rounded-xl border border-input bg-transparent px-3 text-sm shadow-sm">
+          <span className={chosen ? "truncate" : "text-muted-foreground"}>{chosen ? `${chosen.orderNumber} · ${clientName(chosen.clientId)}` : "Choose the order"}</span>
+          <ChevronDown className="h-4 w-4 opacity-50 shrink-0" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="p-0 w-[var(--radix-popover-trigger-width)] min-w-[16rem]">
+        <Command>
+          <CommandInput placeholder="Order no. or client…" />
+          <CommandList className="max-h-64">
+            <CommandEmpty>No open order matches.</CommandEmpty>
+            {orders.map(o => (
+              <CommandItem key={o.id} value={`${o.orderNumber} ${clientName(o.clientId)} ${o.jewelleryType ?? ""}`} onSelect={() => { onChange(o.id); setOpen(false); }}>
+                <span className="font-mono text-xs font-semibold text-primary shrink-0">{o.orderNumber}</span>
+                <span className="truncate text-muted-foreground">{clientName(o.clientId)}{o.jewelleryType ? ` · ${o.jewelleryType}` : ""}</span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }
