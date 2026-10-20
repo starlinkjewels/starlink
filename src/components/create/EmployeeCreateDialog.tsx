@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
@@ -284,10 +285,7 @@ export function EmployeeCreateDialog({ open, onOpenChange, onCreated }: {
                   </Field>
                   {!asAdminChosen && (
                     <Field label="Department">
-                      <Select value={f.department} onValueChange={v => setF({ ...f, department: v })}>
-                        <SelectTrigger className="h-10 rounded-xl" aria-label="Department"><SelectValue /></SelectTrigger>
-                        <SelectContent>{choicesOf("departments", f.department).map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-                      </Select>
+                      <ListCombo list="departments" value={f.department} onChange={v => setF({ ...f, department: v })} optional={false} className="h-10 rounded-xl" ariaLabel="Department" />
                     </Field>
                   )}
                 </div>

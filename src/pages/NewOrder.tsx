@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { officeLabel, officeOf } from "@/lib/offices";
 import { CompanyPicker, CompanyBadge, useDefaultCompany } from "@/components/CompanyFields";
 import { coField, companyOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
@@ -633,37 +634,19 @@ export function NewOrderPage() {
           {/* Type + Metal — 2 cols on all screens (both short) */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Jewellery Type">
-              <Select value={f.jewelleryType} onValueChange={setJewelleryType}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {choicesOf("jewelleryTypes", f.jewelleryType, db.settings).map(x =>
-                    <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <ListCombo list="jewelleryTypes" value={f.jewelleryType} onChange={setJewelleryType} optional={false} className="rounded-xl h-11" ariaLabel="Jewellery Type" />
             </Field>
 
             <Field label="Metal">
               {isDiamondOnly ? (
                 <div className="rounded-xl h-11 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">None (Diamond only)</div>
               ) : (
-                <Select value={f.metal} onValueChange={setMetal}>
-                  <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {choicesOf("metals", f.metal, db.settings).map(x =>
-                      <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                  </SelectContent>
-                </Select>
+                <ListCombo list="metals" value={f.metal} onChange={setMetal} optional={false} className="rounded-xl h-11" ariaLabel="Metal" />
               )}
             </Field>
 
             <Field label="Diamond Type">
-              <Select value={f.diamondType} onValueChange={v => set("diamondType", v)}>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {choicesOf("diamondTypes", f.diamondType, db.settings).map(x =>
-                    <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                </SelectContent>
-              </Select>
+              <ListCombo list="diamondTypes" value={f.diamondType} onChange={v => set("diamondType", v)} optional={false} className="rounded-xl h-11" ariaLabel="Diamond Type" />
             </Field>
 
             <Field label="Priority">
@@ -780,12 +763,7 @@ export function NewOrderPage() {
               {/* Color + Karats — 2 cols always */}
               <div className="grid grid-cols-2 gap-3">
                 <Field label="Color *">
-                  <Select value={f.productColor} onValueChange={v => set("productColor", v)} required>
-                    <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
-                    <SelectContent>
-                      {choicesOf("colours", f.productColor, db.settings).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
+                  <ListCombo list="colours" value={f.productColor} onChange={v => set("productColor", v)} optional={false} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Color" />
                 </Field>
 
                 {metalHasKarats ? (

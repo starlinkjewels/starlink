@@ -1,3 +1,5 @@
+import { ListCombo } from "@/components/ListCombo";
+import type { ListKey } from "@/lib/optionLists";
 import { useState, type ReactNode } from "react";
 import { Lock, Pencil } from "lucide-react";
 import { toast } from "sonner";
@@ -196,6 +198,13 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     </Select>
   );
 
+  // A business list: pick, or type a new word — used and remembered (ListCombo).
+  const pickList = (k: keyof Form, list: ListKey, disabled: string | undefined) => (
+    <div title={disabled}>
+      <ListCombo list={list} value={f[k]} onChange={v => set(k, v)} disabled={!!disabled} placeholder="Select…" className="h-10 rounded-xl" />
+    </div>
+  );
+
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} title={`Edit ${order.orderNumber}`} icon={Pencil} size="lg"
       description="The piece and its delivery, as New Order took them. The price has its own editor on the order page."
@@ -233,7 +242,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                     ? pick("productKarats", KARATS, matLock)
                     : <div className="h-10 rounded-xl px-3 flex items-center bg-secondary/60 text-xs text-muted-foreground">No karats for {f.metal}</div>}
                 </Field>
-                <Field label="Colour">{pick("productColor", listOf("colours", db.settings), pieceLock)}</Field>
+                <Field label="Colour">{pickList("productColor", "colours", pieceLock)}</Field>
                 <Field label="Product size" wide>
                   <Input value={f.productSize} onChange={e => set("productSize", e.target.value)} disabled={!!pieceLock} placeholder="e.g. Ring size 7, Bracelet 18cm" className="h-10 rounded-xl" />
                 </Field>
@@ -243,10 +252,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
               <Input type="number" min={1} step={1} value={f.quantity} onChange={e => set("quantity", e.target.value)} disabled={!!matLock} title={matLock} className="h-10 rounded-xl" />
             </Field>
             <Field label="Diamond type">
-              <Select value={f.diamondType} onValueChange={v => set("diamondType", v)} disabled={!!matLock}>
-                <SelectTrigger className="h-10 rounded-xl" title={matLock}><SelectValue /></SelectTrigger>
-                <SelectContent>{opts(listOf("diamondTypes", db.settings), f.diamondType).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
-              </Select>
+              {pickList("diamondType", "diamondTypes", matLock)}
             </Field>
             <Field label="Est. diamond weight (ct)">
               <Input type="number" min={0} step="0.01" value={f.diamondWeight} onChange={e => set("diamondWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
@@ -260,8 +266,8 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                   <Input type="number" min={0} step="0.001" value={f.estimatedNetWeight} onChange={e => set("estimatedNetWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
                 </Field>
                 <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight) || undefined} net={Number(f.estimatedNetWeight) || undefined} diamondCt={Number(f.diamondWeight) || undefined} />
-                <Field label="Rhodium">{pick("rhodium", listOf("rhodium", db.settings), pieceLock)}</Field>
-                <Field label="Stamping">{pick("stamping", choicesOf("stamping", undefined, db.settings), pieceLock)}</Field>
+                <Field label="Rhodium">{pickList("rhodium", "rhodium", pieceLock)}</Field>
+                <Field label="Stamping">{pickList("stamping", "stamping", pieceLock)}</Field>
                 {f.stamping === "Special Stamp" && (
                   <Field label="Special stamp" wide>
                     <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)} disabled={!!pieceLock} placeholder="Describe the stamp (logo, initials, text…)" className="h-10 rounded-xl" />

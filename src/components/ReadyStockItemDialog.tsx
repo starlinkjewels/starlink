@@ -1,3 +1,4 @@
+import { ListCombo } from "@/components/ListCombo";
 import { useRef, useState } from "react";
 import { ImagePlus, X, Film, Gem } from "lucide-react";
 import { toast } from "sonner";
@@ -304,10 +305,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           </div>
           <div>
             <Label className="text-xs">Jewellery Type</Label>
-            <Select value={f.jewelleryType} onValueChange={v => setF({ ...f, jewelleryType: v as Order["jewelleryType"] })}>
-              <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-              <SelectContent>{choicesOf("jewelleryTypes", f.jewelleryType, db.settings, { builtIn: false }).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-            </Select>
+            <ListCombo list="jewelleryTypes" value={f.jewelleryType} onChange={v => setF({ ...f, jewelleryType: v as Order["jewelleryType"] })}
+              choices={choicesOf("jewelleryTypes", undefined, db.settings, { builtIn: false })} optional={false} className="rounded-xl mt-1 h-9" ariaLabel="Jewellery Type" />
           </div>
           <div>
             <Label className="text-xs">Metal</Label>
@@ -348,10 +347,7 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           {Number(f.diamondWeight) > 0 && (
             <div>
               <Label className="text-xs">Diamond Type</Label>
-              <Select value={f.diamondType} onValueChange={v => setF({ ...f, diamondType: v })}>
-                <SelectTrigger className="rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                <SelectContent>{choicesOf("diamondTypes", f.diamondType, db.settings).map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
-              </Select>
+              <ListCombo list="diamondTypes" value={f.diamondType} onChange={v => setF({ ...f, diamondType: v })} optional={false} className="rounded-xl mt-1 h-9" ariaLabel="Diamond Type" />
             </div>
           )}
           <WeightCheck className="col-span-2" gross={Number(f.grossWeight)} net={Number(f.netWeight)} diamondCt={Number(f.diamondWeight)} />
