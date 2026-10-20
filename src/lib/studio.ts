@@ -10,7 +10,10 @@
 // looks, fonts, heading styles, corner sizes, table styles) step aside; each
 // business keeps its brand colour and light/dark.
 
+import { useSyncExternalStore } from "react";
+
 const KEY = "ui:studio";
+const listeners = new Set<() => void>();
 
 /** Is the new look switched on on this device? */
 export function studioOn(): boolean {
@@ -27,4 +30,10 @@ export function applyStudio(root: HTMLElement = document.documentElement): void 
 export function setStudio(on: boolean): void {
   try { if (on) localStorage.setItem(KEY, "1"); else localStorage.removeItem(KEY); } catch { /* private window: this visit only */ }
   applyStudio();
+  listeners.forEach(l => l());
+}
+
+/** Is the new look on? Redraws when it is switched — for the parts of the new look that are layout, not style. */
+export function useStudio(): boolean {
+  return useSyncExternalStore(cb => { listeners.add(cb); return () => listeners.delete(cb); }, studioOn, () => false);
 }

@@ -143,3 +143,24 @@
 
 /* ── The Gujarati words (ughrani, chukavni) stay, but quieter ───────── */
 :root[data-studio] .ui-local { opacity: 0.6; font-style: italic; }
+
+/* ══ Phase 2 — the frame ════════════════════════════════════════════════ */
+/* One way to sign out: the profile menu on a computer, More on a phone. */
+:root[data-studio] .app-signout { display: none; }
+/* Sidebar group names: quiet, in sentence case. */
+:root[data-studio] .app-nav-group { text-transform: none; letter-spacing: 0; font-size: 12px; font-weight: 500; }
+/* The top bar: calm, solid, a hairline under it. */
+:root[data-studio] .app-header { background: color-mix(in oklab, var(--color-card) 92%, transparent); }
+
+@media (max-width: 767px) {
+  /* The top bar carries the back arrow on an inner page; the page doesn't repeat it. */
+  :root[data-studio] .ui-back { display: none; }
+  /* The page's main button floats above the tab bar, where the thumb is. */
+  :root[data-studio] .ui-primary {
+    position: fixed; right: 16px; bottom: calc(env(safe-area-inset-bottom) + 4.75rem); z-index: 35;
+    height: 48px; padding: 0 20px; border-radius: 999px; flex: none !important; width: auto;
+    box-shadow: 0 10px 24px -10px rgb(16 24 40 / 0.5), 0 2px 6px rgb(16 24 40 / 0.14);
+  }
+  /* Room under the last row for the floating button. */
+  :root[data-studio] .app-main { padding-bottom: 9.5rem; }
+}
