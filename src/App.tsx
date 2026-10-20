@@ -3,6 +3,7 @@ import { ConfirmHost } from "@/components/ConfirmHost";
 import { Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { useAuth } from "./lib/auth";
+import { auth, isAdminEmail } from "./lib/firebase";
 import { AppLayout } from "./components/layout/AppLayout";
 import { LoginPage } from "./pages/Login";
 import { InstallPrompt } from "./components/InstallPrompt";
@@ -102,9 +103,21 @@ export function App() {
       // off (once; a no-op after that), before the day's backup copies them.
       import("./lib/db").then(m => m.dropStoredClientPasswords()).catch(() => {});
       import("./lib/backup").then(m => m.autoBackup()).catch(() => {});
-      // And the off-site copy, if a Drive account is connected and one is due.
-      // Silent either way — Settings shows the state and renews permission.
-      import("./lib/googleDrive").then(m => m.autoBackupToDrive()).catch(() => {});
+      // And the off-site copy — the main admin's job only (the owner login, not
+      // every admin), and never by opening Google's window: when its permission
+      // has lapsed, a note offers "Back up now" and Google opens on that press.
+      if (isAdminEmail(user.email) || isAdminEmail(auth.currentUser?.email)) {
+        import("./lib/googleDrive").then(async m => {
+          if ((await m.autoBackupToDrive()) !== "lapsed") return;
+          const day = new Date().toDateString();
+          try { if (localStorage.getItem("starlink-gdrive-asked") === day) return; localStorage.setItem("starlink-gdrive-asked", day); } catch { /* private window */ }
+          toast("Google Drive backup is due", {
+            description: "Google's permission has lapsed — back up now to renew it.",
+            duration: 20000,
+            action: { label: "Back up now", onClick: () => { m.backupToDrive(true).then(n => toast.success(`Backed up to Drive — ${n}`)).catch(e => toast.error(e instanceof Error ? e.message : "Couldn't back up to Drive")); } },
+          });
+        }).catch(() => {});
+      }
     }, 8000);
     return () => clearTimeout(id);
   }, [user]);

@@ -233,6 +233,8 @@ export interface Kpis {
   collectedUsd: number;
   /** Admin figures — null when not asked for, or not convertible. */
   costUsd: number | null; profitUsd: number | null; marginPct: number | null; incomplete: number;
+  /** The same in rupees (each sale at its own day's rate, cost as paid) — admin only. */
+  salesInr: number | null; costInr: number | null; profitInr: number | null;
   avgCycleDays: number | null; medianCycleDays: number | null; onTimePct: number | null;
 }
 
@@ -249,6 +251,7 @@ export function kpis(db: DB, orders: Order[], p: Period, withProfit: boolean, cl
     receivedCount: live.length, receivedUsd: r2(live.reduce((s, o) => s + orderTotal(o), 0)), rejectedCount: rec.length - live.length,
     collectedUsd: collectionsIn(db, p, clientIds),
     costUsd: pr?.costUsd ?? null, profitUsd: pr?.profitUsd ?? null, marginPct: pr?.marginPct ?? null, incomplete: pr?.incomplete ?? 0,
+    salesInr: pr?.sellingInr ?? null, costInr: pr ? pr.costInr : null, profitInr: pr?.profitInr ?? null,
     avgCycleDays: mean(cycles), medianCycleDays: median(cycles),
     onTimePct: ot.length ? Math.round((ot.filter(Boolean).length / ot.length) * 1000) / 10 : null,
   };
@@ -258,6 +261,7 @@ export interface MonthRow {
   month: string; label: string;
   salesUsd: number; soldCount: number; receivedCount: number; receivedUsd: number; collectedUsd: number;
   costUsd: number | null; profitUsd: number | null; marginPct: number | null;
+  salesInr: number | null; costInr: number | null; profitInr: number | null;
 }
 
 /** Month by month across the period: sales, orders in, cash in — and, for the admin, cost and profit. */
@@ -272,6 +276,7 @@ export function monthly(db: DB, orders: Order[], p: Period, withProfit: boolean,
       month, label: monthLabel(month),
       salesUsd: k.salesUsd, soldCount: k.soldCount, receivedCount: k.receivedCount, receivedUsd: k.receivedUsd,
       collectedUsd: k.collectedUsd, costUsd: k.costUsd, profitUsd: k.profitUsd, marginPct: k.marginPct,
+      salesInr: k.salesInr, costInr: k.costInr, profitInr: k.profitInr,
     };
   });
 }
@@ -313,6 +318,7 @@ export interface ClientRow {
   id: string; name: string;
   received: number; sold: number; salesUsd: number;
   profitUsd: number | null; marginPct: number | null;
+  profitInr: number | null;
   collectedUsd: number; outstandingUsd: number; overdue90Usd: number;
   avgOrderUsd: number | null; lastOrder: string | null; daysSinceLast: number | null;
 }
@@ -329,7 +335,7 @@ export function clientTable(db: DB, orders: Order[], p: Period, withProfit: bool
       id: c.id, name: c.companyName,
       received: receivedIn(mine, p).filter(o => o.status !== "Rejected").length,
       sold: sold.length, salesUsd,
-      profitUsd: pr?.profitUsd ?? null, marginPct: pr?.marginPct ?? null,
+      profitUsd: pr?.profitUsd ?? null, marginPct: pr?.marginPct ?? null, profitInr: pr?.profitInr ?? null,
       collectedUsd: collectionsIn(db, p, new Set([c.id])),
       outstandingUsd: age.total, overdue90Usd: age.d90,
       avgOrderUsd: sold.length ? r2(salesUsd / sold.length) : null,
@@ -341,7 +347,7 @@ export function clientTable(db: DB, orders: Order[], p: Period, withProfit: bool
 export interface TeamRow {
   id: string; name: string; role: string;
   clients: number; received: number; sold: number; salesUsd: number;
-  profitUsd: number | null; collectedUsd: number;
+  profitUsd: number | null; profitInr: number | null; collectedUsd: number;
   expensesInr: number;
   /** Their expenses left out of expensesInr — in a currency with no rate on file. */
   expensesUncounted: number;
@@ -377,7 +383,7 @@ export function teamTable(db: DB, orders: Order[], p: Period, withProfit: boolea
       clients: managed.size,
       received: receivedIn(mine, p).filter(o => o.status !== "Rejected").length,
       sold: sold.length, salesUsd: r2(sold.reduce((s, o) => s + orderTotal(o), 0)),
-      profitUsd: pr?.profitUsd ?? null,
+      profitUsd: pr?.profitUsd ?? null, profitInr: pr?.profitInr ?? null,
       collectedUsd: collectionsIn(db, p, undefined, u.id),
       expensesInr: r2(expensesInr), expensesUncounted,
       tasksDone: tasks.filter(t => t.completed && inPeriod(p, t.completedAt ?? t.createdAt)).length,

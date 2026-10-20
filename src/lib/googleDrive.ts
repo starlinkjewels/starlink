@@ -125,17 +125,26 @@ function loadGis(): Promise<void> {
   return gisReady;
 }
 
+/** Said when Google's permission (about an hour) has lapsed and nobody asked to renew it. */
+export const DRIVE_LAPSED = "Google Drive permission has lapsed — press Back up now to renew it.";
+
+/** True while Google's last permission is still good — nothing needs asking. */
+export function driveTokenValid(): boolean {
+  return !!readToken();
+}
+
 /**
  * Ask Google for an access token.
  *
- * `interactive` false tries for one without showing anything, which works once
- * the account has already consented — that is what lets the scheduled backup
- * run quietly on app open. It fails quickly when consent is actually needed,
- * and the Settings page then asks for it properly.
+ * Only when someone pressed a button (`interactive`). Google has no truly
+ * silent way to renew: asking "quietly" still opens its account chooser, which
+ * popped up at random on app open. So without a button press, a lapsed
+ * permission is simply reported (DRIVE_LAPSED) and nothing opens.
  */
 async function getToken(interactive: boolean): Promise<string> {
   const existing = readToken();
   if (existing) return existing.token;
+  if (!interactive) throw new Error(DRIVE_LAPSED);
 
   const clientId = driveClientId();
   if (!clientId) throw new Error("Google Drive isn't set up yet — no client id configured.");
@@ -156,7 +165,8 @@ async function getToken(interactive: boolean): Promise<string> {
       },
       error_callback: () => reject(new Error("Google sign-in was closed before it finished.")),
     });
-    client.requestAccessToken({ prompt: interactive ? "consent" : "" });
+    // A known account renews with its chooser only; consent is asked the first time.
+    client.requestAccessToken({ prompt: ls.get(K_EMAIL) ? "" : "consent" });
   });
 }
 
@@ -262,21 +272,22 @@ export async function backupToDrive(interactive = false): Promise<string> {
  * token has lapsed the Settings page says so and asks for it there, where
  * someone is actually looking.
  */
-export async function autoBackupToDrive(): Promise<boolean> {
-  if (!driveConfigured()) return false;
-  const { connected, frequency, lastAt } = driveStatus();
-  if (!connected || frequency === "off") return false;
-
-  const due = !lastAt
-    || Date.now() - new Date(lastAt).getTime() >= DAYS[frequency] * 24 * 60 * 60 * 1000;
-  if (!due) return false;
-
+export async function autoBackupToDrive(): Promise<"done" | "lapsed" | "none"> {
+  if (!driveConfigured()) return "none";
+  if (!driveBackupDue()) return "none";
+  // Permission lapsed: say so (the app offers a button) rather than open Google.
+  if (!readToken()) return "lapsed";
   try {
     await backupToDrive(false);
-    return true;
+    return "done";
   } catch {
-    // Expired consent or no connection. Settings shows the state; nothing here
-    // is worth interrupting someone's work for.
-    return false;
+    return "none";
   }
+}
+
+/** Connected, switched on, and the last copy older than the chosen interval. */
+export function driveBackupDue(): boolean {
+  const { connected, frequency, lastAt } = driveStatus();
+  if (!connected || frequency === "off") return false;
+  return !lastAt || Date.now() - new Date(lastAt).getTime() >= DAYS[frequency] * 24 * 60 * 60 * 1000;
 }

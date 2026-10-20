@@ -8,7 +8,7 @@ import { Users, UserPlus, Repeat, HandCoins, AlertOctagon, Search, Table2, Hourg
 import { downloadCsv } from "@/lib/ledgerExport";
 import { clientTable, receivables, soldIn, localDay, type ClientRow } from "@/lib/analytics";
 import { fmtDate } from "@/lib/db";
-import { C, KpiCard, Panel, ChartTip, Bar, ExportButton, Table, Empty, usd, pct } from "./ui";
+import { C, KpiCard, Panel, ChartTip, Bar, ExportButton, Table, Empty, usd, inr, pct } from "./ui";
 import type { ReportCtx } from "./context";
 
 
@@ -121,7 +121,7 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
               <div className="flex items-center gap-2 min-w-[150px]"><span className="font-semibold w-16 text-right shrink-0">{r.salesUsd ? usd(r.salesUsd, true) : "—"}</span><div className="flex-1"><Bar value={r.salesUsd} max={maxSales} /></div></div>
             ) },
             ...(withProfit ? [
-              { key: "profit", header: "Profit", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.profitUsd : null), cell: (r: ClientRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}</span> },
+              { key: "profit", header: "Profit", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.profitUsd : null), cell: (r: ClientRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}{r.sold && r.profitInr != null && <span className="block text-[11px] font-normal text-muted-foreground whitespace-nowrap">{inr(r.profitInr, true)}</span>}</span> },
               { key: "margin", header: "Margin", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.marginPct : null), cell: (r: ClientRow) => (r.sold ? pct(r.marginPct) : "—") },
             ] : []),
             { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },

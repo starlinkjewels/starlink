@@ -31,7 +31,12 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
   const totOf = (ms: MonthRow[]) => ms.reduce((t, m) => ({
     receivedCount: t.receivedCount + m.receivedCount, soldCount: t.soldCount + m.soldCount, salesUsd: t.salesUsd + m.salesUsd,
     collectedUsd: t.collectedUsd + m.collectedUsd, costUsd: t.costUsd + (m.costUsd ?? 0), profitUsd: t.profitUsd + (m.profitUsd ?? 0),
-  }), { receivedCount: 0, soldCount: 0, salesUsd: 0, collectedUsd: 0, costUsd: 0, profitUsd: 0 });
+    salesInr: t.salesInr + (m.salesInr ?? 0), costInr: t.costInr + (m.costInr ?? 0), profitInr: t.profitInr + (m.profitInr ?? 0),
+  }), { receivedCount: 0, soldCount: 0, salesUsd: 0, collectedUsd: 0, costUsd: 0, profitUsd: 0, salesInr: 0, costInr: 0, profitInr: 0 });
+  // The admin's figures in rupees too, under the dollars: each sale at its own day's rate, the cost as paid.
+  const withInr = (main: ReactNode, rupees: number | null | undefined) => (withProfit && rupees != null
+    ? <div className="text-right leading-tight">{main}<div className="text-[11px] font-normal text-muted-foreground tabular-nums whitespace-nowrap">{inr(rupees)}</div></div>
+    : main);
   const marginOf = (ms: MonthRow[]) => { const t = totOf(ms); return t.salesUsd > 0 && withProfit ? Math.round((t.profitUsd / t.salesUsd) * 1000) / 10 : null; };
   let run = 0;
   const cumulative = new Map(data.months.map(m => { run += m.salesUsd; return [m.month, run]; }));
@@ -39,9 +44,9 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
   const metalTotal = data.byMetal.reduce((s, x) => s + x.value, 0);
 
   const exportMonths = () => downloadCsv(`Sales-by-month_${fileTag}.csv`,
-    ["Month", "Orders in", "Shipped", "Sales ($)", "Collected ($)", ...(withProfit ? ["Cost ($)", "Profit ($)", "Margin %"] : []), "Cumulative sales ($)"],
+    ["Month", "Orders in", "Shipped", "Sales ($)", "Collected ($)", ...(withProfit ? ["Cost ($)", "Profit ($)", "Margin %", "Sales (₹)", "Cost (₹)", "Profit (₹)"] : []), "Cumulative sales ($)"],
     data.months.map(m => [m.label, m.receivedCount, m.soldCount, m.salesUsd, m.collectedUsd,
-      ...(withProfit ? [m.costUsd ?? "", m.profitUsd ?? "", m.marginPct ?? ""] : []), Math.round((cumulative.get(m.month) ?? 0) * 100) / 100]));
+      ...(withProfit ? [m.costUsd ?? "", m.profitUsd ?? "", m.marginPct ?? "", m.salesInr ?? "", m.costInr ?? "", m.profitInr ?? ""] : []), Math.round((cumulative.get(m.month) ?? 0) * 100) / 100]));
 
   const clientName = (id: string) => db.clients.find(c => c.id === id)?.companyName ?? "";
   const n = (v: number) => <span className="tabular-nums">{v || "—"}</span>;
@@ -49,14 +54,14 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
     { key: "month", header: "Month", always: true, kind: "date", sortValue: m => m.month, cell: m => <CellMain title={m.label} /> },
     { key: "in", header: "Orders in", align: "right", kind: "number", sortValue: m => m.receivedCount, cell: m => n(m.receivedCount) },
     { key: "sold", header: "Shipped", align: "right", kind: "number", sortValue: m => m.soldCount, cell: m => n(m.soldCount) },
-    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: m => m.salesUsd, cell: m => (m.salesUsd ? <CellAmount>{usd(m.salesUsd)}</CellAmount> : "—") },
+    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: m => m.salesUsd, cell: m => (m.salesUsd ? withInr(<CellAmount>{usd(m.salesUsd)}</CellAmount>, m.salesInr) : "—") },
     { key: "collected", header: "Collected", align: "right", kind: "number", sortValue: m => m.collectedUsd,
       cell: m => <span className="tabular-nums whitespace-nowrap">{m.collectedUsd ? usd(m.collectedUsd) : "—"}</span> },
     ...(withProfit ? [
       { key: "cost", header: "Cost", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => m.costUsd,
-        cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.costUsd ? usd(m.costUsd) : "—"}</span> },
+        cell: (m: MonthRow) => (m.costUsd ? withInr(<span className="tabular-nums whitespace-nowrap">{usd(m.costUsd)}</span>, m.costInr) : "—") },
       { key: "profit", header: "Profit", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount ? m.profitUsd : null),
-        cell: (m: MonthRow) => <CellAmount tone={(m.profitUsd ?? 0) < 0 ? "out" : "in"}>{m.profitUsd != null && m.soldCount ? usd(m.profitUsd) : "—"}</CellAmount> },
+        cell: (m: MonthRow) => (m.profitUsd != null && m.soldCount ? withInr(<CellAmount tone={(m.profitUsd ?? 0) < 0 ? "out" : "in"}>{usd(m.profitUsd)}</CellAmount>, m.profitInr) : "—") },
       { key: "margin", header: "Margin", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount ? m.marginPct : null),
         cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.soldCount ? pct(m.marginPct) : "—"}</span> },
     ] : []),
@@ -67,9 +72,9 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
   const groupColumns = (header: string, first: (g: ProfitGroup) => ReactNode): DataColumn<ProfitGroup>[] => [
     { key: "name", header, always: true, sortValue: g => g.key, cell: first },
     { key: "pcs", header: "Pcs", align: "right", kind: "number", sortValue: g => g.count, cell: g => <span className="tabular-nums">{g.count}</span> },
-    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd, cell: g => <span className="tabular-nums whitespace-nowrap">{usd(g.sellingUsd)}</span> },
+    { key: "sales", header: "Sales", align: "right", kind: "number", sortValue: g => g.sellingUsd, cell: g => withInr(<span className="tabular-nums whitespace-nowrap">{usd(g.sellingUsd)}</span>, g.sellingInr) },
     { key: "profit", header: "Profit", align: "right", kind: "number", sortValue: g => g.profitUsd,
-      cell: g => <CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{usd(g.profitUsd)}</CellAmount> },
+      cell: g => withInr(<CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{usd(g.profitUsd)}</CellAmount>, g.profitInr) },
     { key: "margin", header: "Margin", align: "right", kind: "number", sortValue: g => g.marginPct, cell: g => <span className="tabular-nums">{pct(g.marginPct)}</span> },
   ];
   const lossColumns: DataColumn<ProfitRow>[] = [
@@ -79,9 +84,10 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
       cell: r => <span className="block truncate max-w-[180px]">{clientName(r.order.clientId) || "—"}</span> },
     { key: "sold", header: "Sold for", align: "right", kind: "number", sortValue: r => r.sellingUsd,
       cell: r => <span className="tabular-nums whitespace-nowrap">{usd(r.sellingUsd)}{r.sellingUsd <= 5 ? <span className="text-amber-600"> · price not set?</span> : null}</span> },
-    { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: r => r.costUsd, cell: r => <span className="tabular-nums whitespace-nowrap">{usd(r.costUsd)}</span> },
+    { key: "cost", header: "Cost", align: "right", kind: "number", sortValue: r => r.costUsd, cell: r => withInr(<span className="tabular-nums whitespace-nowrap">{usd(r.costUsd)}</span>, r.costInr) },
     // The biggest loss is the most negative figure, so it sorts low → high first.
-    { key: "loss", header: "Loss", align: "right", kind: "number", sortFirst: "asc", sortValue: r => r.profitUsd, cell: r => <CellAmount tone="out">{usd(r.profitUsd)}</CellAmount> },
+    { key: "loss", header: "Loss", align: "right", kind: "number", sortFirst: "asc", sortValue: r => r.profitUsd,
+      cell: r => withInr(<CellAmount tone="out">{usd(r.profitUsd)}</CellAmount>, r.fx && r.profitUsd != null ? Math.round(r.sellingUsd * r.fx.rate - r.costInr) : null) },
   ];
 
   // Opened rows: what each table's columns leave out.
@@ -137,11 +143,11 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
               totals={{
                 in: ms => totOf(ms).receivedCount,
                 sold: ms => totOf(ms).soldCount,
-                sales: ms => usd(totOf(ms).salesUsd),
+                sales: ms => withInr(usd(totOf(ms).salesUsd), totOf(ms).salesInr),
                 collected: ms => usd(totOf(ms).collectedUsd),
                 ...(withProfit ? {
-                  cost: (ms: MonthRow[]) => usd(totOf(ms).costUsd),
-                  profit: (ms: MonthRow[]) => usd(totOf(ms).profitUsd),
+                  cost: (ms: MonthRow[]) => withInr(usd(totOf(ms).costUsd), totOf(ms).costInr),
+                  profit: (ms: MonthRow[]) => withInr(usd(totOf(ms).profitUsd), totOf(ms).profitInr),
                   margin: (ms: MonthRow[]) => pct(marginOf(ms)),
                 } : {}),
               }}

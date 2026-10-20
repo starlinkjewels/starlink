@@ -34,7 +34,7 @@ import { orphanDirectUses, orphanImpact, repairOrphanDirectUses } from "@/lib/st
 import { fmtMoneyInr } from "@/lib/manufacturing";
 import { ccy, ccySymbol, fmtCcy } from "@/lib/currency";
 import { uploadDataUrl } from "@/lib/storage";
-import { createAuthUser } from "@/lib/firebase";
+import { createAuthUser, auth, isAdminEmail, ADMIN_EMAILS } from "@/lib/firebase";
 import { authErrorMessage } from "@/lib/authErrors";
 import { useAuth } from "@/lib/auth";
 import { Button } from "@/components/ui/button";
@@ -2136,7 +2136,12 @@ export function SettingsPage() {
         )}
 
         {/* ── The same snapshot, in Drive — the copy that is not in this project ── */}
-        {isAdminUser && <GoogleDriveBackup />}
+        {/* Drive is the main admin's (the owner login) — one account, one browser, no prompts for anyone else. */}
+        {isAdminUser && (isAdminEmail(user?.email) || isAdminEmail(auth.currentUser?.email)
+          ? <GoogleDriveBackup />
+          : <p className="rounded-xl border border-border/70 p-4 mt-2 text-xs text-muted-foreground">
+              Google Drive backup is managed by the main admin ({ADMIN_EMAILS[0]}).
+            </p>)}
 
       </div>
       )}

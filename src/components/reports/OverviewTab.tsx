@@ -45,7 +45,7 @@ export function OverviewTab({ ctx, goTo }: { ctx: ReportCtx; goTo: (t: TabKey) =
         <KpiCard icon={DollarSign} label="Sales (dispatched)" value={usd(k.salesUsd, true)} sub={`${k.soldCount} piece${k.soldCount !== 1 ? "s" : ""} shipped`} delta={d(k.salesUsd, kp?.salesUsd)} />
         <KpiCard icon={ShoppingBag} label="Orders received" value={num(k.receivedCount)} sub={`${usd(k.receivedUsd, true)} booked${k.rejectedCount ? ` · ${k.rejectedCount} rejected` : ""}`} delta={d(k.receivedCount, kp?.receivedCount)} tone="sky" />
         {withProfit ? (
-          <KpiCard icon={TrendingUp} label="Gross profit" value={usd(k.profitUsd, true)} sub={`Margin ${pct(k.marginPct)}${k.incomplete ? ` · ${k.incomplete} not fully costed` : ""}`}
+          <KpiCard icon={TrendingUp} label="Gross profit" value={usd(k.profitUsd, true)} sub={`${k.profitInr != null ? `${inr(k.profitInr, true)} · ` : ""}Margin ${pct(k.marginPct)}${k.incomplete ? ` · ${k.incomplete} not fully costed` : ""}`}
             delta={d(k.profitUsd, kp?.profitUsd)} tone="success" hint="Sales less what the pieces cost — gold, diamonds, factory and freight." />
         ) : (
           <KpiCard icon={TrendingUp} label="Average order" value={usd(k.avgOrderUsd)} sub="Per piece shipped" delta={d(k.avgOrderUsd, kp?.avgOrderUsd)} tone="success" />
