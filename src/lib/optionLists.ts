@@ -15,7 +15,7 @@ export type ListKey =
   | "jewelleryTypes" | "metals" | "diamondTypes" | "colours" | "rhodium" | "stamping"
   | "paymentMethods" | "departments" | "meltReasons" | "returnReasons"
   | "diamondShapes" | "diamondSizes" | "diamondMm" | "diamondColors" | "diamondClarities"
-  | "diamondFinish" | "diamondFluorescence" | "diamondLabs";
+  | "diamondFinish" | "diamondFluorescence" | "diamondLabs" | "chargeNames";
 
 export interface ListDef {
   key: ListKey;
@@ -42,6 +42,8 @@ export const LIST_DEFS: readonly ListDef[] = [
     defaults: ["No Rhodium", "Diamond Part White", "Full White", "Two Tone Casting", "Other"] },
   { key: "stamping", group: "Orders", title: "Stamping", hint: "Stamp choices on an order",
     defaults: ["No Stamping", "KT Stamping", "Diamond Weight + KT Stamp"], builtIn: ["Special Stamp"] },
+  { key: "chargeNames", group: "Orders", title: "Other charges", hint: "Extra charges added to an order's total",
+    defaults: ["Setting charge", "Engraving", "Rush fee", "Insurance", "Packaging", "Hallmarking", "Polishing / repair"] },
   // Loose diamond lots in stock: shape · sieve · mm · colour · clarity (lib/diamondLots.ts),
   // and a certified stone's grading.
   { key: "diamondShapes", group: "Diamonds", title: "Shapes", hint: "Loose and certified stones",

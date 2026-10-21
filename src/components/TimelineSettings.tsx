@@ -7,8 +7,9 @@ import { useDb } from "@/hooks/useDb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  BUILTIN_MIDDLE, HEAD_STAGES, TAIL_STAGES, isBuiltinStage, middleStages, stageKind, stageOrderProblem,
+  BUILTIN_MIDDLE, HEAD_STAGES, TAIL_STAGES, isBuiltinStage, looseStageProblem, looseStages, middleStages, stageKind, stageOrderProblem,
 } from "@/lib/stages";
+import { buildReadyStockSaleTimelineSteps, buildReadyStockTimelineSteps } from "@/lib/db";
 
 const NOTE: Record<string, string> = {
   "Order Submitted": "The order is placed",
@@ -105,8 +106,9 @@ export function TimelineSettings() {
 
   return (
     <div className="card-luxe p-6 space-y-4">
-      <SectionTitle icon={ListOrdered} title="Production Timeline" sub="Order stages and board columns"
+      <SectionTitle icon={ListOrdered} title="Production Timeline" sub="The stages of each kind of order — and the board's columns"
         info="Reorder the middle stages with the arrows, or add your own (e.g. Hallmarking, Polishing)." />
+      <p className="text-sm font-semibold text-foreground">Make a piece</p>
 
       <div className="space-y-1.5">
         {HEAD_STAGES.map(s => row(s, true))}
@@ -135,6 +137,94 @@ export function TimelineSettings() {
         )}
         {dirty && <Button type="button" variant="outline" onClick={() => setList(saved)} className="rounded-xl">Discard</Button>}
         <Button type="button" onClick={save} disabled={!dirty} className="btn-hero rounded-xl">Save timeline</Button>
+      </div>
+
+      <LooseStagesEditor />
+
+      {/* The two kinds whose stages are fixed — shown so every kind's journey is in one place. */}
+      <div className="border-t border-border/60 pt-4 space-y-3">
+        {([
+          ["From Ready Stock", "A finished piece sold — nothing is made", buildReadyStockSaleTimelineSteps()],
+          ["Build for our stock", "Made for Ready Stock — your stages, without Certification", buildReadyStockTimelineSteps(saved)],
+        ] as const).map(([title, sub, steps]) => (
+          <div key={title} className="space-y-1.5">
+            <p className="text-sm font-semibold text-foreground">{title} <span className="text-xs font-normal text-muted-foreground">· {sub}</span></p>
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {steps.map((st, i) => (
+                <span key={st} className="inline-flex items-center gap-1.5">
+                  {i > 0 && <span className="text-muted-foreground">→</span>}
+                  <span className="px-2 py-1 rounded-lg bg-secondary text-foreground">{st}</span>
+                </span>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A loose-diamond order's own stages — between approval and dispatch (e.g.
+ * Matching, Sorting, Quality check). Nothing is made, so a piece's stages
+ * never apply; Certification is added on its own when the order needs one.
+ */
+function LooseStagesEditor() {
+  const db = useDb();
+  const saved = looseStages(db.settings);
+  const savedKey = saved.join("|");
+  const [list, setList] = useState<string[]>(saved);
+  const [name, setName] = useState("");
+  useEffect(() => { setList(saved); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [savedKey]);
+  const dirty = list.join("|") !== savedKey;
+  const swap = (i: number, j: number) => { const n = [...list]; [n[i], n[j]] = [n[j], n[i]]; setList(n); };
+  const add = () => {
+    const n = name.trim().replace(/\s+/g, " ");
+    if (!n) return;
+    const problem = looseStageProblem([...list, n]);
+    if (problem) { toast.error(problem); return; }
+    setList([...list, n]); setName("");
+  };
+  const save = () => {
+    const problem = looseStageProblem(list);
+    if (problem) { toast.error(problem); return; }
+    updateDb(d => { d.settings.looseStages = list.length ? list : undefined; });
+    toast.success("Loose-diamond stages saved — new orders will follow them");
+  };
+  const fixed = (st: string, note: string) => (
+    <div key={st} className="flex items-center gap-2 rounded-xl border px-3 py-2 bg-secondary/40 border-border/50">
+      <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
+      <p className="text-sm font-medium text-foreground flex-1 truncate">{st}</p>
+      <p className="text-[11px] text-muted-foreground shrink-0">{note}</p>
+    </div>
+  );
+  return (
+    <div className="border-t border-border/60 pt-4 space-y-3">
+      <p className="text-sm font-semibold text-foreground">Loose diamonds <span className="text-xs font-normal text-muted-foreground">· stones sold as they are — nothing is made</span></p>
+      <div className="space-y-1.5">
+        {fixed("Order Submitted", "The order is placed")}
+        {fixed("Order Approved", "The client is told")}
+        {list.map((st, i) => (
+          <div key={st} className="flex items-center gap-2 rounded-xl border px-3 py-2 bg-card border-border/70">
+            <span className="text-xs text-muted-foreground w-5 text-right shrink-0">{i + 3}</span>
+            <p className="text-sm font-medium text-foreground flex-1 truncate">{st} <span className="ml-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary align-middle">your stage</span></p>
+            <button type="button" onClick={() => swap(i, i - 1)} disabled={i === 0} aria-label={`Move ${st} up`} className="h-7 w-7 grid place-items-center rounded-lg hover:bg-secondary disabled:opacity-30"><ArrowUp className="h-3.5 w-3.5" /></button>
+            <button type="button" onClick={() => swap(i, i + 1)} disabled={i === list.length - 1} aria-label={`Move ${st} down`} className="h-7 w-7 grid place-items-center rounded-lg hover:bg-secondary disabled:opacity-30"><ArrowDown className="h-3.5 w-3.5" /></button>
+            <button type="button" onClick={() => setList(list.filter((_, j) => j !== i))} aria-label={`Remove ${st}`} className="h-7 w-7 grid place-items-center rounded-lg text-destructive hover:bg-destructive/10"><Trash2 className="h-3.5 w-3.5" /></button>
+          </div>
+        ))}
+        {fixed("Certification", "Only when it needs a certificate")}
+        {fixed("Dispatch", "Courier and tracking")}
+        {fixed("Delivered", "Closes the order")}
+      </div>
+      <div className="flex gap-2">
+        <Input value={name} onChange={e => setName(e.target.value)} onKeyDown={e => e.key === "Enter" && add()}
+          placeholder="New stage, e.g. Matching" className="rounded-xl h-10" maxLength={40} aria-label="New loose-diamond stage" />
+        <Button type="button" variant="outline" onClick={add} className="rounded-xl h-10 gap-1.5 shrink-0"><Plus className="h-4 w-4" /> Add stage</Button>
+      </div>
+      <div className="flex gap-2 justify-end">
+        {dirty && <Button type="button" variant="outline" onClick={() => setList(saved)} className="rounded-xl">Discard</Button>}
+        <Button type="button" onClick={save} disabled={!dirty} className="btn-hero rounded-xl">Save loose-diamond stages</Button>
       </div>
     </div>
   );

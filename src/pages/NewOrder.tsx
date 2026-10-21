@@ -1,4 +1,16 @@
+import { stonesLine } from "@/lib/orderText";
+import { useCan } from "@/hooks/useCan";
+import { buildLooseTimelineSteps } from "@/lib/db";
+import { looseStages } from "@/lib/stages";
+import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
+import type { PlannedBuy } from "@/components/BuyMaterialForm";
+import { issuePick, pickCostInr, pickName, picksProblem, type StockPick } from "@/lib/orderStock";
+import { fineGoldRate, rateOn } from "@/lib/orderCost";
+import { estimatedPureGoldNeeded, fmtMoneyInr } from "@/lib/manufacturing";
+import { workCompanyOf } from "@/lib/companies";
 import { ListCombo } from "@/components/ListCombo";
+import { LooseLotFields, type LooseLotDraft } from "@/components/LotFields";
+import { OtherChargesEditor, chargesOf, chargesSum, type ChargeDraft } from "@/components/OtherCharges";
 import { officeLabel, officeOf } from "@/lib/offices";
 import { CompanyPicker, CompanyBadge, useDefaultCompany } from "@/components/CompanyFields";
 import { coField, companyOf, companyIdOfClient, hasCompanies } from "@/lib/companies";
@@ -32,7 +44,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
+import { Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -67,6 +79,13 @@ async function compressImage(file: File): Promise<string> {
     };
     reader.readAsDataURL(file);
   });
+}
+
+/** The stones' details as kept on the order: only what was given. */
+function cleanStoneSpec(sp: LooseLotDraft) {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(sp)) if (typeof v === "string" && v.trim()) out[k] = v.trim();
+  return out;
 }
 
 export function NewOrderPage() {
@@ -119,6 +138,9 @@ export function NewOrderPage() {
     certificate: "no" as "yes" | "no",
     certificateFee: 0,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
+    // A loose-diamond order: what the stones are (shape · mm · sieve · colour · clarity).
+    stoneSpec: { shape: "Round", mm: "", size: "", color: "", clarity: "" } as LooseLotDraft,
+    otherCharges: [] as ChargeDraft[],
     readyStockItemId: "",
     assignedFactoryId: "",
   });
@@ -154,6 +176,15 @@ export function NewOrderPage() {
   // A pure diamond sale, no jewellery piece at all — hides every field that
   // only makes sense for a manufactured piece (size, plating, factory, etc.).
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
+  // What the order is: a piece to make, loose diamonds to sell, or a Ready Stock piece.
+  const [kind, setKindState] = useState<OrderKind>("piece");
+  // The id the order will have — so a purchase planned now is recorded against it.
+  const draftId = useRef(uid("o_"));
+  const [picks, setPicks] = useState<StockPick[]>([]);
+  const [plannedBuy, setPlannedBuy] = useState<PlannedBuy | null>(null);
+  // Planning material is changing the order's manufacturing — the same right as on the order page.
+  const canDo = useCan();
+  const mayPlan = !isClient && (isAdmin || (isEmployee && canDo("orders", "edit")));
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
   const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
   // The company the order is for: the client's; for an in-house build, the one chosen.
@@ -180,6 +211,24 @@ export function NewOrderPage() {
       metal: v === "Diamond Only" ? "None (Diamond only)" : prev.metal,
       productKarats: v === "Diamond Only" ? "" : prev.productKarats,
     }));
+  };
+
+  const setKind = (k: OrderKind) => {
+    if (k === kind) return;
+    setKindState(k);
+    // What was planned belongs to the kind it was planned for.
+    setPicks([]); setPlannedBuy(null);
+    if (k === "loose") { setJewelleryType("Diamond Only"); setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later", assignedFactoryId: "" })); }
+    else {
+      setF(prev => ({
+        ...prev,
+        ...(prev.jewelleryType === "Diamond Only" ? {
+          jewelleryType: listOf("jewelleryTypes").find(t => t !== "Diamond Only") ?? "Ring",
+          metal: listOf("metals").find(m => m !== "None (Diamond only)") ?? "Yellow Gold",
+        } : {}),
+        ...(k === "piece" ? { readyStockItemId: "", materialSourcing: "later" } : {}),
+      }));
+    }
   };
 
   const applyEstimate = () => {
@@ -246,8 +295,9 @@ export function NewOrderPage() {
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
     if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
     if (!isClient && !forReadyStock && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
-    // A Ready-Stock sale reuses the finished piece's specs — don't re-ask for them.
-    const needSpecs = !isDiamondOnly && !isReadyStockSale;
+    // A Ready-Stock sale reuses the finished piece's specs — don't re-ask for them; loose diamonds have none.
+    if (kind === "readyStock" && !f.readyStockItemId) { toast.error("Choose the piece from Ready Stock."); return; }
+    const needSpecs = kind === "piece" && !isDiamondOnly && !isReadyStockSale;
     if (needSpecs && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
     if (needSpecs && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
     // Colour is the gold's (yellow, white, rose) — not needed for silver, platinum or any metal without karats.
@@ -263,6 +313,14 @@ export function NewOrderPage() {
       const wp = weightProblem({ gross: Number(f.estimatedGrossWeight), net: Number(f.estimatedNetWeight), diamondCt: Number(f.diamondWeight) });
       if (wp) { toast.error(wp); return; }
     }
+    // The production plan: what is taken must be there, and a piece's material needs its factory.
+    if (mayPlan && kind !== "readyStock") {
+      const unchosen = picks.findIndex(pk => pk.kind !== "certified" && !pk.key);
+      if (unchosen >= 0) { toast.error(`From stock, line ${unchosen + 1}: choose what to take — or remove the line.`); return; }
+      const problem = picksProblem(loadDb(), picks, orderCompany);
+      if (problem) { toast.error(problem); return; }
+      if (kind === "piece" && (picks.length || plannedBuy) && !f.assignedFactoryId) { toast.error("Choose the factory — the material from stock and the purchase go straight to it."); return; }
+    }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
       if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
@@ -274,7 +332,7 @@ export function NewOrderPage() {
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : (forReadyStock ? "" : f.clientId);
-    const orderId = uid("o_");
+    const orderId = draftId.current;
 
     // Upload reference images to Firebase Storage; store their URLs on the order.
     let imageUrls: string[] = [];
@@ -336,7 +394,11 @@ export function NewOrderPage() {
         stamping: f.stamping === "Special Stamp" && f.stampingNote.trim() ? `Special Stamp: ${f.stampingNote.trim()}` : (f.stamping || undefined),
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
-        materialSourcing: f.materialSourcing === "later" ? undefined : f.materialSourcing,
+        ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
+        ...(isDiamondOnly ? { stoneSpec: cleanStoneSpec(f.stoneSpec) } : {}),
+        // What the plan said: from stock, bought, or a Ready Stock piece.
+        materialSourcing: kind === "readyStock" ? f.materialSourcing === "later" ? undefined : f.materialSourcing
+          : picks.length ? "stock" : plannedBuy ? "purchase" : undefined,
         readyStockItemId: f.materialSourcing === "readyStock" ? f.readyStockItemId : undefined,
         assignedFactoryId: f.assignedFactoryId || undefined,
         instructions: f.instructions,
@@ -358,7 +420,7 @@ export function NewOrderPage() {
         }] : [],
         // The stages in the admin's order (Settings → Production timeline), fixed onto
         // the order now — changing the setting later never reshuffles it.
-        timeline: (forReadyStock ? buildReadyStockTimelineSteps(middleStages(loadDb().settings)) : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : buildTimelineSteps(f.certificate === "yes", f.metal === DIAMOND_ONLY_METAL, middleStages(loadDb().settings))).map((s, i) => ({
+        timeline: (forReadyStock ? buildReadyStockTimelineSteps(middleStages(loadDb().settings)) : isReadyStockSale ? buildReadyStockSaleTimelineSteps() : (f.metal === DIAMOND_ONLY_METAL ? buildLooseTimelineSteps(f.certificate === "yes", looseStages(loadDb().settings)) : buildTimelineSteps(f.certificate === "yes", false, middleStages(loadDb().settings)))).map((s, i) => ({
           step: s,
           status: i === 0 ? "done" : "pending" as "done" | "pending",
           date: i === 0 ? new Date().toISOString() : undefined,
@@ -373,8 +435,9 @@ export function NewOrderPage() {
       if (!forReadyStock) mailInfo = {
         orderNumber: order.orderNumber,
         clientName: d.clients.find(c => c.id === clientId)?.companyName ?? "Client",
-        jewelleryType: order.jewelleryType,
-        metal: order.metal,
+        // A loose-diamond order is described by its stones, never as "Metal: None".
+        jewelleryType: isDiamondOnly ? "Loose diamonds" : order.jewelleryType,
+        metal: isDiamondOnly ? stonesLine(order) : order.metal,
         quantity: order.quantity,
         expectedDelivery: order.expectedDelivery,
       };
@@ -456,11 +519,24 @@ export function NewOrderPage() {
       void sendMail(MARKETING_EMAIL, m.subject, m.html);
     }
 
-    // "Use from stock" / "Buy new for this order": the order opens on that step, ready to fill in.
-    const next = !isClient && (f.materialSourcing === "stock" || f.materialSourcing === "purchase") ? (f.materialSourcing === "stock" ? "stock" : "buy") : null;
-    if (next) {
-      toast.success(next === "buy" ? "Order submitted — now the purchase for it" : "Order submitted — now the stones from stock");
-      nav(`/orders/${orderId}?next=${next}`);
+    // The production plan, recorded against the order as saved: stock first, then the bill.
+    if (mayPlan && (picks.length || plannedBuy)) {
+      const placed = loadDb().orders.find(o => o.id === orderId);
+      const failed: string[] = [];
+      if (placed) {
+        const co = workCompanyOf(loadDb(), placed);
+        for (const pk of picks) {
+          try { await issuePick({ order: placed, factoryId: placed.assignedFactoryId || "", companyId: co, pick: pk, userId: user!.id }); }
+          catch (err) { failed.push(`${pickName(loadDb(), pk)}: ${err instanceof Error ? err.message : "not recorded"}`); }
+        }
+        if (plannedBuy) {
+          try { await plannedBuy.execute(placed); }
+          catch (err) { failed.push(`Purchase from ${plannedBuy.supplierName}: ${err instanceof Error ? err.message : "not recorded"}`); }
+        }
+      }
+      if (failed.length) toast.error(`Order placed — but not recorded: ${failed.join("; ")}. Add it from the order's Manufacturing.`);
+      else toast.success(`Order placed — ${[picks.length && `${picks.length} from stock`, plannedBuy && `bill from ${plannedBuy.supplierName}`].filter(Boolean).join(", ")} recorded`);
+      nav(`/orders/${orderId}`);
       return;
     }
     toast.success("Order submitted successfully");
@@ -469,7 +545,8 @@ export function NewOrderPage() {
 
   const shipping   = Number(f.shippingCharge) || 0;
   const certFee    = f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0;
-  const grandTotal = Number(f.orderValue) + shipping + certFee;
+  const extraCharges = forReadyStock ? 0 : chargesSum(f.otherCharges);
+  const grandTotal = Number(f.orderValue) + shipping + certFee + extraCharges;
   const balanceDue = Math.max(0, grandTotal - Number(f.advanceAmount));
   // The advance is billed in USD; the locker it lands in can hold any currency.
   const advLockerCcy = ccy(db.lockers.find(l => l.id === f.advanceLockerId)?.currency);
@@ -561,11 +638,31 @@ export function NewOrderPage() {
           </SectionCard>
         )}
 
-        {/* ══ 1b. Sell from Ready Stock (optional) — not for in-house stock builds ══ */}
-        {!forReadyStock && (
-        <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Optional">
+        {/* ══ 1a. What the order is — everything below follows it ══ */}
+        <SectionCard title="What is this order?">
+          <div role="radiogroup" aria-label="What is this order?" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+            {([
+              ["piece", "Make a piece", "Made by a factory", Gem, true],
+              ["loose", "Loose diamonds", "Stones sold as they are — gems too", Sparkles, !forReadyStock],
+              ["readyStock", "From Ready Stock", "A finished piece we hold", PackageCheck, !forReadyStock],
+            ] as const).filter(([, , , , ok]) => ok).map(([k, label, hint, Icon]) => (
+              <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
+                className={`text-left flex items-start gap-2.5 p-3 rounded-xl border transition-colors ${kind === k ? "border-primary bg-primary/5" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
+                <Icon className={`h-4 w-4 mt-0.5 shrink-0 ${kind === k ? "text-primary" : "text-muted-foreground"}`} />
+                <span className="min-w-0">
+                  <span className={`block text-sm ${kind === k ? "font-semibold text-primary" : "font-medium text-foreground"}`}>{label}</span>
+                  <span className="block text-xs text-muted-foreground">{hint}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+        </SectionCard>
+
+        {/* ══ 1b. Sell from Ready Stock — the "From Ready Stock" kind ══ */}
+        {!forReadyStock && kind === "readyStock" && (
+        <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Choose the piece — its details and price come with it">
           <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => { selectReadyStock(v === READY_STOCK_NONE ? "" : v); setStockSearch(""); }}>
-            <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="None — custom order" /></SelectTrigger>
+            <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a piece…" /></SelectTrigger>
             <SelectContent>
               {/* Search box — stopPropagation so typing doesn't trigger Select's typeahead */}
               <div className="sticky top-0 z-10 bg-popover p-2 border-b border-border/60">
@@ -581,7 +678,6 @@ export function NewOrderPage() {
                   />
                 </div>
               </div>
-              <SelectItem value={READY_STOCK_NONE}>None — custom order</SelectItem>
               {filteredStockItems.map(item => (
                 <SelectItem key={item.id} value={item.id}>
                   <span className="font-mono text-[10px] text-muted-foreground mr-1.5">{item.id.slice(-6).toUpperCase()}</span>
@@ -638,22 +734,24 @@ export function NewOrderPage() {
         </SectionCard>
         )}
 
-        {/* ══ 2. Order Details — replaced by a compact block for a Ready-Stock sale ══ */}
-        {!isReadyStockSale && (
+        {/* ══ 2. Order Details — not for a Ready Stock sale (the piece has them) ══ */}
+        {kind !== "readyStock" && (
         <SectionCard title="Order Details">
           {/* Type + Metal — 2 cols on all screens (both short) */}
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Jewellery Type">
-              <ListCombo list="jewelleryTypes" value={f.jewelleryType} onChange={setJewelleryType} optional={false} className="rounded-xl h-11" ariaLabel="Jewellery Type" />
-            </Field>
+            {!isDiamondOnly && (
+              <Field label="Jewellery Type">
+                <ListCombo list="jewelleryTypes" value={f.jewelleryType} onChange={setJewelleryType} optional={false} className="rounded-xl h-11" ariaLabel="Jewellery Type"
+                  choices={choicesOf("jewelleryTypes", f.jewelleryType, db.settings).filter(t => t !== "Diamond Only")} />
+              </Field>
+            )}
 
-            <Field label="Metal">
-              {isDiamondOnly ? (
-                <div className="rounded-xl h-11 px-3 flex items-center bg-secondary/60 text-sm text-muted-foreground">None (Diamond only)</div>
-              ) : (
+            {/* A loose-diamond order has no metal — only its stones (below). */}
+            {!isDiamondOnly && (
+              <Field label="Metal">
                 <ListCombo list="metals" value={f.metal} onChange={setMetal} optional={false} className="rounded-xl h-11" ariaLabel="Metal" />
-              )}
-            </Field>
+              </Field>
+            )}
 
             <Field label="Diamond Type">
               <ListCombo list="diamondTypes" value={f.diamondType} onChange={v => set("diamondType", v)} optional={false} className="rounded-xl h-11" ariaLabel="Diamond Type" />
@@ -669,17 +767,25 @@ export function NewOrderPage() {
               </Select>
             </Field>
 
-            <Field label="Quantity">
+            <Field label={isDiamondOnly ? "Stones (pcs)" : "Quantity"}>
               <Input type="number" min={1} value={f.quantity}
                 onChange={e => set("quantity", +e.target.value)}
                 className="rounded-xl h-11" />
             </Field>
 
-            <Field label="Est. Diamond Weight (ct)">
+            <Field label={isDiamondOnly ? "Carats (est.)" : "Est. Diamond Weight (ct)"}>
               <Input type="number" step="0.01" min={0} value={f.diamondWeight}
                 onChange={e => set("diamondWeight", +e.target.value)}
                 className="rounded-xl h-11" placeholder="0.00" />
             </Field>
+
+            {isDiamondOnly && (
+              <div className="col-span-2 space-y-1.5">
+                <p className="text-sm font-medium text-foreground">The stones <span className="text-xs font-normal text-muted-foreground">· as much as the client asked for</span></p>
+                <LooseLotFields idPrefix="no-stone" value={f.stoneSpec} showBag={false}
+                  onChange={patch => setF(prev => ({ ...prev, stoneSpec: { ...prev.stoneSpec, ...patch } }))} />
+              </div>
+            )}
 
             {!isDiamondOnly && (
               <>
@@ -715,7 +821,7 @@ export function NewOrderPage() {
         )}
 
         {/* ══ 3. Reference Images — not for a Ready-Stock sale (the piece has its own photos) ══ */}
-        {!isReadyStockSale && (
+        {kind !== "readyStock" && (
         <SectionCard icon={<ImagePlus className="h-4 w-4 text-primary" />} title="Reference Images" subtitle="Up to 3">
           <div className="grid grid-cols-3 gap-3">
             {images.map((src, i) => (
@@ -750,8 +856,8 @@ export function NewOrderPage() {
         )}
 
         {/* ══ 4. Product Specifications — skipped for a Ready-Stock sale (specs come from the piece) ══ */}
-        {!isReadyStockSale && (
-        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title="Product Specifications" subtitle={isDiamondOnly ? "Just the diamond" : undefined}>
+        {kind !== "readyStock" && (
+        <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title={isDiamondOnly ? "Delivery" : "Product Specifications"}>
 
           {!isDiamondOnly && (
             <Field label="Design Number *">
@@ -859,65 +965,19 @@ export function NewOrderPage() {
         </div>
         <div className="space-y-4 min-w-0">
 
-        {/* ══ 4b. Material Sourcing (staff only, optional) ══ */}
-        {!isClient && f.materialSourcing === "readyStock" ? (
-          <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Not needed — the piece already exists">
-            {null}
-          </SectionCard>
-        ) : !isClient && (
-          <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title="Material Sourcing" subtitle="Optional">
-            <RadioGroup value={f.materialSourcing} onValueChange={v => set("materialSourcing", v)} className="grid grid-cols-1 sm:grid-cols-3 xl:grid-cols-1 min-[1600px]:grid-cols-3 gap-2.5">
-              {[
-                { v: "later", label: "Decide later", icon: HelpCircle },
-                { v: "stock", label: "Use from Stock", icon: Boxes },
-                { v: "purchase", label: "Buy new for this order", icon: ShoppingBag },
-              ].map(opt => (
-                <label key={opt.v}
-                  className={`flex items-center gap-2.5 p-3 rounded-xl border cursor-pointer transition-colors text-sm
-                    ${f.materialSourcing === opt.v ? "border-primary bg-primary/5 text-primary font-semibold" : "border-border hover:border-primary/40 hover:bg-secondary/60"}`}>
-                  <RadioGroupItem value={opt.v} id={`ms-${opt.v}`} className="shrink-0" />
-                  <opt.icon className="h-4 w-4 shrink-0" />
-                  <span>{opt.label}</span>
-                </label>
-              ))}
-            </RadioGroup>
-
-            {f.materialSourcing === "stock" && (
-              isDiamondOnly ? (
-                <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                  After you submit, the order opens on <span className="font-medium text-foreground">Diamond from stock</span> — pick the bag or certified stones it sells.
-                </p>
-              ) : (
-                <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
-                  {f.productKarats
-                    ? `Available in Stock: ${availableGold ?? 0}g ${f.productKarats} gold${goldShort ? " — not enough for the weight entered above, consider Buy New for the shortfall" : ""}`
-                    : "Select Karats above to see live stock availability."}
-                  {" "}After you submit, the order opens on <span className="font-medium text-foreground">Diamond from stock</span>{f.assignedFactoryId ? "" : " — choose the factory below so the stones go straight to it"}. Gold goes from the factory's gold account.
-                </p>
-              )
-            )}
-            {f.materialSourcing === "purchase" && (
-              <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                After you submit, the order opens its <span className="font-medium text-foreground">purchase form</span> — the bill goes on the supplier&rsquo;s account{isDiamondOnly ? "" : f.assignedFactoryId ? " and the material straight to the factory" : " — choose the factory below so the material goes straight to it"}.
-              </p>
-            )}
-          </SectionCard>
-        )}
-
-        {/* ══ 4c. Assign Factory (staff only, optional) — a pure tag, no
-            material movement; the client hands a factory gold in bulk well
-            before any specific order exists, so this just notes who will
-            make it. Independent of Material Sourcing above. Not applicable to
-            a diamond-only sale — nothing is being manufactured. ══ */}
-        {!isClient && !isDiamondOnly && !isReadyStockSale && (
-          <SectionCard icon={<FactoryIconLucide className="h-4 w-4 text-primary" />} title="Assign Factory" subtitle="Optional">
-            <Select value={f.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => set("assignedFactoryId", v === "__none" ? "" : v))}>
-              <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Not assigned yet" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__none">Not assigned yet</SelectItem>
-                {db.factories.filter(fac => fac.active !== false).map(fac => <SelectItem key={fac.id} value={fac.id}>{fac.name}</SelectItem>)}
-              <AddNewItem kind="factory" /></SelectContent>
-            </Select>
+        {/* ══ 4b. Production plan — staff: the factory, what comes from stock, what is bought ══ */}
+        {mayPlan && kind !== "readyStock" && (
+          <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title={kind === "loose" ? "Stones for this sale" : "Production plan"}
+            subtitle="From stock or bought — recorded with the order">
+            <ProductionPlan
+              order={{ kind, companyId: orderCompany, metal: f.metal, metalHasKarats, productKarats: f.productKarats,
+                estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0,
+                diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: f.stoneSpec }}
+              factoryId={f.assignedFactoryId} onFactory={v => set("assignedFactoryId", v)}
+              picks={picks} onPicks={setPicks} planned={plannedBuy} onPlanned={setPlannedBuy}
+              stub={{ id: draftId.current, orderNumber: "this order", clientId: forReadyStock ? "" : f.clientId, forReadyStock: forReadyStock || undefined,
+                ...coField(orderCompany), metal: f.metal, jewelleryType: f.jewelleryType, assignedFactoryId: f.assignedFactoryId || undefined } as unknown as Order}
+              isAdmin={isAdmin} />
           </SectionCard>
         )}
 
@@ -978,6 +1038,46 @@ export function NewOrderPage() {
           )}
         </SectionCard>
 
+        {/* ══ 5b. Cost & margin — admins only, as the order is placed ══ */}
+        {isAdmin && kind !== "readyStock" && (() => {
+          const now = new Date().toISOString();
+          const fromStock = picks.reduce((s2, pk) => s2 + (pickCostInr(db, pk, orderCompany) ?? 0), 0);
+          const unpriced = picks.filter(pk => (pk.key || pk.kind === "certified") && pickCostInr(db, pk, orderCompany) == null).length;
+          const bought = plannedBuy?.totalInr ?? 0;
+          const goldPlanned = picks.some(pk => pk.material === "gold") || !!plannedBuy?.lines.some(l => l.kind === "gold");
+          const fine = kind === "piece" && metalHasKarats && !goldPlanned
+            ? estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight), estimatedGrossWeight: Number(f.estimatedGrossWeight), metalWeight: 0 }) : 0;
+          const fg = fine > 0 ? fineGoldRate(db, now, orderCompany) : null;
+          const goldEst = fg ? Math.round(fine * fg.rate) : 0;
+          const cost = Math.round(fromStock + bought + goldEst);
+          const fx = rateOn(db, now)?.rate ?? 0;
+          const sell = forReadyStock ? 0 : Math.round(grandTotal * fx);
+          const margin = sell - cost;
+          const pct = sell > 0 ? Math.round((margin / sell) * 1000) / 10 : null;
+          if (!cost && !sell) return null;
+          const row = (label: string, value: string, strong = false) => (
+            <div className="flex justify-between gap-3 text-sm"><span className="text-muted-foreground">{label}</span><span className={`tabular-nums ${strong ? "font-semibold text-foreground" : ""}`}>{value}</span></div>
+          );
+          return (
+            <SectionCard icon={<Sparkles className="h-4 w-4 text-primary" />} title="Cost & margin" subtitle="Admin only — before the factory's making charge">
+              <div className="space-y-1.5">
+                {fromStock > 0 && row("From stock", fmtMoneyInr(Math.round(fromStock)))}
+                {bought > 0 && row("Bought for it", fmtMoneyInr(bought))}
+                {goldEst > 0 && row(`Gold (estimate, ${fine} g fine)`, fmtMoneyInr(goldEst))}
+                {row("Material cost", fmtMoneyInr(cost), true)}
+                {sell > 0 && row(`Selling ($${grandTotal.toLocaleString()} at ₹${fx})`, fmtMoneyInr(sell))}
+                {sell > 0 && (
+                  <div className={`flex justify-between gap-3 text-sm font-semibold ${margin < 0 ? "text-destructive" : "text-success"}`}>
+                    <span>Margin</span><span className="tabular-nums">{fmtMoneyInr(margin)}{pct != null ? ` · ${pct}%` : ""}</span>
+                  </div>
+                )}
+                {!fx && !forReadyStock && <p className="text-xs text-muted-foreground">Set the dollar rate in Settings → Pricing to see the margin.</p>}
+                {unpriced > 0 && <p className="text-xs text-amber-700">{unpriced} item{unpriced !== 1 ? "s" : ""} from stock {unpriced !== 1 ? "have" : "has"} no cost on record — the margin is an upper bound.</p>}
+              </div>
+            </SectionCard>
+          );
+        })()}
+
         {/* ══ 6. Order Value / Shipping / Advance — staff only, not for in-house stock builds ══ */}
         {!isClient && !forReadyStock && (
           <>
@@ -995,13 +1095,14 @@ export function NewOrderPage() {
               </Field>
 
               {/* Estimate helper — stacked on mobile so text never overflows */}
+              {kind !== "readyStock" && (
               <div className="rounded-xl bg-secondary/60 p-3 space-y-2">
                 <div className="flex items-start gap-2">
                   <Sparkles className="h-3.5 w-3.5 text-primary mt-0.5 shrink-0" />
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground">Weight-based estimate</p>
                     <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                      <p>Metal: {f.estimatedNetWeight || 0}g × ${metalRate}/g = <span className="text-foreground font-medium">${Math.round(Number(f.estimatedNetWeight) * metalRate).toLocaleString()}</span></p>
+                      {!isDiamondOnly && <p>Metal: {f.estimatedNetWeight || 0}g × ${metalRate}/g = <span className="text-foreground font-medium">${Math.round(Number(f.estimatedNetWeight) * metalRate).toLocaleString()}</span></p>}
                       <p>Diamond: {f.diamondWeight}ct × ${diamondRate.toLocaleString()}/ct = <span className="text-foreground font-medium">${Math.round(Number(f.diamondWeight) * diamondRate).toLocaleString()}</span></p>
                       <p className="font-semibold text-foreground">Est. Total = ${autoValue.toLocaleString()}</p>
                     </div>
@@ -1012,6 +1113,7 @@ export function NewOrderPage() {
                   Apply this estimate → ${autoValue.toLocaleString()}
                 </button>
               </div>
+              )}
             </SectionCard>
 
             {/* Shipping */}
@@ -1025,6 +1127,11 @@ export function NewOrderPage() {
                     className="rounded-xl h-11 pl-7" placeholder="0" />
                 </div>
               </Field>
+            </SectionCard>
+
+            {/* Other charges — named, each added to the total and shown on the invoice */}
+            <SectionCard icon={<Plus className="h-4 w-4 text-brand-dark" />} title="Other charges" subtitle="Optional — setting, engraving, rush…" iconBg="bg-brand-light/15">
+              <OtherChargesEditor rows={f.otherCharges} onChange={rows => setF(prev => ({ ...prev, otherCharges: rows }))} />
             </SectionCard>
 
             {/* Advance Payment */}
@@ -1110,9 +1217,9 @@ export function NewOrderPage() {
               </div>
 
               {/* Grand total line */}
-              {(shipping > 0 || certFee > 0) && (
+              {(shipping > 0 || certFee > 0 || extraCharges > 0) && (
                 <p className="text-xs text-muted-foreground px-1">
-                  Grand total (order{shipping > 0 ? " + shipping" : ""}{certFee > 0 ? " + certificate" : ""}):&nbsp;
+                  Grand total (order{shipping > 0 ? " + shipping" : ""}{certFee > 0 ? " + certificate" : ""}{extraCharges > 0 ? " + other charges" : ""}):&nbsp;
                   <span className="font-semibold text-foreground">${grandTotal.toLocaleString()}</span>
                 </p>
               )}

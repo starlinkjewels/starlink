@@ -187,6 +187,16 @@ export const CARAT_TO_GRAM = 0.2;
  *  already held) and dispatched. */
 export const DIAMOND_ONLY_METAL = "None (Diamond only)";
 
+/** A named extra charge on an order, in USD. */
+export interface OrderCharge { id: string; name: string; amountUsd: number }
+/** What a loose-diamond order's stones are. Every part optional — as much as the client asked for. */
+export interface StoneSpec { shape?: string; mm?: string; size?: string; color?: string; clarity?: string }
+
+/** The extra charges on an order, added up. */
+export function otherChargesTotal(o: { otherCharges?: OrderCharge[] }): number {
+  return Math.round((o.otherCharges ?? []).reduce((s, c) => s + (Number(c.amountUsd) || 0), 0) * 100) / 100;
+}
+
 export function isDiamondOnlyOrder(o: { metal: string }): boolean {
   return o.metal === DIAMOND_ONLY_METAL;
 }
@@ -253,6 +263,15 @@ export function buildTimelineSteps(hasCertificate: boolean, diamondOnly = false,
   return order.filter(
     (s) => (s !== "Certification" || hasCertificate) && !(diamondOnly && (isProductionStep(s) || !builtin(s))),
   );
+}
+
+/**
+ * A loose-diamond order: nothing is made, so none of a piece's stages — its own
+ * stages instead (Settings → Production timeline → Loose diamonds), then
+ * Certification when it needs a certificate, then dispatch and delivery.
+ */
+export function buildLooseTimelineSteps(hasCertificate: boolean, own: string[] = []): string[] {
+  return ["Order Submitted", "Order Approved", ...own, ...(hasCertificate ? ["Certification"] : []), "Dispatch", "Delivered"];
 }
 
 // A Ready-Stock (in-house) order has no client, so it skips the client-approval
@@ -526,6 +545,10 @@ export interface Order {
   // Certificate
   certificate?: boolean;
   certificateFee?: number; // editable per order
+  /** Named extra charges on top of the order value ("Setting charge", "Engraving"…), USD — part of the order's total. */
+  otherCharges?: OrderCharge[];
+  /** A loose-diamond order: what the stones are (the piece's metal, size and finish don't apply). */
+  stoneSpec?: StoneSpec;
 
   // Manufacturing sourcing (optional — defaults to today's fully-manual flow
   // if never set). See src/lib/manufacturing.ts / src/lib/stock.ts.
@@ -876,6 +899,8 @@ export interface Settings {
    *  the end (Dispatch, Delivered) never move. Applies to orders created after
    *  it is saved; an order keeps the stages it was created with. See stages.ts. */
   timelineStages?: string[];
+  /** A loose-diamond order's own stages, between approval and dispatch (e.g. Matching, Sorting). Certification is added when it needs a certificate. */
+  looseStages?: string[];
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
   /** Our offices where Ready Stock is kept, in order. Unset = US, Hong Kong, India, Other. */
@@ -1671,7 +1696,7 @@ export function totalAdvance(order: Order): number {
 
 /** Jewellery value + shipping + certificate fee, BEFORE any gift-card discount. */
 export function orderGrossTotal(order: Order): number {
-  return order.amount + (order.shippingCharge || 0) + (order.certificateFee || 0);
+  return order.amount + (order.shippingCharge || 0) + (order.certificateFee || 0) + otherChargesTotal(order);
 }
 
 /** The amount the client owes in full — gross minus any redeemed gift card (a
