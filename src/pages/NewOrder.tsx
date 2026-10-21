@@ -117,7 +117,7 @@ export function NewOrderPage() {
     advanceLockerId: "",
     advanceLockerAmount: "",
     certificate: "no" as "yes" | "no",
-    certificateFee: 50,
+    certificateFee: 0,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
     readyStockItemId: "",
     assignedFactoryId: "",
@@ -250,7 +250,8 @@ export function NewOrderPage() {
     const needSpecs = !isDiamondOnly && !isReadyStockSale;
     if (needSpecs && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
     if (needSpecs && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
-    if (needSpecs && !f.productColor)        { toast.error("Color of Product is required."); return; }
+    // Colour is the gold's (yellow, white, rose) — not needed for silver, platinum or any metal without karats.
+    if (needSpecs && metalHasKarats && !f.productColor) { toast.error("Color of Product is required."); return; }
     if (needSpecs && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
     if (needSpecs && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
     if (needSpecs && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
@@ -303,8 +304,10 @@ export function NewOrderPage() {
 
       // Assign the order to an employee so it shows in their views: the creating
       // employee, otherwise the client's account manager (if any).
+      // (An admin named as the client's handler doesn't take its orders — orders go to employees.)
       const managerId = d.clients.find(c => c.id === clientId)?.accountManagerId;
-      const assignedEmployeeId = isEmployee ? user!.id : managerId;
+      const managerIsEmployee = !!managerId && d.users.some(u => u.id === managerId && u.role === "employee");
+      const assignedEmployeeId = isEmployee ? user!.id : managerIsEmployee ? managerId : undefined;
 
       const order: Order = {
         id: orderId,
@@ -453,6 +456,13 @@ export function NewOrderPage() {
       void sendMail(MARKETING_EMAIL, m.subject, m.html);
     }
 
+    // "Use from stock" / "Buy new for this order": the order opens on that step, ready to fill in.
+    const next = !isClient && (f.materialSourcing === "stock" || f.materialSourcing === "purchase") ? (f.materialSourcing === "stock" ? "stock" : "buy") : null;
+    if (next) {
+      toast.success(next === "buy" ? "Order submitted — now the purchase for it" : "Order submitted — now the stones from stock");
+      nav(`/orders/${orderId}?next=${next}`);
+      return;
+    }
     toast.success("Order submitted successfully");
     nav("/orders");
   };
@@ -762,8 +772,8 @@ export function NewOrderPage() {
 
               {/* Color + Karats — 2 cols always */}
               <div className="grid grid-cols-2 gap-3">
-                <Field label="Color *">
-                  <ListCombo list="colours" value={f.productColor} onChange={v => set("productColor", v)} optional={false} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Color" />
+                <Field label={metalHasKarats ? "Color *" : "Color · optional"}>
+                  <ListCombo list="colours" value={f.productColor} onChange={v => set("productColor", v)} optional={!metalHasKarats} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Color" />
                 </Field>
 
                 {metalHasKarats ? (
@@ -875,20 +885,20 @@ export function NewOrderPage() {
             {f.materialSourcing === "stock" && (
               isDiamondOnly ? (
                 <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                  Sourced later, from this order's Diamond section.
+                  After you submit, the order opens on <span className="font-medium text-foreground">Diamond from stock</span> — pick the bag or certified stones it sells.
                 </p>
               ) : (
                 <p className={`text-xs mt-3 p-2.5 rounded-xl ${goldShort ? "bg-destructive/5 text-destructive" : "bg-secondary text-muted-foreground"}`}>
                   {f.productKarats
                     ? `Available in Stock: ${availableGold ?? 0}g ${f.productKarats} gold${goldShort ? " — not enough for the weight entered above, consider Buy New for the shortfall" : ""}`
                     : "Select Karats above to see live stock availability."}
-                  {" "}Actual gold is issued later from the order's Factory section.
+                  {" "}After you submit, the order opens on <span className="font-medium text-foreground">Diamond from stock</span>{f.assignedFactoryId ? "" : " — choose the factory below so the stones go straight to it"}. Gold goes from the factory's gold account.
                 </p>
               )
             )}
             {f.materialSourcing === "purchase" && (
               <p className="text-xs mt-3 p-2.5 rounded-xl bg-secondary text-muted-foreground">
-                Only notes the intent — record the purchase in Suppliers with this order's number.
+                After you submit, the order opens its <span className="font-medium text-foreground">purchase form</span> — the bill goes on the supplier&rsquo;s account{isDiamondOnly ? "" : f.assignedFactoryId ? " and the material straight to the factory" : " — choose the factory below so the material goes straight to it"}.
               </p>
             )}
           </SectionCard>

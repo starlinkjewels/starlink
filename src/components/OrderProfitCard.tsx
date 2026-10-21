@@ -132,6 +132,13 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         </p>
       )}
 
+      {/* ── The gold is still the order's estimate ── */}
+      {cost.estimated && (
+        <p className="text-xs rounded-xl bg-secondary/60 border border-border/70 px-3 py-2 text-muted-foreground">
+          <span className="font-medium text-foreground">Includes the estimated gold</span> — no gold has gone out for this order yet, so its estimate is counted at today&rsquo;s fine-gold cost. It is replaced by the real gold once issued.
+        </p>
+      )}
+
       {/* ── Why a figure is missing or only an upper bound ── */}
       {!rateSet && (
         <p className="text-xs text-muted-foreground">

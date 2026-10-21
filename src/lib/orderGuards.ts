@@ -26,7 +26,7 @@ export const CANCEL_REF_COLS = ["invoices", "readyStock"] as const;
 export function cancelBlocker(db: DB, o: Order): string | undefined {
   if (o.melted) return "Melted — the piece no longer exists";
   if (o.status === "Rejected") return "Already cancelled — re-open it on the order page to change it";
-  if (orderIsDispatched(o) || o.returns?.length) return "Dispatched — record a return instead";
+  if (orderIsDispatched(o) || o.returns?.length) return "Already dispatched — use “Return pieces” instead (credit note, piece back into Ready Stock)";
   if (!collectionsLoaded(CANCEL_REF_COLS)) return CHECKING;
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `On invoice ${inv.number} — delete or credit the invoice first`;

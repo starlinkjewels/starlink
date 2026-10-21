@@ -10,6 +10,8 @@ import { executeTool } from "./tools/execute";
 export { sendNotificationPush } from "./notifications";
 // Transactional email from the company's own Gmail account (see mail.ts).
 export { sendMail } from "./mail";
+// An admin changing a client's sign-in email or password (see clientLogin.ts).
+export { setClientLogin } from "./clientLogin";
 
 // Totals kept on the server (see summaries.ts), deployed by its own name:
 //   firebase deploy --only functions:sumProd   (production database)
