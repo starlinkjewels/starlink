@@ -1,4 +1,5 @@
 import { isDiamondOnlyOrder } from "@/lib/db";
+import { looseLabel } from "@/lib/orderText";
 import { ListCombo } from "@/components/ListCombo";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { choicesOf } from "@/lib/optionLists";
@@ -450,7 +451,7 @@ function ClientHistoryPageBody() {
         );
       } },
     { key: "item", header: "Item", sortValue: o => o.jewelleryType, cell: o => <span className="font-medium whitespace-nowrap">{o.jewelleryType}</span> },
-    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{isDiamondOnlyOrder(o) ? "Loose diamonds" : metalLabel(o.metal)}</span> },
+    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{isDiamondOnlyOrder(o) ? looseLabel(o) : metalLabel(o.metal)}</span> },
     { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.diamondType}</span> },
     { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },
     { key: "priority", header: "Priority", sortValue: o => o.priority,

@@ -82,9 +82,11 @@ export interface LooseLotDraft { shape: string; mm: string; size: string; color:
  * supplier's bill, an order's purchase). Under it: the bag the stones go into,
  * and what that bag holds now.
  */
-export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false }: {
+export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false }: {
   value: LooseLotDraft; onChange: (patch: Partial<LooseLotDraft>) => void; idPrefix: string;
   companyId?: string; showBag?: boolean; compact?: boolean;
+  /** Gems (emerald, ruby…), not diamonds: no sieve, and colour and quality in the gem trade's words. */
+  gem?: boolean;
 }) {
   const db = useDb();
   const sizes = listOf("diamondSizes", db.settings);
@@ -99,7 +101,7 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
   const round = isRoundShape(value.shape);
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+      <div className={`grid grid-cols-2 ${gem ? "sm:grid-cols-4" : "sm:grid-cols-5"} gap-2`}>
         <div>
           <Label htmlFor={`${idPrefix}-shape`} className={lbl}>Shape</Label>
           <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange(isRoundShape(v || "Round") ? { shape: v || "Round" } : { shape: v, size: "" })} optional={false} className={box} />
@@ -108,18 +110,20 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
           <Label htmlFor={`${idPrefix}-mm`} className={lbl}>MM</Label>
           <ListSelect id={`${idPrefix}-mm`} list="diamondMm" choices={mm} value={value.mm} onChange={v => onChange({ mm: v })} className={box} normalize={t => normalizeMm(t) ?? t} />
         </div>
-        <div>
-          <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve{!round && <span className="text-muted-foreground font-normal"> · round only</span>}</Label>
-          <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={round ? value.size : ""} onChange={v => onChange({ size: v })} className={box}
-            disabled={!round} placeholder={round ? "—" : "Use MM"} />
-        </div>
+        {!gem && (
+          <div>
+            <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve{!round && <span className="text-muted-foreground font-normal"> · round only</span>}</Label>
+            <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={round ? value.size : ""} onChange={v => onChange({ size: v })} className={box}
+              disabled={!round} placeholder={round ? "—" : "Use MM"} />
+          </div>
+        )}
         <div>
           <Label htmlFor={`${idPrefix}-color`} className={lbl}>Colour</Label>
-          <ListSelect id={`${idPrefix}-color`} list="diamondColors" value={value.color} onChange={v => onChange({ color: v })} className={box} />
+          <ListSelect id={`${idPrefix}-color`} list={gem ? "gemColors" : "diamondColors"} value={value.color} onChange={v => onChange({ color: v })} className={box} />
         </div>
         <div>
-          <Label htmlFor={`${idPrefix}-clarity`} className={lbl}>Clarity</Label>
-          <ListSelect id={`${idPrefix}-clarity`} list="diamondClarities" value={value.clarity} onChange={v => onChange({ clarity: v })} className={box} />
+          <Label htmlFor={`${idPrefix}-clarity`} className={lbl}>{gem ? "Quality" : "Clarity"}</Label>
+          <ListSelect id={`${idPrefix}-clarity`} list={gem ? "gemQualities" : "diamondClarities"} value={value.clarity} onChange={v => onChange({ clarity: v })} className={box} />
         </div>
       </div>
       {showBag && (

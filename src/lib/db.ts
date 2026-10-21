@@ -190,7 +190,12 @@ export const DIAMOND_ONLY_METAL = "None (Diamond only)";
 /** A named extra charge on an order, in USD. */
 export interface OrderCharge { id: string; name: string; amountUsd: number }
 /** What a loose-diamond order's stones are. Every part optional — as much as the client asked for. */
-export interface StoneSpec { shape?: string; mm?: string; size?: string; color?: string; clarity?: string }
+/**
+ * The stones of a loose order. `stone` is what they are — "Emerald", "Ruby",
+ * "Emerald + Diamond" when the sale mixes them; unset means diamonds (every
+ * loose order from before gems could be sold).
+ */
+export interface StoneSpec { stone?: string; shape?: string; mm?: string; size?: string; color?: string; clarity?: string }
 
 /** The extra charges on an order, added up. */
 export function otherChargesTotal(o: { otherCharges?: OrderCharge[] }): number {
@@ -610,6 +615,10 @@ export interface Invoice {
   previousNumber?: string;
   amount: number; // snapshot at creation; the UI always recomputes live from the orders
   paid: boolean;
+  /** Each order's certified stones as printed on the bill ("GIA 2141438 · 1.01 ct
+   *  Round · F VS1"), by order id — kept when it is raised, so the client's own
+   *  copy shows them (a client can't read the stone records). */
+  stones?: Record<string, string[]>;
   /** The company that issued it — fixed when it is raised, so moving the client
    *  to another company later never changes a bill already sent. Unset = the
    *  first company (every invoice from before there was more than one). */
@@ -716,6 +725,8 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
     number: number || nextInvoiceNumber(d), amount, paid: allCleared, createdAt: at,
     ...(companyId && companyId !== "main" ? { companyId } : {}),
   };
+  const stones = Object.fromEntries(eligible.map(oid => [oid, certStoneLines(d, oid)]).filter(([, l]) => l.length));
+  if (Object.keys(stones).length) inv.stones = stones;
   d.invoices.push(inv);
   return inv;
 }
@@ -3602,6 +3613,20 @@ export function timeAgo(iso?: string): string {
   const day = Math.floor(hr / 24);
   if (day < 7) return `${day}d ago`;
   return fmtDate(iso);
+}
+
+/** A certified stone as a bill names it: "GIA 2141438 · 1.01 ct Round · F VS1 · EX/EX/EX · Fluor. None". */
+export function certStoneLine(p: DiamondPacket): string {
+  const cert = [p.certificateLab, p.certificateNumber].filter(Boolean).join(" ");
+  const finish = [p.cut, p.polish, p.symmetry].filter(Boolean).join("/");
+  return [cert, `${p.carat} ct ${p.shape}`.trim(), [p.color, p.clarity].filter(Boolean).join(" "), finish, p.fluorescence ? `Fluor. ${p.fluorescence}` : ""]
+    .filter(Boolean).join(" · ");
+}
+
+/** The certified stones on an order (set in it, or sold on it), as the bill lists them. */
+export function certStoneLines(d: Pick<DB, "diamondPackets">, orderId: string): string[] {
+  return (d.diamondPackets ?? []).filter(p => p.orderId === orderId)
+    .sort((a, b) => (b.carat || 0) - (a.carat || 0)).map(certStoneLine);
 }
 
 /**

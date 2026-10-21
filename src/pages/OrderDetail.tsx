@@ -1,7 +1,7 @@
 import { issuePick, type StockPick } from "@/lib/orderStock";
 import { otherChargesTotal } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
-import { orderTitle } from "@/lib/orderText";
+import { hasDiamonds, orderTitle, stoneOf } from "@/lib/orderText";
 import { ChangeClientSheet } from "@/components/ChangeClientSheet";
 import { clientChangeBlocker, deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
 import { useStudio } from "@/lib/studio";
@@ -2052,14 +2052,15 @@ function OrderDetailPageBody() {
         <div className="border-t border-border/60 grid lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border/60">
           {diamondOnly ? (
           <div className="p-4 sm:p-6">
-            <p className="text-sm font-semibold text-foreground mb-3">The diamonds</p>
+            <p className="text-sm font-semibold text-foreground mb-3">{stoneOf(order) === "Diamond" ? "The diamonds" : "The stones"}</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <OrderSpec label="Diamond type" value={order.diamondType} />
+              {stoneOf(order) !== "Diamond" && <OrderSpec label="Stone" value={stoneOf(order)} />}
+              {hasDiamonds(stoneOf(order)) && <OrderSpec label="Diamond type" value={order.diamondType} />}
               <OrderSpec label="Stones" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
               <OrderSpec label="Shape" value={order.stoneSpec?.shape} />
               <OrderSpec label="Size" value={[order.stoneSpec?.mm, order.stoneSpec?.size].filter(Boolean).join(" · ") || undefined} />
               <OrderSpec label="Colour" value={order.stoneSpec?.color} />
-              <OrderSpec label="Clarity" value={order.stoneSpec?.clarity} />
+              <OrderSpec label={hasDiamonds(stoneOf(order)) ? "Clarity" : "Quality"} value={order.stoneSpec?.clarity} />
               <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
             </div>
           </div>

@@ -15,6 +15,7 @@ import { bagNoOf } from "@/lib/diamondBags";
 import { deriveStockBalances, estimatedPureGoldNeeded, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
 import { materialDefs, materialName, materialUnit, type MaterialKey } from "@/lib/materials";
 import { pickAvailable, pickCostInr, suggestLots, type StockPick } from "@/lib/orderStock";
+import { hasDiamonds } from "@/lib/orderText";
 
 export type OrderKind = "piece" | "loose" | "readyStock";
 
@@ -29,7 +30,8 @@ export interface PlanOrder {
   estimatedGrossWeight: number;
   diamondWeight: number;
   quantity: number;
-  stoneSpec?: { shape?: string; mm?: string; size?: string; color?: string; clarity?: string };
+  /** A loose order's stones; `stone` is what they are ("Diamond", "Emerald", "Emerald + Diamond"). */
+  stoneSpec?: { stone?: string; shape?: string; mm?: string; size?: string; color?: string; clarity?: string };
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -63,9 +65,15 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   const remove = (id: string) => onPicks(picks.filter(p => p.id !== id));
 
   // ── What is wanted, and what the plan covers ──
+  // A loose order sells the stones it names: diamonds, the business's own gems, or both.
+  const stone = order.stoneSpec?.stone?.trim() || "Diamond";
+  const wantsDiamonds = !piece ? hasDiamonds(stone) : true;
+  const stoneMats = piece ? [] : materialDefs(db.settings).filter(m => m.kind === "stone" && m.unit === "ct"
+    && stone.split("+").some(w => w.trim().toLowerCase() === m.name.toLowerCase()));
+  const counted = (id: string) => id === "diamond" || stoneMats.some(m => m.id === id);
   const wantCt = order.diamondWeight || 0;
-  const plannedCt = r2(picks.filter(p => p.material === "diamond").reduce((s, p) => s + (p.kind === "certified" ? pickAvailable(db, p, co).qty : p.qty || 0), 0)
-    + (planned?.lines.filter(l => l.kind === "loose" || l.kind === "certified").reduce((s, l) => s + l.qty, 0) ?? 0));
+  const plannedCt = r2(picks.filter(p => counted(p.material)).reduce((s, p) => s + (p.kind === "certified" ? pickAvailable(db, p, co).qty : p.qty || 0), 0)
+    + (planned?.lines.filter(l => l.kind === "loose" || l.kind === "certified" || (l.materialId && counted(l.materialId))).reduce((s, l) => s + l.qty, 0) ?? 0));
   const goldNeed = piece && order.metalHasKarats ? estimatedPureGoldNeeded({ productKarats: order.productKarats, estimatedNetWeight: order.estimatedNetWeight, estimatedGrossWeight: order.estimatedGrossWeight, metalWeight: 0 }) : 0;
   const factory = db.factories.find(f => f.id === factoryId);
   const factoryFine = factory ? factoryFineGoldBalance(db.materialIssuances ?? [], factory.id, factory.openingFineGold, co) : 0;
@@ -75,7 +83,10 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   const goldBuckets = Object.entries(deriveStockBalances(db.stockMovements ?? [], "gold", co)).filter(([, q]) => q > 0);
   const others = materialDefs(db.settings).filter(m => m.active !== false);
   const certified = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (!multi || companyOf(p) === co));
-  const suggestions = order.kind === "loose" ? suggestLots(db, order.stoneSpec ?? {}, co).slice(0, 6) : [];
+  const suggestions = order.kind === "loose" && wantsDiamonds ? suggestLots(db, order.stoneSpec ?? {}, co).slice(0, 6) : [];
+  // A gem sale: that gem's stock, grade by grade.
+  const gemStock = stoneMats.flatMap(m => Object.entries(deriveStockBalances(db.stockMovements ?? [], m.id, co))
+    .filter(([, q]) => q > 0).map(([key, q]) => ({ m, key, q: r2(q) })));
 
   const addMenu = [
     { label: "Diamonds from a bag", icon: Gem, onSelect: () => add({ material: "diamond", kind: "loose", key: "", qty: 0 }) },
@@ -119,8 +130,34 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
         </div>
       )}
 
+      {/* A gem sale: what of that gem is in stock — one tap takes it. */}
+      {stoneMats.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-sm font-medium text-foreground">{stoneMats.map(m => m.name).join(" and ")} in stock</p>
+          {gemStock.length === 0 ? (
+            <p className="text-xs text-muted-foreground">None in stock — buy below.</p>
+          ) : (
+            <div className="rounded-xl border border-border/70 divide-y divide-border/60 overflow-hidden">
+              {gemStock.map(g => {
+                const taken = picks.some(p => p.material === g.m.id && p.key === g.key);
+                const need = Math.max(0, r2(wantCt - plannedCt));
+                return (
+                  <div key={`${g.m.id}|${g.key}`} className="flex items-center gap-3 px-3 py-2 text-sm">
+                    <p className="min-w-0 flex-1 truncate">{g.key === "—" ? g.m.name : `${g.key} ${g.m.name}`} <span className="text-xs text-muted-foreground">· {g.q} {g.m.unit}</span></p>
+                    <Button type="button" size="sm" variant={taken ? "secondary" : "outline"} disabled={taken} className="rounded-lg h-8 gap-1"
+                      onClick={() => add({ material: g.m.id as MaterialKey, kind: "bulk", key: g.key, qty: r2(Math.min(g.q, need || g.q)) })}>
+                      {taken ? <><Check className="h-3.5 w-3.5" />Added</> : <><Plus className="h-3.5 w-3.5" />Add</>}
+                    </Button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Loose diamonds: the bags that suit the request. */}
-      {order.kind === "loose" && (
+      {order.kind === "loose" && wantsDiamonds && (
         <div className="space-y-2">
           <p className="text-sm font-medium text-foreground">Matching bags in stock</p>
           {suggestions.length === 0 ? (
@@ -252,7 +289,7 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
       {/* Coverage */}
       {(wantCt > 0 || plannedCt > 0) && (
         <p className={`text-xs flex items-center gap-1.5 ${plannedCt >= wantCt && wantCt > 0 ? "text-success" : "text-muted-foreground"}`}>
-          <Gem className="h-3.5 w-3.5" />Diamonds planned: {plannedCt} ct{wantCt ? ` of ${wantCt} ct` : ""}{plannedCt >= wantCt && wantCt > 0 ? " — covered" : ""}
+          <Gem className="h-3.5 w-3.5" />{piece || stone === "Diamond" ? "Diamonds" : "Stones"} planned: {plannedCt} ct{wantCt ? ` of ${wantCt} ct` : ""}{plannedCt >= wantCt && wantCt > 0 ? " — covered" : ""}
         </p>
       )}
       {isAdmin && (picks.length > 0 || planned) && <p className="text-xs text-muted-foreground">Material planned: <span className="font-medium text-foreground">{fmtMoneyInr(r2(totalCost))}</span></p>}

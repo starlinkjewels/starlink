@@ -1,5 +1,6 @@
 import type { Order, Client, Settings, DB } from "./db";
-import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb, isDiamondOnlyOrder } from "./db";
+import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb, isDiamondOnlyOrder, certStoneLines } from "./db";
+import { hasDiamonds, stoneOf } from "./orderText";
 import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
 import { getBrand, brandName, BUILTIN } from "./brand";
@@ -26,10 +27,13 @@ function usd(n: number) {
  * reads cleanly. `mainShape` comes from mainDiamondShape() at the call site.
  */
 function itemDescription(order: Order, mainShape?: string): string {
-  // Loose diamonds are described by the stones — there is no metal or size.
+  // A loose sale is described by its stones — there is no metal or size. Gems
+  // by their own name: an emerald sale never prints as "loose diamonds".
   if (isDiamondOnlyOrder(order)) {
     const sp = order.stoneSpec ?? {};
-    return [order.diamondType, "loose diamonds", sp.shape || mainShape, sp.mm || sp.size, sp.color, sp.clarity]
+    const stone = stoneOf(order);
+    const what = stone === "Diamond" ? [order.diamondType, "loose diamonds"] : [hasDiamonds(stone) ? order.diamondType : "", "loose", stone];
+    return [...what, sp.shape || mainShape, sp.mm || sp.size, sp.color, sp.clarity]
       .filter(Boolean).join(" ").toUpperCase();
   }
   // 14K -> 14KT
@@ -58,7 +62,25 @@ function itemDescription(order: Order, mainShape?: string): string {
   return line || `${order.jewelleryType} - ${order.metal}`.toUpperCase();
 }
 
-function itemRowHtml(sr: number, order: Order, mainShape?: string): string {
+/** Each certified stone of the order on its own small line under the item — lab, report number, grading. */
+function stonesHtml(stones: string[]): string {
+  return stones.map(t => `<div style="font-size:9px;color:#333;margin-top:1px;">${esc(t)}</div>`).join("");
+}
+
+/**
+ * An order's certified stones for its bill: read from the stone records when
+ * this person can (staff), else as they were kept on the invoice when it was
+ * raised (a client's own copy).
+ */
+function orderStones(orderId: string, invoiceNumber?: string): string[] {
+  const d = loadDb();
+  const live = certStoneLines(d, orderId);
+  if (live.length) return live;
+  const inv = invoiceNumber ? d.invoices.find(i => i.number === invoiceNumber) : undefined;
+  return inv?.stones?.[orderId] ?? [];
+}
+
+function itemRowHtml(sr: number, order: Order, mainShape?: string, stones: string[] = []): string {
   const stockId = order.designNumber || order.orderNumber;
   const weight = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
   const itemPrice = order.amount ? usd(order.amount) : "—";
@@ -66,7 +88,7 @@ function itemRowHtml(sr: number, order: Order, mainShape?: string): string {
   return `<tr class="item-row">
         <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${itemDescription(order, mainShape)}${returnedQty(order) > 0
+        <td class="l">${itemDescription(order, mainShape)}${stonesHtml(stones)}${returnedQty(order) > 0
           ? `<div style="font-size:9px;color:#b91c1c;margin-top:1px;">${returnedQty(order)} of ${order.quantity} returned — ${[...new Set((order.returns ?? []).map(r => r.creditNoteNo))].join(", ")}</div>` : ""}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>
@@ -511,7 +533,7 @@ export function printInvoice(
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
   const ITEM_ROWS = 10;
-  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order, mainShape) : BLANK_ROW).join("\n");
+  const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) => i === 0 ? itemRowHtml(1, order, mainShape, orderStones(order.id, invoiceNumber)) : BLANK_ROW).join("\n");
 
   // A raised invoice prints as the company that issued it; a proforma as the
   // company the client buys from.
@@ -559,7 +581,7 @@ export function printBatchInvoice(
   // orders and zero blank rows left, the images would overlap real item rows.
   const ITEM_ROWS = Math.max(10, orders.length + 4);
   const itemRows = Array.from({ length: ITEM_ROWS }, (_, i) =>
-    i < orders.length ? itemRowHtml(i + 1, orders[i], mainShapes?.[orders[i].id]) : BLANK_ROW
+    i < orders.length ? itemRowHtml(i + 1, orders[i], mainShapes?.[orders[i].id], orderStones(orders[i].id, invoiceNumber)) : BLANK_ROW
   ).join("\n");
 
   const brand = brandForDocument(loadDb(), { clientId: client?.id ?? orders[0]?.clientId, invoiceNumber });

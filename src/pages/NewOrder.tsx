@@ -1,4 +1,5 @@
-import { stonesLine } from "@/lib/orderText";
+import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
+import { activeMaterials, materialDef } from "@/lib/materials";
 import { useCan } from "@/hooks/useCan";
 import { buildLooseTimelineSteps } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
@@ -181,6 +182,21 @@ export function NewOrderPage() {
   // The id the order will have — so a purchase planned now is recorded against it.
   const draftId = useRef(uid("o_"));
   const [picks, setPicks] = useState<StockPick[]>([]);
+  // A loose order: what the stones are — "Diamond", or a gem the business keeps
+  // (Settings → Materials), or typed. Follows what is taken from stock until it
+  // is chosen by hand: take emeralds, and it reads "Emerald".
+  const [stone, setStoneState] = useState("Diamond");
+  const stoneChosen = useRef(false);
+  const setStone = (v: string) => { stoneChosen.current = true; setStoneState(v.trim() || "Diamond"); };
+  const onPicks = (next: StockPick[]) => {
+    setPicks(next);
+    if (kind !== "loose" || stoneChosen.current) return;
+    const names = [...new Set(next.map(pk => pk.material === "diamond" ? "Diamond"
+      : materialDef(db.settings, pk.material)?.kind === "stone" ? materialDef(db.settings, pk.material)!.name : "").filter(Boolean))];
+    if (names.length) setStoneState(names.join(" + "));
+  };
+  // A loose sale of gems only — no diamond type, no sieve; colour and quality in gem words.
+  const isGemSale = isDiamondOnly && !hasDiamonds(stone);
   const [plannedBuy, setPlannedBuy] = useState<PlannedBuy | null>(null);
   // Planning material is changing the order's manufacturing — the same right as on the order page.
   const canDo = useCan();
@@ -218,6 +234,7 @@ export function NewOrderPage() {
     setKindState(k);
     // What was planned belongs to the kind it was planned for.
     setPicks([]); setPlannedBuy(null);
+    if (!stoneChosen.current) setStoneState("Diamond");
     if (k === "loose") { setJewelleryType("Diamond Only"); setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later", assignedFactoryId: "" })); }
     else {
       setF(prev => ({
@@ -378,7 +395,7 @@ export function NewOrderPage() {
         contactPerson: user!.name,
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
         metal: f.metal as Order["metal"],
-        diamondType: f.diamondType as Order["diamondType"],
+        diamondType: (isGemSale ? "" : f.diamondType) as Order["diamondType"],
         quantity: Number(f.quantity),
         diamondWeight: Number(f.diamondWeight),
         metalWeight: 0,
@@ -395,7 +412,7 @@ export function NewOrderPage() {
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
-        ...(isDiamondOnly ? { stoneSpec: cleanStoneSpec(f.stoneSpec) } : {}),
+        ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? { ...f.stoneSpec, size: "" } : f.stoneSpec), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
         // What the plan said: from stock, bought, or a Ready Stock piece.
         materialSourcing: kind === "readyStock" ? f.materialSourcing === "later" ? undefined : f.materialSourcing
           : picks.length ? "stock" : plannedBuy ? "purchase" : undefined,
@@ -435,8 +452,8 @@ export function NewOrderPage() {
       if (!forReadyStock) mailInfo = {
         orderNumber: order.orderNumber,
         clientName: d.clients.find(c => c.id === clientId)?.companyName ?? "Client",
-        // A loose-diamond order is described by its stones, never as "Metal: None".
-        jewelleryType: isDiamondOnly ? "Loose diamonds" : order.jewelleryType,
+        // A loose order is described by its stones, never as "Metal: None" — gems by their name.
+        jewelleryType: isDiamondOnly ? looseLabel(order) : order.jewelleryType,
         metal: isDiamondOnly ? stonesLine(order) : order.metal,
         quantity: order.quantity,
         expectedDelivery: order.expectedDelivery,
@@ -643,7 +660,7 @@ export function NewOrderPage() {
           <div role="radiogroup" aria-label="What is this order?" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {([
               ["piece", "Make a piece", "Made by a factory", Gem, true],
-              ["loose", "Loose diamonds", "Stones sold as they are — gems too", Sparkles, !forReadyStock],
+              ["loose", "Loose stones", "Diamonds, certified stones or gems — sold as they are", Sparkles, !forReadyStock],
               ["readyStock", "From Ready Stock", "A finished piece we hold", PackageCheck, !forReadyStock],
             ] as const).filter(([, , , , ok]) => ok).map(([k, label, hint, Icon]) => (
               <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => setKind(k)}
@@ -746,16 +763,26 @@ export function NewOrderPage() {
               </Field>
             )}
 
-            {/* A loose-diamond order has no metal — only its stones (below). */}
+            {/* A loose order has no metal — only its stones (below). */}
             {!isDiamondOnly && (
               <Field label="Metal">
                 <ListCombo list="metals" value={f.metal} onChange={setMetal} optional={false} className="rounded-xl h-11" ariaLabel="Metal" />
               </Field>
             )}
 
-            <Field label="Diamond Type">
-              <ListCombo list="diamondTypes" value={f.diamondType} onChange={v => set("diamondType", v)} optional={false} className="rounded-xl h-11" ariaLabel="Diamond Type" />
-            </Field>
+            {/* A loose order: what the stones are — diamonds, or the business's own gems, or typed. */}
+            {isDiamondOnly && (
+              <Field label="Stone">
+                <ListCombo value={stone} onChange={setStone} optional={false} className="rounded-xl h-11" ariaLabel="Stone"
+                  choices={["Diamond", ...activeMaterials(db.settings).filter(m => m.kind === "stone").map(m => m.name)]} />
+              </Field>
+            )}
+
+            {!isGemSale && (
+              <Field label="Diamond Type">
+                <ListCombo list="diamondTypes" value={f.diamondType} onChange={v => set("diamondType", v)} optional={false} className="rounded-xl h-11" ariaLabel="Diamond Type" />
+              </Field>
+            )}
 
             <Field label="Priority">
               <Select value={f.priority} onValueChange={v => set("priority", v)}>
@@ -782,7 +809,7 @@ export function NewOrderPage() {
             {isDiamondOnly && (
               <div className="col-span-2 space-y-1.5">
                 <p className="text-sm font-medium text-foreground">The stones <span className="text-xs font-normal text-muted-foreground">· as much as the client asked for</span></p>
-                <LooseLotFields idPrefix="no-stone" value={f.stoneSpec} showBag={false}
+                <LooseLotFields idPrefix="no-stone" value={f.stoneSpec} showBag={false} gem={isGemSale}
                   onChange={patch => setF(prev => ({ ...prev, stoneSpec: { ...prev.stoneSpec, ...patch } }))} />
               </div>
             )}
@@ -972,9 +999,9 @@ export function NewOrderPage() {
             <ProductionPlan
               order={{ kind, companyId: orderCompany, metal: f.metal, metalHasKarats, productKarats: f.productKarats,
                 estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0,
-                diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: f.stoneSpec }}
+                diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: { ...f.stoneSpec, stone } }}
               factoryId={f.assignedFactoryId} onFactory={v => set("assignedFactoryId", v)}
-              picks={picks} onPicks={setPicks} planned={plannedBuy} onPlanned={setPlannedBuy}
+              picks={picks} onPicks={onPicks} planned={plannedBuy} onPlanned={setPlannedBuy}
               stub={{ id: draftId.current, orderNumber: "this order", clientId: forReadyStock ? "" : f.clientId, forReadyStock: forReadyStock || undefined,
                 ...coField(orderCompany), metal: f.metal, jewelleryType: f.jewelleryType, assignedFactoryId: f.assignedFactoryId || undefined } as unknown as Order}
               isAdmin={isAdmin} />

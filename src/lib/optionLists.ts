@@ -15,7 +15,8 @@ export type ListKey =
   | "jewelleryTypes" | "metals" | "diamondTypes" | "colours" | "rhodium" | "stamping"
   | "paymentMethods" | "departments" | "meltReasons" | "returnReasons"
   | "diamondShapes" | "diamondSizes" | "diamondMm" | "diamondColors" | "diamondClarities"
-  | "diamondFinish" | "diamondFluorescence" | "diamondLabs" | "chargeNames";
+  | "diamondFinish" | "diamondFluorescence" | "diamondLabs" | "chargeNames"
+  | "gemColors" | "gemQualities";
 
 export interface ListDef {
   key: ListKey;
@@ -56,6 +57,11 @@ export const LIST_DEFS: readonly ListDef[] = [
     defaults: DEFAULT_DIAMOND_COLORS },
   { key: "diamondClarities", group: "Diamonds", title: "Clarities", hint: "Single grades and groups, loose and certified",
     defaults: DEFAULT_DIAMOND_CLARITIES },
+  // A loose sale of gems (emerald, ruby…): their colour and quality, in the gem trade's words.
+  { key: "gemColors", group: "Diamonds", title: "Gem colours", hint: "Loose gems sold on an order",
+    defaults: ["Red", "Pink", "Blue", "Green", "Yellow", "Purple", "Orange", "White", "Black", "Multi"] },
+  { key: "gemQualities", group: "Diamonds", title: "Gem qualities", hint: "Loose gems sold on an order",
+    defaults: ["AAA", "AA", "A", "Eye clean", "Commercial"] },
   { key: "diamondFinish", group: "Diamonds", title: "Cut · polish · symmetry", hint: "A certified stone's finish grades",
     defaults: ["EX", "VG", "G", "F", "P", "Ideal"] },
   { key: "diamondFluorescence", group: "Diamonds", title: "Fluorescence", hint: "A certified stone's fluorescence",
