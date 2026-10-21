@@ -70,6 +70,27 @@ export function middleStages(settings?: Pick<Settings, "timelineStages"> | null)
   return [...BUILTIN_MIDDLE];
 }
 
+/** Why a loose-diamond stage list can't be used — or null when it can. Only the business's own names: the app's stages are placed for it. */
+export function looseStageProblem(list: string[]): string | null {
+  const seen = new Set<string>();
+  for (const s of list) {
+    const name = s.trim();
+    if (!name) return "A stage needs a name.";
+    if (name.length > 40) return `"${name.slice(0, 20)}…" is too long — keep a stage name under 40 letters.`;
+    const key = name.toLowerCase();
+    if (seen.has(key)) return `"${name}" is in the list twice.`;
+    seen.add(key);
+    if (RESERVED.has(key)) return `"${name}" is a name the app already uses — pick another.`;
+  }
+  return null;
+}
+
+/** A loose-diamond order's own stages, as configured (none by default). */
+export function looseStages(settings?: Pick<Settings, "looseStages"> | null): string[] {
+  const set = settings?.looseStages;
+  return set && set.length && !looseStageProblem(set) ? set.map(s => s.trim()) : [];
+}
+
 /** Every stage of a standard order, start to finish, as configured. */
 export function fullStageOrder(settings?: Pick<Settings, "timelineStages"> | null): string[] {
   return [...HEAD_STAGES, ...middleStages(settings), ...TAIL_STAGES];

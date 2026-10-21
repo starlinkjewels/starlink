@@ -1,3 +1,4 @@
+import { LooseLotFields } from "@/components/LotFields";
 import { ListCombo } from "@/components/ListCombo";
 import type { ListKey } from "@/lib/optionLists";
 import { useState, type ReactNode } from "react";
@@ -38,6 +39,8 @@ type Form = {
   quantity: string; diamondType: string; diamondWeight: string; estimatedGrossWeight: string; estimatedNetWeight: string;
   rhodium: string; stamping: string; stampingNote: string;
   designNumber: string; priority: string; expectedDelivery: string; deliveryTime: string; contactPerson: string; instructions: string;
+  // A loose-diamond order's stones.
+  stoneShape: string; stoneMm: string; stoneSize: string; stoneColor: string; stoneClarity: string;
 };
 
 const numStr = (n?: number) => (n ? String(n) : "");
@@ -51,18 +54,20 @@ function formOf(o: Order): Form {
     rhodium: o.rhodium ?? "", stamping: special ? "Special Stamp" : o.stamping ?? "", stampingNote: special ? o.stamping!.slice(SPECIAL.length) : "",
     designNumber: o.designNumber ?? "", priority: o.priority, expectedDelivery: (o.expectedDelivery ?? "").slice(0, 10),
     deliveryTime: o.deliveryTime ?? "", contactPerson: o.contactPerson ?? "", instructions: o.instructions ?? "",
+    stoneShape: o.stoneSpec?.shape ?? "", stoneMm: o.stoneSpec?.mm ?? "", stoneSize: o.stoneSpec?.size ?? "",
+    stoneColor: o.stoneSpec?.color ?? "", stoneClarity: o.stoneSpec?.clarity ?? "",
   };
 }
 
 /** Field → how the activity line and the confirmation name it. */
 const LABEL: Record<string, string> = {
-  jewelleryType: "type", metal: "metal", productKarats: "karats", productColor: "colour", productSize: "size",
+  jewelleryType: "type", metal: "metal", productKarats: "karats", productColor: "colour", productSize: "size", stoneSpec: "stones",
   quantity: "quantity", diamondType: "diamond type", diamondWeight: "est. diamonds", estimatedGrossWeight: "est. gross weight",
   estimatedNetWeight: "est. net weight", rhodium: "rhodium", stamping: "stamping", designNumber: "design no.",
   priority: "priority", expectedDelivery: "due date", deliveryTime: "delivery time", contactPerson: "contact person", instructions: "instructions",
 };
 /** What the printed invoice shows of an order — it reads them from the order itself. */
-const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber"]);
+const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec"]);
 
 // Outside the panel, so typing in a field never remounts it (and loses focus).
 function Note({ children }: { children: ReactNode }) {
@@ -143,12 +148,16 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       deliveryTime: txt(f.deliveryTime),
       contactPerson: f.contactPerson.trim(),
       instructions: f.instructions.trim(),
+      ...(diamondOnly ? { stoneSpec: Object.fromEntries(Object.entries({ shape: f.stoneShape, mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity })
+        .map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)) } : {}),
     };
     // Which form fields each stored field is made from.
     const FROM: Partial<Record<keyof Order, (keyof Form)[]>> = {
       productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"],
+      stoneSpec: ["stoneShape", "stoneMm", "stoneSize", "stoneColor", "stoneClarity"],
     };
-    const same = (a: unknown, b: unknown) => (a ?? "") === (b ?? "") || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9);
+    const same = (a: unknown, b: unknown) => (a ?? "") === (b ?? "") || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9)
+      || (typeof a === "object" && typeof b === "object" && JSON.stringify(a ?? {}) === JSON.stringify(b ?? {}));
     const changed = (Object.keys(next) as (keyof Order)[]).filter(k =>
       touched(...(FROM[k] ?? [k as keyof Form]))
       && !same(next[k], k === "expectedDelivery" ? (o.expectedDelivery ?? "").slice(0, 10) : o[k]));
@@ -229,12 +238,25 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                 <SelectContent>{typeOpts.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
-            <Field label="Metal">
-              <Select value={f.metal} onValueChange={setMetal} disabled={!!matLock || diamondOnly}>
-                <SelectTrigger className="h-10 rounded-xl" title={matLock}><SelectValue /></SelectTrigger>
-                <SelectContent>{metalOpts.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
-              </Select>
-            </Field>
+            {/* A loose-diamond order has no metal — its stones are below. */}
+            {!diamondOnly && (
+              <Field label="Metal">
+                <Select value={f.metal} onValueChange={setMetal} disabled={!!matLock}>
+                  <SelectTrigger className="h-10 rounded-xl" title={matLock}><SelectValue /></SelectTrigger>
+                  <SelectContent>{metalOpts.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
+                </Select>
+              </Field>
+            )}
+            {diamondOnly && (
+              <div className="col-span-2">
+                <LooseLotFields idPrefix="oe-stone" showBag={false} compact
+                  value={{ shape: f.stoneShape, mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity }}
+                  onChange={patch => setF(p => ({ ...p,
+                    ...(patch.shape !== undefined ? { stoneShape: patch.shape } : {}), ...(patch.mm !== undefined ? { stoneMm: patch.mm } : {}),
+                    ...(patch.size !== undefined ? { stoneSize: patch.size } : {}), ...(patch.color !== undefined ? { stoneColor: patch.color } : {}),
+                    ...(patch.clarity !== undefined ? { stoneClarity: patch.clarity } : {}) }))} />
+              </div>
+            )}
             {!diamondOnly && (
               <>
                 <Field label="Karats">
@@ -248,7 +270,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                 </Field>
               </>
             )}
-            <Field label="Quantity">
+            <Field label={diamondOnly ? "Stones (pcs)" : "Quantity"}>
               <Input type="number" min={1} step={1} value={f.quantity} onChange={e => set("quantity", e.target.value)} disabled={!!matLock} title={matLock} className="h-10 rounded-xl" />
             </Field>
             <Field label="Diamond type">

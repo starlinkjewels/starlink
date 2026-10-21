@@ -1,3 +1,4 @@
+import { pieceLine } from "@/lib/orderText";
 import { DataTable, CellAmount, type DataColumn } from "@/components/DataTable";
 import { metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -788,7 +789,7 @@ export function InvoicesPage() {
                       <label key={o.id} className={`flex items-center gap-3 p-2 rounded-lg border cursor-pointer transition-colors ${selected.has(o.id) ? "border-primary bg-primary/5" : "border-border/70 hover:bg-secondary/50"}`}>
                         <Checkbox checked={selected.has(o.id)} onCheckedChange={() => toggle(o.id)} />
                         <span className="font-mono text-xs font-semibold">{o.orderNumber}</span>
-                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">{o.jewelleryType} · {metalLabel(o.metal)}</span>
+                        <span className="text-xs text-muted-foreground truncate hidden sm:inline">{pieceLine(o, false)}</span>
                         {disp.dispatched
                           ? <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-success/10 text-success">Dispatched{disp.date ? ` ${fmtDate(disp.date)}` : ""}</span>
                           : <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-secondary text-muted-foreground">{o.status}</span>}

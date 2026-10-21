@@ -4,12 +4,13 @@ import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
 import { ListSelect, LooseLotFields, CertGradeFields } from "@/components/LotFields";
-import { lotKey, type LotSpec } from "@/lib/diamondLots";
+import { lotKey, lotLabel, type LotSpec } from "@/lib/diamondLots";
 import { billBrokerageProblem, brokerageForLines, brokerageWePay, emptyBillBrokerage, landedInr, type BillBrokerage } from "@/lib/brokers";
 import { useDb } from "@/hooks/useDb";
 import {
   updateDb, uid, nextDiamondStockNumber, todayLocal, stampFor,
   isDiamondOnlyOrder, type Order, type Purchase, type PurchaseCurrency,
+  loadDb,
 } from "@/lib/db";
 import { increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
@@ -95,6 +96,13 @@ const whose = (name: string) => (/s$/i.test(name) ? `${name}'` : `${name}'s`);
 const lineUnit = (l: Line, settings: Parameters<typeof materialUnit>[0]): MaterialUnit =>
   (l.kind === "gold" ? "g" : l.kind === "other" ? materialUnit(settings, l.materialId) : "ct");
 
+/** "18K gold", "Round · 1.3 mm · G-H · VS", "Certified Oval GIA 2141…", "950 Platinum" — a line in a word or two. */
+const lineText = (l: Line, settings: Parameters<typeof materialName>[0]): string =>
+  l.kind === "gold" ? `${l.purity} gold`
+    : l.kind === "loose" ? lotLabel(lotKey(lotOfLine(l)))
+    : l.kind === "certified" ? `Certified ${l.shape}${l.certNo.trim() ? ` · ${l.certNo.trim()}` : ""}`
+    : `${l.grade.trim() ? `${l.grade.trim()} ` : ""}${materialName(settings, l.materialId)}`;
+
 /**
  * Buying material into stock, a whole bill at a time — in a panel over the
  * page, so the history stays where it was.
@@ -107,8 +115,23 @@ const lineUnit = (l: Line, settings: Parameters<typeof materialUnit>[0]): Materi
  * is shared — supplier, date, bill number, currency and the rounding — is
  * entered once, and the lines saved together are one bill afterwards.
  */
-export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier, order: fixedOrder }: {
+/**
+ * A purchase planned while an order is being placed (New Order's production
+ * plan): checked now, recorded when the order is submitted — by `execute`,
+ * with the order as saved (its number, its factory).
+ */
+export interface PlannedBuy {
+  supplierName: string;
+  billNo: string;
+  lines: { kind: BuyKind; text: string; qty: number; unit: string; inr: number }[];
+  totalInr: number;
+  execute: (order: Order) => Promise<void>;
+}
+
+export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier, order: givenOrder, plan }: {
   open: boolean; onOpenChange: (open: boolean) => void;
+  /** Planning for an order not yet placed: `stub` stands in for it; Save hands back a PlannedBuy. */
+  plan?: { stub: Order; onPlanned: (p: PlannedBuy) => void };
   /** Opened from a supplier's page: the bill is theirs, already chosen. */
   supplierId?: string;
   /** Opened from an order's "Buy new": the bill is for that order, and what is
@@ -118,6 +141,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   const { user } = useAuth();
   const db = useDb();
   const studio = useStudio();
+  // Planning for an order being placed behaves as its own "Buy new".
+  const fixedOrder = givenOrder ?? plan?.stub;
+  const planning = !!plan;
   const addNew = useAddNew();
   const [supplierChosen, setSupplierId] = useState("");
   const supplierId = fixedSupplier ?? supplierChosen;
@@ -184,7 +210,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   // For an order: open orders, newest first; the bill goes on the order's own company.
   const openOrders = db.orders.filter(o => !["Delivered", "Rejected", "Cancelled"].includes(o.status) && !o.melted)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
-  const forOrder = forWhat === "order" ? db.orders.find(o => o.id === orderId) : undefined;
+  const forOrder = forWhat === "order" ? (planning ? plan!.stub : db.orders.find(o => o.id === orderId)) : undefined;
 
   const submit = async () => {
     if (!supplierId) { toast.error("Choose a supplier"); return; }
@@ -194,7 +220,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
     // From the order's own "Buy new": what is bought goes straight to its factory —
     // so the factory comes first (a diamond-only order has none: its stones are bought for the client).
     const sendTo = fixedOrder ? (fixedOrder.assignedFactoryId || "") : "";
-    if (fixedOrder && !sendTo && !isDiamondOnlyOrder(fixedOrder)) { toast.error("Assign a factory first (step ① on the order) — the material goes straight to it."); return; }
+    if (!planning && fixedOrder && !sendTo && !isDiamondOnlyOrder(fixedOrder)) { toast.error("Assign a factory first (step ① on the order) — the material goes straight to it."); return; }
     // The same bill entered twice is the same bill paid twice.
     if (fixedOrder && billNo.trim()) {
       const key = billNo.trim().toLowerCase();
@@ -212,6 +238,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       if (l.kind === "certified" && !l.certNo.trim()) { toast.error(`Item ${i + 1}: enter the report number`); return; }
       if (lineInr(l) <= 0) { toast.error(`Item ${i + 1}: comes to ₹0 — check the rate`); return; }
     }
+    // Recording the bill: now, or — planned with a new order — when the order is placed.
+    const record = async (target: Order | undefined, asFixed: boolean, co: string, sendTo: string) => {
+    const db = loadDb();
     const supplier = db.suppliers.find(s => s.id === supplierId);
     const now = stampFor(date);
     const ids = lines.map(() => uid("pur_"));
@@ -224,7 +253,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       // From the order's own Buy: material goes straight to the factory and never into the
       // stock pool, but a paired in + out (netting to zero) keeps it on the Stock report.
       // Both legs carry the purchase's own timestamp (see logOrderDirectPurchase).
-      if (fixedOrder) {
+      if (asFixed && target) {
         for (const [i, l] of lines.entries()) {
           if (l.kind === "certified") continue;
           const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
@@ -232,12 +261,12 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             companyId: co, material: lineMaterial(l),
             purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
             quantity: Number(l.qty), lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
-            purchaseId: ids[i], orderId: fixedOrder.id, createdBy: user!.id, createdAt: now,
+            purchaseId: ids[i], orderId: target.id, createdBy: user!.id, createdAt: now,
           });
         }
       }
       // Bought for an order, nothing goes into stock — the order's factory takes it from the bill.
-      for (const [i, l] of (forOrder ? [] : lines).entries()) {
+      for (const [i, l] of (target ? [] : lines).entries()) {
         if (l.kind === "certified") continue;
         // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
         const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
@@ -274,7 +303,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               certificateNumber: l.kind === "certified" ? l.certNo.trim() : undefined,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
-            purpose: forOrder ? "order" : "stock", ...(forOrder ? { orderId: forOrder.id } : {}), currency,
+            purpose: target ? "order" : "stock", ...(target ? { orderId: target.id } : {}), currency,
             totalUsd: currency === "USD" ? Math.round(lineBase(l) * 100) / 100 : undefined,
             exchangeRate: currency === "USD" ? Number(xrate) : undefined,
             totalInr: total, payments: [],
@@ -303,15 +332,15 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               supplierId, purchaseId: ids[i], ...coField(co),
               // From the order's own Buy it goes straight to the order ("issued", below).
               // For an order chosen elsewhere: kept in stock, reserved to it, for the normal issue to the factory.
-              status: fixedOrder ? "issued" : "in_stock",
-              ...(forOrder ? { orderId: forOrder.id } : {}),
+              status: asFixed ? "issued" : "in_stock",
+              ...(target ? { orderId: target.id } : {}),
               createdBy: user!.id, createdAt: now,
             });
           }
         });
         // The order: its purchases, and a line in its manufacturing log for each.
-        if (forOrder) {
-          const o = d.orders.find(x => x.id === forOrder.id);
+        if (target) {
+          const o = d.orders.find(x => x.id === target.id);
           if (o) {
             if (!o.linkedPurchaseIds) o.linkedPurchaseIds = [];
             if (!o.manufacturingLog) o.manufacturingLog = [];
@@ -359,14 +388,29 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
           }
         }
       });
-      toast.success(fixedOrder && sendTo
+      toast.success(asFixed && sendTo
         ? `${lines.length > 1 ? `${lines.length} items` : "Item"} bought (${fmtMoneyInr(billTotalInr)}) & sent to ${db.factories.find(f => f.id === sendTo)?.name || "the factory"}`
-        : `${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${forOrder ? `order ${forOrder.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}stock`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
+        : `${lines.length > 1 ? `${lines.length} items` : "Item"} bought → ${target ? `order ${target.orderNumber}` : `${co !== "main" ? `${companyById(db.settings, co).name}'s ` : ""}stock`} · ${fmtMoneyInr(billTotalInr)} to ${supplier?.name || "supplier"}`);
       reset();
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to buy");
     } finally { setSaving(false); }
+    };
+
+    if (planning) {
+      // Checked; recorded when the order is placed, against the order as saved.
+      plan!.onPlanned({
+        supplierName: db.suppliers.find(x => x.id === supplierId)?.name ?? "Supplier",
+        billNo: billNo.trim(),
+        lines: lines.map(l => ({ kind: l.kind, text: lineText(l, db.settings), qty: Number(l.qty), unit: lineUnit(l, db.settings), inr: lineInr(l) })),
+        totalInr: billTotalInr,
+        execute: async (o: Order) => record(o, true, workCompanyOf(loadDb(), o), o.assignedFactoryId || ""),
+      });
+      onOpenChange(false);
+      return;
+    }
+    await record(forOrder, !!fixedOrder, co, sendTo);
   };
 
   const footer = (

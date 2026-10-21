@@ -1,5 +1,5 @@
 import type { Order, Client, Settings, DB } from "./db";
-import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb } from "./db";
+import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb, isDiamondOnlyOrder } from "./db";
 import { brandForDocument, MAIN_COMPANY_ID, type BrandSettings } from "./companies";
 import { exportAllowed } from "./access";
 import { getBrand, brandName, BUILTIN } from "./brand";
@@ -26,6 +26,12 @@ function usd(n: number) {
  * reads cleanly. `mainShape` comes from mainDiamondShape() at the call site.
  */
 function itemDescription(order: Order, mainShape?: string): string {
+  // Loose diamonds are described by the stones — there is no metal or size.
+  if (isDiamondOnlyOrder(order)) {
+    const sp = order.stoneSpec ?? {};
+    return [order.diamondType, "loose diamonds", sp.shape || mainShape, sp.mm || sp.size, sp.color, sp.clarity]
+      .filter(Boolean).join(" ").toUpperCase();
+  }
   // 14K -> 14KT
   const karat = order.productKarats ? order.productKarats.trim().toUpperCase().replace(/K$/, "KT") : "";
 
@@ -94,7 +100,7 @@ function bankImagesHtml(settings: Settings): string {
 /* Deposit/Balance rows only appear when they add information: a $0 balance or a
    deposit that equals the total is redundant with "Total Amount" above, so a
    fully-settled invoice just ends with Total Amount as the final line. */
-function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, gift = 0, more: { certificate?: number; returned?: number; notes?: string[] } = {}): string {
+function totalsRowsHtml(total: number, adv: number, bal: number, shipping: number, gift = 0, more: { certificate?: number; returned?: number; notes?: string[]; charges?: { name: string; amountUsd: number }[] } = {}): string {
   const shippingRow = shipping > 0 ? `
     <tr class="tot-row">
       <td colspan="4" class="blank"></td>
@@ -108,6 +114,14 @@ function totalsRowsHtml(total: number, adv: number, bal: number, shipping: numbe
       <td colspan="2" class="tot-lbl">Certificate</td>
       <td class="tot-val">${usd(more.certificate!)}</td>
     </tr>` : "";
+
+  // Named extra charges, each on its own line ("Setting charge", "Engraving"…).
+  const chargeRows = (more.charges ?? []).filter(c => c.amountUsd > 0).map(c => `
+    <tr class="tot-row">
+      <td colspan="4" class="blank"></td>
+      <td colspan="2" class="tot-lbl">${esc(c.name)}</td>
+      <td class="tot-val">${usd(c.amountUsd)}</td>
+    </tr>`).join("");
 
   // Pieces the client sent back — the credit note(s) that took them off.
   const returnedRow = (more.returned ?? 0) > 0 ? `
@@ -140,7 +154,7 @@ function totalsRowsHtml(total: number, adv: number, bal: number, shipping: numbe
 
   return `
     ${shippingRow}
-    ${certificateRow}
+    ${certificateRow}${chargeRows}
     ${giftRow}
     ${returnedRow}
     <tr class="tot-row tot-bold">
@@ -493,7 +507,7 @@ export function printInvoice(
   const bal = balanceDue(order);
   const shipping = order.shippingCharge || 0;
   const gift = order.giftCardRedeemed || 0;
-  const more = { certificate: order.certificateFee || 0, returned: returnedCredit(order), notes: [...new Set((order.returns ?? []).map(r => r.creditNoteNo))] };
+  const more = { certificate: order.certificateFee || 0, returned: returnedCredit(order), notes: [...new Set((order.returns ?? []).map(r => r.creditNoteNo))], charges: order.otherCharges ?? [] };
 
   /* ── 10 item rows then totals rows embedded inside same table ── */
   const ITEM_ROWS = 10;
@@ -533,6 +547,9 @@ export function printBatchInvoice(
   const gift = orders.reduce((s, o) => s + (o.giftCardRedeemed || 0), 0);
   const more = {
     certificate: orders.reduce((s, o) => s + (o.certificateFee || 0), 0),
+    // The same charge on several orders is one line, added up.
+    charges: [...orders.flatMap(o => o.otherCharges ?? []).reduce((m, c) => m.set(c.name, Math.round(((m.get(c.name) ?? 0) + c.amountUsd) * 100) / 100), new Map<string, number>())]
+      .map(([name, amountUsd]) => ({ name, amountUsd })),
     returned: Math.round(orders.reduce((s, o) => s + returnedCredit(o), 0) * 100) / 100,
     notes: [...new Set(orders.flatMap(o => (o.returns ?? []).map(r => r.creditNoteNo)))].sort(),
   };

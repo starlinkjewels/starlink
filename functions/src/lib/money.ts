@@ -5,6 +5,8 @@ export interface OrderMoneyFields {
   amount?: number;
   shippingCharge?: number;
   certificateFee?: number;
+  /** Named extra charges ("Setting charge"…), USD. */
+  otherCharges?: Array<{ amountUsd?: number }>;
   giftCardRedeemed?: number;
   /** Pieces the client sent back — each credit comes off the bill. */
   returns?: Array<{ creditUsd?: number }>;
@@ -12,7 +14,8 @@ export interface OrderMoneyFields {
 }
 
 export function orderTotal(o: OrderMoneyFields): number {
-  const gross = (o.amount || 0) + (o.shippingCharge || 0) + (o.certificateFee || 0);
+  const gross = (o.amount || 0) + (o.shippingCharge || 0) + (o.certificateFee || 0)
+    + (o.otherCharges || []).reduce((s, c) => s + (Number(c.amountUsd) || 0), 0);
   const returned = (o.returns || []).reduce((s, r) => s + (r.creditUsd || 0), 0);
   return Math.max(0, Math.round((gross - (o.giftCardRedeemed || 0) - returned) * 100) / 100);
 }

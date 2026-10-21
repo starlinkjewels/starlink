@@ -1,3 +1,7 @@
+import { issuePick, type StockPick } from "@/lib/orderStock";
+import { otherChargesTotal } from "@/lib/db";
+import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
+import { orderTitle } from "@/lib/orderText";
 import { ChangeClientSheet } from "@/components/ChangeClientSheet";
 import { clientChangeBlocker, deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
 import { useStudio } from "@/lib/studio";
@@ -273,6 +277,7 @@ function OrderDetailPageBody() {
   const [showPricing, setShowPricing] = useState(false);
   const [priceValue, setPriceValue] = useState("");
   const [priceShipping, setPriceShipping] = useState("");
+  const [priceCharges, setPriceCharges] = useState<ChargeDraft[]>([]);
 
   // Manufacturing — record a purchase / issue material for THIS order directly,
   // without leaving the page (order is already known, no order-number lookup needed).
@@ -866,117 +871,33 @@ function OrderDetailPageBody() {
   // a purchase bought specifically for this order, then shared company stock —
   // the client only ever needs to tell us "how much" and "what's the charge."
   const issueMaterialToFactory = async () => {
-    // A diamond-only order sells the stones themselves: they leave stock for the order, no factory.
-    const soldStones = isDiamondOnlyOrder(order);
-    if (!issueFactoryId && !soldStones) { toast.error("Choose a factory"); return; }
+    // The issue itself is lib/orderStock.ts — the same one New Order's production plan uses.
+    const certified = issueMaterial === "diamond" && issueDiaKind === "certified";
+    const looseDia = issueMaterial === "diamond" && issueDiaKind === "loose";
+    const qty = Number(issueQuantity);
+    if (!issueFactoryId && !isDiamondOnlyOrder(order)) { toast.error("Choose a factory"); return; }
+    if (certified && issueCertPacketIds.length === 0) { toast.error("Select at least one certified packet"); return; }
+    if (!certified) {
+      if (isOtherMaterial(issueMaterial) && !otherMaterials.some(m => m.id === issueMaterial)) { toast.error("Choose the material"); return; }
+      if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} ${isOtherMaterial(issueMaterial) ? "quantity" : "weight/carat"} used`); return; }
+      if (looseDia && !issueQuality.trim()) { toast.error("Choose the lot the stones come from"); return; }
+    }
+    const key = certified ? "" : issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
+    const pick: StockPick = {
+      id: "panel", material: issueMaterial, kind: certified ? "certified" : looseDia ? "loose" : "bulk", key, qty: certified ? 0 : qty,
+      pcs: looseDia && Number(issueDiaPcs) > 0 ? Math.round(Number(issueDiaPcs)) : undefined,
+      packetIds: certified ? issueCertPacketIds.filter(id => inStockPackets.some(p => p.id === id)) : undefined,
+      rateInr: looseDia ? Number(issueDiaRate) || undefined : undefined,
+      amountInr: looseDia && issueDiaAmount.trim() !== "" ? Number(issueDiaAmount) || 0 : undefined,
+    };
     const factory = db.factories.find(f => f.id === issueFactoryId);
     const chargeAmount = Number(issueChargeAmount) || 0;
-
-    // ── Certified diamond packets: the exact stones used (not a pooled carat) ──
-    if (issueMaterial === "diamond" && issueDiaKind === "certified") {
-      const packets = inStockPackets.filter(p => issueCertPacketIds.includes(p.id));
-      if (packets.length === 0) { toast.error("Select at least one certified packet"); return; }
-      const totalCarat = Math.round(packets.reduce((s, p) => s + p.carat, 0) * 100) / 100;
-      const issuanceId = uid("mi_");
-      const now = new Date().toISOString();
-      setIssuing(true);
-      try {
-        updateDb(d => {
-          if (!d.materialIssuances) d.materialIssuances = [];
-          d.materialIssuances.unshift({
-            id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: "diamond", ...coField(workCo),
-            purityOrQuality: "Certified", quantityIssued: totalCarat,
-            source: "stock", diamondKind: "certified", diamondPacketIds: packets.map(p => p.id),
-            issuedAt: now, issuedBy: user!.id, status: "open",
-            finishedPieces: [{ id: uid("fp_"), quantityUsed: totalCarat, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-            makingCharges: { amountInr: chargeAmount, payments: [] },
-            notes: issueNotes.trim() || undefined,
-          });
-          // Move each selected packet out of stock, tagged to this order.
-          for (const p of d.diamondPackets) {
-            if (issueCertPacketIds.includes(p.id) && p.status === "in_stock") { p.status = "issued"; p.orderId = order.id; }
-          }
-          const o = d.orders.find(o => o.id === order.id);
-          if (o) {
-            if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
-            o.materialIssuanceIds.push(issuanceId);
-            if (!o.manufacturingLog) o.manufacturingLog = [];
-            o.manufacturingLog.push({
-              id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
-              material: "diamond", amountMaterial: totalCarat, amountInr: chargeAmount || undefined,
-              remarks: `${packets.length} certified diamond${packets.length !== 1 ? "s" : ""} (${totalCarat}ct) used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""} — cert ${packets.map(p => p.certificateNumber).join(", ")}`,
-            });
-          }
-        });
-        toast.success(`${packets.length} certified packet${packets.length !== 1 ? "s" : ""} recorded for ${factory?.name || "factory"}`);
-        setShowIssueForm(false); setShowDiamond(false); resetIssueForm();
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : "Failed to save");
-      } finally { setIssuing(false); }
-      return;
-    }
-
-    const qty = Number(issueQuantity);
-    if (isOtherMaterial(issueMaterial) && !otherMaterials.some(m => m.id === issueMaterial)) { toast.error("Choose the material"); return; }
-    if (!qty || qty <= 0) { toast.error(`Enter the ${matWord(issueMaterial)} ${isOtherMaterial(issueMaterial) ? "quantity" : "weight/carat"} used`); return; }
-    if (issueMaterial === "diamond" && issueDiaKind === "loose" && !issueQuality.trim()) { toast.error("Choose the lot the stones come from"); return; }
-    const purityOrQuality = issueMaterial === "gold" ? issuePurity : isOtherMaterial(issueMaterial) ? (issueGrade.trim() || "—") : (issueQuality.trim() || "unspecified");
-    const issuePcs = issueMaterial === "diamond" && issueDiaKind === "loose" && Number(issueDiaPcs) > 0 ? Math.round(Number(issueDiaPcs)) : undefined;
-
-    // "From Stock" is now an explicit choice, so it MUST draw from company stock
-    // (and decrement it) — no silent auto-resolve to a factory pool or a linked
-    // purchase, which was leaving stock untouched.
-    const resolvedSource: "factoryPool" | "purchase" | "stock" = "stock";
-
-    // Loose diamonds: their details and price, when given (the amount typed, or ct × price/ct).
-    const looseDia = issueMaterial === "diamond" && issueDiaKind === "loose";
-    const diaRate = Number(issueDiaRate) || 0;
-    const diaAmount = issueDiaAmount.trim() !== "" ? Number(issueDiaAmount) || 0 : diaRate > 0 ? Math.round(diaRate * qty * 100) / 100 : 0;
-    // The stones' mm, colour and clarity are the bag's own (its lot) — only the price is kept here.
-    const diamondSpec = looseDia && (diaRate > 0 || diaAmount > 0) ? {
-      ratePerCaratInr: diaRate > 0 ? diaRate : diaAmount > 0 && qty > 0 ? Math.round((diaAmount / qty) * 100) / 100 : undefined,
-      amountInr: diaAmount > 0 ? diaAmount : undefined,
-    } : undefined;
-
-    const issuanceId = uid("mi_");
-    const now = new Date().toISOString();
     setIssuing(true);
     try {
-      if (resolvedSource === "stock") {
-        await decreaseStockSelfHealing({
-          material: issueMaterial, companyId: workCo, purityOrQuality, quantity: qty,
-          type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
-          note: soldStones && !factory ? `Sold on order ${order.orderNumber}` : `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
-          ...(issueMaterial === "diamond" && issueDiaKind === "loose" ? { lot: lotParts(purityOrQuality), pieces: issuePcs } : {}),
-        }, db.stockMovements);
-      }
-      updateDb(d => {
-        if (!d.materialIssuances) d.materialIssuances = [];
-        const issuance: MaterialIssuance = {
-          id: issuanceId, factoryId: issueFactoryId, orderId: order.id, material: issueMaterial, ...coField(workCo),
-          purityOrQuality, quantityIssued: qty,
-          ...(issuePcs ? { piecesIssued: issuePcs } : {}),
-          source: resolvedSource,
-          issuedAt: now, issuedBy: user!.id, status: "open",
-          finishedPieces: [{ id: uid("fp_"), quantityUsed: qty, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-          makingCharges: { amountInr: chargeAmount, payments: [] },
-          notes: issueNotes.trim() || undefined,
-          ...(diamondSpec ? { diamondSpec } : {}),
-        };
-        d.materialIssuances.unshift(issuance);
-        const o = d.orders.find(o => o.id === order.id);
-        if (o) {
-          if (!o.materialIssuanceIds) o.materialIssuanceIds = [];
-          o.materialIssuanceIds.push(issuanceId);
-          if (!o.manufacturingLog) o.manufacturingLog = [];
-          o.manufacturingLog.push({
-            id: uid("mlog_"), type: "material_issued", at: now, employeeId: user!.id, factoryId: issueFactoryId,
-            material: issueMaterial, amountMaterial: qty, amountInr: chargeAmount || undefined,
-            remarks: `${qty}${materialUnit(db.settings, issueMaterial)} ${looseDia && bagNoOf(db, purityOrQuality) ? `${bagNoOf(db, purityOrQuality)} · ` : ""}${purityOrQuality} ${matWord(issueMaterial)}${diamondSpec?.amountInr ? ` (${fmtMoneyInr(diamondSpec.amountInr)})` : ""} used at ${factory?.name || "factory"}${chargeAmount ? ` — making charge ${fmtMoneyInr(chargeAmount)}` : ""}`,
-          });
-        }
-      });
-      toast.success(`Recorded ${qty}${materialUnit(db.settings, issueMaterial)} ${purityOrQuality} ${isOtherMaterial(issueMaterial) ? `${matWord(issueMaterial)} ` : ""}used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
+      await issuePick({ order, factoryId: issueFactoryId, companyId: workCo, pick, userId: user!.id, chargeInr: chargeAmount, notes: issueNotes });
+      toast.success(certified
+        ? `${pick.packetIds!.length} certified packet${pick.packetIds!.length !== 1 ? "s" : ""} recorded for ${factory?.name || "factory"}`
+        : `Recorded ${qty}${materialUnit(db.settings, issueMaterial)} ${key} ${isOtherMaterial(issueMaterial) ? `${matWord(issueMaterial)} ` : ""}used${chargeAmount ? ` — ${fmtMoneyInr(chargeAmount)} charge` : ""}`);
       setShowIssueForm(false); setShowDiamond(false);
       resetIssueForm();
     } catch (e) {
@@ -1839,6 +1760,8 @@ function OrderDetailPageBody() {
       const o = d.orders.find(x => x.id === order.id)!;
       o.amount = val;
       o.shippingCharge = ship;
+      const charges = chargesOf(priceCharges);
+      if (charges.length) o.otherCharges = charges; else delete o.otherCharges;
       // The client is not told: a price set or changed here sends no notice.
     });
     toast.success("Pricing saved");
@@ -2076,7 +1999,7 @@ function OrderDetailPageBody() {
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;
                   })()}
                 </div>
-                <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{order.jewelleryType} in {metalLabel(order.metal)}</h1>
+                <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{orderTitle(order)}</h1>
                 <p className="text-sm text-muted-foreground mt-1 break-words">
                   {order.forReadyStock ? "Ready Stock — in-house build" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
                   {order.materialSourcing === "readyStock" ? (() => {
@@ -2127,6 +2050,20 @@ function OrderDetailPageBody() {
 
         {/* Details, grouped: the piece · its stones and weight · design and team. */}
         <div className="border-t border-border/60 grid lg:grid-cols-3 divide-y lg:divide-y-0 lg:divide-x divide-border/60">
+          {diamondOnly ? (
+          <div className="p-4 sm:p-6">
+            <p className="text-sm font-semibold text-foreground mb-3">The diamonds</p>
+            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+              <OrderSpec label="Diamond type" value={order.diamondType} />
+              <OrderSpec label="Stones" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
+              <OrderSpec label="Shape" value={order.stoneSpec?.shape} />
+              <OrderSpec label="Size" value={[order.stoneSpec?.mm, order.stoneSpec?.size].filter(Boolean).join(" · ") || undefined} />
+              <OrderSpec label="Colour" value={order.stoneSpec?.color} />
+              <OrderSpec label="Clarity" value={order.stoneSpec?.clarity} />
+              <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
+            </div>
+          </div>
+          ) : (
           <div className="p-4 sm:p-6">
             <p className="text-sm font-semibold text-foreground mb-3">The piece</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
@@ -2141,15 +2078,17 @@ function OrderDetailPageBody() {
               <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
             </div>
           </div>
+          )}
           <div className="p-4 sm:p-6">
-            <p className="text-sm font-semibold text-foreground mb-3">Stones &amp; weight</p>
+            <p className="text-sm font-semibold text-foreground mb-3">{diamondOnly ? "Carats" : <>Stones &amp; weight</>}</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <OrderSpec label="Est. diamonds" value={`${order.diamondWeight} ct`} />
-              <OrderSpec label="Diamond type" value={order.diamondType} />
-              <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : undefined} />
-              <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${order.estimatedNetWeight} g` : undefined} />
-              <OrderSpec label="Actual net weight" value={order.actualNetWeight ? `${order.actualNetWeight} g` : undefined} />
-              <OrderSpec label="Actual diamonds" value={order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : undefined} />
+              <OrderSpec label={diamondOnly ? "Estimated" : "Est. diamonds"} value={`${order.diamondWeight} ct`} />
+              {!diamondOnly && <OrderSpec label="Diamond type" value={order.diamondType} />}
+              {!diamondOnly && <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : undefined} />}
+              {!diamondOnly && <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${order.estimatedNetWeight} g` : undefined} />}
+              {!diamondOnly && <OrderSpec label="Actual net weight" value={order.actualNetWeight ? `${order.actualNetWeight} g` : undefined} />}
+              <OrderSpec label={diamondOnly ? "Actual" : "Actual diamonds"} value={order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : undefined} />
+              {diamondOnly && <OrderSpec label="Certificate" value={order.certificate ? "Yes" : "No"} />}
             </div>
           </div>
           <div className="p-4 sm:p-6">
@@ -2206,6 +2145,7 @@ function OrderDetailPageBody() {
                   onClick={() => {
                     setPriceValue(order.amount ? String(order.amount) : "");
                     setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+                    setPriceCharges(chargeDrafts(order.otherCharges));
                     setShowPricing(v => !v);
                   }}
                 >
@@ -2231,6 +2171,14 @@ function OrderDetailPageBody() {
                 <p className="text-xs text-muted-foreground">Shipping</p>
                 <p className="mt-0.5 text-xl font-semibold text-foreground tabular-nums">{(order.shippingCharge || 0) > 0 ? fmtMoney(order.shippingCharge) : "—"}</p>
               </div>
+              {(order.otherCharges?.length ?? 0) > 0 && (
+                <div className="min-w-0 col-span-2">
+                  <p className="text-xs text-muted-foreground">Other charges · {fmtMoney(otherChargesTotal(order))}</p>
+                  <ul className="mt-1 space-y-0.5 text-sm">
+                    {order.otherCharges!.map(c => <li key={c.id} className="flex justify-between gap-3"><span className="truncate">{c.name}</span><span className="tabular-nums font-medium">{fmtMoney(c.amountUsd)}</span></li>)}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <AnimatePresence>
@@ -2261,6 +2209,10 @@ function OrderDetailPageBody() {
                         className="rounded-xl h-10"
                         placeholder="0"
                       />
+                    </div>
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label className="text-xs">Other charges ($)</Label>
+                      <OtherChargesEditor rows={priceCharges} onChange={setPriceCharges} />
                     </div>
                   </div>
                   <div className="flex gap-2 mt-3">
@@ -2882,9 +2834,10 @@ function OrderDetailPageBody() {
         {(() => {
           const shipping = order.shippingCharge || 0;
           const certFee  = order.certificateFee || 0;
+          const extras   = otherChargesTotal(order);
           const total    = orderTotal(order);
           const returned = returnedCredit(order);
-          const extraCols = (shipping > 0 ? 1 : 0) + (certFee > 0 ? 1 : 0) + (returned > 0 ? 1 : 0);
+          const extraCols = (shipping > 0 ? 1 : 0) + (certFee > 0 ? 1 : 0) + (extras > 0 ? 1 : 0) + (returned > 0 ? 1 : 0);
           // Three base tiles (Order Value, Total Paid, Balance Due) + optional
           // Shipping/Certificate — one tile per column so they sit on ONE row.
           const totalCols = 3 + extraCols;
@@ -2899,6 +2852,12 @@ function OrderDetailPageBody() {
                 <div className="p-3 rounded-xl bg-secondary text-center">
                   <p className="text-xs text-muted-foreground mb-1">Shipping</p>
                   <p className="font-semibold text-sm">{fmtMoney(shipping)}</p>
+                </div>
+              )}
+              {extras > 0 && (
+                <div className="p-3 rounded-xl bg-secondary text-center">
+                  <p className="text-xs text-muted-foreground mb-1">Other charges</p>
+                  <p className="font-semibold text-sm">{fmtMoney(extras)}</p>
                 </div>
               )}
               {certFee > 0 && (
@@ -3230,9 +3189,16 @@ function OrderDetailPageBody() {
                     <div className="flex items-center gap-2">
                       {diamondOnly ? (
                         <>
-                          <Button variant="outline" onClick={() => openDiamond("stock")} className="rounded-xl h-10 gap-2">
-                            <Gem className="h-4 w-4" /> From stock
-                          </Button>
+                          {otherMaterials.length > 0 ? (
+                            <MoreMenu button={{ label: "From stock", icon: Gem }} label="From stock" actions={[
+                              { label: "Diamonds from stock", icon: Gem, hint: "A bag or certified stones", onSelect: () => openDiamond("stock") },
+                              { label: "Other material from stock", icon: Box, hint: otherMaterials.map(m => m.name).slice(0, 4).join(", "), onSelect: openOther },
+                            ]} />
+                          ) : (
+                            <Button variant="outline" onClick={() => openDiamond("stock")} className="rounded-xl h-10 gap-2">
+                              <Gem className="h-4 w-4" /> From stock
+                            </Button>
+                          )}
                           <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); }}
                             className="btn-hero rounded-xl h-10 gap-2">
                             <Plus className="h-4 w-4" /> Buy Diamond

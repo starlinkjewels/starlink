@@ -1,3 +1,4 @@
+import { isDiamondOnlyOrder } from "@/lib/db";
 import { ListCombo } from "@/components/ListCombo";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { choicesOf } from "@/lib/optionLists";
@@ -449,7 +450,7 @@ function ClientHistoryPageBody() {
         );
       } },
     { key: "item", header: "Item", sortValue: o => o.jewelleryType, cell: o => <span className="font-medium whitespace-nowrap">{o.jewelleryType}</span> },
-    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{metalLabel(o.metal)}</span> },
+    { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{isDiamondOnlyOrder(o) ? "Loose diamonds" : metalLabel(o.metal)}</span> },
     { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.diamondType}</span> },
     { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },
     { key: "priority", header: "Priority", sortValue: o => o.priority,
@@ -483,6 +484,7 @@ function ClientHistoryPageBody() {
       `Value ${fmtMoney(o.amount)}`,
       (o.shippingCharge || 0) > 0 ? `shipping ${fmtMoney(o.shippingCharge)}` : "",
       (o.certificateFee || 0) > 0 ? `certificate ${fmtMoney(o.certificateFee || 0)}` : "",
+      ...(o.otherCharges ?? []).map(c => `${c.name.toLowerCase()} ${fmtMoney(c.amountUsd)}`),
       (o.giftCardRedeemed || 0) > 0 ? `gift card −${fmtMoney(o.giftCardRedeemed || 0)}` : "",
       returned > 0 ? `returned −${fmtMoney(returned)}` : "",
     ].filter(Boolean);

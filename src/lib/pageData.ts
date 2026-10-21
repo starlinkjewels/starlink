@@ -57,7 +57,9 @@ const PHOTOS: LazyCol[] = ["catalogFolders", "productPhotoFolders", "productPhot
  */
 const PAGE: Record<string, readonly LazyCol[]> = {
   "/orders": [...COST, "lockerTransactions"],
-  "/orders/new": ["clientReceipts", "lockerTransactions"],
+  // The production plan reads stock (bags, gold, every material, certified stones), the
+  // factories' gold accounts and the costs — all here before the page draws.
+  "/orders/new": [...COST, "clientReceipts", "lockerTransactions", "stockMovements", "diamondPackets", "materialIssuances", "purchases"],
   "/orders/:id": [...COST, "lockerTransactions"],
   "/invoices": ["purchases", "materialIssuances", "diamondPackets", "clientReceipts", "lockerTransactions"],
   // diamondSales: an account entry a diamond sale paid in is corrected with

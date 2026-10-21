@@ -1,3 +1,4 @@
+import { pieceLine } from "@/lib/orderText";
 import { useMemo, useState } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link, useNavigate } from "react-router-dom";
@@ -245,7 +246,7 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                         </div>
                         <div className="min-w-0 flex-1">
                           <Link to={`/orders/${o.id}`} draggable={false} className="text-sm font-semibold text-brand-dark hover:text-primary hover:underline truncate block">{o.orderNumber}</Link>
-                          <p className="text-[11px] text-muted-foreground truncate">{o.jewelleryType} · {metalLabel(o.metal)}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
+                          <p className="text-[11px] text-muted-foreground truncate">{pieceLine(o, false)}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
                           <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
                         </div>
                       </div>
