@@ -1,3 +1,4 @@
+import { studioOn } from "@/lib/studio";
 import { supplierFigures } from "@/lib/partyTotals";
 import { SupplierCreateDialog } from "@/components/create/SupplierCreateDialog";
 import { useState, type MouseEvent } from "react";
@@ -37,7 +38,8 @@ export function SuppliersPage() {
   const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
-    try { return (localStorage.getItem("suppliers-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+    // The new look opens on the list (slim rows on a phone); a choice made with the switch is kept.
+    try { return (localStorage.getItem("suppliers-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("suppliers-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
@@ -233,6 +235,7 @@ export function SuppliersPage() {
             }}
             rowActions={actionsFor}
             emptyText="No suppliers found."
+            emptyAction={!db.suppliers.length && isAdmin ? { label: "Add a supplier", onClick: () => setOpen(true) } : undefined}
           />
         </div>
       )}

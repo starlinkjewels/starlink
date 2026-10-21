@@ -736,6 +736,7 @@ function SupplierHistoryPageBody() {
             // be done — a paid bill says to cancel the payment first.
             rowActions={purchaseActions}
             emptyText="No purchases recorded yet."
+            emptyAction={!purchases.length && isAdmin ? { label: "Record a purchase", onClick: () => setShowPurchaseForm(true) } : undefined}
           />
         </div>
       </div>
