@@ -12,22 +12,26 @@ import { Package } from "lucide-react";
 
 const NONE = "__none";
 
+/** Round (or not given yet) — the shapes measured by sieve. */
+export const isRoundShape = (shape: string | undefined) => !shape?.trim() || /^(round|rbc|brilliant)/i.test(shape.trim());
+
 /**
  * A dropdown fed by one of the business's lists (Settings → Dropdown lists) —
  * the diamond shapes, sizes, colours and clarities on every stock form. A
  * value a record already has stays offered. `optional` adds "—" (not recorded).
  */
-export function ListSelect({ list, value, onChange, id, optional = true, placeholder = "—", className = "h-10 rounded-xl", choices, normalize }: {
+export function ListSelect({ list, value, onChange, id, optional = true, placeholder = "—", className = "h-10 rounded-xl", choices, normalize, disabled }: {
   list: ListKey; value: string; onChange: (v: string) => void; id?: string;
   optional?: boolean; placeholder?: string; className?: string;
   /** The options, when they are not the list as it stands (the mm and sieve sizes). */
   choices?: string[];
   /** Tidies a typed word before it is used and remembered. */
   normalize?: (typed: string) => string;
+  disabled?: boolean;
 }) {
   // Pick, or type something new — it is used and remembered in the list (ListCombo).
   return <ListCombo list={list} value={value} onChange={onChange} id={id} optional={optional} placeholder={placeholder}
-    className={className} choices={choices} normalize={normalize} />;
+    className={className} choices={choices} normalize={normalize} disabled={disabled} />;
 }
 
 /** "2.35 ct · 120 pcs · ₹3,200/ct" — what a lot holds and what it cost. */
@@ -91,20 +95,23 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
   const lot = showBag ? lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === key && l.ct > 0) : undefined;
   const lbl = compact ? "text-[11px]" : "text-xs";
   const box = compact ? "h-9 rounded-lg mt-1" : "h-10 rounded-xl mt-1";
+  // Sieve sizes are for round stones; a fancy shape is recorded by its mm.
+  const round = isRoundShape(value.shape);
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
         <div>
           <Label htmlFor={`${idPrefix}-shape`} className={lbl}>Shape</Label>
-          <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} className={box} />
+          <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange(isRoundShape(v || "Round") ? { shape: v || "Round" } : { shape: v, size: "" })} optional={false} className={box} />
         </div>
         <div>
           <Label htmlFor={`${idPrefix}-mm`} className={lbl}>MM</Label>
           <ListSelect id={`${idPrefix}-mm`} list="diamondMm" choices={mm} value={value.mm} onChange={v => onChange({ mm: v })} className={box} normalize={t => normalizeMm(t) ?? t} />
         </div>
         <div>
-          <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve</Label>
-          <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={value.size} onChange={v => onChange({ size: v })} className={box} />
+          <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve{!round && <span className="text-muted-foreground font-normal"> · round only</span>}</Label>
+          <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={round ? value.size : ""} onChange={v => onChange({ size: v })} className={box}
+            disabled={!round} placeholder={round ? "—" : "Use MM"} />
         </div>
         <div>
           <Label htmlFor={`${idPrefix}-color`} className={lbl}>Colour</Label>

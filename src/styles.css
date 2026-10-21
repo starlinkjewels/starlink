@@ -440,6 +440,11 @@
 :root[data-tbl-density="compact"]:not([data-tbl]) table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.32rem; padding-bottom: 0.32rem; }
 :root[data-tbl-density="spacious"]:not([data-tbl]) table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.95rem; padding-bottom: 0.95rem; }
 
+/* A table's own row spacing (its View menu) wins over the one set for every table. */
+table > tbody > tr > td.dt-pad-compact { padding-top: 0.32rem !important; padding-bottom: 0.32rem !important; }
+table > tbody > tr > td.dt-pad-normal { padding-top: 0.625rem !important; padding-bottom: 0.625rem !important; }
+table > tbody > tr > td.dt-pad-spacious { padding-top: 0.95rem !important; padding-bottom: 0.95rem !important; }
+
 /* The column a data table is sorted by stays marked under any style. */
 :root[data-tbl] table:not(.tbl-plain) > thead > tr > th.dt-sorted { box-shadow: inset 0 -2px 0 var(--color-primary); }
 :root[data-tbl]:not([data-tbl="bold"]) table:not(.tbl-plain) > thead > tr > th.dt-sorted { color: var(--color-primary); }

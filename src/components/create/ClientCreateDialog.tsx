@@ -1,3 +1,4 @@
+import { handlerChoices } from "@/lib/clientHandlers";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -29,11 +30,13 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
   const multiCo = hasCompanies(dbNow.settings);
   const meUser = dbNow.users.find(u => u.id === user!.id) ?? user!;
   const myCompanies = companiesForUser(dbNow.settings, meUser);
-  const employees = dbNow.users.filter(u => u.role === "employee");
+  const staff = handlerChoices(dbNow);
   const [saving, setSaving] = useState(false);
+  // Handled by whoever adds the client, unless they hand it to someone else.
   const [f, setF] = useState<Partial<Client>>({
     companyName: "", ownerName: "", email: "", phone: "",
-    country: "USA", zip: "", gstVat: "", address: "", username: "", password: "",
+    country: "", zip: "", gstVat: "", address: "", username: "", password: "",
+    accountManagerId: user!.role === "admin" ? user!.id : undefined,
   });
 
   const create = async () => {
@@ -75,10 +78,10 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       // saying it is done. It goes up just after the profile; close the tab in
       // between and the account can sign in to nothing.
       await flush();
-      toast.success(`${authUid ? "Client created — they can sign in with their email & password" : "Client created — no login"}${f.accountManagerId ? "" : " · handled by Admin"}`);
+      toast.success(`${authUid ? "Client created — they can sign in with their email & password" : "Client created — no login"}${f.accountManagerId ? "" : " · not assigned to anyone yet"}`);
       onOpenChange(false);
       onCreated?.(id);
-      setF({ companyName: "", ownerName: "", email: "", phone: "", country: "USA", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: undefined });
+      setF({ companyName: "", ownerName: "", email: "", phone: "", country: "", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: user!.role === "admin" ? user!.id : undefined });
     } catch (e) {
       toast.error(authErrorMessage(e));
     } finally { setSaving(false); }
@@ -152,18 +155,18 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       )}
       {user!.role === "admin" ? (
         <div className="mt-4">
-          <Label className="text-xs">Assign Employee (optional)</Label>
+          <Label className="text-xs">Handled by</Label>
           <Select
             value={f.accountManagerId || "__none"}
             onValueChange={addNew("employee", v => setF(prev => ({ ...prev, accountManagerId: v === "__none" ? undefined : v })))}
           >
-            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — you (Admin) will handle this client" /></SelectTrigger>
+            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not assigned" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-              {employees.filter(e => !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+              <SelectItem value="__none">Not assigned</SelectItem>
+              {staff.filter(e => e.role === "admin" || !multiCo || !f.companyId || worksFor(e, f.companyId)).map(e => <SelectItem key={e.id} value={e.id}>{e.name}{e.role === "admin" ? " · admin" : ""}</SelectItem>)}
             <AddNewItem kind="employee" /></SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground mt-1">The employee gets full access to this client only.</p>
+          <p className="text-xs text-muted-foreground mt-1">An employee named here gets full access to this client.</p>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground mt-4">Added under your account.</p>

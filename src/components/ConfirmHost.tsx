@@ -1,4 +1,5 @@
-import { useSyncExternalStore } from "react";
+import { useState, useSyncExternalStore } from "react";
+import { Input } from "@/components/ui/input";
 import { AlertTriangle, HelpCircle } from "lucide-react";
 import { subscribeConfirm, currentConfirm } from "@/lib/confirm";
 import { Button } from "@/components/ui/button";
@@ -7,6 +8,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 /** Shows the questions lib/confirm.ts asks, one at a time. Mounted once, at the root. */
 export function ConfirmHost() {
   const req = useSyncExternalStore(subscribeConfirm, currentConfirm, currentConfirm);
+  const [typed, setTyped] = useState<{ id: number; text: string }>({ id: 0, text: "" });
+  const typedNow = req && typed.id === req.id ? typed.text : "";
+  const blocked = !!req?.typeToConfirm && typedNow.trim().toUpperCase() !== req.typeToConfirm.trim().toUpperCase();
   return (
     <Dialog open={!!req} onOpenChange={v => { if (!v && req) req.resolve(false); }}>
       {req && (
@@ -30,9 +34,16 @@ export function ConfirmHost() {
               <div className="text-sm text-muted-foreground whitespace-pre-line leading-relaxed">{req.body}</div>
             </DialogDescription>
           )}
+          {req.typeToConfirm && (
+            <div className="space-y-1.5">
+              <p className="text-sm text-foreground">Type <span className="font-mono font-semibold">{req.typeToConfirm}</span> to confirm</p>
+              <Input value={typedNow} onChange={e => setTyped({ id: req.id, text: e.target.value })} autoComplete="off" spellCheck={false}
+                className="rounded-xl font-mono" aria-label={`Type ${req.typeToConfirm} to confirm`} />
+            </div>
+          )}
           <DialogFooter>
             <Button variant="outline" data-confirm-cancel onClick={() => req.resolve(false)} className="rounded-xl">{req.cancelText}</Button>
-            <Button onClick={() => req.resolve(true)}
+            <Button onClick={() => req.resolve(true)} disabled={blocked}
               className={`rounded-xl px-5 ${req.danger ? "bg-destructive text-white hover:bg-destructive/90" : "btn-hero"}`}>
               {req.confirmText}
             </Button>

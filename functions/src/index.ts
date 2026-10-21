@@ -3,6 +3,8 @@
 
 export { sendNotificationPush } from "./notifications";
 export { sendMail } from "./mail";
+// An admin changing a client's sign-in email or password (see clientLogin.ts).
+export { setClientLogin } from "./clientLogin";
 
 // Totals kept on the server (see summaries.ts):
 //   firebase deploy --only functions:sumProd

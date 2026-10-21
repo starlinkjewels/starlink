@@ -1,3 +1,5 @@
+import { FillHandlersSheet } from "@/components/FillHandlersSheet";
+import { handlerName, handlerOf } from "@/lib/clientHandlers";
 import { studioOn } from "@/lib/studio";
 import { ClientCreateDialog } from "@/components/create/ClientCreateDialog";
 import { ClientEditDialog } from "@/components/ClientEditDialog";
@@ -153,13 +155,13 @@ export function ClientsPage() {
   }, []);
 
   const [open, setOpen] = useState(false);
+  const [fillOpen, setFillOpen] = useState(false);
 
   // Editing an existing client — the shared form (ClientEditDialog), the same
   // one the client's own page opens.
   const [editingId, setEditingId] = useState<string | null>(null);
   const openEdit = (c: Client) => setEditingId(c.id);
 
-  const employees = db.users.filter(u => u.role === "employee");
 
   // Employee: the clients within their work (their own, or all when their
   // role reaches every client). Admin: everyone.
@@ -265,8 +267,8 @@ export function ClientsPage() {
     ...(multiCo ? [{ key: "company", header: "Company", sortValue: (c: Client) => companyById(dbNow.settings, companyIdOfClient(c)).name,
       cell: (c: Client) => <CellTag tone="blue">{companyById(dbNow.settings, companyIdOfClient(c)).name}</CellTag> }] : []),
     ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by", hidden: true,
-      sortValue: (c: Client) => employees.find(e => e.id === c.accountManagerId)?.name ?? "Admin",
-      cell: (c: Client) => <span className="whitespace-nowrap">{employees.find(e => e.id === c.accountManagerId)?.name ?? "Admin"}</span> }] : []),
+      sortValue: (c: Client) => handlerName(db, c),
+      cell: (c: Client) => <span className={`whitespace-nowrap ${c.accountManagerId ? "" : "text-muted-foreground"}`}>{handlerName(db, c)}</span> }] : []),
     { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => statsOf(c).total,
       cell: c => {
         const s = statsOf(c);
@@ -359,7 +361,12 @@ export function ClientsPage() {
         subtitle="Orders, bills and payments"
         primary={user!.role !== "client" && can("clients", "add") ? { label: "New Client", icon: Plus, onClick: () => setOpen(true) } : null}
         actions={<ViewSwitch view={view} onChange={saveView} />}
+        menu={user!.role === "admin" ? [
+          { label: "Fill in “Handled by”", icon: UserCog, onSelect: () => setFillOpen(true), disabled: !db.clients.some(c => !c.accountManagerId),
+            hint: db.clients.some(c => !c.accountManagerId) ? "From who added each client — shown to you first" : "Every client already shows who handles them" },
+        ] : undefined}
       />
+      {user!.role === "admin" && <FillHandlersSheet open={fillOpen} onOpenChange={setFillOpen} />}
       {user!.role !== "client" && can("clients", "add") && <ClientCreateDialog open={open} onOpenChange={setOpen} />}
 
       <ClientEditDialog clientId={editingId} onClose={() => setEditingId(null)} />
@@ -432,7 +439,7 @@ export function ClientsPage() {
           const orderCount = db.orders.filter(o => o.clientId === c.id).length;
           const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
           const acc = accounts.get(c.id)!;
-          const manager = employees.find(e => e.id === c.accountManagerId);
+          const manager = handlerOf(db, c);
           const clientUser = db.users.find(u => u.clientId === c.id);
           const online = isOnline(clientUser?.lastActiveAt);
           return (
@@ -467,7 +474,7 @@ export function ClientsPage() {
                 {user!.role === "admin" && (
                   <p className="flex items-center gap-2 text-muted-foreground min-w-0">
                     <UserCog className="h-4 w-4 shrink-0" />
-                    <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Handled by Admin"}</span>
+                    <span className="truncate">{manager ? <>Handled by <span className="font-medium text-foreground">{manager.name}</span></> : "Not assigned"}</span>
                   </p>
                 )}
                 <p className="flex items-center gap-2 text-muted-foreground min-w-0">

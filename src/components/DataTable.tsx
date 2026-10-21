@@ -152,6 +152,8 @@ export function DataTable<T>({
   const sort: Sort = prefs.sort === undefined ? defaultSort : prefs.sort;
   const hidden = new Set(prefs.hidden ?? columns.filter(c => c.hidden).map(c => c.key));
   const dense = prefs.dense ?? "normal";
+  // Chosen for this table in its View menu: wins over the row spacing set for every table (Settings → Table Style).
+  const padCls = prefs.dense ? `dt-pad-${prefs.dense}` : "";
   const pageSize = prefs.pageSize ?? pageSizes[0];
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
@@ -587,12 +589,12 @@ export function DataTable<T>({
                 <Fragment key={k}>
                 <tr onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
                   className={`dt-row group transition-colors ${pin ? "dt-pin bg-secondary/25 italic" : on ? "dt-on bg-primary/[0.05]" : "hover:bg-secondary/30"} ${!pin && (opensPage || opens) ? "cursor-pointer" : ""} ${isOpen ? "dt-open bg-secondary/30" : ""} ${rowClassName?.(r) ?? ""}`}>
-                  {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${stick} left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
+                  {ticking && <td className={`w-10 px-3 ${PAD[dense]} ${padCls} ${stick} left-0`}>{!pin && <Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} />}</td>}
                   {shown.map(c => (
-                    <td key={c.key} className={`px-3 ${PAD[dense]} ${alignCls(c.align)} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
+                    <td key={c.key} className={`px-3 ${PAD[dense]} ${padCls} ${alignCls(c.align)} ${c.key === firstKey ? `${stick} ${stickLeft}` : ""} ${c.className ?? ""}`}>{c.cell(r)}</td>
                   ))}
                   {opener && (
-                    <td className={`w-10 px-2 ${PAD[dense]} text-center ${stick} ${openerPin}`}>
+                    <td className={`w-10 px-2 ${PAD[dense]} ${padCls} text-center ${stick} ${openerPin}`}>
                       {opens && (
                         <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Hide details" : "Show details"}
                           className="h-7 w-7 inline-grid place-items-center rounded-lg text-muted-foreground hover:bg-secondary hover:text-foreground">
@@ -602,7 +604,7 @@ export function DataTable<T>({
                     </td>
                   )}
                   {rowActions && (
-                    <td className={`w-12 px-2 ${PAD[dense]} text-right ${stick} right-0 ${opener ? "" : "dt-stick-r"}`} data-no-row>
+                    <td className={`w-12 px-2 ${PAD[dense]} ${padCls} text-right ${stick} right-0 ${opener ? "" : "dt-stick-r"}`} data-no-row>
                       {!pin && <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} className="opacity-70 group-hover:opacity-100 focus-visible:opacity-100" />}
                     </td>
                   )}

@@ -1,3 +1,5 @@
+import { ClientLoginSection } from "@/components/ClientLoginSection";
+import { handlerChoices } from "@/lib/clientHandlers";
 import { useState } from "react";
 import { Pencil } from "lucide-react";
 import { toast } from "sonner";
@@ -25,18 +27,22 @@ const fieldsOf = (c: Client): Partial<Client> => ({
  * Edit a client's details — the one form, opened from the Clients list and
  * from the client's own page, in the side panel.
  *
- * Login email and password aren't here: email is the Firebase Auth identifier
- * (changing it needs a privileged Admin SDK operation, not a plain Firestore
- * write) and the password has its own "Reset Password" email-link flow.
+ * The login (email and password) is its own section, for the admin: giving
+ * one to a client who has none, or changing it through the server
+ * (ClientLoginSection — a plain record can't change a sign-in).
  * Who handles the client and which of our companies bills them are an
  * admin's to change.
  */
+/** The handler a client has now — kept in the list even if they have since left. */
+const currentHandler = (clientId: string | null, db: { clients: { id: string; accountManagerId?: string }[] }) =>
+  clientId ? db.clients.find(c => c.id === clientId)?.accountManagerId : undefined;
+
 export function ClientEditDialog({ clientId, onClose }: { clientId: string | null; onClose: () => void }) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
   const multiCo = hasCompanies(db.settings);
-  const employees = db.users.filter(u => u.role === "employee");
+  const staff = handlerChoices(db, currentHandler(clientId, db));
   const client = clientId ? db.clients.find(c => c.id === clientId) : undefined;
   const [ef, setEf] = useState<Partial<Client>>({});
   const [shown, setShown] = useState<string | null>(null);
@@ -86,7 +92,7 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       open={!!clientId && !!client}
       onOpenChange={v => { if (!v) onClose(); }}
       title="Edit Client"
-      description="The login stays — use Send password reset for it"
+      description={user!.role === "admin" ? "Details, who handles them, and their login" : "Their details"}
       icon={Pencil}
       size="lg"
       footer={
@@ -143,19 +149,20 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       )}
       {user!.role === "admin" && (
         <div className="mt-4">
-          <Label className="text-xs">Assign Employee</Label>
+          <Label className="text-xs">Handled by</Label>
           <Select
             value={ef.accountManagerId || "__none"}
             onValueChange={addNew("employee", v => setEf(prev => ({ ...prev, accountManagerId: v === "__none" ? undefined : v })))}
           >
-            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not selected — Admin handles this client" /></SelectTrigger>
+            <SelectTrigger className="rounded-xl mt-1"><SelectValue placeholder="Not assigned" /></SelectTrigger>
             <SelectContent>
-              <SelectItem value="__none">Not selected — Admin handles this client</SelectItem>
-              {employees.map(e => <SelectItem key={e.id} value={e.id}>{e.name}</SelectItem>)}
+              <SelectItem value="__none">Not assigned</SelectItem>
+              {staff.map(e => <SelectItem key={e.id} value={e.id}>{e.name}{e.role === "admin" ? " · admin" : ""}</SelectItem>)}
             <AddNewItem kind="employee" /></SelectContent>
           </Select>
         </div>
       )}
+      {user!.role === "admin" && clientId && <ClientLoginSection clientId={clientId} />}
     </ActionSheet>
   );
 }

@@ -1,3 +1,4 @@
+import { deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
@@ -193,7 +194,8 @@ export function OrdersPage() {
       { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
       { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
       { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Closes it; can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
-      { label: "Delete", icon: Trash2, danger: true, hint: "Orders are never deleted — cancel instead", disabled: true, onSelect: () => undefined, show: isStaff },
+      { label: "Delete", icon: Trash2, danger: true, hint: orderDeleteBlocker(db, user, o) ?? "Nothing is attached to it — removed for good (asked twice)",
+        disabled: !!orderDeleteBlocker(db, user, o), onSelect: () => { void deleteOrderFlow(o.id, user!); }, show: isStaff },
     ];
   };
   const toggleSel = (id: string) => setSel(prev => {

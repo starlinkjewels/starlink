@@ -1,9 +1,11 @@
 import { brokerageWePay, landedInr } from "./brokers";
 import { ccy, ccyOrder, inrPerUnit, roundCcy, sumByCcy, type CurrencyCode } from "@/lib/currency";
-import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
+import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, isDiamondOnlyOrder, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
 import { freightRecorded } from "@/lib/dispatch";
 import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/materials";
 import { companyOf } from "@/lib/companies";
+import { estimatedPureGoldNeeded } from "./manufacturing";
+import { metalHasKarats } from "./metals";
 
 /** In one company's books — or every company's when none is given. */
 const inCo = (r: { companyId?: string }, companyId?: string) => !companyId || companyId === "all" || companyOf(r) === companyId;
@@ -94,6 +96,8 @@ export function inrOn(db: DB, code: string | undefined, iso: string): number | u
 export interface CostLine {
   label: string;
   amountInr: number;
+  /** Not yet on record: the order's own estimate, until the real thing is. */
+  estimate?: boolean;
 }
 
 export interface MissingCost {
@@ -115,6 +119,8 @@ export interface OrderCost {
   missing: MissingCost[];
   /** True only when no part of the cost is unknown. */
   complete: boolean;
+  /** Part of it is still an estimate (the gold, before any has gone out). */
+  estimated?: boolean;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -399,6 +405,30 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       label: `${q}${unit} ${what} · bought for this order${p.invoiceNumber ? ` (bill ${p.invoiceNumber})` : ""}${brokerageWePay(p) > 0 ? " · incl. brokerage" : ""}`,
       amountInr: r2(landedInr(p)),
     });
+  }
+
+  // Before any gold has gone out for the piece, its gold is still a cost: the
+  // order's estimate (its net weight at its karat, in fine gold) at what fine
+  // gold costs now. Shown as an estimate, and replaced the moment real gold is
+  // issued or bought for it — so a profit is never stated without the gold.
+  const anyGold = issuances.some(i => i.material === "gold") || purchases.some(p => p.orderId === order.id && p.material === "gold");
+  if (!anyGold && order.materialSourcing !== "readyStock" && !isDiamondOnlyOrder(order) && metalHasKarats(order.metal, db.settings)) {
+    const w = order.estimatedNetWeight || order.estimatedGrossWeight || order.metalWeight || 0;
+    if (w > 0 && !order.productKarats) {
+      out.missing.push({ label: `Estimated gold ${w}g`, reason: "the order has no karat, so its fine gold can't be worked out" });
+    } else if (w > 0) {
+      const fine = estimatedPureGoldNeeded(order);
+      const fg = fineGoldRate(db, new Date().toISOString(), companyOf(order));
+      if (fg && fine > 0) {
+        out.gold.push({
+          label: `Estimate: ${w}g ${order.productKarats} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis}) — until gold is issued`,
+          amountInr: r2(fine * fg.rate), estimate: true,
+        });
+        out.estimated = true;
+      } else if (fine > 0) {
+        out.missing.push({ label: `Estimated gold ${w}g ${order.productKarats}`, reason: "no gold purchase with a price is on file to value it by" });
+      }
+    }
   }
 
   // Sold from ready stock: the piece was made earlier, on its own stock-build

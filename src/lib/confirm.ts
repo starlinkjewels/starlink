@@ -13,6 +13,8 @@ export interface ConfirmOptions {
   confirmText?: string;
   cancelText?: string;
   danger?: boolean;
+  /** The words to type before the button works — a last check for what can't be undone. */
+  typeToConfirm?: string;
 }
 export interface ConfirmRequest {
   id: number;
@@ -21,6 +23,7 @@ export interface ConfirmRequest {
   confirmText: string;
   cancelText: string;
   danger: boolean;
+  typeToConfirm?: string;
   resolve: (ok: boolean) => void;
 }
 
@@ -56,7 +59,7 @@ export function confirmBox(message: string | string[], opts: ConfirmOptions = {}
   const id = nextId++;
   return new Promise<boolean>(resolve => {
     queue = [...queue, {
-      id, title, body, confirmText, cancelText, danger,
+      id, title, body, confirmText, cancelText, danger, typeToConfirm: opts.typeToConfirm,
       resolve: ok => { queue = queue.filter(q => q.id !== id); emit(); resolve(ok); },
     }];
     emit();

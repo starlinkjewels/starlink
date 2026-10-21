@@ -1,3 +1,5 @@
+import { ChangeClientSheet } from "@/components/ChangeClientSheet";
+import { clientChangeBlocker, deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
 import { useStudio } from "@/lib/studio";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { choicesOf } from "@/lib/optionLists";
@@ -23,7 +25,7 @@ import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
@@ -45,7 +47,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, type LucideIcon } from "lucide-react";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
@@ -332,6 +334,7 @@ function OrderDetailPageBody() {
   const [returnOpen, setReturnOpen] = useState(false);
   // The order's details (side panel), and a payment row being corrected.
   const [editOpen, setEditOpen] = useState(false);
+  const [clientOpen, setClientOpen] = useState(false);
   const [editingPayId, setEditingPayId] = useState<string | null>(null);
   const mayReturn = useMayReturn();
   const mayExport = useMayExport();
@@ -349,6 +352,22 @@ function OrderDetailPageBody() {
 
   const db = useDb();
   const order = db.orders.find(o => o.id === id);
+  // Placed with "Use from stock" / "Buy new for this order": open that step at once.
+  const [params, setParams] = useSearchParams();
+  const nextStep = params.get("next");
+  useEffect(() => {
+    if (!order || (nextStep !== "stock" && nextStep !== "buy")) return;
+    setParams(p => { p.delete("next"); return p; }, { replace: true });
+    if (user!.role === "client" || order.materialSourcing === "readyStock") return;
+    const dOnly = isDiamondOnlyOrder(order);
+    if (!order.assignedFactoryId && !dOnly) {
+      toast.info("Choose the factory for this order first (Manufacturing → Factory) — then add its material.");
+      return;
+    }
+    if (nextStep === "buy") { setShowBuyForm(true); setShowIssueForm(false); return; }
+    setDiaSource("stock"); setShowDiamond(true); setShowBuyForm(false);
+    setIssueMaterial("diamond"); setIssueFactoryId(order.assignedFactoryId ?? ""); setShowIssueForm(true);
+  }, [!!order, nextStep]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!order) return <div className="text-center py-20">Order not found. <Link to="/orders" className="text-primary underline">Back</Link></div>;
   // Whose stock and factory share this order's material work uses — each company holds its own.
   const workCo = workCompanyOf(db, order);
@@ -847,7 +866,9 @@ function OrderDetailPageBody() {
   // a purchase bought specifically for this order, then shared company stock —
   // the client only ever needs to tell us "how much" and "what's the charge."
   const issueMaterialToFactory = async () => {
-    if (!issueFactoryId) { toast.error("Choose a factory"); return; }
+    // A diamond-only order sells the stones themselves: they leave stock for the order, no factory.
+    const soldStones = isDiamondOnlyOrder(order);
+    if (!issueFactoryId && !soldStones) { toast.error("Choose a factory"); return; }
     const factory = db.factories.find(f => f.id === issueFactoryId);
     const chargeAmount = Number(issueChargeAmount) || 0;
 
@@ -925,7 +946,7 @@ function OrderDetailPageBody() {
         await decreaseStockSelfHealing({
           material: issueMaterial, companyId: workCo, purityOrQuality, quantity: qty,
           type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: user!.id,
-          note: `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
+          note: soldStones && !factory ? `Sold on order ${order.orderNumber}` : `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
           ...(issueMaterial === "diamond" && issueDiaKind === "loose" ? { lot: lotParts(purityOrQuality), pieces: issuePcs } : {}),
         }, db.stockMovements);
       }
@@ -1946,6 +1967,8 @@ function OrderDetailPageBody() {
   const isStaffUser = user!.role !== "client";
   const editWhy = orderEditAccess(db, user, can, order) ?? orderSpecLocks(db, order).all;
   const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, order);
+  const changeClientWhy = editWhy ?? clientChangeBlocker(db, order);
+  const deleteWhy = orderDeleteBlocker(db, user, order);
   const returnWhy = !mayReturn ? needsAccess("invoices", "edit") : returnBlocker(order);
   // Melt opens when the piece is a finished, made, unsold piece; its dialog
   // then says anything else in the way. Otherwise the plan's own reason.
@@ -1959,6 +1982,7 @@ function OrderDetailPageBody() {
   const meltReason = meltWhy();
   const orderActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
+    { label: "Change client", icon: Users, hint: changeClientWhy ?? "Picked the wrong client? Move it — while nothing is billed or paid", disabled: !!changeClientWhy, onSelect: () => setClientOpen(true), show: isStaffUser },
     { label: "Print band", icon: Tag, hint: order.melted ? "Melted — the piece no longer exists" : !mayExport ? needsAccess("orders", "export") : "The barcode jewellery tag",
       disabled: !!order.melted || !mayExport, onSelect: () => setBandOpen(true),
       show: db.settings.barcodeBandEnabled !== false && isStaffUser },
@@ -1968,7 +1992,8 @@ function OrderDetailPageBody() {
       show: isStaffUser },
     { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling || !!cancelWhy,
       show: isStaffUser },
-    { label: "Delete", icon: Trash2, danger: true, hint: "Orders are never deleted — cancel instead", disabled: true, onSelect: () => undefined, show: isStaffUser },
+    { label: "Delete", icon: Trash2, danger: true, hint: deleteWhy ?? "Nothing is attached to it — removed for good (asked twice)", disabled: !!deleteWhy,
+      onSelect: async () => { if (await deleteOrderFlow(order.id, user!)) nav("/orders"); }, show: isStaffUser },
   ];
 
   // A payment row: corrected or deleted as the receipt it came in on.
@@ -3204,10 +3229,15 @@ function OrderDetailPageBody() {
                   {editable && (
                     <div className="flex items-center gap-2">
                       {diamondOnly ? (
-                        <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); }}
-                          className="btn-hero rounded-xl h-10 gap-2">
-                          <Plus className="h-4 w-4" /> Buy Diamond
-                        </Button>
+                        <>
+                          <Button variant="outline" onClick={() => openDiamond("stock")} className="rounded-xl h-10 gap-2">
+                            <Gem className="h-4 w-4" /> From stock
+                          </Button>
+                          <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); }}
+                            className="btn-hero rounded-xl h-10 gap-2">
+                            <Plus className="h-4 w-4" /> Buy Diamond
+                          </Button>
+                        </>
                       ) : faDone ? (
                         <Button onClick={openRework} className="btn-hero rounded-xl h-10 gap-2"><RotateCcw className="h-4 w-4" /> Rework / Alteration</Button>
                       ) : addActions.some(a => a.show !== false) ? (
@@ -3398,12 +3428,13 @@ function OrderDetailPageBody() {
               const check = !srcPurchase && isStockIssuance(mi) && isStaffUser ? canEditIssuance(db, mi) : undefined;
               const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason)) : undefined;
               rows.push({
-                id: mi.id, href: `/factories/${mi.factoryId}`, gold: mi.material === "gold",
+                // Stones a diamond-only order sold straight from stock have no factory: the row opens the bags.
+                id: mi.id, href: mi.factoryId ? `/factories/${mi.factoryId}` : "/stock/diamond", gold: mi.material === "gold",
                 title: mi.diamondKind === "certified" && packs.length > 1 ? `${packs.length} certified diamonds` : kindTitle(mi.material, mi.diamondKind, mi.purityOrQuality),
                 detail: detail || undefined,
                 qty: `${used}${unit}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${mi.quantityIssued}${unit}` : ""}`,
                 source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : "—",
-                sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, `to ${factory?.name || "factory"}`].filter(Boolean).join(" · "),
+                sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, mi.factoryId ? `to ${factory?.name || "factory"}` : "sold with the order"].filter(Boolean).join(" · "),
                 costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
                 status, tone,
                 actions: srcPurchase ? purchaseActs(srcPurchase) : check ? [
@@ -3478,11 +3509,11 @@ function OrderDetailPageBody() {
           {/* From our stock to the factory — a diamond lot, certified stones, or another material. */}
           <ActionSheet open={showIssueForm} onOpenChange={o => { if (!o) { setShowIssueForm(false); setShowDiamond(false); } }} size="lg" icon={isOtherMaterial(issueMaterial) ? Box : Gem}
             title={`${isOtherMaterial(issueMaterial) ? "Other material" : "Diamond"} from stock`}
-            description={`To ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the factory"}, for ${order.orderNumber}`}
+            description={isDiamondOnlyOrder(order) && !order.assignedFactoryId ? `Out of stock, sold on ${order.orderNumber}` : `To ${db.factories.find(f => f.id === order.assignedFactoryId)?.name || "the factory"}, for ${order.orderNumber}`}
             footer={
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => { setShowDiamond(false); setShowIssueForm(false); resetIssueForm(); }} className="rounded-xl h-10">Cancel</Button>
-                <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10 px-6">{issuing ? "Saving…" : "Save Usage & Charge"}</AsyncButton>
+                <AsyncButton onClick={issueMaterialToFactory} disabled={issuing} className="btn-hero rounded-xl h-10 px-6">{issuing ? "Saving…" : isDiamondOnlyOrder(order) && !order.assignedFactoryId ? "Save" : "Save Usage & Charge"}</AsyncButton>
               </div>
             }>
             <div className="space-y-3">
@@ -3612,10 +3643,11 @@ function OrderDetailPageBody() {
               })()}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <Input
+                {/* Stones sold straight from stock (a diamond-only order, no factory) have no making charge. */}
+                {!(isDiamondOnlyOrder(order) && !order.assignedFactoryId) && <Input
                   type="number" min={0} value={issueChargeAmount} onChange={e => setIssueChargeAmount(e.target.value)}
                   className="rounded-xl h-10" placeholder="Making charge (₹, optional)"
-                />
+                />}
                 <Input value={issueNotes} onChange={e => setIssueNotes(e.target.value)} className="rounded-xl h-10" placeholder="Notes (optional)" />
               </div>
 
@@ -4170,6 +4202,7 @@ function OrderDetailPageBody() {
 
     {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
     {editOpen && <OrderEditDialog order={order} onClose={() => setEditOpen(false)} />}
+    {user!.role !== "client" && <ChangeClientSheet order={order} open={clientOpen} onOpenChange={setClientOpen} />}
     {editingPay && <OrderPaymentEditDialog order={order} advance={editingPay} onClose={() => setEditingPayId(null)} />}
     {returnOpen && <ReturnDialog orders={[order]} invoice={findInvoiceForOrder(db.invoices, order.id)} onClose={() => setReturnOpen(false)} />}
 
