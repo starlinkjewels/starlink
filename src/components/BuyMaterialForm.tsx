@@ -123,7 +123,7 @@ const lineText = (l: Line, settings: Parameters<typeof materialName>[0]): string
 export interface PlannedBuy {
   supplierName: string;
   billNo: string;
-  lines: { kind: BuyKind; text: string; qty: number; unit: string; inr: number }[];
+  lines: { kind: BuyKind; text: string; qty: number; unit: string; inr: number; materialId?: string }[];
   totalInr: number;
   execute: (order: Order) => Promise<void>;
 }
@@ -403,7 +403,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       plan!.onPlanned({
         supplierName: db.suppliers.find(x => x.id === supplierId)?.name ?? "Supplier",
         billNo: billNo.trim(),
-        lines: lines.map(l => ({ kind: l.kind, text: lineText(l, db.settings), qty: Number(l.qty), unit: lineUnit(l, db.settings), inr: lineInr(l) })),
+        lines: lines.map(l => ({ kind: l.kind, text: lineText(l, db.settings), qty: Number(l.qty), unit: lineUnit(l, db.settings), inr: lineInr(l),
+          ...(l.kind === "other" && l.materialId ? { materialId: l.materialId } : {}) })),
         totalInr: billTotalInr,
         execute: async (o: Order) => record(o, true, workCompanyOf(loadDb(), o), o.assignedFactoryId || ""),
       });

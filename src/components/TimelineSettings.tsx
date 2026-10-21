@@ -200,7 +200,7 @@ function LooseStagesEditor() {
   );
   return (
     <div className="border-t border-border/60 pt-4 space-y-3">
-      <p className="text-sm font-semibold text-foreground">Loose diamonds <span className="text-xs font-normal text-muted-foreground">· stones sold as they are — nothing is made</span></p>
+      <p className="text-sm font-semibold text-foreground">Loose stones <span className="text-xs font-normal text-muted-foreground">· stones sold as they are — nothing is made</span></p>
       <div className="space-y-1.5">
         {fixed("Order Submitted", "The order is placed")}
         {fixed("Order Approved", "The client is told")}
