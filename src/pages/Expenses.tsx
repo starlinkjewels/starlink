@@ -295,6 +295,7 @@ export function ExpensesPage() {
       {(isEmployee || (isAdmin && tab === "mine")) && (
         <ExpenseList
           expenses={myExpenses}
+          onAdd={can("expenses", "add") ? () => setShowAdd(true) : undefined}
           showEmployee={isAdmin && mineFilter !== "self"}
           users={db.users}
           clients={db.clients}
@@ -520,6 +521,8 @@ export function ExpensesPage() {
 
 interface ExpenseListProps {
   expenses: Expense[];
+  /** The next step in an empty list (new look): add an expense. */
+  onAdd?: () => void;
   showEmployee: boolean;
   users: any[];
   clients: any[];
@@ -539,7 +542,7 @@ interface ExpenseListProps {
   resetKey?: string;
 }
 
-function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, onDelete, onEdit, rights, search, filters, onClearFilters, resetKey }: ExpenseListProps) {
+function ExpenseList({ expenses, onAdd, showEmployee, users, clients, lockers, orders, onDelete, onEdit, rights, search, filters, onClearFilters, resetKey }: ExpenseListProps) {
   const can = useCan();
   // A nil total reads in the list's one currency ("$0"), else in rupees.
   const codes = new Set(expenses.map(e => ccy(e.currency)));
@@ -603,6 +606,7 @@ function ExpenseList({ expenses, showEmployee, users, clients, lockers, orders, 
           { label: "Shipment", value: e.shipmentRef },
         ])}
         emptyText="No expenses yet."
+        emptyAction={!expenses.length && onAdd ? { label: "Add an expense", onClick: onAdd } : undefined}
       />
     </div>
   );

@@ -1,4 +1,5 @@
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { useStudio } from "@/lib/studio";
 import { useId, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
@@ -116,6 +117,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
 }) {
   const { user } = useAuth();
   const db = useDb();
+  const studio = useStudio();
   const addNew = useAddNew();
   const [supplierChosen, setSupplierId] = useState("");
   const supplierId = fixedSupplier ?? supplierChosen;
@@ -405,7 +407,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             ? (forOrder ? `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, for order ${forOrder.orderNumber} — not into stock${certifiedLines ? "; certified stones kept for the order" : ""}.` : "Choose the order this bill is for.")
             : `${lines.length} purchase${lines.length !== 1 ? "s" : ""} onto ${whose(chosenSupplier.name)} account, into ${multiCo ? `${whose(companyById(db.settings, companyId).name)} ` : ""}stock${certifiedLines ? " — each certified stone as its own packet" : ""}.`}>
         <AsyncButton onClick={submit} disabled={saving} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-52">
-          {saving ? "Saving…" : fixedOrder ? (lines.length > 1 ? `Save ${lines.length} Purchases` : "Save Purchase") : forWhat === "order" ? (forOrder ? `Buy for ${forOrder.orderNumber}` : "Buy for the order") : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : "Buy → Stock"}
+          {saving ? "Saving…" : fixedOrder ? (lines.length > 1 ? `Save ${lines.length} Purchases` : "Save Purchase") : forWhat === "order" ? (forOrder ? `Buy for ${forOrder.orderNumber}` : "Buy for the order") : lines.length > 1 ? `Buy ${lines.length} Items → Stock` : (studio ? (lines.length > 1 ? `Save ${lines.length} purchases` : "Save purchase") : "Buy → Stock")}
         </AsyncButton>
       </PanelActions>
     </div>

@@ -28,9 +28,9 @@ export function ActionSheet({ open, onOpenChange, title, description, icon: Icon
       <SheetContent side="right" className={`w-full ${width} p-0 gap-0 flex flex-col bg-background`}>
         <div className="shrink-0 px-5 sm:px-6 pt-5 pb-4 border-b border-border/60 pr-12">
           <div className="flex items-start gap-3">
-            {Icon && <div className="h-10 w-10 rounded-xl bg-primary/10 grid place-items-center shrink-0"><Icon className="h-5 w-5 text-primary" /></div>}
+            {Icon && <div className="ui-title-icon h-10 w-10 rounded-xl bg-primary/10 grid place-items-center shrink-0"><Icon className="h-5 w-5 text-primary" /></div>}
             <div className="min-w-0">
-              <SheetTitle className="font-display text-xl text-brand-dark leading-tight">{title}</SheetTitle>
+              <SheetTitle className="ui-panel-title font-display text-xl text-brand-dark leading-tight">{title}</SheetTitle>
               {description
                 ? <SheetDescription className="text-xs text-muted-foreground mt-1 leading-relaxed">{description}</SheetDescription>
                 : <SheetDescription className="sr-only">{title}</SheetDescription>}
@@ -38,7 +38,7 @@ export function ActionSheet({ open, onOpenChange, title, description, icon: Icon
           </div>
         </div>
         <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5">{children}</div>
-        {footer && <div className="shrink-0 border-t border-border/60 bg-secondary/30 px-5 sm:px-6 py-4">{footer}</div>}
+        {footer && <div className="ui-panel-foot shrink-0 border-t border-border/60 bg-secondary/30 px-5 sm:px-6 py-4">{footer}</div>}
       </SheetContent>
     </Sheet>
   );

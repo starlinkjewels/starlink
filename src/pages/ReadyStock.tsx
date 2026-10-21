@@ -501,6 +501,7 @@ export function ReadyStockPage() {
             totals={{ qty: rows => rows.reduce((s, i) => s + Math.max(0, i.quantity), 0), price: rows => fmtMoney(rows.reduce((s, i) => s + i.price * Math.max(0, i.quantity), 0)) }}
             totalsLabel="In stock"
             emptyText={shelf.length ? "Nothing matches." : "No ready stock yet."}
+            emptyAction={!shelf.length && canManage && can("readyStock", "add") ? { label: "Add a piece", onClick: openAdd } : undefined}
           />
         </div>
       )}

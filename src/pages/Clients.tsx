@@ -1,3 +1,4 @@
+import { studioOn } from "@/lib/studio";
 import { ClientCreateDialog } from "@/components/create/ClientCreateDialog";
 import { ClientEditDialog } from "@/components/ClientEditDialog";
 import { companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompanies } from "@/lib/companies";
@@ -138,7 +139,8 @@ export function ClientsPage() {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
-    try { return (localStorage.getItem("clients-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+    // The new look opens on the list (slim rows on a phone); a choice made with the switch is kept.
+    try { return (localStorage.getItem("clients-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("clients-view", v); } catch { /* ignore */ } };
 
@@ -404,6 +406,7 @@ export function ClientsPage() {
             // with anything on record), is greyed with the reason under it.
             rowActions={clientActions}
             emptyText="No clients found."
+            emptyAction={!scoped.length && user!.role !== "client" && can("clients", "add") ? { label: "Add a client", onClick: () => setOpen(true) } : undefined}
           />
         </div>
       )}

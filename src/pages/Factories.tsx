@@ -1,3 +1,4 @@
+import { studioOn } from "@/lib/studio";
 import { factoryFigures } from "@/lib/partyTotals";
 import { FactoryCreateDialog } from "@/components/create/FactoryCreateDialog";
 import { useState, type MouseEvent } from "react";
@@ -36,7 +37,8 @@ export function FactoriesPage() {
   const isAdmin = user?.role === "admin";
   const [q, setQ] = useState("");
   const [view, setView] = useState<"list" | "grid">(() => {
-    try { return (localStorage.getItem("factories-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
+    // The new look opens on the list (slim rows on a phone); a choice made with the switch is kept.
+    try { return (localStorage.getItem("factories-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
@@ -225,6 +227,7 @@ export function FactoriesPage() {
             }}
             rowActions={actionsFor}
             emptyText="No factories found."
+            emptyAction={!db.factories.length && isAdmin ? { label: "Add a factory", onClick: () => setOpen(true) } : undefined}
           />
         </div>
       )}

@@ -1,3 +1,4 @@
+import { useStudio } from "@/lib/studio";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { choicesOf } from "@/lib/optionLists";
 import { LotPicker, BagSelect } from "@/components/LotFields";
@@ -206,6 +207,7 @@ function OrderDetailPageBody() {
   const { user } = useAuth();
   const can = useCan();
   const addNew = useAddNew();
+  const studio = useStudio();
   const nav = useNavigate();
 
   // Barcode band modal state
@@ -3245,7 +3247,7 @@ function OrderDetailPageBody() {
                       )}
                       <p className="text-[11px] text-muted-foreground mt-0.5">
                         {order.noDiamond ? "No diamond in this piece"
-                          : diaMissing && needsDia ? "Add material → from stock or buy new"
+                          : diaMissing && needsDia ? (studio ? "Add the diamonds — from stock or bought new" : "Add material → from stock or buy new")
                           : otherIssues.length ? `+ ${otherIssues.length} other material${otherIssues.length === 1 ? "" : "s"}`
                           : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
                       </p>

@@ -1,5 +1,6 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
-import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, ArrowUpDown, Check, ChevronDown, FileSpreadsheet, Inbox, Search, SearchX, ChevronLeft, ChevronRight, Minus, Plus, X } from "lucide-react";
+import { useStudio } from "@/lib/studio";
 import { useMayExport } from "@/hooks/useCan";
 import { useNavigate } from "react-router-dom";
 import { downloadCsv } from "@/lib/ledgerExport";
@@ -69,7 +70,7 @@ export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
   rowClassName, controls = "full", noun = "row", plural, searchPlaceholder = "Search this table", totals, totalsLabel = "Total", expand, rowHref, pinnedRows, pinnedAt = "bottom", resetKey, canClickRow, details,
-  search, filters, onClearFilters, exports, exportScope, summary, loading,
+  search, filters, onClearFilters, exports, exportScope, summary, loading, emptyAction,
 }: {
   /** Names this table's remembered choices — unique per table. */
   id: string;
@@ -143,6 +144,8 @@ export function DataTable<T>({
   summary?: ReactNode;
   /** The rows are still on their way: placeholder rows instead of "nothing here". */
   loading?: boolean;
+  /** The next step when there is nothing yet ("Add a client") — offered in the empty list (new look). */
+  emptyAction?: { label: string; onClick: () => void };
 }) {
   const [prefs, setPrefs] = useState<Prefs>(() => read(id));
   const save = (p: Prefs) => { setPrefs(p); write(id, p); };
@@ -162,6 +165,8 @@ export function DataTable<T>({
   const narrow = useNarrow();
   const canCards = controls === "full" && narrow && !footer;
   const cardMode = canCards && (prefs.layout ?? "cards") === "cards";
+  // The new look (preview): a phone list of slim rows, and a next step in an empty list.
+  const studio = useStudio();
   useEffect(() => {
     const el = boxRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
@@ -411,7 +416,62 @@ export function DataTable<T>({
               <span className="text-xs text-muted-foreground">{allState === "on" ? "Untick all" : `Tick all ${keysShown.length}`}</span>
             </div>
           )}
-          {listed.map(r => {
+          {studio && listed.length > 0 && (
+            <div className="dt-list rounded-xl border border-border/70 bg-card overflow-hidden divide-y divide-border/60">
+              {listed.map(r => {
+                const k = rowKey(r);
+                const pin = !!pinnedRows?.includes(r);
+                const on = !pin && ticking && selected!.has(k);
+                const opens = !pin && canOpen(r), isOpen = opens && open.has(k);
+                const opensPage = !pin && pageable && (canClickRow ? canClickRow(r) : true);
+                const [head, ...restCols] = shown;
+                const filled = restCols.filter(c => c.header && (pin || !blank(c, r)))
+                  .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== "");
+                // The row's figure on the right (its last amount column); up to three facts under the name.
+                const trail = [...filled].reverse().find(c => c.align === "right");
+                const meta = filled.filter(c => c !== trail).slice(0, pin ? 8 : 3);
+                const tap = !pin && (opensPage || opens);
+                return (
+                  <div key={k} className={`dt-row-slim ${on ? "bg-primary/[0.04]" : ""} ${pin ? "bg-secondary/30 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
+                    <div onClick={tap ? rowClick(r) : undefined} className={`flex items-start gap-3 px-3.5 py-3 ${tap ? "cursor-pointer active:bg-secondary/50 transition-colors" : ""}`}>
+                      {ticking && !pin && <span className="pt-0.5"><Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} /></span>}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">{head ? head.cell(r) : null}</div>
+                          {trail && <div className="shrink-0 text-right text-sm font-semibold text-foreground tabular-nums leading-snug">{trail.v}</div>}
+                        </div>
+                        {/* One line of facts; the last gives way. A row that only opens
+                            in place shows a chevron — a tap anywhere on it does the same. */}
+                        {(meta.length > 0 || (opens && !opensPage)) && (
+                          <div className="mt-1 flex items-center gap-x-3 text-xs text-muted-foreground whitespace-nowrap overflow-hidden">
+                            {meta.map((c, i) => (
+                              <span key={c.key} className={`inline-flex items-baseline gap-1 ${i === meta.length - 1 ? "min-w-0 shrink" : "shrink-0"}`}>
+                                <span className="shrink-0">{c.header}</span>
+                                <span className="text-foreground/85 min-w-0 truncate">{c.v}</span>
+                              </span>
+                            ))}
+                            {opens && !opensPage && (
+                              <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Less" : "All details"}
+                                className="ml-auto shrink-0 -my-2 h-8 w-8 grid place-items-center rounded-full text-muted-foreground active:bg-secondary">
+                                <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                      {rowActions && !pin && (
+                        <div data-no-row className="-mr-1.5 -mt-1 shrink-0">
+                          <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} />
+                        </div>
+                      )}
+                    </div>
+                    {isOpen && <div className="border-t border-border/60 bg-secondary/20 px-3.5 py-3">{expand ? expand.render(r) : autoDetails(r)}</div>}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          {!studio && listed.map(r => {
             const k = rowKey(r);
             const pin = !!pinnedRows?.includes(r);
             const on = !pin && ticking && selected!.has(k);
@@ -468,7 +528,7 @@ export function DataTable<T>({
                 </div>
               ))
               : <div className="rounded-xl border border-dashed border-border bg-white px-4 py-10 text-center">
-                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} />
+                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} action={studio ? emptyAction : undefined} />
                 </div>
           )}
           {totals && filtered.length > 0 && (
@@ -574,7 +634,7 @@ export function DataTable<T>({
             {!visible.length && !loading && (
               <tr><td colSpan={cols} className="p-0">
                 <div className="sticky left-0 px-4 py-12 text-center" style={boxW ? { width: boxW } : undefined}>
-                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} />
+                  <EmptyState narrowedOut={narrowed && rows.length > 0} text={emptyText} onClear={() => { setQv(""); clearFilters(); }} action={studio ? emptyAction : undefined} />
                 </div>
               </td></tr>
             )}
@@ -622,8 +682,12 @@ export function DataTable<T>({
 
 /** What an empty table says: nothing yet (the page's own words), or nothing
  *  left after the search and filters — with the way back. */
-function EmptyState({ narrowedOut, text, onClear }: { narrowedOut: boolean; text: ReactNode; onClear: () => void }) {
-  if (!narrowedOut && typeof text !== "string") return <div className="text-sm text-muted-foreground">{text}</div>;
+function EmptyState({ narrowedOut, text, onClear, action }: { narrowedOut: boolean; text: ReactNode; onClear: () => void; action?: { label: string; onClick: () => void } }) {
+  // Nothing yet, and a clear next step: say so and offer it.
+  const next = !narrowedOut && action
+    ? <button type="button" onClick={action.onClick} className="btn-hero mt-4 h-10 px-4 rounded-lg text-sm font-semibold inline-flex items-center gap-1.5"><Plus className="h-4 w-4" />{action.label}</button>
+    : null;
+  if (!narrowedOut && typeof text !== "string") return <div className="text-sm text-muted-foreground">{text}{next && <div>{next}</div>}</div>;
   const Icon = narrowedOut ? SearchX : Inbox;
   return (
     <div className="flex flex-col items-center">
@@ -633,6 +697,7 @@ function EmptyState({ narrowedOut, text, onClear }: { narrowedOut: boolean; text
       {narrowedOut && (
         <button type="button" onClick={onClear} className="mt-3 h-8 px-3 rounded-lg border border-border bg-white text-xs font-medium text-brand-dark hover:bg-secondary/70">Clear search and filters</button>
       )}
+      {next}
     </div>
   );
 }
