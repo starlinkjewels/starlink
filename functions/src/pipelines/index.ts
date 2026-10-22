@@ -19,7 +19,7 @@ const base = { region: REGION, secrets: [SMTP_PASSWORD], memory: "256MiB" as con
 export const pipelineOnOrder = onDocumentWritten({ ...base, document: "orders/{id}", database: DATABASE, maxInstances: 3, timeoutSeconds: 120 }, async ev => {
   const before = ev.data?.before.exists ? (ev.data.before.data() as OrderLike) : null;
   const after = ev.data?.after.exists ? (ev.data.after.data() as OrderLike) : null;
-  await onOrderWrite(ev.params.id, before, after);
+  await onOrderWrite(ev.params.id, before, after, ev.data?.after.exists ? ev.data.after.updateTime?.toDate().toISOString() : undefined);
 });
 
 export const pipelineOnClient = onDocumentCreated({ ...base, document: "clients/{id}", database: DATABASE, maxInstances: 2 }, async ev => {
@@ -58,15 +58,15 @@ export const pipelineTest = onCall<{ pipeline?: Pipeline; orderId?: string; clie
     const p = req.data?.pipeline;
     if (!p || typeof p !== "object" || !p.trigger || !Array.isArray(p.steps) || !Array.isArray(p.only)) throw new HttpsError("invalid-argument", "Send the pipeline to test.");
     if (JSON.stringify(p).length > 200_000) throw new HttpsError("invalid-argument", "This pipeline is too large.");
-    // At most 40 tests a day each, so a held-down button cannot flood the mailbox.
+    // At most 20 tests a day each, so a held-down button cannot flood the mailbox.
     const day = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Kolkata" });
     const ref = db.collection(C.state).doc(`tests_${who.uid}_${day}`);
     const n = await db.runTransaction(async t => {
       const k = ((await t.get(ref)).data()?.count as number | undefined) ?? 0;
-      if (k < 40) t.set(ref, { count: k + 1, day }, { merge: true });
+      if (k < 20) t.set(ref, { count: k + 1, day }, { merge: true });
       return k;
     });
-    if (n >= 40) throw new HttpsError("resource-exhausted", "That's 40 tests today — try again tomorrow.");
+    if (n >= 20) throw new HttpsError("resource-exhausted", "That's 20 tests today — try again tomorrow.");
     const answer = req.data.answer === "no" ? "no" : "yes";
     return testPipeline({ ...p, id: p.id || "draft", version: Number(p.version) || 1 }, who, { orderId: req.data.orderId, clientId: req.data.clientId, answer });
   },
@@ -78,6 +78,9 @@ export const pipelineRunNow = onCall<{ pipelineId?: string }>({ ...base, cors: t
   const p = (await livePipelines()).find(x => x.id === req.data?.pipelineId);
   if (!p) throw new HttpsError("failed-precondition", "Switch the pipeline on first.");
   if (p.trigger.kind !== "time.schedule") throw new HttpsError("failed-precondition", "Only a scheduled pipeline can be run now.");
-  const started = await fireSchedule(p, await world(), `manual:${new Date().toISOString().slice(0, 16)}`);
-  return { started };
+  const key = `manual:${new Date().toISOString().slice(0, 16)}`;
+  const r = await fireSchedule(p, await world(), key);
+  // A big one goes on in the regular check — nobody is left out, nobody gets it twice.
+  if (!r.complete) await db.collection(C.state).doc("clock").set({ pendingSchedules: { [p.id]: key } }, { merge: true });
+  return { started: r.started, more: !r.complete };
 });

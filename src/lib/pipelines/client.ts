@@ -71,7 +71,9 @@ export async function savePipeline(p: Pipeline, by: { id: string; name: string }
 }
 /** On or off — the steps stay as saved. */
 export async function setPipelineOn(id: string, on: boolean, by: { id: string }): Promise<void> {
-  await updateDoc(doc(fsdb, COL.pipelines, id), { on, updatedAt: new Date().toISOString(), updatedBy: by.id });
+  const at = new Date().toISOString();
+  // "From now on": the regular checks start only for what becomes true after this moment.
+  await updateDoc(doc(fsdb, COL.pipelines, id), { on, updatedAt: at, updatedBy: by.id, ...(on ? { onSince: at } : {}) });
 }
 /** Delete the pipeline. Its runs stop by themselves; its history stays. */
 export async function deletePipeline(id: string): Promise<void> {

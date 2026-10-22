@@ -252,6 +252,8 @@ service cloud.firestore {
       allow read: if isAdmin() || (isStaff() && myAppId() in resource.data.userIds);
       allow update: if (isAdmin() || (isStaff() && myAppId() in resource.data.userIds))
         && resource.data.answer == null && request.resource.data.answer in ['yes', 'no']
+        // Answered in one's own name (an owner without a staff record answers as an admin).
+        && (isAdmin() || request.resource.data.answeredBy == myAppId())
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'answeredAt', 'answeredBy', 'answeredByName']);
       allow create, delete: if false;
     }

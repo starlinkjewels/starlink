@@ -115,6 +115,8 @@ export interface Pipeline {
   steps: Step[];
   /** A run for an order stops by itself when the order is cancelled or deleted (and, if set, delivered). */
   stopWhenDelivered?: boolean;
+  /** When it was last switched on: the regular checks start only for what became true after it. */
+  onSince?: string;
   version: number;
   updatedAt?: string;
   updatedBy?: string;
@@ -127,7 +129,7 @@ export interface Pipeline {
 // Only what the rules need — structural, so the app's records and the server's
 // plain documents both fit.
 
-export interface TimelineStepLike { step: string; status: string; date?: string }
+export interface TimelineStepLike { step: string; status: string; date?: string; remarks?: string }
 export interface OrderLike {
   id: string; orderNumber: string; clientId: string; status: string;
   timeline?: TimelineStepLike[];
@@ -169,6 +171,8 @@ export interface Ctx {
   /** invoice.raised: the bill. */
   invoice?: { number: string; amount?: number };
   brandName: string;
+  /** False while the order was saved moments ago (someone may still be saving it): approve and assign wait. */
+  orderSettled?: boolean;
   /** Labels a pipeline has put on this order already (pipelineMarks). */
   labels?: string[];
 }
@@ -225,31 +229,36 @@ export function orderEvents(before: OrderLike | null, after: OrderLike | null): 
   if (!after) return [];
   const out: OrderEvent[] = [];
   const add = (kind: TriggerKind, key: string, stage?: string) => out.push({ kind, key, ...(stage ? { stage } : {}) });
+  // Each key carries when it happened, so an order approved again after being
+  // re-opened is news again — while the same save seen twice is still one event.
+  const when = (t: TimelineStepLike) => t.date ?? "";
+  // A stage the app fills in on an old order when it loads it is not news.
+  const real = (t: TimelineStepLike) => t.status === "done" && t.remarks !== "Backfilled";
   if (!before) {
     add("order.placed", "placed");
     // A sale straight from stock can arrive already past some stages.
-    for (const t of after.timeline || []) if (t.status === "done" && t.step !== "Order Submitted") add("order.stageDone", `done:${t.step}`, t.step);
+    for (const t of after.timeline || []) if (real(t) && t.step !== "Order Submitted") add("order.stageDone", `done:${t.step}:${when(t)}`, t.step);
     return out;
   }
   const wasDone = new Set((before.timeline || []).filter(t => t.status === "done").map(t => t.step));
   for (const t of after.timeline || []) {
-    if (t.status === "done" && !wasDone.has(t.step)) {
-      add("order.stageDone", `done:${t.step}`, t.step);
-      if (t.step === "Order Approved") add("order.approved", "approved");
-      if (t.step === "Final Approval") add("order.finalApproval", "finalApproval");
+    if (real(t) && !wasDone.has(t.step)) {
+      add("order.stageDone", `done:${t.step}:${when(t)}`, t.step);
+      if (t.step === "Order Approved") add("order.approved", `approved:${when(t)}`);
+      if (t.step === "Final Approval") add("order.finalApproval", `finalApproval:${when(t)}`);
     }
   }
   // Reaching a stage: it became the current one.
   const cb = currentStage(before), ca = currentStage(after);
-  if (ca !== cb && ca !== "Finished") add("order.stageReached", `reached:${ca}`, ca);
-  if (!before.assignedFactoryId && after.assignedFactoryId) add("order.factoryAssigned", `factory:${after.assignedFactoryId}`);
-  else if (before.assignedFactoryId && after.assignedFactoryId && before.assignedFactoryId !== after.assignedFactoryId) add("order.factoryAssigned", `factory:${after.assignedFactoryId}`);
-  if ((after.materialIssuanceIds || []).length > (before.materialIssuanceIds || []).length) add("order.materialIssued", `issued:${(after.materialIssuanceIds || []).length}`);
-  if (!isDispatched(before) && isDispatched(after)) add("order.dispatched", "dispatched");
-  if (!isDelivered(before) && isDelivered(after)) add("order.delivered", "delivered");
+  if (ca !== cb && ca !== "Finished") add("order.stageReached", `reached:${ca}:${stageSince(after) ?? ""}`, ca);
+  if (after.assignedFactoryId && before.assignedFactoryId !== after.assignedFactoryId) add("order.factoryAssigned", `factory:${after.assignedFactoryId}`);
+  const ib = before.materialIssuanceIds || [], ia = after.materialIssuanceIds || [];
+  if (ia.length > ib.length) add("order.materialIssued", `issued:${ia[ia.length - 1]}`);
+  if (!isDispatched(before) && isDispatched(after)) add("order.dispatched", `dispatched:${after.dispatchedAt ?? ""}`);
+  if (!isDelivered(before) && isDelivered(after)) add("order.delivered", `delivered:${after.deliveredAt ?? ""}`);
   if (before.status !== "Rejected" && after.status === "Rejected") add("order.cancelled", "cancelled");
   const pb = (before.advances || []).length, pa = (after.advances || []).length;
-  if (pa > pb) add("order.paymentReceived", `paid:${pa}`);
+  if (pa > pb) add("order.paymentReceived", `paid:${pa}:${after.advances![pa - 1]?.createdAt ?? ""}`);
   return out;
 }
 
@@ -466,6 +475,8 @@ export interface Run {
   trail: TrailEntry[];
   /** Why it stopped / failed, in words. */
   reason?: string;
+  /** Approve / assign asked for, not yet seen on the order: the run waits for it (until then). */
+  pending?: { stepId: string; until: string };
   /** Set on a test run: nothing it does reaches anyone but the tester. */
   test?: boolean;
 }
@@ -544,7 +555,7 @@ export function advance(p: Pipeline, run: Run, c: Ctx, answer?: "yes" | "no"): {
   const effects: Effect[] = [];
   const at = c.now;
   const log = (stepId: string, outcome: TrailEntry["outcome"], note?: string) => r.trail.push({ stepId, at, outcome, ...(note ? { note } : {}) });
-  const finish = (status: RunStatus, reason?: string) => { r.status = status; r.reason = reason; delete r.wakeAt; delete r.giveUpAt; };
+  const finish = (status: RunStatus, reason?: string) => { r.status = status; r.reason = reason; delete r.wakeAt; delete r.giveUpAt; delete r.pending; };
   r.updatedAt = at;
 
   // A closed order ends its run, whatever step it is at — except the run that
@@ -577,14 +588,42 @@ export function advance(p: Pipeline, run: Run, c: Ctx, answer?: "yes" | "no"): {
         effects.push({ type: "label", stepId: s.id, label: s.label });
         log(s.id, "done"); if (!go(nextCursor(p.steps, r.cursor))) return { run: r, effects }; continue;
       case "approve":
-        // Only a waiting order — the server checks again on the live record.
-        if (c.order?.status === "Waiting") { effects.push({ type: "approve", stepId: s.id }); log(s.id, "done"); }
-        else log(s.id, "skipped", "It was not waiting for approval");
-        if (!go(nextCursor(p.steps, r.cursor))) return { run: r, effects }; continue;
-      case "assign":
-        if (c.order && !c.order.assignedEmployeeId) { effects.push({ type: "assign", stepId: s.id, who: s.who, userId: s.userId }); log(s.id, "done"); }
-        else log(s.id, "skipped", "Someone already has it");
-        if (!go(nextCursor(p.steps, r.cursor))) return { run: r, effects }; continue;
+      case "assign": {
+        // On the order now — whoever did it.
+        const shows = s.kind === "approve" ? !!c.order && c.order.status !== "Waiting" : !!c.order?.assignedEmployeeId;
+        // Asked for already: go on only once the order really shows it, so the
+        // "approved" email never goes for an approval that did not happen.
+        if (r.pending?.stepId === s.id) {
+          if (shows) { delete r.pending; delete r.wakeAt; r.status = "running"; log(s.id, "done"); if (!go(nextCursor(p.steps, r.cursor))) return { run: r, effects }; continue; }
+          if (+new Date(r.pending.until) <= +new Date(at)) {
+            delete r.pending; log(s.id, "stopped", s.kind === "approve" ? "It was not approved" : "It was not assigned");
+            finish("stopped", s.kind === "approve" ? "The order could not be approved — nothing after it was done" : "The order could not be assigned — nothing after it was done");
+            return { run: r, effects };
+          }
+          r.status = "waiting"; r.wakeAt = addTime(at, 10 * 6e4);
+          return { run: r, effects };
+        }
+        // A screen saves an order whole, from its own copy: changing it while
+        // someone is still saving it could be undone by their next save. So
+        // wait until nobody has saved it for a while, then act — and only then
+        // go on (the "approved" email after it goes once it is really approved).
+        if (c.order && c.orderSettled === false) {
+          if (r.status !== "waiting") log(s.id, "waiting", "until nobody is saving the order");
+          r.status = "waiting"; r.wakeAt = addTime(at, 3 * 6e4);
+          return { run: r, effects };
+        }
+        if (r.status === "waiting") { r.status = "running"; delete r.wakeAt; }
+        const can = s.kind === "approve" ? c.order?.status === "Waiting" : !!c.order && !c.order.assignedEmployeeId;
+        if (!can) {
+          log(s.id, "skipped", s.kind === "approve" ? "It was not waiting for approval" : "Someone already has it");
+          if (!go(nextCursor(p.steps, r.cursor))) return { run: r, effects }; continue;
+        }
+        effects.push(s.kind === "approve" ? { type: "approve", stepId: s.id } : { type: "assign", stepId: s.id, who: s.who, userId: s.userId });
+        r.pending = { stepId: s.id, until: addTime(at, 2 * 36e5) };
+        r.status = "waiting"; r.wakeAt = addTime(at, 5 * 6e4);
+        log(s.id, "waiting", s.kind === "approve" ? "approving" : "assigning");
+        return { run: r, effects };
+      }
       case "wait": {
         // Arriving: set the alarm. Woken (its time has come): move on.
         if (r.status === "waiting" && r.wakeAt && +new Date(r.wakeAt) <= +new Date(at)) {

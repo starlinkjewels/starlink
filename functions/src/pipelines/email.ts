@@ -34,25 +34,28 @@ function jobSheet(o: OrderLike): string {
     : "");
 }
 
-function listTable(list: OrderLike[], c: Ctx): string {
+function listTable(list: OrderLike[], c: Ctx, hideMoney: boolean): string {
   if (!list.length) return `<p style="font-size:14px;color:${BRAND.muted};">Nothing in the list today.</p>`;
-  const head = ["Order", "Piece", "Stage", "Due", "To pay"].map(h => `<th align="left" style="padding:8px 6px;font-size:12px;color:${BRAND.muted};border-bottom:1px solid ${BRAND.line_};">${h}</th>`).join("");
+  const head = ["Order", "Piece", "Stage", "Due", ...(hideMoney ? [] : ["To pay"])].map(h => `<th align="left" style="padding:8px 6px;font-size:12px;color:${BRAND.muted};border-bottom:1px solid ${BRAND.line_};">${h}</th>`).join("");
   const body = list.slice(0, 80).map(o => {
     const late = o.expectedDelivery && +new Date(`${o.expectedDelivery.slice(0, 10)}T23:59:59+05:30`) < +new Date(c.now);
-    return `<tr>${[o.orderNumber, pieceText(o), currentStage(o), `${fmtDay(o.expectedDelivery)}${late ? " (late)" : ""}`, balanceOf(o) ? fmtUsd(balanceOf(o)) : "—"]
+    return `<tr>${[o.orderNumber, pieceText(o), currentStage(o), `${fmtDay(o.expectedDelivery)}${late ? " (late)" : ""}`, ...(hideMoney ? [] : [balanceOf(o) ? fmtUsd(balanceOf(o)) : "—"])]
       .map(v => `<td style="padding:8px 6px;font-size:13px;color:${BRAND.ink};border-bottom:1px solid ${BRAND.line_};">${esc(v)}</td>`).join("")}</tr>`;
   }).join("");
   return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin:10px 0;"><tr>${head}</tr>${body}</table>${list.length > 80 ? `<p style="font-size:12px;color:${BRAND.muted};">and ${list.length - 80} more</p>` : ""}`;
 }
 
-/** The body blocks an email step asked for. */
-export function blocksHtml(blocks: EmailBlock[], c: Ctx): string {
+/**
+ * The body blocks an email step asked for. `hideMoney`: it goes to a factory —
+ * what clients pay and owe is never shown to them.
+ */
+export function blocksHtml(blocks: EmailBlock[], c: Ctx, hideMoney = false): string {
   const o = c.order;
   return blocks.map(b => {
     if (b === "order" && o) return rows(orderRows(o));
     if (b === "jobSheet" && o) return jobSheet(o);
-    if (b === "money" && o) return rows([["Order", o.orderNumber], ["Order total", fmtUsd(orderTotalOf(o))], ["Paid", fmtUsd(paidOf(o))], ["Still to pay", fmtUsd(balanceOf(o))]]);
-    if (b === "list") return listTable(c.list ?? [], c);
+    if (b === "money" && o && !hideMoney) return rows([["Order", o.orderNumber], ["Order total", fmtUsd(orderTotalOf(o))], ["Paid", fmtUsd(paidOf(o))], ["Still to pay", fmtUsd(balanceOf(o))]]);
+    if (b === "list") return listTable(c.list ?? [], c, hideMoney);
     return "";
   }).join("");
 }

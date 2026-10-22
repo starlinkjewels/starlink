@@ -1,7 +1,7 @@
 import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { defineSecret } from "firebase-functions/params";
 import { FieldValue } from "firebase-admin/firestore";
-import { createTransport } from "nodemailer";
+import { createTransport, type Transporter } from "nodemailer";
 import { db } from "./lib/firestoreAdmin";
 import { OWNER_EMAILS } from "./summaries";
 
@@ -96,17 +96,36 @@ export const sendMail = onCall<MailRequest>(
  * On the local emulator nothing leaves the machine: the email is written to the
  * `outbox` collection instead, to be read by the tests.
  */
+let pooled: Transporter | null = null;
 export async function deliverMail(to: string, subject: string, html: string): Promise<void> {
   if (!EMAIL_RE.test(to)) throw new Error(`Not an email address: ${to}`);
   if (process.env.FUNCTIONS_EMULATOR === "true") {
     await db.collection("outbox").add({ to, subject, html, at: new Date().toISOString() });
     return;
   }
-  const transport = createTransport({
+  // One connection kept open and reused: many emails in a row don't each log in to Gmail again.
+  const open = () => (pooled ??= createTransport({
+    pool: true, maxConnections: 1, maxMessages: 100,
     host: "smtp.gmail.com",
     port: 465,
     secure: true,
     auth: { user: SMTP_USER, pass: SMTP_PASSWORD.value().replace(/\s+/g, "") },
-  });
-  await transport.sendMail({ from: FROM, to, subject, html });
+  }));
+  try {
+    await open().sendMail({ from: FROM, to, subject, html });
+  } catch (e) {
+    // A connection Gmail closed while it sat idle fails before anything is sent:
+    // open a fresh one and try once more. Anything else is a real failure.
+    const code = (e as { code?: string; command?: string }).code;
+    if (!["ECONNECTION", "ETIMEDOUT", "ESOCKET", "ECONNRESET", "EPIPE"].includes(code ?? "")) throw e;
+    await closeMail();
+    await open().sendMail({ from: FROM, to, subject, html });
+  }
+}
+
+/** Close the kept connection — at the end of a batch, so none is left to go stale. */
+export async function closeMail(): Promise<void> {
+  const p = pooled;
+  pooled = null;
+  p?.close();
 }

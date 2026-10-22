@@ -218,7 +218,7 @@ export function AutopilotEditorPage() {
       {sheet === "only" && <OnlyIfSheet p={draft} onChange={setDraft} onClose={() => setSheet(null)} />}
       <TestSheet p={draft} open={sheet === "test"} onClose={() => setSheet(null)} />
       {saved && <VersionsSheet p={saved} open={sheet === "versions"} onClose={() => setSheet(null)}
-        onRestore={v => { setDraft({ ...v.pipeline, id: saved.id, version: saved.version, on: saved.on }); setSheet(null); toast.success(`Version ${v.version} brought back — Save to use it`); }} />}
+        onRestore={v => { setDraft({ ...v.pipeline, id: saved.id, version: saved.version, on: saved.on, onSince: saved.onSince }); setSheet(null); toast.success(`Version ${v.version} brought back — Save to use it`); }} />}
     </div>
   );
 }
