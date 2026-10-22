@@ -6,7 +6,7 @@ import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from 
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
@@ -18,6 +18,7 @@ import { Loader2, Lock } from "lucide-react";
 import { can, nextAccessChange } from "@/lib/permissions";
 import { pageRequirement } from "@/lib/modules";
 import { GiftCardPopup } from "@/components/GiftCardPopup";
+import { ReminderHost } from "@/components/autopilot/Reminders";
 import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
@@ -45,7 +46,9 @@ const NAV: NavItem[] = [
   { to: "/ai", label: "Starlink AI", icon: Sparkles },
   { to: "/messages", label: "Messages", icon: MessageSquare },
   { to: "/notifications", label: "Alerts", icon: Bell },
+  { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin", "employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
+  { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
@@ -80,10 +83,12 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Workspace", items: [
     { to: "/messages", label: "Messages", icon: MessageSquare },
     { to: "/notifications", label: "Alerts", icon: Bell },
+    { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin", "employee"] },
     { to: "/ai", label: "Starlink AI", icon: Sparkles },
     { to: "/reports", label: "Reports", icon: BarChart3 },
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
+    { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
     { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   ] },
 ];
@@ -119,8 +124,10 @@ const MORE_NAV: NavItem[] = [
   { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin","employee"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/reports", label: "Reports", icon: BarChart3 },
+  { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
   { to: "/notifications", label: "Alerts", icon: Bell },
+  { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin","employee"] },
   { to: "/search", label: "Search", icon: SearchIcon },
   { to: "/profile", label: "My Profile", icon: User },
 ];
@@ -753,6 +760,7 @@ export function AppLayout() {
 
       {/* Client gift-card announcements (new card + 24h expiry reminder) */}
       <GiftCardPopup />
+      <ReminderHost />
 
       {/* Mobile barcode scanner (camera → open the order) */}
       <ScanModal open={scanOpen} onClose={() => setScanOpen(false)} />

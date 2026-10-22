@@ -58,6 +58,7 @@ import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
+import { OrderLabels } from "@/components/autopilot/OrderLabels";
 import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, diamondSpec, type MaterialKey } from "@/lib/materials";
 import { ActionSheet } from "@/components/ActionSheet";
 import { DataTable, CellMain, CellAmount, CellTag, type DataColumn } from "@/components/DataTable";
@@ -2033,6 +2034,7 @@ function OrderDetailPageBody() {
                   )}
                   {order.melted && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-destructive/10 text-destructive inline-flex items-center gap-1"><Flame className="h-3 w-3" />Melted</span>}
                   {user!.role !== "client" && <CompanyBadge id={companyOfOrder(db, order)} />}
+                  {user!.role !== "client" && <OrderLabels orderId={order.id} />}
                   {!!order.returns?.length && (() => {
                     const back = order.returns.reduce((s, r) => s + r.qty, 0), of = order.quantity || 1;
                     return <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-800 inline-flex items-center gap-1"><Undo2 className="h-3 w-3" />{back >= of ? "Returned" : `${back} of ${of} returned`}</span>;

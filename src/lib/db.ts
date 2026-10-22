@@ -1382,6 +1382,8 @@ export interface Factory {
   name: string;
   contactPerson?: string;
   phone?: string;
+  /** Where Autopilot emails this factory its jobs (Settings → Autopilot). */
+  email?: string;
   address?: string;
   createdAt: string;
   active: boolean;

@@ -9,12 +9,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
 
-const FIELDS = ["name", "contactPerson", "phone", "address"] as const;
+const FIELDS = ["name", "contactPerson", "phone", "email", "address"] as const;
 type Field = (typeof FIELDS)[number];
 type Form = Record<Field, string>;
 
 const formOf = (f: Factory | null): Form => ({
-  name: f?.name ?? "", contactPerson: f?.contactPerson ?? "", phone: f?.phone ?? "", address: f?.address ?? "",
+  name: f?.name ?? "", contactPerson: f?.contactPerson ?? "", phone: f?.phone ?? "", email: f?.email ?? "", address: f?.address ?? "",
 });
 
 /**
@@ -30,6 +30,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
   const save = () => {
     if (!factory) return;
     if (!f.name.trim()) { toast.error("Enter a factory name"); return; }
+    if (f.email.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) { toast.error("That email address doesn't look right"); return; }
     updateDb(d => {
       const x = d.factories.find(y => y.id === factory.id);
       if (!x) return;
@@ -71,7 +72,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
         {FIELDS.map(k => (
           <div key={k} className={k === "address" || k === "name" ? "col-span-2" : ""}>
             <Label htmlFor={`fac-edit-${k}`} className="text-xs capitalize">{k === "contactPerson" ? "Contact Person / Karigar" : k.replace(/([A-Z])/g, " $1")}</Label>
-            <Input id={`fac-edit-${k}`} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
+            <Input id={`fac-edit-${k}`} type={k === "email" ? "email" : "text"} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
           </div>
         ))}
         <div className="col-span-2"><FactoryLabourFields value={labour} onChange={setLabour} idPrefix="fac-edit-labour" /></div>

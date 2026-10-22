@@ -17,7 +17,7 @@ import { OWNER_EMAILS } from "./summaries";
  *   • clients — only the company inbox (the "new order" and "client signed in" alerts).
  * so a signed-in account cannot use the mailbox to write to strangers.
  */
-const SMTP_PASSWORD = defineSecret("SMTP_PASSWORD");
+export const SMTP_PASSWORD = defineSecret("SMTP_PASSWORD");
 const SMTP_USER = "marketing.starlinkjewels@gmail.com";
 const FROM = `"Starlink Jewels" <${SMTP_USER}>`;
 /** Keep in sync with MARKETING_EMAIL in src/lib/email.ts. */
@@ -89,3 +89,24 @@ export const sendMail = onCall<MailRequest>(
     }
   },
 );
+
+/**
+ * Send one email from the company mailbox — for the server's own senders
+ * (Smart Pipelines, pipelines/engine.ts), which bind SMTP_PASSWORD themselves.
+ * On the local emulator nothing leaves the machine: the email is written to the
+ * `outbox` collection instead, to be read by the tests.
+ */
+export async function deliverMail(to: string, subject: string, html: string): Promise<void> {
+  if (!EMAIL_RE.test(to)) throw new Error(`Not an email address: ${to}`);
+  if (process.env.FUNCTIONS_EMULATOR === "true") {
+    await db.collection("outbox").add({ to, subject, html, at: new Date().toISOString() });
+    return;
+  }
+  const transport = createTransport({
+    host: "smtp.gmail.com",
+    port: 465,
+    secure: true,
+    auth: { user: SMTP_USER, pass: SMTP_PASSWORD.value().replace(/\s+/g, "") },
+  });
+  await transport.sendMail({ from: FROM, to, subject, html });
+}

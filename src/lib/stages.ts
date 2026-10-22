@@ -1,3 +1,4 @@
+import { approveOrderTimeline } from "./pure/pipelines";
 import {
   TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, statusFromTimeline, uid, worksOnOrder,
   type DB, type Order, type Settings, type Worker,
@@ -213,11 +214,8 @@ export function stagePermission(db: DB, user: Worker, o: Order, mayEditOrders: b
 /** Approve a waiting order — the board's twin of the order screen's Approve. */
 export function applyApprove(d: DB, orderId: string, at: string): void {
   const o = d.orders.find(x => x.id === orderId);
-  if (!o || o.status !== "Waiting") return;
-  o.status = "Approved";
-  if (o.timeline[0]) { o.timeline[0].status = "done"; o.timeline[0].date = o.timeline[0].date ?? at; }
-  if (o.timeline[1]) { o.timeline[1].status = "done"; o.timeline[1].date = at; }
-  if (o.timeline[2] && o.timeline[2].status === "pending") o.timeline[2].status = "in_progress";
+  // The same rule a pipeline's "Approve the order" runs on the server (lib/pure/pipelines.ts).
+  if (!o || !approveOrderTimeline(o, at)) return;
   const clientUser = d.users.find(u => u.clientId === o.clientId);
   if (clientUser) d.notifications.unshift({
     id: uid("n_"), userId: clientUser.id, title: "Order Approved",
