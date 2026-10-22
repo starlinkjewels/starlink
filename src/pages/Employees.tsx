@@ -141,7 +141,7 @@ export function EmployeesPage() {
     const offBlock = owner ? "An owner can't be deactivated" : u.role === "admin" ? "Remove admin first" : undefined;
     return [
       { label: "View", icon: Eye, onSelect: () => navigate(`/employees/${u.id}`), show: withView },
-      { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingId(u.id) },
+      { label: "Edit details", icon: Pencil, hint: "Name, phone, department, login, opening salary", onSelect: () => setEditingId(u.id) },
       { label: "Tasks", icon: ListTodo, hint: pending > 0 ? `${pending} pending` : undefined, onSelect: () => setTasksPanelUser(u.id) },
       { label: "Manage access", icon: ShieldCheck, hint: rolesLive ? "What they may see and do" : "After the security update",
         disabled: !rolesLive, onSelect: () => setManaging(u), show: signsIn },

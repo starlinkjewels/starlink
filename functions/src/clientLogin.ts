@@ -4,14 +4,16 @@ import { app, db } from "./lib/firestoreAdmin";
 import { OWNER_EMAILS } from "./summaries";
 
 /**
- * Change a CLIENT's sign-in email and/or password (Edit client → Login).
+ * Change a CLIENT's or an EMPLOYEE's sign-in email and/or password
+ * (Edit client → Login; Employees → Edit details → Login).
  *
  * A browser can't change another person's login — only the server can, with
  * the Admin SDK. So this one narrow door:
  *   • the caller must be an owner or an active admin (the role index the app keeps);
- *   • the login changed must be a client's — never a staff member's or an owner's;
- *   • a new password signs the client out everywhere, so it takes effect at once.
- * The app updates the client's own record (their email) itself, after this succeeds.
+ *   • the login changed must be a client's or an employee's — never an admin's
+ *     or an owner's, and never to an owner's email (that would make them one);
+ *   • a new password signs them out everywhere, so it takes effect at once.
+ * The app updates the person's own record (their email) itself, after this succeeds.
  */
 const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]{2,}$/;
 
@@ -28,7 +30,7 @@ export const setClientLogin = onCall<Req>(
       const idx = (await db.collection("userByAuth").doc(uid).get()).data() as { role?: string; status?: string } | undefined;
       admin = idx?.role === "admin" && idx?.status === "active";
     }
-    if (!admin) throw new HttpsError("permission-denied", "Only an admin can change a client's login.");
+    if (!admin) throw new HttpsError("permission-denied", "Only an admin can change someone's login.");
 
     const target = typeof req.data?.authUid === "string" ? req.data.authUid.trim() : "";
     const email = typeof req.data?.email === "string" ? req.data.email.trim().toLowerCase() : "";
@@ -38,11 +40,16 @@ export const setClientLogin = onCall<Req>(
     if (email && !EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "That email address doesn't look right.");
     if (password && password.length < 6) throw new HttpsError("invalid-argument", "The password needs at least 6 characters.");
 
-    // Only a client's login — the role index says whose it is.
+    // Only a client's or an employee's login — the role index says whose it is.
     const who = (await db.collection("userByAuth").doc(target).get()).data() as { role?: string } | undefined;
-    if (who?.role !== "client") throw new HttpsError("permission-denied", "Only a client's login can be changed here.");
+    if (who?.role !== "client" && who?.role !== "employee") throw new HttpsError("permission-denied", "Only a client's or an employee's login can be changed here.");
+    // An owner is recognised by email: giving anyone an owner's address would make them one.
+    if (email && OWNER_EMAILS.diamondflow.includes(email)) throw new HttpsError("permission-denied", "That email belongs to an owner.");
 
     const auth = getAuth(app);
+    // Never an owner's own account, whatever its role index says.
+    const current = await auth.getUser(target).catch(() => null);
+    if (current?.email && OWNER_EMAILS.diamondflow.includes(current.email.toLowerCase())) throw new HttpsError("permission-denied", "An owner's login can't be changed here.");
     try {
       await auth.updateUser(target, { ...(email ? { email } : {}), ...(password ? { password } : {}) });
       if (password) await auth.revokeRefreshTokens(target);

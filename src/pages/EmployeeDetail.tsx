@@ -202,7 +202,7 @@ export function EmployeeDetailPage() {
   // when the books still point at them.
   const delBlock = employeeDeleteBlock(db, employee);
   const profileActions: MoreAction[] = [
-    { label: "Edit details", icon: Pencil, hint: "Name, phone, department, opening salary", onSelect: () => setEditingSelf(true) },
+    { label: "Edit details", icon: Pencil, hint: "Name, phone, department, login, opening salary", onSelect: () => setEditingSelf(true) },
     { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login", disabled: !!delBlock,
       onSelect: async () => { if (await confirmDeleteEmployee(employee)) navigate("/employees"); } },
   ];
