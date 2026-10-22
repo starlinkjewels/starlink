@@ -52,6 +52,9 @@ const GiftCardPage = lazy(() => import("./pages/GiftCard").then(m => ({ default:
 const GiftCardsAdminPage = lazy(() => import("./pages/GiftCardsAdmin").then(m => ({ default: m.GiftCardsAdminPage })));
 const PaymentsPage = lazy(() => import("./pages/Payments").then(m => ({ default: m.PaymentsPage })));
 const BuyAssignPage = lazy(() => import("./pages/BuyAssign").then(m => ({ default: m.BuyAssignPage })));
+const AutopilotPage = lazy(() => import("./pages/Autopilot").then(m => ({ default: m.AutopilotPage })));
+const AutopilotEditorPage = lazy(() => import("./pages/AutopilotEditor").then(m => ({ default: m.AutopilotEditorPage })));
+const RemindersPage = lazy(() => import("./pages/Reminders").then(m => ({ default: m.RemindersPage })));
 
 function Protected({ children, roles }: { children: React.ReactNode; roles?: Role[] }) {
   const { user } = useAuth();
@@ -183,6 +186,9 @@ export function App() {
           <Route path="reports" element={<ReportsPage />} />
           <Route path="search" element={<SearchPage />} />
           <Route path="settings" element={<Protected roles={["admin"]}><SettingsPage /></Protected>} />
+          <Route path="autopilot" element={<Protected roles={["admin"]}><AutopilotPage /></Protected>} />
+          <Route path="autopilot/:id" element={<Protected roles={["admin"]}><AutopilotEditorPage /></Protected>} />
+          <Route path="reminders" element={<Protected roles={["admin","employee"]}><RemindersPage /></Protected>} />
           <Route path="expenses" element={<Protected roles={["admin","employee"]}><ExpensesPage /></Protected>} />
           <Route path="income" element={<IncomePage />} />
           <Route path="catalog" element={<CatalogPage />} />

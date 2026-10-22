@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
 
-const EMPTY: Partial<Factory> = { name: "", contactPerson: "", phone: "", address: "" };
+const EMPTY: Partial<Factory> = { name: "", contactPerson: "", phone: "", email: "", address: "" };
 
 /**
  * The one Add Factory form — the Factories page's, also opened from "+ Add new
@@ -24,13 +24,14 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a factory name"); return; }
+    if (f.email?.trim() && !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(f.email.trim())) { toast.error("That email address doesn't look right"); return; }
     setSaving(true);
     try {
       const id = uid("fac_");
       updateDb(d => {
         if (!d.factories) d.factories = [];
         const rates = labourOf(labour);
-        d.factories.unshift({ ...f, name: f.name!.trim(), id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}) } as Factory);
+        d.factories.unshift({ ...f, name: f.name!.trim(), email: f.email?.trim() || undefined, id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}) } as Factory);
       });
       toast.success("Factory added");
       onOpenChange(false);
@@ -62,10 +63,10 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
       }
     >
       <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-        {(["name", "contactPerson", "phone", "address"] as const).map(k => (
+        {(["name", "contactPerson", "phone", "email", "address"] as const).map(k => (
           <div key={k} className={k === "address" || k === "name" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize">{k === "contactPerson" ? "Contact Person / Karigar" : k.replace(/([A-Z])/g, " $1")}</Label>
-            <Input value={(f as Record<string, string>)[k] || ""} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
+            <Input type={k === "email" ? "email" : "text"} value={(f as Record<string, string>)[k] || ""} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
           </div>
         ))}
         <OpeningBalanceFields

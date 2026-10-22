@@ -238,6 +238,37 @@ service cloud.firestore {
         && (!('color' in request.resource.data) || (request.resource.data.color is string && request.resource.data.color.matches('^#[0-9a-fA-F]{6}$')));
     }
 
+    // Smart Pipelines (Autopilot). The pipelines and their settings are the
+    // admins'. Runs, steps and the email queue are written only by the server
+    // (Cloud Functions, which pass these rules by right) — nobody can fake a
+    // run or an email from a browser. Each person sees and answers only their
+    // own reminders and questions; staff see the labels a pipeline puts on orders.
+    match /pipelines/{id}        { allow read, write: if isAdmin(); }
+    match /pipelineVersions/{id} { allow read, create: if isAdmin(); allow update, delete: if false; }
+    match /pipelineRuns/{id}     { allow read: if isAdmin(); allow write: if false; }
+    match /pipelineJobs/{id}     { allow read: if isAdmin(); allow write: if false; }
+    match /pipelineMail/{id}     { allow read: if isAdmin(); allow write: if false; }
+    match /pipelineState/{id}    { allow read: if isAdmin(); allow write: if isAdmin() && id == 'settings'; }
+    match /pipelineMarks/{id}    { allow read: if isStaff(); allow write: if isAdmin(); }
+    match /pipelineAsks/{id} {
+      allow read: if isAdmin() || (isStaff() && myAppId() in resource.data.userIds);
+      allow update: if (isAdmin() || (isStaff() && myAppId() in resource.data.userIds))
+        && resource.data.answer == null && request.resource.data.answer in ['yes', 'no']
+        // Answered in one's own name (an owner without a staff record answers as an admin).
+        && (isAdmin() || request.resource.data.answeredBy == myAppId())
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['answer', 'answeredAt', 'answeredBy', 'answeredByName']);
+      allow create, delete: if false;
+    }
+    match /reminders/{id} {
+      allow read: if isAdmin() || (isStaff() && resource.data.userId == myAppId());
+      // A reminder a person sets by hand: for themselves (an admin may set one for anyone).
+      allow create: if isStaff() && request.resource.data.source == 'manual'
+        && (isAdmin() || request.resource.data.userId == myAppId());
+      // Done, snoozed, edited — never handed to someone else by its holder.
+      allow update: if isAdmin() || (isStaff() && resource.data.userId == myAppId() && request.resource.data.userId == resource.data.userId);
+      allow delete: if isAdmin() || (isStaff() && resource.data.userId == myAppId() && resource.data.source == 'manual');
+    }
+
     // Deny everything else by default.
     match /{document=**} { allow read, write: if false; }
   }

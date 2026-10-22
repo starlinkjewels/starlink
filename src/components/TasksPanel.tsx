@@ -288,7 +288,7 @@ function TaskRow({
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {task.completed
             ? `Completed: ${fmtCompleted(task.completedAt)}`
-            : assigner ? `Assigned by ${assigner.name}` : ""}
+            : assigner ? `Assigned by ${assigner.name}` : task.assignedBy === "autopilot" ? "From Autopilot" : ""}
         </p>
       </div>
 

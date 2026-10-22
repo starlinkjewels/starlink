@@ -5,6 +5,8 @@ export { sendNotificationPush } from "./notifications";
 export { sendMail } from "./mail";
 // An admin changing a client's sign-in email or password (see clientLogin.ts).
 export { setClientLogin } from "./clientLogin";
+// Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
+export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 
 // Totals kept on the server (see summaries.ts):
 //   firebase deploy --only functions:sumProd
