@@ -64,9 +64,9 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
         </div>
       </div>
 
-      {/* ── The four numbers ── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <div className="rounded-xl bg-secondary p-3">
+      {/* ── The numbers: cost, price, profit — and profit as margin (÷ price) and markup (÷ cost) ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <div className="rounded-xl bg-secondary p-3 max-sm:col-span-2">
           <p className="text-[10px] text-muted-foreground mb-0.5">Cost</p>
           <p className="font-semibold">{fmtMoneyInr(cost.totalInr)}</p>
           {rateSet && <p className="text-[11px] text-muted-foreground">{fmtMoney(p.costUsd!)}</p>}
@@ -89,6 +89,14 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
           <p className={`font-semibold ${losing ? "text-destructive" : "text-success"}`}>
             {stockBuild || p.marginPct === null ? "—" : `${!cost.complete ? "≤ " : ""}${p.marginPct}%`}
           </p>
+          <p className="text-[11px] text-muted-foreground">profit ÷ price</p>
+        </div>
+        <div className={`rounded-xl p-3 ${losing ? "bg-destructive/10" : "bg-success/10"}`}>
+          <p className="text-[10px] text-muted-foreground mb-0.5">Markup</p>
+          <p className={`font-semibold ${losing ? "text-destructive" : "text-success"}`}>
+            {stockBuild || p.markupPct === null ? "—" : `${!cost.complete ? "≤ " : ""}${p.markupPct}%`}
+          </p>
+          <p className="text-[11px] text-muted-foreground">profit ÷ cost</p>
         </div>
       </div>
 
@@ -135,7 +143,7 @@ export function OrderProfitCard({ db, order }: { db: DB; order: Order }) {
       {/* ── The gold is still the order's estimate ── */}
       {cost.estimated && (
         <p className="text-xs rounded-xl bg-secondary/60 border border-border/70 px-3 py-2 text-muted-foreground">
-          <span className="font-medium text-foreground">Includes the estimated gold</span> — no gold has gone out for this order yet, so its estimate is counted at today&rsquo;s fine-gold cost. It is replaced by the real gold once issued.
+          <span className="font-medium text-foreground">Includes the estimated gold</span> — no gold has gone out for this order yet, so its estimate is counted at the average cost of the gold in stock. It is replaced by the real gold once issued.
         </p>
       )}
 

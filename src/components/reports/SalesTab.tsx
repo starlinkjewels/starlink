@@ -4,7 +4,7 @@ import { ResponsiveContainer, ComposedChart, Bar as RBar, Line, XAxis, YAxis, Ca
 import { CalendarRange, Gem, Layers, TrendingDown, Users } from "lucide-react";
 import { downloadCsv } from "@/lib/ledgerExport";
 import { monthly, salesBy, soldIn, type MonthRow } from "@/lib/analytics";
-import { profitReport, saleDate, type ProfitGroup, type ProfitRow } from "@/lib/orderCost";
+import { profitReport, saleDate, type ProfitGroup, type ProfitRow, markupOf } from "@/lib/orderCost";
 import { DataTable, CellMain, CellAmount, type DataColumn } from "@/components/DataTable";
 import { C, SERIES, Panel, ChartTip, Empty, Bar, ExportButton, usd, inr, pct } from "./ui";
 import { filled, type Detail } from "@/components/rowDetails";
@@ -64,6 +64,9 @@ export function SalesTab({ ctx }: { ctx: ReportCtx }) {
         cell: (m: MonthRow) => (m.profitUsd != null && m.soldCount ? withInr(<CellAmount tone={(m.profitUsd ?? 0) < 0 ? "out" : "in"}>{usd(m.profitUsd)}</CellAmount>, m.profitInr) : "—") },
       { key: "margin", header: "Margin", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount ? m.marginPct : null),
         cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.soldCount ? pct(m.marginPct) : "—"}</span> },
+      // Markup = profit ÷ cost, beside the margin (profit ÷ selling price).
+      { key: "markup", header: "Markup", align: "right" as const, kind: "number" as const, sortValue: (m: MonthRow) => (m.soldCount && m.costUsd && m.profitUsd != null ? markupOf(m.profitUsd, m.costUsd) : null),
+        cell: (m: MonthRow) => <span className="tabular-nums whitespace-nowrap">{m.soldCount && m.costUsd && m.profitUsd != null ? pct(markupOf(m.profitUsd, m.costUsd)) : "—"}</span> },
     ] : []),
     { key: "running", header: "Running total", align: "right", kind: "number", sortValue: m => cumulative.get(m.month) ?? 0,
       cell: m => <span className="text-muted-foreground tabular-nums whitespace-nowrap">{usd(cumulative.get(m.month) ?? 0, true)}</span> },

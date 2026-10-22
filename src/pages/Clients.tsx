@@ -107,9 +107,13 @@ function printLabel(c: Client) {
         <div class="field-value">${c.companyName}${c.ownerName ? "<br><span style='font-size:10pt;font-weight:400;color:#555'>" + c.ownerName + "</span>" : ""}</div>
       </div>
       <div class="field">
-        <div class="field-label">Address :</div>
+        <div class="field-label">Billing address :</div>
         <div class="field-value">${(c.address || "—").replace(/\n/g, "<br>")}</div>
       </div>
+      ${c.shippingAddress ? `<div class="field">
+        <div class="field-label">Shipping address :</div>
+        <div class="field-value">${c.shippingAddress.replace(/\n/g, "<br>")}</div>
+      </div>` : ""}
       <div class="field">
         <div class="field-label">Zip :</div>
         <div class="field-value">${c.zip || "—"}</div>
@@ -311,7 +315,8 @@ export function ClientsPage() {
     return filled([
       !!c.email && c.email !== sub && { label: "Email", value: <a href={`mailto:${c.email}`} className="text-primary hover:underline break-all">{c.email}</a> },
       !!c.phone && c.phone !== sub && { label: "Phone", value: <a href={`tel:${c.phone}`} className="text-primary hover:underline">{c.phone}</a> },
-      { label: "Address", value: noteText(c.address) },
+      { label: "Billing address", value: noteText(c.address) },
+      { label: "Shipping address", value: c.shippingAddress ? noteText(c.shippingAddress) : undefined },
       { label: "Country", value: [c.country, c.zip].filter(Boolean).join(" · ") },
       { label: "GST / VAT", value: c.gstVat },
       { label: "Client since", value: fmtDate(c.createdAt) },
@@ -436,8 +441,8 @@ export function ClientsPage() {
       {view === "grid" && (
       <div className="grid gap-3 md:grid-cols-2 lg:grid-auto-cards">
         {paged.map(c => {
-          const orderCount = db.orders.filter(o => o.clientId === c.id).length;
-          const activeCount = db.orders.filter(o => o.clientId === c.id && !["Delivered","Rejected"].includes(o.status)).length;
+          const orderCount = db.orders.filter(o => o.clientId === c.id && !o.deletedAt).length;
+          const activeCount = db.orders.filter(o => o.clientId === c.id && !o.deletedAt && !["Delivered","Rejected"].includes(o.status)).length;
           const acc = accounts.get(c.id)!;
           const manager = handlerOf(db, c);
           const clientUser = db.users.find(u => u.clientId === c.id);

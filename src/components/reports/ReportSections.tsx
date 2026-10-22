@@ -16,7 +16,7 @@ import type { ModuleKey } from "@/lib/modules";
 import { filled, when, recorded, userName, refLink, linkList, noteText, refNo, lockerLabel, type Detail } from "@/components/rowDetails";
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
-import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal } from "@/lib/orderCost";
+import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal, markupOf } from "@/lib/orderCost";
 import { exportProfitCsv } from "@/lib/productExport";
 import { useDbVersion } from "@/hooks/useDb";
 import { exportAllowed } from "@/lib/access";
@@ -1416,6 +1416,10 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                     cell: g => <div className="text-right leading-tight"><CellAmount tone={(g.profitUsd ?? 0) < 0 ? "out" : "in"}>{g.profitUsd === null ? "—" : (g.incomplete ? "≤ " : "") + fmtMoney(g.profitUsd)}</CellAmount>{g.profitInr != null && <div className="text-[11px] text-muted-foreground tabular-nums whitespace-nowrap">{(g.incomplete ? "≤ " : "") + fmtMoneyInr(g.profitInr)}</div>}</div> },
                   { key: "margin", header: "Margin", align: "right", kind: "number", sortValue: g => g.marginPct,
                     cell: g => <span className={`tabular-nums whitespace-nowrap ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{g.marginPct === null ? "—" : `${g.incomplete ? "≤ " : ""}${g.marginPct}%`}</span> },
+                  // Markup = profit ÷ cost, beside the margin (profit ÷ selling price).
+                  { key: "markup", header: "Markup", align: "right", kind: "number", sortValue: g => (g.costUsd && g.profitUsd != null ? markupOf(g.profitUsd, g.costUsd) : null),
+                    cell: g => { const m = g.costUsd && g.profitUsd != null ? markupOf(g.profitUsd, g.costUsd) : null;
+                      return <span className={`tabular-nums whitespace-nowrap ${(g.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{m === null ? "—" : `${g.incomplete ? "≤ " : ""}${m}%`}</span>; } },
                 ]}
               />
 

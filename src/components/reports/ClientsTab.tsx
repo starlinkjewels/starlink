@@ -1,4 +1,5 @@
 import { DataTable } from "@/components/DataTable";
+import { markupFromMargin } from "@/lib/orderCost";
 import { useCan } from "@/hooks/useCan";
 import { filled, userName, type Detail } from "@/components/rowDetails";
 import { useMemo, useState } from "react";
@@ -123,6 +124,8 @@ export function ClientsTab({ ctx }: { ctx: ReportCtx }) {
             ...(withProfit ? [
               { key: "profit", header: "Profit", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.profitUsd : null), cell: (r: ClientRow) => <span className={`font-semibold ${(r.profitUsd ?? 0) < 0 ? "text-destructive" : "text-success"}`}>{r.sold ? usd(r.profitUsd, true) : "—"}{r.sold && r.profitInr != null && <span className="block text-[11px] font-normal text-muted-foreground whitespace-nowrap">{inr(r.profitInr, true)}</span>}</span> },
               { key: "margin", header: "Margin", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? r.marginPct : null), cell: (r: ClientRow) => (r.sold ? pct(r.marginPct) : "—") },
+              { key: "markup", header: "Markup", align: "right" as const, sortValue: (r: ClientRow) => (r.sold ? markupFromMargin(r.marginPct) : null),
+                cell: (r: ClientRow) => (r.sold && markupFromMargin(r.marginPct) != null ? pct(markupFromMargin(r.marginPct)) : "—") },
             ] : []),
             { key: "collected", header: "Collected", align: "right", sortValue: r => r.collectedUsd, cell: r => (r.collectedUsd ? usd(r.collectedUsd, true) : "—") },
             { key: "owed", header: "Owed", align: "right", sortValue: r => r.outstandingUsd, cell: r => <span className={r.overdue90Usd > 0 ? "text-destructive font-semibold" : ""} title={r.overdue90Usd ? `${usd(r.overdue90Usd)} over 90 days` : undefined}>{r.outstandingUsd ? usd(r.outstandingUsd, true) : "—"}</span> },

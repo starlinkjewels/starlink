@@ -110,8 +110,9 @@ function ClientHistoryPageBody() {
     );
   }
 
+  // A deleted order (lib/orderAdmin.ts) is off every list, this one too.
   const allOrders = db.orders
-    .filter(o => o.clientId === id)
+    .filter(o => o.clientId === id && !o.deletedAt)
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
 
   // Rejected orders are cancelled work — they must NOT be billed or absorb
@@ -632,7 +633,13 @@ function ClientHistoryPageBody() {
           {client.address && (
             <div className="col-span-2 flex items-start gap-2 min-w-0">
               <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-              <div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{client.address}</p></div>
+              <div className="min-w-0"><p className="text-xs text-muted-foreground">Billing address</p><p className="font-medium break-words">{client.address}</p></div>
+            </div>
+          )}
+          {client.shippingAddress && (
+            <div className="col-span-2 flex items-start gap-2 min-w-0">
+              <MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+              <div className="min-w-0"><p className="text-xs text-muted-foreground">Shipping address</p><p className="font-medium break-words">{client.shippingAddress}</p></div>
             </div>
           )}
           <div className="flex items-start gap-2">

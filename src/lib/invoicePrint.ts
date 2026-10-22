@@ -260,7 +260,8 @@ function buildInvoiceDoc(opts: {
 
   /* ── TO / meta row ── */
   .inforow { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 14px; gap: 20px; }
-  .to { font-size: 11px; line-height: 1.75; flex: 1; }
+  .to { font-size: 11px; line-height: 1.75; flex: 1; min-width: 0; }
+  .to .lbl { font-size: 9px; font-weight: bold; letter-spacing: 0.08em; color: #555; margin-bottom: 1px; }
   .to .name { font-weight: bold; font-size: 11.5px; text-transform: uppercase; }
   .meta { border: 1px solid #333; font-size: 10.5px; min-width: 200px; }
   .meta table { width: 100%; border-collapse: collapse; }
@@ -413,16 +414,29 @@ function buildInvoiceDoc(opts: {
 
   <!-- TO + Invoice meta -->
   <div class="inforow">
+    <!-- Bill to: the client and their billing address. Ship to: where the goods go —
+         the client's shipping address, or the billing address when they are the same. -->
     <div class="to">
-      <div class="name">TO: ${(client?.companyName || client?.ownerName || "").toUpperCase()}</div>
+      <div class="lbl">BILL TO</div>
+      <div class="name">${(client?.companyName || client?.ownerName || "").toUpperCase()}</div>
       ${client?.ownerName ? `<div>${client.ownerName}</div>` : ""}
       ${[client?.address, client?.zip, client?.country].filter(Boolean).length
         ? `<div>${[client?.address, client?.zip, client?.country].filter(Boolean).join(", ")}</div>`
         : ""}
+      ${client?.gstVat ? `<div>GST / VAT: ${esc(client.gstVat)}</div>` : ""}
       ${client?.phone || client?.email
         ? `<div>${[client?.phone ? `Tel: ${client.phone}` : "", client?.email ? `Email: ${client.email}` : ""].filter(Boolean).join("&nbsp;&nbsp;&nbsp;")}</div>`
         : ""}
     </div>
+    ${client ? `<div class="to">
+      <div class="lbl">SHIP TO</div>
+      <div class="name">${esc((client.companyName || client.ownerName || "").toUpperCase())}</div>
+      ${client.shippingAddress?.trim()
+        ? `<div>${esc(client.shippingAddress.trim()).replace(/\n/g, "<br/>")}</div>`
+        : [client.address, client.zip, client.country].filter(Boolean).length
+          ? `<div>${esc([client.address, client.zip, client.country].filter(Boolean).join(", "))}</div><div style="color:#777;font-size:9.5px;">Same as billing address</div>`
+          : `<div style="color:#777;">Same as billing</div>`}
+    </div>` : ""}
     <div class="meta">
       <table>
         <tr><td>${credit ? "Credit Note No:" : draft ? "Proforma" : "Invoice No:"}</td><td>${draft ? "NOT BILLED" : invoiceNumber}</td></tr>

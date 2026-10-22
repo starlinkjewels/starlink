@@ -124,7 +124,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const mine = (o: Order) => !!user && (isAdmin || worksOnOrder(db, user, o));
   const clientName = (o: Order) => (mine(o) ? db.clients.find(c => c.id === o.clientId)?.companyName : undefined);
   const sales = canManage
-    ? db.orders.filter(o => o.materialSourcing === "readyStock" && o.readyStockItemId === item.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+    ? db.orders.filter(o => o.materialSourcing === "readyStock" && o.readyStockItemId === item.id && !o.deletedAt).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
     : [];
   const lots = otherLots(db.readyStock, item)
     .filter(l => canManage || l.quantity > 0)

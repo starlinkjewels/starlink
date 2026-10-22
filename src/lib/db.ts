@@ -84,7 +84,10 @@ export interface Client {
   country: string;
   zip?: string;
   gstVat: string;
+  /** The billing address — on the invoice's "Bill to". */
   address: string;
+  /** Where the goods go, when not the billing address — the invoice's "Ship to". Unset = the billing address. */
+  shippingAddress?: string;
   username: string;
   /** No longer saved — the login's password lives only in Firebase Auth.
    *  Older records had it in plain text; dropStoredClientPasswords() removes it. */
@@ -552,6 +555,14 @@ export interface Order {
   certificateFee?: number; // editable per order
   /** The order this one was duplicated from (New Order → Duplicate), when it was. */
   copiedFromId?: string;
+  /**
+   * Deleted by an admin (lib/orderDelete.ts): everything on it was undone first,
+   * exactly as Cancel does, so it is a cancelled order taken out of every list.
+   * The record stays, so the stock, payment and activity lines that name it
+   * still read right — and an admin can bring it back.
+   */
+  deletedAt?: string;
+  deletedBy?: string;
   /** Named extra charges on top of the order value ("Setting charge", "Engraving"…), USD — part of the order's total. */
   otherCharges?: OrderCharge[];
   /** A loose-diamond order: what the stones are (the piece's metal, size and finish don't apply). */
@@ -1383,7 +1394,12 @@ export interface Factory {
   // running business — added straight onto factoryFineGoldBalance().
   openingFineGold?: number;
   openingFineGoldDate?: string;
+  /** The factory's making charge, set once — Final Approval starts from it (components/FactoryLabourFields). */
+  labour?: FactoryLabour;
 }
+
+/** A factory's labour: ₹ a gram for each jewellery type, and the least it charges for a light piece. */
+export interface FactoryLabour { minimum?: number; perGram?: Record<string, number> }
 
 // Finished jewelry already sitting in physical inventory — separate from the
 // raw-material Stock (gold grams / diamond carats, src/lib/stock.ts). Readable
@@ -3537,14 +3553,20 @@ export function currentUserClients(db: DB, user: Worker): Client[] {
   return db.clients.filter((c) => worksOnClient(db, user, c));
 }
 
-export function currentUserOrders(db: DB, user: User): Order[] {
-  if (user.role === "client") return db.orders.filter((o) => o.clientId === user.clientId);
-  if (reachOf(user, db.roles ?? []) === "all") return db.orders;
+/**
+ * The orders this person sees in every list, count and search. A deleted order
+ * (an admin's Delete — lib/orderAdmin.ts) is left out everywhere; only the
+ * admin's "Deleted" filter asks for it (withDeleted).
+ */
+export function currentUserOrders(db: DB, user: User, opts: { withDeleted?: boolean } = {}): Order[] {
+  const all = opts.withDeleted ? db.orders : db.orders.filter((o) => !o.deletedAt);
+  if (user.role === "client") return all.filter((o) => o.clientId === user.clientId);
+  if (reachOf(user, db.roles ?? []) === "all") return all;
   // Employee: orders assigned to them OR belonging to a client they manage.
   const myClientIds = new Set(
     db.clients.filter((c) => c.accountManagerId === user.id).map((c) => c.id),
   );
-  return db.orders.filter((o) => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
+  return all.filter((o) => o.assignedEmployeeId === user.id || myClientIds.has(o.clientId));
 }
 
 /**

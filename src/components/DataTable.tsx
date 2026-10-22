@@ -164,8 +164,11 @@ export function DataTable<T>({
   const [boxW, setBoxW] = useState<number>();
   // On a phone a list reads best as cards — what the row is, its few key
   // figures, ⋯ — not a table to slide sideways. View → Table brings it back.
+  // A table set inside a page without its toolbar (an order's materials, a
+  // piece's history) is cards on a phone too — it used to stay a wide table
+  // that had to be slid sideways, with no View to change it.
   const narrow = useNarrow();
-  const canCards = controls === "full" && narrow && !footer;
+  const canCards = narrow && !footer;
   const cardMode = canCards && (prefs.layout ?? "cards") === "cards";
   // The new look (preview): a phone list of slim rows, and a next step in an empty list.
   const studio = useStudio();

@@ -12,11 +12,25 @@ import { db as fsdb } from "./firebase";
 import type { Client, DB, User } from "./db";
 import type { ActivityEntry } from "./activityFormat";
 
-/** The people a client can be handed to: active admins first, then employees. The one it has now stays offered. */
+/** Sales staff: an employee whose department says so — "Sales", "Salesman", "Sales team". */
+export const isSalesperson = (u: Pick<User, "role" | "department">) => u.role === "employee" && /sales/i.test(u.department ?? "");
+
+/**
+ * The employees who take clients and orders: the sales staff. A business that
+ * has no Sales department set (nobody marked) keeps every employee, so nothing
+ * disappears from its lists before it sorts its people.
+ */
+export function salesStaff(users: User[]): User[] {
+  const emps = users.filter(u => u.role === "employee");
+  return emps.some(isSalesperson) ? emps.filter(isSalesperson) : emps;
+}
+
+/** The people a client can be handed to: active admins first, then the sales staff. The one it has now stays offered. */
 export function handlerChoices(db: Pick<DB, "users">, current?: string): User[] {
   const rank = (u: User) => (u.role === "admin" ? 0 : 1);
+  const sales = new Set(salesStaff(db.users).map(u => u.id));
   return db.users
-    .filter(u => (u.role === "admin" || u.role === "employee") && (u.status !== "inactive" || u.id === current))
+    .filter(u => (u.role === "admin" || sales.has(u.id) || u.id === current) && (u.role === "admin" || u.role === "employee") && (u.status !== "inactive" || u.id === current))
     .sort((a, b) => rank(a) - rank(b) || a.name.localeCompare(b.name));
 }
 

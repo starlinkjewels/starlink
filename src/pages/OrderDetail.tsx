@@ -3,14 +3,15 @@ import { otherChargesTotal } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
 import { hasDiamonds, orderTitle, stoneOf } from "@/lib/orderText";
 import { ChangeClientSheet } from "@/components/ChangeClientSheet";
-import { clientChangeBlocker, deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
+import { clientChangeBlocker, deleteHint, deleteOrderFlow, orderDeleteBlocker, restoreOrderFlow } from "@/lib/orderAdmin";
 import { useStudio } from "@/lib/studio";
 import { BuyMaterialForm } from "@/components/BuyMaterialForm";
 import { choicesOf } from "@/lib/optionLists";
 import { LotPicker, BagSelect } from "@/components/LotFields";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 import { lotBalances, lotParts } from "@/lib/diamondLots";
-import { stockAverageRate } from "@/lib/orderCost";
+import { stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
+import { factoryRatesFor } from "@/components/FactoryLabourFields";
 import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -710,6 +711,8 @@ function OrderDetailPageBody() {
   const [faOther, setFaOther] = useState("");
   const [faMetalG, setFaMetalG] = useState("");
   const [faMetalRate, setFaMetalRate] = useState("");
+  // Where the labour and metal rate were filled in from, said under them (first approval only).
+  const [faFilledFrom, setFaFilledFrom] = useState<string[]>([]);
   const [faOrderValue, setFaOrderValue] = useState("");
   const [faShipping, setFaShipping] = useState("");
   const [faSaving, setFaSaving] = useState(false);
@@ -1019,6 +1022,26 @@ function OrderDetailPageBody() {
     setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
     setFaMetalG(finish?.labour?.metalByFactoryGrams != null ? String(finish.labour.metalByFactoryGrams) : "");
     setFaMetalRate(finish?.labour?.metalByFactoryRate != null ? String(finish.labour.metalByFactoryRate) : "");
+    // The first approval starts from the factory's own rates for this kind of piece
+    // (Factory → Labour rates), and the metal rate from the gold in stock — each
+    // still changeable here. A re-edit keeps what was saved.
+    const from: string[] = [];
+    if (!finish?.labour) {
+      const fac = db.factories.find(x => x.id === order.assignedFactoryId);
+      const r = factoryRatesFor(fac?.labour, order.jewelleryType);
+      if (r.perGram) setFaPerGram(String(r.perGram));
+      if (r.minimum) setFaMinLabour(String(r.minimum));
+      if (r.perGram || r.minimum) from.push(`Labour from ${fac!.name}'s rates${r.perGram ? ` for a ${order.jewelleryType}` : ""}`);
+    }
+    if (finish?.labour?.metalByFactoryRate == null) {
+      const purity = finish?.finishedPurity ?? defaultPurity;
+      const fg = purity ? stockFineGoldRate(db, new Date().toISOString(), workCompanyOf(db, order)) : null;
+      if (fg && purity) {
+        setFaMetalRate(String(Math.round(fg.rate * purity / 10) / 100));
+        from.push(`Metal rate: gold in stock at ₹${fg.rate.toLocaleString("en-IN")}/g fine × ${purity}`);
+      }
+    }
+    setFaFilledFrom(from);
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
     const disp: Record<string, "used" | "returned"> = {};
     const ret: Record<string, string> = {};
@@ -1918,9 +1941,13 @@ function OrderDetailPageBody() {
       show: isStaffUser },
     { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Close it as rejected — it can be re-opened", onSelect: cancelOrder, disabled: cancelling || !!cancelWhy,
       show: isStaffUser },
-    { label: "Delete", icon: Trash2, danger: true, hint: deleteWhy ?? "Nothing is attached to it — removed for good (asked twice)", disabled: !!deleteWhy,
+    { label: "Delete", icon: Trash2, danger: true, hint: deleteWhy ?? deleteHint(db, order), disabled: !!deleteWhy,
       onSelect: async () => { if (await deleteOrderFlow(order.id, user!)) nav("/orders"); }, show: isStaffUser },
   ];
+  // A deleted order is only looked at — or brought back by the admin.
+  const shownActions: MoreAction[] = order.deletedAt
+    ? [{ label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it to carry on", onSelect: () => { void restoreOrderFlow(order.id, user!); }, show: user!.role === "admin" }]
+    : orderActions;
 
   // A payment row: corrected or deleted as the receipt it came in on.
   const removePayment = async (a: (typeof advances)[number]) => {
@@ -1982,6 +2009,15 @@ function OrderDetailPageBody() {
         const closed = order.status === "Rejected";
         return (
           <div className="p-4 sm:p-6">
+            {order.deletedAt && (
+              <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm">
+                <Trash2 className="h-4 w-4 text-destructive shrink-0" />
+                <p className="flex-1 min-w-0 text-foreground/90">
+                  <span className="font-semibold text-destructive">Deleted</span> on {fmtDate(order.deletedAt)}{(() => { const by = db.users.find(u => u.id === order.deletedBy)?.name; return by ? ` by ${by}` : ""; })()} — off every list. Everything on it was undone first, as a cancel.
+                </p>
+                {user!.role === "admin" && <Button size="sm" variant="outline" className="rounded-lg gap-1.5" onClick={() => { void restoreOrderFlow(order.id, user!); }}><Undo2 className="h-3.5 w-3.5" />Restore</Button>}
+              </div>
+            )}
             <div className="flex items-start gap-4 sm:gap-5">
               {heroImg && (
                 <div className="h-[72px] w-[72px] sm:h-24 sm:w-24 rounded-xl overflow-hidden bg-white ring-1 ring-border/70 shrink-0">
@@ -2018,7 +2054,7 @@ function OrderDetailPageBody() {
               </div>
               <div className="hidden sm:flex items-center gap-2 shrink-0">
                 {mainAction}
-                <MoreMenu title="This order" actions={orderActions} />
+                <MoreMenu title="This order" actions={shownActions} />
               </div>
             </div>
 
@@ -2049,7 +2085,7 @@ function OrderDetailPageBody() {
             {/* On a phone the main action spans the width, under the facts. */}
             <div className="sm:hidden mt-5 flex items-center gap-2">
               {mainAction}
-              <MoreMenu title="This order" actions={orderActions} />
+              <MoreMenu title="This order" actions={shownActions} />
             </div>
           </div>
         );
@@ -4131,6 +4167,7 @@ function OrderDetailPageBody() {
                     This piece is {faNetW} g. If the factory charges a minimum on light pieces, enter it above.
                   </p>
                 ) : null}
+                {faFilledFrom.length > 0 && <p className="text-[11px] mt-1.5 text-muted-foreground">{faFilledFrom.join(" · ")} — change any of it for this piece.</p>}
                 <p className="text-sm mt-2">Labour total: <span className="font-semibold text-brand-dark">{fmtMoneyInr(faLive)}</span></p>
               </div>
 

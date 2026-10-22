@@ -4,7 +4,7 @@ import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf,
 import { freightRecorded } from "@/lib/dispatch";
 import { purchaseQty, materialUnit, materialName, isOtherMaterial } from "@/lib/materials";
 import { companyOf } from "@/lib/companies";
-import { estimatedPureGoldNeeded } from "./manufacturing";
+import { deriveStockBalances, estimatedPureGoldNeeded } from "./manufacturing";
 import { metalHasKarats } from "./metals";
 
 /** In one company's books — or every company's when none is given. */
@@ -216,6 +216,33 @@ export function fineGoldRate(db: DB, at: string, companyId?: string): { rate: nu
   return fineGoldLots(db, at);
 }
 
+/**
+ * What a gram of fine gold is worth in the gold we hold now: every purity in
+ * stock at its own running-average cost (stockAverageRate), added up and spread
+ * over the fine gold it contains. This is what an order's gold will cost when it
+ * is issued from stock — so an estimate made before any gold goes out is valued
+ * at it. With no priced gold in stock, the average of the gold bought instead.
+ */
+export function stockFineGoldRate(db: DB, at: string, companyId?: string): { rate: number; basis: string } | null {
+  const co = companyId && companyId !== "all" ? companyId : undefined;
+  const value = (only?: string) => {
+    let inr = 0, fine = 0;
+    for (const [bucket, q] of Object.entries(deriveStockBalances(db.stockMovements ?? [], "gold", only))) {
+      if (!(q > 0)) continue;
+      const avg = stockAverageRate(db, "gold", bucket, at, only);
+      const f = toPureGold(q, bucket);
+      if (avg == null || !(f > 0)) continue;
+      inr += q * avg; fine += f;
+    }
+    return fine > 0 ? { rate: r2(inr / fine), fine: r2(fine) } : null;
+  };
+  // One company's stock; with none of its own priced, every company's together.
+  const own = value(co) ?? (co ? value() : null);
+  if (own) return { rate: own.rate, basis: `average cost of the gold in stock, ${own.fine}g fine` };
+  const bought = fineGoldRate(db, at, companyId);
+  return bought && { ...bought, basis: `${bought.basis} — no priced gold in stock` };
+}
+
 function fineGoldLots(db: DB, at: string, companyId?: string): { rate: number; basis: string } | null {
   const lots: { at: number; fine: number; inr: number }[] = [];
   for (const p of db.purchases ?? []) {
@@ -409,7 +436,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
 
   // Before any gold has gone out for the piece, its gold is still a cost: the
   // order's estimate (its net weight at its karat, in fine gold) at what fine
-  // gold costs now. Shown as an estimate, and replaced the moment real gold is
+  // gold in stock is worth now (stockFineGoldRate). Shown as an estimate, and replaced the moment real gold is
   // issued or bought for it — so a profit is never stated without the gold.
   const anyGold = issuances.some(i => i.material === "gold") || purchases.some(p => p.orderId === order.id && p.material === "gold");
   if (!anyGold && order.materialSourcing !== "readyStock" && !isDiamondOnlyOrder(order) && metalHasKarats(order.metal, db.settings)) {
@@ -418,7 +445,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
       out.missing.push({ label: `Estimated gold ${w}g`, reason: "the order has no karat, so its fine gold can't be worked out" });
     } else if (w > 0) {
       const fine = estimatedPureGoldNeeded(order);
-      const fg = fineGoldRate(db, new Date().toISOString(), companyOf(order));
+      const fg = stockFineGoldRate(db, new Date().toISOString(), companyOf(order));
       if (fg && fine > 0) {
         out.gold.push({
           label: `Estimate: ${w}g ${order.productKarats} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis}) — until gold is issued`,
@@ -546,7 +573,10 @@ export interface OrderProfit {
   /** Null when there is no exchange rate to convert the cost with. */
   costUsd: number | null;
   profitUsd: number | null;
+  /** Profit as a share of the selling price. */
   marginPct: number | null;
+  /** Profit as a share of the cost — (profit ÷ cost) × 100. */
+  markupPct: number | null;
 }
 
 /**
@@ -560,11 +590,23 @@ export function orderProfit(db: DB, order: Order): OrderProfit {
   // Converted at the rate on the day it was sold, not today's — an order
   // shipped in March is worth what the dollar fetched in March.
   const fx = rateOn(db, saleDate(order));
-  if (!fx) return { cost, fx, sellingUsd, costUsd: null, profitUsd: null, marginPct: null };
+  if (!fx) return { cost, fx, sellingUsd, costUsd: null, profitUsd: null, marginPct: null, markupPct: null };
   const costUsd = r2(cost.totalInr / fx.rate);
   const profitUsd = r2(sellingUsd - costUsd);
   const marginPct = sellingUsd > 0 ? Math.round((profitUsd / sellingUsd) * 1000) / 10 : null;
-  return { cost, fx, sellingUsd, costUsd, profitUsd, marginPct };
+  const markupPct = costUsd > 0 ? markupOf(profitUsd, costUsd) : null;
+  return { cost, fx, sellingUsd, costUsd, profitUsd, marginPct, markupPct };
+}
+
+/** Markup: (profit ÷ cost) × 100, one decimal — beside the margin (profit ÷ selling price) wherever both are known. */
+export function markupOf(profit: number, cost: number): number | null {
+  return cost > 0 ? Math.round((profit / cost) * 1000) / 10 : null;
+}
+
+/** The same markup from a margin, where only the margin is kept: m ÷ (100 − m). */
+export function markupFromMargin(marginPct: number | null | undefined): number | null {
+  if (marginPct == null || marginPct >= 100) return null;
+  return Math.round((marginPct / (100 - marginPct)) * 1000) / 10;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────

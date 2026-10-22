@@ -5,6 +5,7 @@ import { updateDbAs, assignOrders, type DB, type Order, type User } from "@/lib/
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { reachOf } from "@/lib/permissions";
+import { salesStaff } from "@/lib/clientHandlers";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -17,12 +18,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const NOBODY = "__none";
 
-/** The people an order can be given to: active employees, then the admins. */
-export function assignableStaff(db: DB): User[] {
+/** The people an order can be given to: the active sales staff, then the admins — and whoever has it now. */
+export function assignableStaff(db: DB, current?: string): User[] {
   const byName = (a: User, b: User) => a.name.localeCompare(b.name);
-  const active = db.users.filter(u => u.status !== "inactive");
+  const active = db.users.filter(u => u.status !== "inactive" || u.id === current);
+  const sales = new Set(salesStaff(db.users).map(u => u.id));
   return [
-    ...active.filter(u => u.role === "employee").sort(byName),
+    ...active.filter(u => u.role === "employee" && (sales.has(u.id) || u.id === current)).sort(byName),
     ...active.filter(u => u.role === "admin").sort(byName),
   ];
 }
@@ -54,11 +56,11 @@ function PersonLine({ u, size = "md" }: { u?: User; size?: "sm" | "md" }) {
   );
 }
 
-function StaffOptions({ db }: { db: DB }) {
+function StaffOptions({ db, current }: { db: DB; current?: string }) {
   return (
     <>
       <SelectItem value={NOBODY} className="group py-1.5"><PersonLine size="sm" /></SelectItem>
-      {assignableStaff(db).map(u => (
+      {assignableStaff(db, current).map(u => (
         <SelectItem key={u.id} value={u.id} className="group py-1.5"><PersonLine u={u} size="sm" /></SelectItem>
       ))}
     </>
@@ -111,7 +113,7 @@ export function AssignOrderField({ order }: { order: Order }) {
       <p className="text-xs text-muted-foreground mb-1.5">Assigned to</p>
       <Select value={order.assignedEmployeeId && current ? order.assignedEmployeeId : NOBODY} onValueChange={change}>
         <PersonTrigger label="Assigned to" u={current} />
-        <SelectContent className="max-h-80"><StaffOptions db={db} /></SelectContent>
+        <SelectContent className="max-h-80"><StaffOptions db={db} current={order.assignedEmployeeId} /></SelectContent>
       </Select>
       {also && (
         <p className="text-[11px] text-muted-foreground mt-1.5 flex items-start gap-1.5 max-w-sm">

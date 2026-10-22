@@ -249,7 +249,7 @@ export function ReadyStockPage() {
     const retOrder = fr ? db.orders.find(o => o.id === fr.orderId) : undefined;
     const ret = fr ? retOrder?.returns?.find(r => r.id === fr.returnId) : undefined;
     const built = fr ? undefined : db.orders.find(o => o.readyStockCreatedId === item.id);
-    const sales = db.orders.filter(o => o.materialSourcing === "readyStock" && o.readyStockItemId === item.id)
+    const sales = db.orders.filter(o => o.materialSourcing === "readyStock" && o.readyStockItemId === item.id && !o.deletedAt)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     // A cost line is the admin's alone, as on the piece's page.
     const last = pieceTimeline(db, item).filter(e => isAdmin || e.kind !== "cost").pop();
