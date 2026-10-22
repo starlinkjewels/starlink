@@ -1,4 +1,5 @@
-import { pieceLine } from "@/lib/orderText";
+import { looseLabel, pieceLine, stoneOf } from "@/lib/orderText";
+import { Facets } from "@/components/Facets";
 import { deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { metalLabel } from "@/lib/metals";
@@ -16,7 +17,8 @@ import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, kept
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2 } from "lucide-react";
+import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy } from "lucide-react";
+import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
@@ -194,6 +196,7 @@ export function OrdersPage() {
     return [
       { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
       { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
+      { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details — change what's different", disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(o)), show: isStaff },
       { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Closes it; can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
       { label: "Delete", icon: Trash2, danger: true, hint: orderDeleteBlocker(db, user, o) ?? "Nothing is attached to it — removed for good (asked twice)",
         disabled: !!orderDeleteBlocker(db, user, o), onSelect: () => { void deleteOrderFlow(o.id, user!); }, show: isStaff },
@@ -561,9 +564,13 @@ export function OrdersPage() {
                       className="relative z-10 w-full h-full object-contain p-1 transition-transform duration-300 ease-out group-hover:scale-[1.03]"
                     />
                   </div>
-                ) : (
-                  <div className="mx-3 h-24 rounded-xl bg-secondary/50 ring-1 ring-border/60 grid place-items-center">
-                    {isDiamondOnlyOrder(o) ? <Gem className="h-7 w-7 text-sky-500/45" /> : <Package className="h-7 w-7 text-primary/35" />}
+                ) : isDiamondOnlyOrder(o) ? <StoneTile o={o} /> : (
+                  // No photo yet: the same square as the cards beside it, so the grid stays even.
+                  <div className="mx-3 aspect-square rounded-xl bg-secondary/50 ring-1 ring-border/60 grid place-items-center text-center">
+                    <div>
+                      <Package className="mx-auto h-8 w-8 text-primary/35" />
+                      <p className="mt-2 text-xs text-muted-foreground">No photo yet</p>
+                    </div>
                   </div>
                 )}
                 <div className="px-3 pt-3 pb-3 flex flex-col flex-1 min-w-0">
@@ -578,7 +585,7 @@ export function OrdersPage() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground truncate mt-1">
-                    {pieceLine(o)}{o.designNumber ? ` · #${o.designNumber}` : ""}
+                    {isDiamondOnlyOrder(o) && !(img && !brokenImg.has(o.id)) ? looseLabel(o) : pieceLine(o)}{o.designNumber ? ` · #${o.designNumber}` : ""}
                   </p>
                   {user!.role !== "client" && (o.forReadyStock
                     ? <p className="text-xs font-medium text-primary truncate mt-1">Ready Stock</p>
@@ -686,6 +693,36 @@ export function OrdersPage() {
           onDone={() => { setBulkInvoice(false); setSel(new Set()); }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * A loose-stones order without a photo: what is being sold, at a glance — the
+ * carats large, what the stones are, then shape and size, grade and pieces —
+ * in the same square as the photo cards beside it.
+ */
+function StoneTile({ o }: { o: Order }) {
+  const ct = o.actualDiamondWeight || o.diamondWeight;
+  const sp = o.stoneSpec ?? {};
+  const stone = stoneOf(o);
+  const what = stone !== "Diamond" ? stone : o.diamondType ? `${o.diamondType} diamonds` : "Diamonds";
+  const facts = [[sp.shape, sp.mm || sp.size].filter(Boolean).join(" "), [sp.color, sp.clarity].filter(Boolean).join(" "), o.quantity > 1 ? `${o.quantity} pcs` : ""].filter(Boolean);
+  return (
+    <div className="relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 bg-gradient-to-br from-primary/[0.07] via-card to-sky-500/[0.08] grid place-items-center">
+      <Facets className="absolute -right-[18%] -bottom-[18%] w-[80%] h-[80%] text-primary/[0.13]" />
+      <div className="relative text-center px-3 min-w-0 max-w-full">
+        <Gem className="mx-auto h-6 w-6 text-primary/60" />
+        <p className="mt-2 text-2xl sm:text-[1.9rem] font-semibold tracking-tight tabular-nums text-foreground leading-none">
+          {ct ? ct : "—"}<span className="ml-1 text-sm sm:text-base font-medium text-muted-foreground">ct</span>
+        </p>
+        <p className="mt-1.5 text-sm font-medium text-foreground/80 truncate">{what}</p>
+        {facts.length > 0 && (
+          <div className="mt-2.5 flex flex-wrap justify-center gap-1">
+            {facts.map(f => <span key={f} className="text-[11px] leading-5 px-2 rounded-full bg-card/90 ring-1 ring-border/70 text-foreground/75 whitespace-nowrap">{f}</span>)}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

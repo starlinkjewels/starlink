@@ -550,6 +550,8 @@ export interface Order {
   // Certificate
   certificate?: boolean;
   certificateFee?: number; // editable per order
+  /** The order this one was duplicated from (New Order → Duplicate), when it was. */
+  copiedFromId?: string;
   /** Named extra charges on top of the order value ("Setting charge", "Engraving"…), USD — part of the order's total. */
   otherCharges?: OrderCharge[];
   /** A loose-diamond order: what the stones are (the piece's metal, size and finish don't apply). */
