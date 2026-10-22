@@ -2,10 +2,11 @@ import { ListCombo } from "@/components/ListCombo";
 import { useState } from "react";
 import { choicesOf } from "@/lib/optionLists";
 import { toast } from "sonner";
-import { Mail, UserRound, Wallet } from "lucide-react";
-import { updateDb, type User } from "@/lib/db";
+import { KeyRound, Loader2, Mail, UserRound, Wallet } from "lucide-react";
+import { httpsCallable } from "firebase/functions";
+import { loadDb, updateDb, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { isAdminEmail } from "@/lib/firebase";
+import { functions, isAdminEmail } from "@/lib/firebase";
 import { hasCompanies } from "@/lib/companies";
 import { CompanyTicks } from "@/components/EmployeeCompanies";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -19,10 +20,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 /**
  * Correcting someone's details after they were added — everything the Create
- * Employee form asks except the login. The email IS their sign-in, and the
- * sign-in account lives in Firebase Authentication, so it is shown here but
- * not changed here: a new address would leave their login on the old one.
- * Admin only, as the Employees pages are.
+ * Employee form asks. The email IS their sign-in, and the sign-in account lives
+ * in Firebase Authentication, so an employee's login (email, password) is
+ * changed on the server — EmployeeLogin below; an admin's or an owner's is only
+ * shown. Admin only, as the Employees pages are.
  */
 export function EmployeeEditDialog({ userId, onClose }: { userId: string | null; onClose: () => void }) {
   const db = useDb();
@@ -104,7 +105,9 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
         </div>
         {isEmployee && multiCo && <CompanyTicks value={coIds} onChange={setCoIds} />}
 
-        {/* The login: shown, not changed — see the note on the component. */}
+        {/* An employee's login: the admin can change its email and password. An admin's
+            (a partner's) or an owner's is shown, not changed. */}
+        {isEmployee && u.authUid && !owner ? <EmployeeLogin u={u} /> : (
         <div className="rounded-xl border border-border/70 bg-secondary/30 p-3.5 flex items-start gap-3">
           <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div className="min-w-0">
@@ -117,6 +120,7 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
             </p>
           </div>
         </div>
+        )}
 
         <section className="space-y-3">
           <div>
@@ -143,5 +147,58 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
         </section>
       </div>
     </ActionSheet>
+  );
+}
+
+const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]{2,}$/;
+
+/**
+ * An employee's sign-in (admin only): a new email they sign in with, and/or a
+ * new password — they are signed out everywhere and sign in with the new one.
+ * Done on the server (setClientLogin, which takes an employee's or a client's
+ * login, never an admin's or an owner's). The password is never kept on any record.
+ */
+function EmployeeLogin({ u }: { u: User }) {
+  const [email, setEmail] = useState(u.email ?? "");
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    const clean = email.trim().toLowerCase();
+    const newEmail = clean !== (u.email ?? "").toLowerCase() ? clean : "";
+    if (!newEmail && !password) { toast.error("Change the email or type a new password"); return; }
+    if (newEmail && !EMAIL_RE.test(newEmail)) { toast.error("That email address doesn't look right"); return; }
+    if (newEmail && isAdminEmail(newEmail)) { toast.error("That email belongs to an owner"); return; }
+    if (newEmail && loadDb().users.some(x => (x.email ?? "").toLowerCase() === newEmail && x.id !== u.id)) { toast.error("That email is already used by another login"); return; }
+    if (password && password.length < 6) { toast.error("The password needs at least 6 characters"); return; }
+    setBusy(true);
+    try {
+      await httpsCallable(functions, "setClientLogin")({ authUid: u.authUid, ...(newEmail ? { email: newEmail } : {}), ...(password ? { password } : {}) });
+      if (newEmail) updateDb(d => { const x = d.users.find(y => y.id === u.id); if (x) { x.email = newEmail; x.username = newEmail; } });
+      setPassword("");
+      toast.success([newEmail && `${u.name} now signs in with ${newEmail}`, password && "new password set — they are signed out everywhere"].filter(Boolean).join(" · "));
+    } catch (e) {
+      toast.error((e as { message?: string }).message || "The login couldn't be changed");
+    } finally { setBusy(false); }
+  };
+  return (
+    <div className="rounded-xl border border-border/70 p-3.5 space-y-3">
+      <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><KeyRound className="h-4 w-4 text-muted-foreground" />Login <span className="text-xs font-normal text-muted-foreground">· signs in as {u.email}</span></p>
+      <div className="grid sm:grid-cols-2 gap-3">
+        <div>
+          <Label htmlFor="ee-login-email" className="text-xs">Email (login ID)</Label>
+          <Input id="ee-login-email" name="employee-login-email" type="email" autoComplete="off" value={email} onChange={e => setEmail(e.target.value)} className="h-10 rounded-xl mt-1" />
+        </div>
+        <div>
+          <Label htmlFor="ee-login-pass" className="text-xs">New password · optional</Label>
+          <Input id="ee-login-pass" name="employee-new-password" type="password" autoComplete="new-password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Leave empty to keep it" className="h-10 rounded-xl mt-1" />
+        </div>
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[11px] text-muted-foreground">A new password signs them out on every device.</p>
+        <Button type="button" variant="outline" className="rounded-xl h-10 gap-2 shrink-0" disabled={busy} onClick={save}>
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}Save login
+        </Button>
+      </div>
+    </div>
   );
 }
