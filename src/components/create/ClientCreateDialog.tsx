@@ -15,6 +15,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
+const FIELDS = ["companyName", "ownerName", "email", "phone", "country", "zip", "gstVat", "address", "shippingAddress", "password"] as const;
+/** What each box is, for the browser: never the signed-in person's own login. */
+const AUTOFILL: Record<(typeof FIELDS)[number], string> = {
+  companyName: "off", ownerName: "off", email: "off", phone: "off", country: "off", zip: "off", gstVat: "off",
+  address: "off", shippingAddress: "off", password: "new-password",
+};
+
 /**
  * The one Create Client form — the Clients page's, also opened from
  * "+ Add new client" wherever a client is picked. Same fields, same login,
@@ -112,7 +119,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       }
     >
       <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-        {(["companyName","ownerName","email","phone","country","zip","gstVat","address","shippingAddress","password"] as const).map(k => (
+        {FIELDS.map(k => (
           <div key={k} className={k === "address" || k === "shippingAddress" || k === "companyName" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize">
               {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)"
@@ -125,6 +132,11 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
               onChange={e => setF({ ...f, [k]: e.target.value })}
               className="rounded-xl mt-1"
               type={k === "password" ? "password" : k === "email" ? "email" : "text"}
+              // This is someone else's new login, not the person signed in: told so, the
+              // browser stops filling in the saved email and password of whoever is using it
+              // (it put the employee's own email into "Shipping address", their password below).
+              name={`new-client-${k}`}
+              autoComplete={AUTOFILL[k]}
             />
           </div>
         ))}
