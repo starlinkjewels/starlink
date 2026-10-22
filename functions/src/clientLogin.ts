@@ -20,7 +20,7 @@ const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]{2,}$/;
 interface Req { authUid?: unknown; email?: unknown; password?: unknown }
 
 export const setClientLogin = onCall<Req>(
-  { region: "us-central1", memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 },
+  { region: "asia-south1", memory: "256MiB", maxInstances: 5, timeoutSeconds: 30 },
   async req => {
     const uid = req.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
