@@ -1,5 +1,7 @@
 import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
 import { activeMaterials, materialDef } from "@/lib/materials";
+import { COPY_PARAM, copyFields, copyKind } from "@/lib/orderCopy";
+import { chargeDrafts } from "@/components/OtherCharges";
 import { useCan } from "@/hooks/useCan";
 import { buildLooseTimelineSteps } from "@/lib/db";
 import { looseStages } from "@/lib/stages";
@@ -45,7 +47,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin } from "lucide-react";
+import { Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -153,7 +155,7 @@ export function NewOrderPage() {
   const [stockLevels, setStockLevels] = useState<StockLevels | null>(null);
   // Staff-only, like the stock it reports; a client placing an order never sees it.
   useEffect(() => (isClient ? undefined : subscribeStockLevels(setStockLevels)), [isClient]);
-  const availableGold = f.productKarats ? (stockLevels?.gold[f.productKarats] ?? 0) : null;
+  const availableGold = f.productKarats ? (stockLevels?.gold?.[f.productKarats] ?? 0) : null;
   const goldShort = availableGold !== null && Number(f.estimatedNetWeight) > availableGold;
 
   const handleImageFiles = async (files: FileList | null) => {
@@ -307,6 +309,35 @@ export function NewOrderPage() {
     selectReadyStock(id);
   });
 
+  // Duplicate (?copy=<order id>): the order's details filled in, once it is loaded —
+  // not its stock, purchases, payments, dates or number (lib/orderCopy.ts).
+  const copyId = useRef(params.get(COPY_PARAM));
+  const [copiedFrom, setCopiedFrom] = useState<Order | null>(null);
+  useEffect(() => {
+    const id = copyId.current;
+    const src = id ? db.orders.find(o => o.id === id) : undefined;
+    if (!id || !src || isClient) return;
+    copyId.current = null;
+    const k = copyKind(src);
+    const clientOk = src.forReadyStock || allClients.some(c => c.id === src.clientId);
+    setKindState(k);
+    if (src.forReadyStock && src.companyId) setBuildCompany(src.companyId);
+    if (src.stoneSpec?.stone) { stoneChosen.current = true; setStoneState(src.stoneSpec.stone); }
+    setImages((src.images ?? []).slice(0, 3));
+    setF(prev => ({
+      ...prev,
+      ...copyFields(src),
+      // Loose stones have no metal — nor its karat or colour, whatever an older record kept.
+      ...(k === "loose" ? { jewelleryType: "Diamond Only", metal: DIAMOND_ONLY_METAL, productKarats: "", productColor: "" } : {}),
+      clientId: src.forReadyStock ? READY_STOCK_CLIENT : clientOk ? src.clientId : "",
+      otherCharges: chargeDrafts(src.otherCharges).map(c => ({ ...c, id: uid("ch_") })),
+      assignedFactoryId: mayPlan && k === "piece" ? src.assignedFactoryId ?? "" : "",
+      materialSourcing: "later", readyStockItemId: "",
+    }));
+    setCopiedFrom(src);
+    if (!clientOk) toast.info(`${db.clients.find(c => c.id === src.clientId)?.companyName ?? "That client"} isn't in your client list — choose the client.`);
+  }, [db.orders]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
@@ -411,6 +442,7 @@ export function NewOrderPage() {
         stamping: f.stamping === "Special Stamp" && f.stampingNote.trim() ? `Special Stamp: ${f.stampingNote.trim()}` : (f.stamping || undefined),
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
+        ...(copiedFrom ? { copiedFromId: copiedFrom.id } : {}),
         ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
         ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? { ...f.stoneSpec, size: "" } : f.stoneSpec), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
         // What the plan said: from stock, bought, or a Ready Stock piece.
@@ -598,6 +630,17 @@ export function NewOrderPage() {
           select behind it and scrolled the whole page to that — the app slid
           off screen and Submit looked like a blank page. */}
       <form onSubmit={submit} noValidate className="space-y-4">
+        {/* Duplicated: what it came from, and what was left behind. */}
+        {copiedFrom && (
+          <div className="flex items-start gap-3 rounded-2xl border border-primary/25 bg-primary/5 px-4 py-3 text-sm">
+            <Copy className="h-4 w-4 mt-0.5 text-primary shrink-0" />
+            <p className="min-w-0 text-foreground/90">
+              A copy of <a href={`/orders/${copiedFrom.id}`} target="_blank" rel="noreferrer" className="font-semibold text-primary hover:underline">{copiedFrom.orderNumber}</a>
+              {" "}— everything is filled in. Change what is different, then place it as a new order.
+              <span className="block text-xs text-muted-foreground mt-0.5">Not copied: stock taken, purchases, advance and payments, the due date{copyKind(copiedFrom) === "readyStock" ? ", and the Ready Stock piece (choose one)" : ""}.</span>
+            </p>
+          </div>
+        )}
         {/* The whole width of the screen: on a wide one, two columns — who and
             what on the left, how it is made and paid on the right. One column
             below that. */}
@@ -1295,11 +1338,24 @@ export function NewOrderPage() {
             to the screen's bottom edge — fixed, not sticky: Safari and Chrome
             place a sticky bar differently inside the scrolling page, and on an
             iPhone it slid under the tab bar. The page's own bottom space keeps
-            the last field clear of it. On a laptop it floats at the form's foot. ── */}
+            the last field clear of it. On a laptop it sits on the window's bottom
+            edge: the page's own bottom space (main's pb-8) is taken back on both
+            sides — sticky -2rem, margin -2rem — so nothing of the form shows
+            beneath it, mid-page or at the end. ── */}
         <div className="z-30 bg-card
                         max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:px-4 max-md:pt-3 max-md:pb-[max(0.75rem,env(safe-area-inset-bottom))] max-md:border-t max-md:border-border/80 max-md:shadow-[0_-6px_16px_-12px_rgb(15_23_42/0.25)]
-                        md:sticky md:bottom-0 md:mt-2 md:px-4 md:py-3 md:rounded-2xl md:border md:border-border/80 md:shadow-[0_8px_24px_-12px_rgb(15_23_42/0.18)]">
+                        md:sticky md:-bottom-8 md:-mb-8 md:mt-3 md:px-5 md:py-3 md:rounded-t-2xl md:border md:border-b-0 md:border-border/80 md:bg-card/95 md:backdrop-blur-md md:shadow-[0_-10px_28px_-18px_rgb(15_23_42/0.3)]">
           <div className="flex items-center justify-end gap-3">
+            {/* What the order comes to, as it stands — in sight while the form is filled. */}
+            {!isClient && !forReadyStock && (
+              <div className="mr-auto min-w-0 hidden md:block">
+                <p className="text-[11px] uppercase tracking-wider text-muted-foreground">Order total</p>
+                <p className="text-lg font-semibold text-foreground tabular-nums leading-tight">
+                  ${grandTotal.toLocaleString("en-US", { maximumFractionDigits: 2 })}
+                  {Number(f.advanceAmount) > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">balance ${balanceDue.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
+                </p>
+              </div>
+            )}
             <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5 shadow-none">
               Cancel
             </Button>

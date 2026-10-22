@@ -51,7 +51,8 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, type LucideIcon } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, type LucideIcon } from "lucide-react";
+import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
@@ -1905,6 +1906,8 @@ function OrderDetailPageBody() {
   const meltReason = meltWhy();
   const orderActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
+    { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details filled in — change what's different, then place it",
+      disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(order)), show: isStaffUser },
     { label: "Change client", icon: Users, hint: changeClientWhy ?? "Picked the wrong client? Move it — while nothing is billed or paid", disabled: !!changeClientWhy, onSelect: () => setClientOpen(true), show: isStaffUser },
     { label: "Print band", icon: Tag, hint: order.melted ? "Melted — the piece no longer exists" : !mayExport ? needsAccess("orders", "export") : "The barcode jewellery tag",
       disabled: !!order.melted || !mayExport, onSelect: () => setBandOpen(true),
@@ -2007,6 +2010,10 @@ function OrderDetailPageBody() {
                     return ` · Sold from Ready Stock${it && officeOf(it) ? ` — ${officeLabel(officeOf(it))}` : ""}`;
                   })() : ""}
                   {order.contactPerson ? ` · ${order.contactPerson}` : ""}
+                  {(() => {
+                    const from = order.copiedFromId ? db.orders.find(o => o.id === order.copiedFromId) : undefined;
+                    return from ? <> · copied from <Link to={`/orders/${from.id}`} className="text-primary hover:underline">{from.orderNumber}</Link></> : null;
+                  })()}
                 </p>
               </div>
               <div className="hidden sm:flex items-center gap-2 shrink-0">

@@ -182,11 +182,13 @@ export function BrandStudio() {
   };
 
   return (
-    <div className="card-luxe p-5 sm:p-6 space-y-5">
+    <div className="card-luxe p-5 sm:p-6 space-y-5 @container">
       <SectionTitle title="Brand Studio" sub="Your logo, name and colour — on every screen, for everyone" />
 
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] gap-6 items-start">
-        <div>
+      {/* Settings and the preview side by side only when the card itself has room for both — a laptop
+          at 125% has a wide window but a narrow card, and the fields ran under the preview. */}
+      <div className="grid @3xl:grid-cols-[minmax(0,1fr)_minmax(0,25rem)] gap-6 items-start">
+        <div className="min-w-0">
           <Row label="Logo" hint="Shown on the sign-in page, the menu, invoices and shared galleries. PNG or SVG with a clear background works best.">
             <ImagePick label="Logo" box="h-16 w-40" ground="light" value={draft.logo} fallback={BUILTIN.logo}
               onPick={async f => set("logo", await fitImage(f, 640, 200))} onClear={() => set("logo", undefined)} />
@@ -202,7 +204,7 @@ export function BrandStudio() {
               onPick={async f => set("mark", await fitImage(f, 192, 192, 120_000))} onClear={() => set("mark", undefined)} />
           </Row>
           <Row label="Company name" hint="The browser tab and the sign-in page.">
-            <Input value={draft.name ?? ""} onChange={e => set("name", e.target.value.slice(0, 60))} placeholder={brandName({})} className="h-10 rounded-lg sm:w-72" maxLength={60} />
+            <Input value={draft.name ?? ""} onChange={e => set("name", e.target.value.slice(0, 60))} placeholder={brandName({})} className="h-10 rounded-lg w-full max-w-72" maxLength={60} />
           </Row>
           <Row label="Brand colour" hint="Buttons, links and the selected menu item. Any colour — every shade is worked out, for light and dark.">
             <div className="space-y-3 sm:max-w-[22rem]">

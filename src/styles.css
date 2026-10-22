@@ -435,6 +435,12 @@
   --login-glow: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.14), transparent 40%), radial-gradient(circle at 70% 60%, rgba(200,184,158,0.22), transparent 50%);
   --splash-bg: radial-gradient(circle at 30% 25%, oklch(0.34 0.006 75) 0%, oklch(0.17 0.004 75) 55%, oklch(0.11 0.003 75) 100%);
 }
+/* A business on one of the accent colours (Settings → Appearance) and no Brand Studio colour:
+   the sign-in panel in that colour too, deepened — not the default blue beside green buttons. */
+:root[data-accent]:not([data-brand-color]) {
+  --login-bg: radial-gradient(circle at 20% 20%, color-mix(in oklab, var(--primary) 78%, black) 0%, color-mix(in oklab, var(--primary) 42%, black) 60%, color-mix(in oklab, var(--primary) 26%, black) 100%);
+  --login-glow: radial-gradient(circle at 30% 40%, rgba(255,255,255,0.15), transparent 40%), radial-gradient(circle at 70% 60%, color-mix(in oklab, var(--primary) 30%, transparent), transparent 50%);
+}
 
 /* Compact or spacious rows on tables as built too (no table style chosen). */
 :root[data-tbl-density="compact"]:not([data-tbl]) table:not(.tbl-plain) > * > tr > :is(th, td) { padding-top: 0.32rem; padding-bottom: 0.32rem; }
