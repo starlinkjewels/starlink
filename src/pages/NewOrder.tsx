@@ -8,7 +8,7 @@ import { looseStages } from "@/lib/stages";
 import { ProductionPlan, type OrderKind } from "@/components/order/ProductionPlan";
 import type { PlannedBuy } from "@/components/BuyMaterialForm";
 import { issuePick, pickCostInr, pickName, picksProblem, type StockPick } from "@/lib/orderStock";
-import { fineGoldRate, rateOn } from "@/lib/orderCost";
+import { stockFineGoldRate, rateOn } from "@/lib/orderCost";
 import { estimatedPureGoldNeeded, fmtMoneyInr } from "@/lib/manufacturing";
 import { workCompanyOf } from "@/lib/companies";
 import { ListCombo } from "@/components/ListCombo";
@@ -1117,13 +1117,14 @@ export function NewOrderPage() {
           const goldPlanned = picks.some(pk => pk.material === "gold") || !!plannedBuy?.lines.some(l => l.kind === "gold");
           const fine = kind === "piece" && metalHasKarats && !goldPlanned
             ? estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight), estimatedGrossWeight: Number(f.estimatedGrossWeight), metalWeight: 0 }) : 0;
-          const fg = fine > 0 ? fineGoldRate(db, now, orderCompany) : null;
+          const fg = fine > 0 ? stockFineGoldRate(db, now, orderCompany) : null;
           const goldEst = fg ? Math.round(fine * fg.rate) : 0;
           const cost = Math.round(fromStock + bought + goldEst);
           const fx = rateOn(db, now)?.rate ?? 0;
           const sell = forReadyStock ? 0 : Math.round(grandTotal * fx);
           const margin = sell - cost;
           const pct = sell > 0 ? Math.round((margin / sell) * 1000) / 10 : null;
+          const markup = cost > 0 ? Math.round((margin / cost) * 1000) / 10 : null; // (profit ÷ cost) × 100
           if (!cost && !sell) return null;
           const row = (label: string, value: string, strong = false) => (
             <div className="flex justify-between gap-3 text-sm"><span className="text-muted-foreground">{label}</span><span className={`tabular-nums ${strong ? "font-semibold text-foreground" : ""}`}>{value}</span></div>
@@ -1138,7 +1139,12 @@ export function NewOrderPage() {
                 {sell > 0 && row(`Selling ($${grandTotal.toLocaleString()} at ₹${fx})`, fmtMoneyInr(sell))}
                 {sell > 0 && (
                   <div className={`flex justify-between gap-3 text-sm font-semibold ${margin < 0 ? "text-destructive" : "text-success"}`}>
-                    <span>Margin</span><span className="tabular-nums">{fmtMoneyInr(margin)}{pct != null ? ` · ${pct}%` : ""}</span>
+                    <span>Margin <span className="font-normal text-muted-foreground text-xs">profit ÷ price</span></span><span className="tabular-nums">{fmtMoneyInr(margin)}{pct != null ? ` · ${pct}%` : ""}</span>
+                  </div>
+                )}
+                {sell > 0 && markup != null && (
+                  <div className={`flex justify-between gap-3 text-sm font-semibold ${margin < 0 ? "text-destructive" : "text-success"}`}>
+                    <span>Markup <span className="font-normal text-muted-foreground text-xs">profit ÷ cost</span></span><span className="tabular-nums">{markup}%</span>
                   </div>
                 )}
                 {!fx && !forReadyStock && <p className="text-xs text-muted-foreground">Set the dollar rate in Settings → Pricing to see the margin.</p>}

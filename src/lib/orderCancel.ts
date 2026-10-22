@@ -1,7 +1,7 @@
 // Closing an order that will not be made — Reject on the order page, or Cancel
 // from the order page or the Orders list. Lifted out of the order page so the
 // list cancels exactly the way the page does, not with a copy of its own.
-import { loadDb, updateDb, uid, type User } from "./db";
+import { loadDb, updateDb, uid, type MaterialIssuance, type Order, type User } from "./db";
 import { increaseStock } from "./stock";
 import { companyOf } from "./companies";
 import { issuanceUsed } from "./manufacturing";
@@ -10,6 +10,20 @@ import { CANCEL_REF_COLS, cancelAccess, cancelBlocker } from "./orderGuards";
 import { STILL_LOADING, recordsReady } from "./actionHints";
 
 type Who = Pick<User, "id" | "name" | "role">;
+
+/**
+ * How much of an issue the order's piece really took, for undoing the order.
+ * An issue is recorded as used in full the moment it is made (one step: issued
+ * = used), so until the factory's actual details are in — Final Approval, or
+ * the finished weight / the stones' outcome on the issue itself — the piece has
+ * taken nothing, and all of it comes back. After them, what they record stands.
+ * (Counting the one-step "used" as real meant a cancel returned nothing at all.)
+ */
+export function usedOnUndo(order: Pick<Order, "timeline">, mi: MaterialIssuance): number {
+  const made = order.timeline.some(t => t.step === "Final Approval" && t.status === "done")
+    || mi.finishedNetWeight != null || mi.finishDisposition != null;
+  return made ? issuanceUsed(mi) : 0;
+}
 
 /**
  * Return any gold/diamond issued for the order back to stock, release undrawn
@@ -25,8 +39,8 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
   for (const mi of openIssuances) {
     if (mi.diamondKind === "certified") continue; // returned via its DiamondPacket below
     if (mi.source === "stock") {
-      // Stock-sourced: return only the part not actually consumed into a piece.
-      const used = (mi.finishedPieces || []).reduce((s, f) => s + f.quantityUsed, 0);
+      // Stock-sourced: return the part the piece did not take (all of it before Final Approval).
+      const used = usedOnUndo(order, mi);
       const remaining = Math.round((mi.quantityIssued - used) * 100) / 100;
       if (remaining > 0) await increaseStock({ material: mi.material, companyId: companyOf(mi), purityOrQuality: mi.purityOrQuality, quantity: remaining, refType: "manual", createdBy: user.id, note: `Returned from cancelled order ${order.orderNumber}`,
         // Loose stones: all of them come back when none was used in a piece.
@@ -48,7 +62,12 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
         //  • stock/pool → keep only what was genuinely consumed (remainder went back);
         //  • purchase → fully returned to Stock above, so zero it out.
         if (mi.source === "purchase") { mi.quantityIssued = 0; mi.finishedPieces = []; }
-        else if (mi.source === "factoryPool" || mi.source === "stock") mi.quantityIssued = Math.round(issuanceUsed(mi) * 100) / 100;
+        else if (mi.source === "factoryPool" || mi.source === "stock") {
+          const used = Math.round(usedOnUndo(order, mi) * 100) / 100;
+          mi.quantityIssued = used;
+          // Nothing taken: no "used in the piece" line left behind on a closed issue.
+          if (!used) mi.finishedPieces = [];
+        }
         mi.status = "closed";
       }
     }

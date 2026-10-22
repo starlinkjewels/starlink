@@ -2,7 +2,9 @@ import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/Emp
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useState, type MouseEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { updateDb, flush, loadDb, rolesStoreReady, type User } from "@/lib/db";
+import { updateDb, flush, loadDb, rolesStoreReady, orderTotal, type User } from "@/lib/db";
+import { ccyOrder, fmtCcy, sumByCcy, ccy } from "@/lib/currency";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { RolesPanel, EmployeeAccessControls, setAdminRole } from "@/components/RolesAccess";
 import { AccessSummary, ManageAccessDialog } from "@/components/AccessManager";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
@@ -47,6 +49,12 @@ const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row
 
 export function EmployeesPage() {
   const db = useDb();
+  // The month the table's salary and orders are for ("2026-10"), or every month.
+  const thisMonth = new Date().toISOString().slice(0, 7);
+  const [period, setPeriod] = useState<string>(thisMonth);
+  const months = Array.from({ length: 24 }, (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); return d.toISOString().slice(0, 7); });
+  const monthName = (m: string) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
+  const inPeriod = (iso: string | undefined) => period === "all" || (iso ?? "").slice(0, 7) === period;
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [filter, setFilter] = useState<Filter>("all");
@@ -104,6 +112,20 @@ export function EmployeesPage() {
   const clientCount = (userId: string) =>
     db.clients.filter(c => c.accountManagerId === userId).length;
 
+  /** Salary, wages and advances paid to them in the month shown (their salary ledger's lines), by currency. */
+  const salaryIn = (userId: string) => sumByCcy((db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && inPeriod(e.createdAt)), e => e.amount, e => e.currency);
+  const salaryText = (userId: string) => {
+    const m = salaryIn(userId);
+    return [...m.entries()].filter(([, v]) => v).sort(([a], [b]) => ccyOrder(a, b)).map(([c, v]) => fmtCcy(v, c)).join(" + ");
+  };
+  const salarySort = (userId: string) => [...salaryIn(userId).entries()].reduce((s, [c, v]) => s + (ccy(c) === "INR" ? v : v * 100), 0);
+  /** The orders they took in the month shown — not cancelled or deleted — and from how many clients. */
+  const takenBy = (userId: string) => {
+    const list = db.orders.filter(o => o.assignedEmployeeId === userId && o.status !== "Rejected" && !o.deletedAt && inPeriod(o.createdAt));
+    return { count: list.length, clients: new Set(list.map(o => o.clientId).filter(Boolean)).size, value: Math.round(list.reduce((s, o) => s + orderTotal(o), 0) * 100) / 100 };
+  };
+  const grey = (n: number, text: string) => <span className={`tabular-nums whitespace-nowrap ${n ? "" : "text-muted-foreground/60"}`}>{text}</span>;
+
   /**
    * Everything that can be done to one person — the same in a card's ⋯ and a
    * row's ⋯, with the conditions the old card buttons had. Owner/Admin: no
@@ -160,9 +182,21 @@ export function EmployeesPage() {
     { key: "clients", header: "Clients", align: "right", kind: "number", sortValue: u => clientCount(u.id),
       // A zero in grey, as Pending tasks shows one.
       cell: u => { const n = clientCount(u.id); return <span className={`tabular-nums ${n ? "" : "text-muted-foreground/60"}`}>{n}</span>; } },
-    { key: "tasks", header: "Pending tasks", align: "right", kind: "number", sortValue: u => pendingCount(u.id),
+    // For the month chosen above the table (or all time).
+    { key: "salary", header: "Salary paid", align: "right", kind: "number", sortValue: u => salarySort(u.id), csv: u => salaryText(u.id),
+      cell: u => { const t = salaryText(u.id); return grey(t ? 1 : 0, t || "—"); } },
+    // How many orders they took, and from how many clients (companies) — one column, so the month's figures fit.
+    { key: "orders", header: "Orders taken", align: "right", kind: "number", sortValue: u => takenBy(u.id).count,
+      csv: u => `${takenBy(u.id).count} orders · ${takenBy(u.id).clients} clients`,
+      cell: u => { const t = takenBy(u.id); return t.count
+        ? <div className="text-right leading-tight whitespace-nowrap"><span className="tabular-nums font-medium">{t.count}</span><p className="text-[11px] text-muted-foreground">from {t.clients} client{t.clients !== 1 ? "s" : ""}</p></div>
+        : grey(0, "0"); } },
+    { key: "orderValue", header: "Order value", align: "right", kind: "number", sortValue: u => takenBy(u.id).value, csv: u => takenBy(u.id).value,
+      cell: u => grey(takenBy(u.id).value, takenBy(u.id).value ? `$${takenBy(u.id).value.toLocaleString("en-US", { maximumFractionDigits: 2 })}` : "—") },
+    // Pending tasks and status have their tile and their tab above — kept under View, so the month's figures fit.
+    { key: "tasks", header: "Pending tasks", align: "right", kind: "number", hidden: true, sortValue: u => pendingCount(u.id),
       cell: u => pendingPill(pendingCount(u.id)) },
-    { key: "status", header: "Status", sortValue: u => u.status, cell: statusTag },
+    { key: "status", header: "Status", hidden: true, sortValue: u => u.status, cell: statusTag },
   ];
   // The role, admin and company controls, as they are, in a row's details —
   // each opens its own dialog or asks before it changes anything.
@@ -213,8 +247,21 @@ export function EmployeesPage() {
       {/* Quick filters, each with how many it holds (after the search). What
           one of them means is said under the row rather than only on hover. */}
       <div className="space-y-1.5">
-        <TabBar label="Show" value={filter} onChange={setFilter}
-          tabs={FILTERS.map(x => ({ key: x.key, label: x.label, count: searched.filter(x.test).length }))} />
+        <div className="flex flex-wrap items-end justify-between gap-2 min-w-0">
+          {/* The tabs keep to the width there is (they scroll sideways on a phone), the month below them. */}
+          <div className="min-w-0 max-w-full">
+            <TabBar label="Show" value={filter} onChange={setFilter}
+              tabs={FILTERS.map(x => ({ key: x.key, label: x.label, count: searched.filter(x.test).length }))} />
+          </div>
+          {/* Salary paid and orders taken, in the table, are for this month. */}
+          <Select value={period} onValueChange={setPeriod}>
+            <SelectTrigger className="h-9 w-auto min-w-[11rem] max-w-full rounded-xl" aria-label="Month"><span className="text-muted-foreground mr-1">Month:</span><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All time</SelectItem>
+              {months.map(m => <SelectItem key={m} value={m}>{monthName(m)}{m === thisMonth ? " (this month)" : ""}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
         {shownFilter.hint && <p className="px-1 text-xs text-muted-foreground">{shownFilter.hint}</p>}
       </div>
 

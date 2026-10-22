@@ -35,7 +35,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
   // Handled by whoever adds the client, unless they hand it to someone else.
   const [f, setF] = useState<Partial<Client>>({
     companyName: "", ownerName: "", email: "", phone: "",
-    country: "", zip: "", gstVat: "", address: "", username: "", password: "",
+    country: "", zip: "", gstVat: "", address: "", shippingAddress: "", username: "", password: "",
     accountManagerId: user!.role === "admin" ? user!.id : undefined,
   });
 
@@ -81,7 +81,7 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       toast.success(`${authUid ? "Client created — they can sign in with their email & password" : "Client created — no login"}${f.accountManagerId ? "" : " · not assigned to anyone yet"}`);
       onOpenChange(false);
       onCreated?.(id);
-      setF({ companyName: "", ownerName: "", email: "", phone: "", country: "", zip: "", gstVat: "", address: "", username: "", password: "", accountManagerId: user!.role === "admin" ? user!.id : undefined });
+      setF({ companyName: "", ownerName: "", email: "", phone: "", country: "", zip: "", gstVat: "", address: "", shippingAddress: "", username: "", password: "", accountManagerId: user!.role === "admin" ? user!.id : undefined });
     } catch (e) {
       toast.error(authErrorMessage(e));
     } finally { setSaving(false); }
@@ -112,11 +112,13 @@ export function ClientCreateDialog({ open, onOpenChange, onCreated }: {
       }
     >
       <div className="grid grid-cols-2 gap-x-3 gap-y-4">
-        {(["companyName","ownerName","email","phone","country","zip","gstVat","address","password"] as const).map(k => (
-          <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
+        {(["companyName","ownerName","email","phone","country","zip","gstVat","address","shippingAddress","password"] as const).map(k => (
+          <div key={k} className={k === "address" || k === "shippingAddress" || k === "companyName" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize">
-              {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)" : k.replace(/([A-Z])/g, " $1")}
+              {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "email" ? "Email (login ID)" : k === "password" ? "Password (login)"
+                : k === "address" ? "Billing address" : k === "shippingAddress" ? "Shipping address" : k.replace(/([A-Z])/g, " $1")}
               {(k === "email" || k === "password") && <span className="normal-case font-normal text-muted-foreground"> · optional</span>}
+              {k === "shippingAddress" && <span className="normal-case font-normal text-muted-foreground"> · only if different from billing</span>}
             </Label>
             <Input
               value={(f as Record<string, string>)[k] || ""}

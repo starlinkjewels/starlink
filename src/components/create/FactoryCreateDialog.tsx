@@ -7,6 +7,7 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
 
 const EMPTY: Partial<Factory> = { name: "", contactPerson: "", phone: "", address: "" };
 
@@ -19,6 +20,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
 }) {
   const [saving, setSaving] = useState(false);
   const [f, setF] = useState<Partial<Factory>>(EMPTY);
+  const [labour, setLabour] = useState<LabourDraft>(labourDraftOf());
 
   const create = () => {
     if (!f.name?.trim()) { toast.error("Enter a factory name"); return; }
@@ -27,11 +29,13 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
       const id = uid("fac_");
       updateDb(d => {
         if (!d.factories) d.factories = [];
-        d.factories.unshift({ ...f, name: f.name!.trim(), id, active: true, createdAt: new Date().toISOString() } as Factory);
+        const rates = labourOf(labour);
+        d.factories.unshift({ ...f, name: f.name!.trim(), id, active: true, createdAt: new Date().toISOString(), ...(rates ? { labour: rates } : {}) } as Factory);
       });
       toast.success("Factory added");
       onOpenChange(false);
       setF(EMPTY);
+      setLabour(labourDraftOf());
       onCreated?.(id);
     } finally { setSaving(false); }
   };
@@ -94,6 +98,7 @@ export function FactoryCreateDialog({ open, onOpenChange, onCreated }: {
           </div>
           <p className="text-[11px] text-muted-foreground">24KT gold already with them — added to their fine gold.</p>
         </div>
+        <div className="col-span-2"><FactoryLabourFields value={labour} onChange={setLabour} idPrefix="fac-new-labour" /></div>
       </div>
     </ActionSheet>
   );

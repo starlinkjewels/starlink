@@ -1,6 +1,6 @@
 import { looseLabel, pieceLine, stoneOf } from "@/lib/orderText";
 import { Facets } from "@/components/Facets";
-import { deleteOrderFlow, orderDeleteBlocker } from "@/lib/orderAdmin";
+import { deleteHint, deleteOrderFlow, orderDeleteBlocker, restoreOrderFlow } from "@/lib/orderAdmin";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
@@ -17,7 +17,7 @@ import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, kept
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy } from "lucide-react";
+import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
@@ -114,8 +114,10 @@ export function OrdersPage() {
   };
 
   const orders = useMemo(() => {
-    let list = currentUserOrders(db, user!);
-    if (status === "Pending") list = list.filter(o => o.status === "Waiting" || o.status === "Approved");
+    // Deleted orders are off every list; the admin's "Deleted" filter is the one place they show (to restore one).
+    let list = status === "deleted" ? currentUserOrders(db, user!, { withDeleted: true }).filter(o => !!o.deletedAt) : currentUserOrders(db, user!);
+    // Pending = waiting for approval (the Dashboard's tile counts the same).
+    if (status === "Pending") list = list.filter(o => o.status === "Waiting");
     // Shipped work that nobody has billed yet — the whole point of the badge,
     // gathered into one list instead of spotted by scrolling.
     else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
@@ -191,6 +193,11 @@ export function OrdersPage() {
     } finally { setCancellingId(null); }
   };
   const orderActions = (o: Order): MoreAction[] => {
+    // A deleted order: only seen, or brought back.
+    if (o.deletedAt) return [
+      { label: "View", icon: Eye, onSelect: () => nav(`/orders/${o.id}`) },
+      { label: "Restore", icon: Undo2, hint: "Back as a cancelled order — re-open it on its page", onSelect: () => { void restoreOrderFlow(o.id, user!); }, show: user!.role === "admin" },
+    ];
     const editWhy = orderEditAccess(db, user, can, o) ?? orderSpecLocks(db, o).all;
     const cancelWhy = cancelAccess(user) ?? cancelBlocker(db, o);
     return [
@@ -198,7 +205,7 @@ export function OrdersPage() {
       { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date", disabled: !!editWhy, onSelect: () => setEditing(o), show: isStaff },
       { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details — change what's different", disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(o)), show: isStaff },
       { label: "Cancel order", icon: XCircle, danger: true, hint: cancelWhy ?? "Closes it; can be re-opened", disabled: !!cancelWhy || cancellingId === o.id, onSelect: () => cancel(o), show: isStaff },
-      { label: "Delete", icon: Trash2, danger: true, hint: orderDeleteBlocker(db, user, o) ?? "Nothing is attached to it — removed for good (asked twice)",
+      { label: "Delete", icon: Trash2, danger: true, hint: orderDeleteBlocker(db, user, o) ?? deleteHint(db, o),
         disabled: !!orderDeleteBlocker(db, user, o), onSelect: () => { void deleteOrderFlow(o.id, user!); }, show: isStaff },
     ];
   };
@@ -382,9 +389,10 @@ export function OrdersPage() {
   const filters: TableFilter[] = [
     { kind: "select", label: "Status", value: status === "all" ? "" : status, onChange: pick(setStatus), allLabel: "All status",
       options: [
-        { value: "Pending", label: "Pending (Waiting + Approved)" },
+        { value: "Pending", label: "Pending — waiting for approval" },
         ...(isStaff ? [{ value: "uninvoiced", label: "Not invoiced (shipped)" }] : []),
         { value: "returned", label: "Returned by client" },
+        ...(user!.role === "admin" ? [{ value: "deleted", label: "Deleted (to restore)" }] : []),
         ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })),
       ] },
     ...(isStaff ? [{ kind: "select" as const, label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
@@ -653,7 +661,7 @@ export function OrdersPage() {
       )}
 
       {/* Board: every order in its stage column — all of them, not one page. */}
-      {view === "board" && total > 0 && <OrderBoard orders={orders} />}
+      {view === "board" && total > 0 && <OrderBoard orders={orders} actions={isStaff ? orderActions : undefined} />}
 
       {view === "grid" && <PaginationBar
         page={page}

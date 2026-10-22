@@ -1,4 +1,5 @@
 import { pieceLine } from "@/lib/orderText";
+import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useMemo, useState } from "react";
 import { metalLabel } from "@/lib/metals";
 import { Link, useNavigate } from "react-router-dom";
@@ -71,7 +72,7 @@ function columnHint(step: string): string {
  * finished on the order. Moving back re-opens plain stages only; anything with
  * records of its own is undone on the order, where they are shown.
  */
-export function OrderBoard({ orders }: { orders: Order[] }) {
+export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o: Order) => MoreAction[] }) {
   const { user } = useAuth();
   const db = useDb();
   // The store is edited in place — a moved order is the same object with a new
@@ -245,7 +246,11 @@ export function OrderBoard({ orders }: { orders: Order[] }) {
                           {img ? <img src={img} alt="" loading="lazy" draggable={false} className="h-full w-full object-cover" /> : <Package className="h-5 w-5 text-primary/30" />}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <Link to={`/orders/${o.id}`} draggable={false} className="text-sm font-semibold text-brand-dark hover:text-primary hover:underline truncate block">{o.orderNumber}</Link>
+                          <div className="flex items-start justify-between gap-1 min-w-0">
+                            <Link to={`/orders/${o.id}`} draggable={false} className="text-sm font-semibold text-brand-dark hover:text-primary hover:underline truncate block">{o.orderNumber}</Link>
+                            {/* The order's own ⋯ — the same as its row in the list: view, edit, duplicate, cancel, delete. */}
+                            {actions && <MoreMenu size="xs" label={`Actions for ${o.orderNumber}`} title={o.orderNumber} actions={actions(o)} className="-my-1 -mr-1 shrink-0" />}
+                          </div>
                           <p className="text-[11px] text-muted-foreground truncate">{pieceLine(o, false)}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
                           <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
                         </div>

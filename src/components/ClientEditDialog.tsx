@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 
 const fieldsOf = (c: Client): Partial<Client> => ({
   companyName: c.companyName, ownerName: c.ownerName, phone: c.phone,
-  country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address,
+  country: c.country, zip: c.zip, gstVat: c.gstVat, address: c.address, shippingAddress: c.shippingAddress,
   accountManagerId: c.accountManagerId,
   companyId: companyIdOfClient(c),
   openingBalance: c.openingBalance, openingDir: c.openingDir, openingDate: c.openingDate,
@@ -69,6 +69,8 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
         c.zip = ef.zip?.trim() || undefined;
         c.gstVat = ef.gstVat?.trim() || "";
         c.address = ef.address?.trim() || "";
+        // Blank = the billing address, as every client before there was a separate one.
+        c.shippingAddress = ef.shippingAddress?.trim() || undefined;
         // Opening balance (migration) — clear direction/date when amount is blank/0.
         c.openingBalance = ef.openingBalance || undefined;
         c.openingDir = ef.openingBalance ? (ef.openingDir || "debit") : undefined;
@@ -106,10 +108,11 @@ export function ClientEditDialog({ clientId, onClose }: { clientId: string | nul
       }
     >
       <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address"] as const).map(k => (
-          <div key={k} className={k === "address" || k === "companyName" ? "col-span-2" : ""}>
+        {(["companyName", "ownerName", "phone", "country", "zip", "gstVat", "address", "shippingAddress"] as const).map(k => (
+          <div key={k} className={k === "address" || k === "shippingAddress" || k === "companyName" ? "col-span-2" : ""}>
             <Label className="text-xs capitalize" htmlFor={`client-edit-${k}`}>
-              {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k.replace(/([A-Z])/g, " $1")}
+              {k === "zip" ? "ZIP / Postal Code" : k === "gstVat" ? "GST / VAT" : k === "address" ? "Billing address" : k === "shippingAddress" ? "Shipping address" : k.replace(/([A-Z])/g, " $1")}
+              {k === "shippingAddress" && <span className="normal-case font-normal text-muted-foreground"> · only if different from billing</span>}
             </Label>
             <Input
               id={`client-edit-${k}`}

@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { FactoryLabourFields, labourDraftOf, labourOf, type LabourDraft } from "@/components/FactoryLabourFields";
 
 const FIELDS = ["name", "contactPerson", "phone", "address"] as const;
 type Field = (typeof FIELDS)[number];
@@ -23,7 +24,8 @@ const formOf = (f: Factory | null): Form => ({
  */
 export function FactoryEditDialog({ factory, onClose }: { factory: Factory | null; onClose: () => void }) {
   const [f, setF] = useState<Form>(formOf(factory));
-  useEffect(() => { if (factory) setF(formOf(factory)); }, [factory]);
+  const [labour, setLabour] = useState<LabourDraft>(labourDraftOf(factory?.labour));
+  useEffect(() => { if (factory) { setF(formOf(factory)); setLabour(labourDraftOf(factory.labour)); } }, [factory]);
 
   const save = () => {
     if (!factory) return;
@@ -37,6 +39,8 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
         const v = f[k].trim();
         if (v) x[k] = v; else delete x[k];
       }
+      const rates = labourOf(labour);
+      if (rates) x.labour = rates; else delete x.labour;
     });
     toast.success("Factory updated");
     onClose();
@@ -47,7 +51,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
       open={!!factory}
       onOpenChange={o => { if (!o) onClose(); }}
       title="Edit Factory"
-      description="Name and contact details only"
+      description="Details and labour rates"
       icon={FactoryIcon}
       size="md"
       footer={
@@ -70,6 +74,7 @@ export function FactoryEditDialog({ factory, onClose }: { factory: Factory | nul
             <Input id={`fac-edit-${k}`} value={f[k]} onChange={e => setF({ ...f, [k]: e.target.value })} className="rounded-xl mt-1" />
           </div>
         ))}
+        <div className="col-span-2"><FactoryLabourFields value={labour} onChange={setLabour} idPrefix="fac-edit-labour" /></div>
       </div>
     </ActionSheet>
   );

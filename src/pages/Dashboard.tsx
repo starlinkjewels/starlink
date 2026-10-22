@@ -107,7 +107,9 @@ export function Dashboard() {
   const today = new Date().toDateString();
   const todayOrders = orders.filter(o => new Date(o.createdAt).toDateString() === today).length;
   const forApproval = orders.filter(o => o.status === "Waiting").length;
-  const pending = orders.filter(o => o.status === "Waiting" || o.status === "Approved").length;
+  // Pending = waiting for approval. An approved order is under way (a loose sale may be
+  // waiting only for dispatch), so it is not counted here — the same as the Orders filter.
+  const pending = orders.filter(o => o.status === "Waiting").length;
   const inProd = orders.filter(o => o.status === "In Production").length;
   const ready = orders.filter(o => o.status === "Ready" || o.status === "Dispatched").length;
   const completed = orders.filter(o => o.status === "Delivered").length;
@@ -161,7 +163,7 @@ export function Dashboard() {
   const myProfit = myRevenue - myExpenseUsd.usd;
 
   // Admin: certificate stats
-  const certOrders = db.orders.filter(o => o.certificate === true);
+  const certOrders = db.orders.filter(o => o.certificate === true && !o.deletedAt);
   const certCount  = certOrders.length;
   const certIncome = certOrders.reduce((s, o) => s + (o.certificateFee || 0), 0);
 
