@@ -34,11 +34,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   CreditCard, Truck, Factory as FactoryIcon, Receipt, DollarSign, Landmark, BookOpen, Wallet,
-  ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered, Handshake,
+  ArrowLeftRight, ArrowDownCircle, ArrowUpCircle, ListOrdered, Handshake, Users, Undo2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
+import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
+import { RefundClientSheet } from "@/components/RefundClientSheet";
 
 /** Today as yyyy-mm-dd for a date input, in LOCAL time — toISOString() would
  *  roll back a day for anyone east of UTC after midday. */
@@ -48,7 +51,7 @@ import { PayBrokerSheet } from "@/components/PayBrokerSheet";
 /** The ledgers the page reads — one at a time, under the tab bar. */
 type Book = "daybook" | "received" | "supplier" | "factory" | "expense" | "locker";
 /** The forms that slide in over it. */
-type Task = "client" | "supplier" | "factory" | "expense" | "locker" | "broker";
+type Task = "client" | "supplier" | "factory" | "expense" | "employee" | "locker" | "broker" | "brokerIn" | "refund";
 
 const BOOKS = [
   { key: "daybook", label: "Day book", icon: BookOpen },
@@ -61,6 +64,9 @@ const BOOKS = [
 
 /** What a form's panel is given: whether it is open, and how to close it. */
 type SheetProps = { open: boolean; onOpenChange: (open: boolean) => void };
+/** Opened from the Locker's "Record transaction": the account is that one
+ *  (no picker), and the form sits inside that panel (components/SheetFrame). */
+type EmbedProps = { lockerId?: string; frame?: Frame };
 
 const DEFAULT_EXPENSE_CATEGORIES = ["Travel", "Food", "Tools", "Office", "Communication", "Other"];
 // The fallback list is the one in db.ts, shared with Settings → Categories.
@@ -92,6 +98,8 @@ export function PaymentsPage() {
   const db = useDb();
   const can = useCan();
   const mayAdd = can("payments", "add");
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
   // The day book opens first: it is the one view that shows the whole day, and
   // it is what gets checked against the written rojmel.
   const [book, setBook] = useState<Book>("daybook");
@@ -145,13 +153,16 @@ export function PaymentsPage() {
         primary={mayAdd ? { label: "Receive", icon: CreditCard, items: [
           { label: "From a client", icon: CreditCard, hint: "Against their invoices, or an advance", onSelect: () => setTask("client") },
           { label: "From a supplier", icon: Truck, hint: "A refund, or money back on returned goods", onSelect: () => openSupplier("receive") },
+          { label: "From a broker", icon: Handshake, hint: "Money they collected for us", onSelect: () => setTask("brokerIn"), show: isAdmin },
           { label: "Other income", icon: ArrowDownCircle, hint: "Into an account — not a client or supplier", onSelect: () => openLocker("income") },
         ] } : null}
         secondary={mayAdd ? { label: "Pay", icon: Wallet, items: [
           { label: "Pay a supplier", icon: Truck, hint: "A bill, or an advance", onSelect: () => openSupplier("pay") },
           { label: "Pay a factory", icon: FactoryIcon, hint: "Making charges, or an advance", onSelect: () => setTask("factory") },
           { label: "Pay through broker", icon: Handshake, hint: "One payment — he pays the suppliers", onSelect: () => setTask("broker") },
-          { label: "Pay an expense", icon: Receipt, hint: "Rent, salary, courier…", onSelect: () => setTask("expense") },
+          { label: "Pay an employee", icon: Users, hint: "Salary, an advance, a bonus", onSelect: () => setTask("employee") },
+          { label: "Pay an expense", icon: Receipt, hint: "Rent, courier, office…", onSelect: () => setTask("expense") },
+          { label: "Refund to a client", icon: Undo2, hint: "Pay their held credit back", onSelect: () => setTask("refund") },
         ] } : null}
         menuTitle="Accounts"
         menu={mayAdd ? [
@@ -218,8 +229,11 @@ export function PaymentsPage() {
           <PaySupplier {...sheet("supplier")} preset={supplierDir} />
           <PayFactory {...sheet("factory")} />
           <PayExpense {...sheet("expense")} />
+          <PayExpense {...sheet("employee")} forEmployee />
           <LockerActions {...sheet("locker")} preset={lockerAction} />
           <PayBrokerSheet {...sheet("broker")} />
+          {isAdmin && <ReceiveFromBrokerSheet {...sheet("brokerIn")} />}
+          <RefundClientSheet {...sheet("refund")} />
         </>
       )}
     </div>
@@ -268,7 +282,7 @@ function MoveSummary({ label, value, tone, lockerId, change }: {
 const SAVE_BTN = "btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8";
 
 /* ── Receive from Client — mirrors ClientHistory.tsx's recordPayment ── */
-function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
+export function ReceiveFromClient({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame }: SheetProps & EmbedProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -276,7 +290,8 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
   const [amount, setAmount] = useState("");
   const [method, setMethod] = useState("Cash");
   const [note, setNote] = useState("");
-  const [lockerId, setLockerId] = useState("");
+  const [lockerPick, setLockerId] = useState("");
+  const lockerId = fixedLocker ?? lockerPick;
   // 1 USD in the locker's currency. Cleared when the locker changes, so a rate
   // typed for one currency is never saved against another.
   const [exchangeRate, setExchangeRate] = useState<number | "">("");
@@ -373,11 +388,11 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
   // Unknown until there is a rate — never shown as if the dollars landed unconverted.
   const depositPreview = !amount ? null : needsRate ? (rate > 0 ? roundCcy(Number(amount) * rate, lockerCurrency) : null) : Number(amount);
 
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={CreditCard}
-      title="Receive payment"
-      description="From a client, as a numbered receipt"
-      footer={
+  return frame({
+    open, onOpenChange, size: "md", icon: CreditCard,
+    title: "Receive payment",
+    description: "From a client, as a numbered receipt",
+    footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={amount && lockerId ? (
           <div className="grid grid-cols-3 gap-3">
             <div className="min-w-0">
@@ -401,7 +416,8 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Payment Received"}</AsyncButton>
         </PanelFooter>
-      }>
+    ),
+    children: (
     <div className="space-y-3">
       {/* Two columns from a small tablet up; one on a phone, where the panel is
           the whole screen. */}
@@ -451,13 +467,15 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
           <ListCombo list="paymentMethods" value={method} onChange={setMethod} optional={false} className="h-10 rounded-xl mt-1" ariaLabel="Method" />
         </div>
 
-        <div>
-          <Label className="text-xs">Deposited to Locker *</Label>
-          <Select value={lockerId} onValueChange={addNew("locker", v => { setLockerId(v); setExchangeRate(""); })}>
-            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-          </Select>
-        </div>
+        {!fixedLocker && (
+          <div>
+            <Label className="text-xs">Deposited to Locker *</Label>
+            <Select value={lockerId} onValueChange={addNew("locker", v => { setLockerId(v); setExchangeRate(""); })}>
+              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+              <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div>
           <Label className="text-xs">Remark / ref</Label>
@@ -482,13 +500,17 @@ function ReceiveFromClient({ open, onOpenChange }: SheetProps) {
         </p>
       )}
     </div>
-    </ActionSheet>
-  );
+    ),
+  });
 }
 
 /* ── Pay Supplier — mirrors SupplierHistory.tsx's recordPayment ── */
 type SupplierDir = "pay" | "receive";
-function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: SupplierDir }) {
+export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker, frame = sheetFrame, lockDir }: SheetProps & EmbedProps & {
+  preset: SupplierDir;
+  /** The direction is decided by whoever opened it (the Locker's In / Out). */
+  lockDir?: boolean;
+}) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -503,7 +525,8 @@ function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: Supp
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("__fifo");
   const [note, setNote] = useState("");
-  const [lockerId, setLockerId] = useState("");
+  const [lockerPick, setLockerId] = useState("");
+  const lockerId = fixedLocker ?? lockerPick;
   const [saving, setSaving] = useState(false);
   // Entries are often written up a day or two later, so the date is chosen
   // rather than assumed to be today.
@@ -604,28 +627,29 @@ function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: Supp
   };
 
   const typed = Number(amount) || 0;
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Truck}
-      title="Supplier payment"
-      description="Bills or refunds, in rupees"
-      footer={
+  return frame({
+    open, onOpenChange, size: "md", icon: Truck,
+    title: "Supplier payment",
+    description: "Bills or refunds, in rupees",
+    footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
           <MoveSummary label={dir === "pay" ? "Paying" : "Receiving"} value={fmtMoneyInr(typed)} tone={dir === "pay" ? "out" : "in"}
             lockerId={lockerId} change={dir === "pay" ? -typed : typed} />
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : dir === "pay" ? "Record Supplier Payment" : "Record Supplier Receipt"}</AsyncButton>
         </PanelFooter>
-      }>
+    ),
+    children: (
     <div className="space-y-3">
       {/* Direction — pay the supplier, or receive money back (refund/return). */}
-      <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
+      {!lockDir && <div className="grid grid-cols-2 gap-1 p-1 bg-secondary rounded-xl">
         {(["pay", "receive"] as const).map(d => (
           <button key={d} type="button" onClick={() => setDir(d)}
             className={`h-9 rounded-lg text-sm font-medium transition-colors ${dir === d ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground"}`}>
             {d === "pay" ? "Pay supplier" : "Receive from supplier"}
           </button>
         ))}
-      </div>
+      </div>}
 
       <div>
         <Label className="text-xs">Supplier</Label>
@@ -666,20 +690,22 @@ function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: Supp
         )}
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder={dir === "pay" ? "Note (optional)" : "Note (e.g. refund for returned goods)"} />
-      <div>
-        <Label className="text-xs">{dir === "pay" ? "Paid from Locker *" : "Received into Locker *"}</Label>
-        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-        </Select>
-      </div>
+      {!fixedLocker && (
+        <div>
+          <Label className="text-xs">{dir === "pay" ? "Paid from Locker *" : "Received into Locker *"}</Label>
+          <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
-    </ActionSheet>
-  );
+    ),
+  });
 }
 
 /* ── Pay Factory — mirrors FactoryHistory.tsx's payCharge / FIFO ── */
-function PayFactory({ open, onOpenChange }: SheetProps) {
+export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame }: SheetProps & EmbedProps) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
@@ -687,7 +713,8 @@ function PayFactory({ open, onOpenChange }: SheetProps) {
   const [amount, setAmount] = useState("");
   const [target, setTarget] = useState("__fifo");
   const [note, setNote] = useState("");
-  const [lockerId, setLockerId] = useState("");
+  const [lockerPick, setLockerId] = useState("");
+  const lockerId = fixedLocker ?? lockerPick;
   const [saving, setSaving] = useState(false);
   // Entries are often written up a day or two later, so the date is chosen
   // rather than assumed to be today.
@@ -762,17 +789,18 @@ function PayFactory({ open, onOpenChange }: SheetProps) {
   };
 
   const typed = Number(amount) || 0;
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={FactoryIcon}
-      title="Factory payment"
-      description="Making charges, in rupees"
-      footer={
+  return frame({
+    open, onOpenChange, size: "md", icon: FactoryIcon,
+    title: "Factory payment",
+    description: "Making charges, in rupees",
+    footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 ? (
           <MoveSummary label="Paying" value={fmtMoneyInr(typed)} tone="out" lockerId={lockerId} change={-typed} />
         ) : undefined}>
           <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Factory Payment"}</AsyncButton>
         </PanelFooter>
-      }>
+    ),
+    children: (
     <div className="space-y-3">
       <div>
         <Label className="text-xs">Factory</Label>
@@ -807,28 +835,36 @@ function PayFactory({ open, onOpenChange }: SheetProps) {
         </div>
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
-      <div>
-        <Label className="text-xs">Paid from Locker *</Label>
-        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-        </Select>
-      </div>
+      {!fixedLocker && (
+        <div>
+          <Label className="text-xs">Paid from Locker *</Label>
+          <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose locker" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+          </Select>
+        </div>
+      )}
     </div>
-    </ActionSheet>
-  );
+    ),
+  });
 }
 
 /* ── Pay Expense — mirrors Expenses.tsx's handleAdd ── */
-function PayExpense({ open, onOpenChange }: SheetProps) {
+export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame, forEmployee }: SheetProps & EmbedProps & {
+  /** Paying a team member (salary, an advance, a bonus): who it is comes
+   *  first and is required, whatever the category, so it lands on their
+   *  salary ledger. */
+  forEmployee?: boolean;
+}) {
   const { user } = useAuth();
   const db = useDb();
   const addNew = useAddNew();
   const [title, setTitle] = useState("");
   const [amount, setAmount] = useState("");
-  const [category, setCategory] = useState((db.settings.expenseCategories?.[0]) || DEFAULT_EXPENSE_CATEGORIES[0]);
+  const [category, setCategory] = useState(forEmployee ? "Salary" : (db.settings.expenseCategories?.[0]) || DEFAULT_EXPENSE_CATEGORIES[0]);
   const [note, setNote] = useState("");
-  const [lockerId, setLockerId] = useState("");
+  const [lockerPick, setLockerId] = useState("");
+  const lockerId = fixedLocker ?? lockerPick;
   const [paidToEmployeeId, setPaidToEmployeeId] = useState("");
   const [saving, setSaving] = useState(false);
   // Entries are often written up a day or two later, so the date is chosen
@@ -848,16 +884,19 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
     if (!lockerId) { toast.error("Choose the account this is paid from"); return; }
     const amt = parseFloat(amount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (!title.trim()) { toast.error("Enter a title"); return; }
-    if (category === "Salary" && !paidToEmployeeId) { toast.error("Choose which team member this salary is for"); return; }
+    if ((forEmployee || category === "Salary") && !paidToEmployeeId) { toast.error("Choose which team member this is for"); return; }
+    // Paying a team member, the title can be left blank: "Salary — Ramesh".
+    const payee = staff.find(u => u.id === paidToEmployeeId)?.name;
+    const titleText = title.trim() || (forEmployee && payee ? `${category} — ${payee}` : "");
+    if (!titleText) { toast.error("Enter a title"); return; }
     if (!(await confirmOverdraw(db.lockers, db.lockerTransactions, lockerId, amt))) return;
     setSaving(true);
     try {
       const now = stampFor(date);
       const expense: Expense = {
-        id: uid("exp_"), title: title.trim(), amount: amt, category,
+        id: uid("exp_"), title: titleText, amount: amt, category,
         note: note.trim() || undefined, employeeId: user!.id,
-        paidToEmployeeId: category === "Salary" ? (paidToEmployeeId || undefined) : undefined,
+        paidToEmployeeId: forEmployee || category === "Salary" ? (paidToEmployeeId || undefined) : undefined,
         currency: curr, createdAt: now, lockerId,
       };
       updateDb(d => {
@@ -867,7 +906,7 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId, type: "expense", amountInr: amt,
-            currency: ccy(l.currency), category: `Expense — ${title.trim()}`,
+            currency: ccy(l.currency), category: `Expense — ${titleText}`,
             refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
           });
         }
@@ -881,26 +920,40 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
   // Make sure "Salary" is always pickable even if an admin customised categories.
   const catList = categories.includes("Salary") ? categories : ["Salary", ...categories];
   const typed = Number(amount) || 0;
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={Receipt}
-      title="Pay expense"
-      description="From any account, in its currency"
-      footer={
+  return frame({
+    open, onOpenChange, size: "md", icon: Receipt,
+    title: forEmployee ? "Pay an employee" : "Pay expense",
+    description: forEmployee ? "Salary, an advance or a bonus — on their salary ledger" : "From any account, in its currency",
+    footer: (
         <PanelFooter onCancel={() => onOpenChange(false)} summary={typed > 0 && lockerId ? (
           <MoveSummary label={category === "Salary" ? "Salary" : "Expense"} value={fmtCcy(typed, curr)} tone="out" lockerId={lockerId} change={-typed} />
         ) : undefined}>
-          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : "Record Expense"}</AsyncButton>
+          <AsyncButton onClick={submit} disabled={saving} className={SAVE_BTN}>{saving ? "Saving…" : forEmployee ? "Record Payment" : "Record Expense"}</AsyncButton>
         </PanelFooter>
-      }>
+    ),
+    children: (
     <div className="space-y-3">
+      {/* Paying a team member: who, first. */}
+      {forEmployee && (
+        <div>
+          <Label className="text-xs">Employee *</Label>
+          <Select value={paidToEmployeeId || ""} onValueChange={addNew("employee", setPaidToEmployeeId)}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose team member" /></SelectTrigger>
+            <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}<AddNewItem kind="employee" /></SelectContent>
+          </Select>
+          <p className="text-[11px] text-muted-foreground mt-1">Shows on their salary ledger and in Expenses.</p>
+        </div>
+      )}
       {/* 1. Pay from account — first; it sets the currency (same flow as the Expenses page) */}
-      <div>
-        <Label className="text-xs">Pay from Account *</Label>
-        <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
-          <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
-          <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-        </Select>
-      </div>
+      {!fixedLocker && (
+        <div>
+          <Label className="text-xs">Pay from Account *</Label>
+          <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
+            <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
+            <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+          </Select>
+        </div>
+      )}
       {/* Date first: an expense is often written up after the fact. */}
       <div>
         <Label className="text-xs">Date</Label>
@@ -919,13 +972,13 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
       {/* 3. Category */}
       <div>
         <Label className="text-xs">Category</Label>
-        <Select value={category} onValueChange={v => { setCategory(v); if (v !== "Salary") setPaidToEmployeeId(""); }}>
+        <Select value={category} onValueChange={v => { setCategory(v); if (v !== "Salary" && !forEmployee) setPaidToEmployeeId(""); }}>
           <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
           <SelectContent>{catList.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
         </Select>
       </div>
       {/* 4. Salary → team member — shown & COMPULSORY only for a Salary expense */}
-      {category === "Salary" && (
+      {category === "Salary" && !forEmployee && (
         <div>
           <Label className="text-xs">Paid to Team Member *</Label>
           <Select value={paidToEmployeeId || ""} onValueChange={addNew("employee", setPaidToEmployeeId)}>
@@ -937,13 +990,14 @@ function PayExpense({ open, onOpenChange }: SheetProps) {
       )}
       {/* 5. Title + note */}
       <div>
-        <Label className="text-xs">Title *</Label>
-        <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="e.g. August salary, Office rent" />
+        <Label className="text-xs">{forEmployee ? "Title" : "Title *"}</Label>
+        <Input value={title} onChange={e => setTitle(e.target.value)} className="rounded-xl h-10 mt-1"
+          placeholder={forEmployee ? `Optional — "${category} — name" if left blank` : "e.g. August salary, Office rent"} />
       </div>
       <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
     </div>
-    </ActionSheet>
-  );
+    ),
+  });
 }
 
 /* ── Locker — deposit, withdraw, or transfer between lockers.

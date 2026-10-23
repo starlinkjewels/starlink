@@ -1,8 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight, Tag, ArrowDownCircle } from "lucide-react";
-import { toast } from "sonner";
-import { fmtDate, todayLocal, stampFor, updateDb, uid, type Purchase, type SupplierSale } from "@/lib/db";
+import { fmtDate, type Purchase, type SupplierSale } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { brokerAccount, brokerCollected, brokerHandovers, brokerPassed, brokerPayments, brokerSuppliers, brokerageWePay, saleBrokerageWePay } from "@/lib/brokers";
@@ -13,11 +12,7 @@ import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { BrokerCreateDialog } from "@/components/create/BrokerCreateDialog";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
-import { ActionSheet } from "@/components/ActionSheet";
-import { AsyncButton } from "@/components/AsyncButton";
-import { Field, PanelActions } from "@/components/BillLayout";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
 
 type Tab = "bills" | "sales" | "suppliers" | "money";
 
@@ -203,57 +198,7 @@ export function BrokerHistoryPage() {
 
       <PayBrokerSheet open={paying} onOpenChange={setPaying} brokerId={broker.id} />
       {isAdmin && <BrokerCreateDialog open={editing} onOpenChange={setEditing} broker={broker} />}
-      {isAdmin && <ReceiveFromBroker open={receiving} onOpenChange={setReceiving} brokerId={broker.id} brokerName={broker.name} held={acc.held} />}
+      {isAdmin && <ReceiveFromBrokerSheet open={receiving} onOpenChange={setReceiving} brokerId={broker.id} />}
     </div>
-  );
-}
-
-/**
- * Money a broker hands over to us — what they collected from suppliers for us
- * (or simply gives back). One account entry from them (refType "brokerReceipt");
- * the broker's account reads it (lib/brokers.ts), and it is corrected or deleted
- * in Payments → Account entries like any entry of our own.
- */
-function ReceiveFromBroker({ open, onOpenChange, brokerId, brokerName, held }: {
-  open: boolean; onOpenChange: (v: boolean) => void; brokerId: string; brokerName: string; held: number;
-}) {
-  const db = useDb();
-  const { user } = useAuth();
-  const [amount, setAmount] = useState("");
-  const [lockerId, setLockerId] = useState("");
-  const [date, setDate] = useState(todayLocal());
-  const [note, setNote] = useState("");
-  const lockers = db.lockers.filter(l => l.active && (l.currency || "INR") === "INR");
-  const save = () => {
-    const amt = Math.round((Number(amount) || 0) * 100) / 100;
-    if (!(amt > 0)) { toast.error("Enter the amount"); return; }
-    if (!lockerId) { toast.error("Choose the account it went into"); return; }
-    updateDb(d => {
-      if (!d.lockerTransactions) d.lockerTransactions = [];
-      d.lockerTransactions.push({
-        id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${brokerName} (broker)`,
-        refType: "brokerReceipt", refId: brokerId, notClientPayment: true,
-        note: note.trim() || undefined, recordedBy: user!.id, createdAt: stampFor(date),
-      });
-    });
-    toast.success(`${fmtMoneyInr(amt)} received from ${brokerName}`);
-    setAmount(""); setNote(""); setLockerId(""); onOpenChange(false);
-  };
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={ArrowDownCircle} title="Receive from broker"
-      description={held > 0.5 ? `${brokerName} holds ${fmtMoneyInr(held)} of ours` : `Money ${brokerName} hands over to us`}
-      footer={<PanelActions onCancel={() => onOpenChange(false)}><AsyncButton onClick={save} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48">Record</AsyncButton></PanelActions>}>
-      <div className="grid grid-cols-2 gap-3">
-        <Field label="Amount (₹)">{id => <Input id={id} type="number" min={0} step="0.01" value={amount} placeholder={held > 0.5 ? String(held) : "0"} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10" />}</Field>
-        <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
-        <Field label="Into account" className="col-span-2">{id => (
-          <Select value={lockerId} onValueChange={setLockerId}>
-            <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose account" /></SelectTrigger>
-            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
-          </Select>
-        )}</Field>
-        <Field label="Note" className="col-span-2">{id => <Input id={id} value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />}</Field>
-      </div>
-    </ActionSheet>
   );
 }

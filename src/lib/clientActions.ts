@@ -18,7 +18,7 @@ const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? o
  *  have, they read as empty — so Delete waits ("Checking…"). */
 const CLIENT_REF_COLS = ["invoices", "giftCards", "expenses"] as const;
 /** …and the receipt book, loaded on demand: the delete loads it and counts it. */
-const CLIENT_DELETE_COLS = [...CLIENT_REF_COLS, "clientReceipts"] as const;
+const CLIENT_DELETE_COLS = [...CLIENT_REF_COLS, "clientReceipts", "lockerTransactions"] as const;
 
 /**
  * Why this client can't be deleted; undefined when nothing is on record for
@@ -34,12 +34,15 @@ export function clientDeleteBlocker(db: DB, clientId: string): string | undefine
   const receipts = collectionsLoaded(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;
   const cards = (db.giftCards ?? []).filter(g => g.clientId === clientId).length;
   const expenses = (db.expenses ?? []).filter(e => e.clientId === clientId).length;
+  // A refund paid back to them names them in the account books.
+  const refunds = collectionsLoaded(["lockerTransactions"]) ? (db.lockerTransactions ?? []).filter(t => t.refType === "clientRefund" && t.refId === clientId).length : 0;
   const has = [
     orders && plural(orders, "order"),
     invoices && plural(invoices, "invoice"),
     receipts && plural(receipts, "receipt"),
     cards && plural(cards, "gift card"),
     expenses && plural(expenses, "expense"),
+    refunds && plural(refunds, "refund"),
   ].filter(Boolean);
   if (has.length) return `Has ${has.join(" / ")} — deactivate instead`;
   if ((c.creditBalance || 0) > 0.009) return `Holds ${fmtMoney(c.creditBalance || 0)} of their credit — deactivate instead`;

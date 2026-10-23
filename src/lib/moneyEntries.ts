@@ -9,9 +9,10 @@
 //
 // Client receipts are deliberately NOT here — they allocate across a client's
 // orders and have their own engine (src/lib/receipts.ts).
-import { loadDb, updateDb, uid, collectionsLoaded, ensureCollections, fmtDate, dayOf, type DB, type Expense, type LockerTransaction } from "./db";
+import { loadDb, updateDb, uid, collectionsLoaded, ensureCollections, fmtDate, fmtMoney, dayOf, type DB, type Expense, type LockerTransaction } from "./db";
 import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./currency";
 import type { LazyCol } from "./pageData";
+import { undoClientRefund } from "./clientRefunds";
 
 export type EntryKind = "supplier" | "factory" | "expense" | "locker";
 
@@ -94,6 +95,10 @@ export interface MoneyEntry {
   legIds?: string[];
   /** The bills that payment covered, for the dialog to spell out. */
   legLabels?: string[];
+  /** A refund paid back to a client: who, and the dollars it took off their
+   *  credit — put back when it is cancelled (lib/clientRefunds.ts). */
+  refundTo?: string;
+  refundUsd?: number;
 }
 
 /**
@@ -500,7 +505,7 @@ function lockerEntries(db: DB): MoneyEntry[] {
     // A brokerage payment is the record itself — the broker's due is read from
     // it (lib/brokers.ts) — so it is corrected here like any entry of our own.
     // So is money a broker handed over to us (what they collected from a supplier for us).
-    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && !t.pairedLockerId) {
+    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && ref !== "clientRefund" && !t.pairedLockerId) {
       const why = unclaimedRow(db, t);
       if ("gone" in why) {
         orphan = `${why.gone}, so it is corrected here — that changes the account only.`;
@@ -519,6 +524,10 @@ function lockerEntries(db: DB): MoneyEntry[] {
       voucherNo: t.voucherNo,
       transfer: !!t.pairedLockerId,
       locked, lockedWhere, lockedLabel, orphan, unlinked,
+      ...(ref === "clientRefund" ? {
+        refundTo: db.clients.find(c => c.id === t.refId)?.companyName ?? "the client",
+        refundUsd: t.refundUsd,
+      } : {}),
     });
   }
   return out;
@@ -689,6 +698,11 @@ export function entryEditRefusal(d: DB, entry: MoneyEntry, patch: EntryPatch): s
       : "This payment was not made from an account — giving it one here would show money leaving an account that never moved. If it was paid from one, cancel it and record it again from that account.";
   }
   if (entry.kind === "locker") {
+    // A refund's amount is also what came off the client's credit: changed
+    // here, the two would disagree. Its date, note or account can be corrected.
+    if (entry.refundTo && patch.amount !== undefined && Math.abs(patch.amount - entry.amount) >= 0.005) {
+      return "This refund also took the client's credit down — to change the amount, delete it (their credit goes back) and record it again.";
+    }
     const legs = transferLegs(d, entry.id);
     if (legs) {
       const plan = planTransfer(d, legs.out, legs.inn, patch);
@@ -879,6 +893,9 @@ export function entryImpact(entry: MoneyEntry, lockerName?: string): string[] {
     out.push(`• all ${entry.legLabels.length} parts of this payment go — ${entry.legLabels.join(", ")}`);
   }
   if (entry.kind === "expense") out.push(`• the expense is removed from the books and every expense report`);
+  if (entry.kind === "locker" && entry.refundTo) {
+    out.push(`• ${entry.refundUsd ? fmtMoney(entry.refundUsd) : money} goes back onto ${entry.refundTo}'s credit`);
+  }
   if (entry.kind === "locker") {
     out.push(entry.transfer
       ? "• both sides of the transfer are removed — the money goes back to the account it left"
@@ -967,6 +984,8 @@ export function deleteEntry(entry: MoneyEntry, opts: { unlinkedConfirmed?: boole
       // into one account and out of nowhere in the other. Both go.
       const t = (d.lockerTransactions ?? []).find(x => x.id === entry.id);
       const other = t?.pairedLockerId ? transferSibling(d, t) : undefined;
+      // A refund to a client: what it took off their credit goes back on.
+      if (t) undoClientRefund(d, t);
       const drop = new Set([entry.id, ...(other ? [other.id] : [])]);
       d.lockerTransactions = (d.lockerTransactions ?? []).filter(x => !drop.has(x.id));
     }

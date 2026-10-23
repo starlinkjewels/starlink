@@ -1,11 +1,11 @@
 import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { loadDb, updateDb, uid, fmtMoney, fmtDate, balanceDue, invoiceOrderIds, settleClientAccount, collectionsLoaded, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType, type Order } from "@/lib/db";
+import { loadDb, updateDb, uid, fmtDate, collectionsLoaded, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType } from "@/lib/db";
 import { reserveVoucherNumber } from "@/lib/counters";
-import { advanceIds, receiptForAdvance } from "@/lib/receipts";
+import { TOTALS_COLS, type LazyCol } from "@/lib/pageData";
 import { useDb } from "@/hooks/useDb";
 import { useLoaded } from "@/hooks/useLoaded";
 import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
@@ -25,7 +25,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins, Power, Trash2 } from "lucide-react";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins, Power, Trash2, Users, Truck, Factory as FactoryIcon, Handshake, Receipt, UserRound, Undo2, MoreHorizontal, type LucideIcon } from "lucide-react";
+import { embedFrame } from "@/components/SheetFrame";
+import { ReceiveFromClient, PaySupplier, PayFactory, PayExpense } from "@/pages/Payments";
+import { PayBrokerSheet } from "@/components/PayBrokerSheet";
+import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
+import { RefundClientSheet } from "@/components/RefundClientSheet";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -41,6 +46,39 @@ import { SectionTitle } from "@/components/SectionTitle";
 function pdfNum(n: number, currency?: string): string {
   return `${n < 0 ? "-" : ""}${fmtCcyNumber(n, currency)}`;
 }
+
+/**
+ * Who the money is with, on "Record transaction". Each party is recorded
+ * through the same form, and into the same books, as on Payments — a supplier's
+ * payment settles their bills, a factory's its making charges, a team member's
+ * pay lands on their salary ledger, an expense in Expenses and Profit & Loss, a
+ * client's money on their invoices (a numbered receipt), a refund off their
+ * credit, a broker's on the broker's account. "Other" is an entry in this
+ * account only: an owner's deposit or drawing, bank charges.
+ */
+type Who = "client" | "supplier" | "factory" | "broker" | "employee" | "expense" | "other";
+const WHO: Record<Who, { label: string; icon: LucideIcon; hint: Record<"in" | "out", string>; rupees?: boolean; admin?: "in" }> = {
+  client: { label: "Client", icon: Users, hint: { in: "Their payment — on their invoices, as a numbered receipt", out: "Refund their held credit" } },
+  supplier: { label: "Supplier", icon: Truck, rupees: true, hint: { in: "A refund, or money back on returned goods", out: "Their bill, or an advance" } },
+  factory: { label: "Factory", icon: FactoryIcon, rupees: true, hint: { in: "", out: "Making charges, or an advance" } },
+  broker: { label: "Broker", icon: Handshake, rupees: true, admin: "in", hint: { in: "Money they collected for us", out: "One payment — he pays the suppliers and keeps his brokerage" } },
+  employee: { label: "Employee", icon: UserRound, hint: { in: "", out: "Salary, an advance or a bonus — on their salary ledger" } },
+  expense: { label: "Expense", icon: Receipt, hint: { in: "", out: "Rent, courier, office… — in Expenses and Profit & Loss" } },
+  other: { label: "Other", icon: MoreHorizontal, hint: { in: "Owner's deposit, extra income — this account only", out: "Owner's drawing, bank charges — this account only" } },
+};
+/** What each party's form reads beyond this page's own records — asked for
+ *  when it is picked, and the form waits for them (a supplier's balance read
+ *  before their bills arrive would be wrong). */
+const WHO_NEEDS: Partial<Record<Who, readonly LazyCol[]>> = {
+  client: ["clientReceipts"],
+  supplier: TOTALS_COLS.supplier,
+  factory: TOTALS_COLS.factory,
+  broker: ["purchases", "supplierSales", "supplierReceipts"],
+};
+const WHO_FOR: Record<"in" | "out", Who[]> = {
+  in: ["client", "supplier", "broker", "other"],
+  out: ["supplier", "factory", "broker", "employee", "expense", "client", "other"],
+};
 
 /** A line of the ledger table. `t: null` is the opening balance — pinned under
  *  the oldest entry, never sorted or searched with the rest. */
@@ -89,11 +127,12 @@ export function LockerPage() {
   // client's payment, 1 USD in this locker's currency. Cleared whenever the
   // pair changes, so a rate typed for one pair is never saved for another.
   const [txnExchangeRate, setTxnExchangeRate] = useState<number | "">("");
-  // Income can be a REAL client payment rather than a loose cash entry: pick the
-  // client (and the invoice it settles) and the money is allocated to their
-  // orders, instead of sitting in the locker while the invoice still reads unpaid.
-  const [txnClientId, setTxnClientId] = useState("");
-  const [txnInvoiceId, setTxnInvoiceId] = useState("");
+  // Who the money is with (WHO above). Nothing until it is picked: the form
+  // that follows depends on it.
+  const [txnWho, setTxnWho] = useState<Who | null>(null);
+  // The panel's footer, where an embedded form puts its totals and Save.
+  const [txnFoot, setTxnFoot] = useState<HTMLDivElement | null>(null);
+  const whoReady = useLoaded(txnMode && txnWho ? WHO_NEEDS[txnWho] ?? [] : []);
   // Repairing an income row that was typed in as a loose entry when it was
   // really a client payment — the cash is already in the locker, only the
   // allocation to their orders is missing. (src/components/ApplyToClientDialog.tsx)
@@ -119,30 +158,6 @@ export function LockerPage() {
   useLoaded(wantEntries ? ENTRY_COLS.locker : []);
   const entriesReady = collectionsLoaded(ENTRY_COLS.locker);
   const entryById = new Map(entriesReady ? listEntries(db, "locker").map(e => [e.id, e] as const) : []);
-
-  // ── Client payments recorded straight from the locker ──────────────────────
-  const clientsSorted = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
-  const invLiveBalance = (ids: string[]) =>
-    ids.map(oid => db.orders.find(o => o.id === oid))
-      .filter((o): o is Order => !!o && o.status !== "Rejected")
-      .reduce((s, o) => s + balanceDue(o), 0);
-  const clientInvoices = txnClientId
-    ? (db.invoices ?? [])
-        .filter(i => i.clientId === txnClientId)
-        .map(i => ({ inv: i, bal: invLiveBalance(invoiceOrderIds(i)) }))
-        .sort((a, b) => +new Date(b.inv.createdAt) - +new Date(a.inv.createdAt))
-    : [];
-
-  // One outstanding invoice for that client → that is what the money is for.
-  // Preselect it so a deposit settles the bill they actually paid.
-  const clientOpenUnpaid = clientInvoices.filter(x => x.bal > 0);
-  useEffect(() => {
-    setTxnInvoiceId(clientOpenUnpaid.length === 1 ? clientOpenUnpaid[0].inv.id : "");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [txnClientId]);
-
-
-
 
   // ── Edit locker ──
   const [editId, setEditId] = useState<string | null>(null);
@@ -240,9 +255,6 @@ export function LockerPage() {
     ];
   };
 
-  /** A client payment entered here, waiting for its receipt number. */
-  type ClientReceiptDraft = { clientId: string; amountUsd: number; method: string; advanceIds: string[] };
-
   const recordTxn = async () => {
     if (!selected) return;
     const amt = Number(txnAmount);
@@ -255,11 +267,6 @@ export function LockerPage() {
     const crossCurrency = !!target && targetCcy !== currency;
     const rate = Number(txnExchangeRate);
     if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
-    // A non-dollar locker taking a USD-billed client payment needs the rate to
-    // know how much of their bill this actually settles.
-    if (txnType === "income" && txnClientId && currency !== "USD" && (!rate || rate <= 0)) {
-      toast.error("Enter the exchange rate — the client is billed in USD"); return;
-    }
     // Overdraw warning — money leaving the locker (expense / transfer out) that
     // would take it below zero is almost always a mistake (wrong locker, or a
     // deposit that was never recorded). Warn, but let them proceed knowingly.
@@ -287,10 +294,6 @@ export function LockerPage() {
     // A voucher number is what a person quotes when they refer to a cash entry.
     // Reserved in the database, so two people banking at once cannot share one.
     const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
-    const clientTxnId = uid("ltx_");
-    // A holder rather than a plain variable: it is filled inside updateDb's
-    // callback, which TypeScript's flow analysis cannot follow.
-    const receiptFor: { draft: ClientReceiptDraft | null } = { draft: null };
     const xferId = uid("xfer_");
     updateDb(d => {
       if (!d.lockerTransactions) d.lockerTransactions = [];
@@ -316,58 +319,18 @@ export function LockerPage() {
           recordedBy: user!.id, createdAt: now,
         });
       } else {
-        // Income the client sent us is a PAYMENT, not a loose cash entry: put it
-        // through the same allocation the Payments screen uses, or the money sits
-        // in the locker while their invoice still reads unpaid (exactly what
-        // happened to invoice 0001).
-        const payClient = txnType === "income" && txnClientId
-          ? d.clients.find(c => c.id === txnClientId)
-          : undefined;
-        if (payClient) {
-          // Orders are billed in USD; the amount typed here is in the LOCKER's
-          // currency, so any other locker converts back through the entered
-          // rate (this locker's currency for $1 — what exchangeRate means here).
-          const billed = currency === "USD" ? amt : (rate > 0 ? Math.round((amt / rate) * 100) / 100 : 0);
-          const noteText = txnNote.trim() || undefined;
-          const beforeIds = advanceIds(d, payClient.id);
-          const leftover = settleClientAccount(d, payClient.id, billed, user!.id, now, noteText, txnInvoiceId || undefined);
-          // A client payment is a numbered receipt wherever it is entered.
-          receiptFor.draft = {
-            clientId: payClient.id, amountUsd: billed, method: noteText || "Payment received",
-            advanceIds: [...advanceIds(d, payClient.id)].filter(x => !beforeIds.has(x)),
-          };
-          d.lockerTransactions.push({
-            id: clientTxnId, lockerId: selected.id, type: "income", amountInr: amt, currency,
-            category: `Client Payment — ${payClient.companyName}`,
-            refType: "clientPayment", refId: payClient.id,
-            note: noteText, recordedBy: user!.id, createdAt: now,
-            exchangeRate: currency === "USD" ? undefined : (rate || undefined),
-          });
-        } else {
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
-            category: txnCategory || undefined, refType: "manual", voucherNo: voucher,
-            note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
-          });
-        }
+        // "Other": an entry in this account only. Money with a client,
+        // supplier, factory, broker or team member, and a business expense,
+        // go through their own forms (WHO) so they reach their books.
+        d.lockerTransactions.push({
+          id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
+          category: txnCategory || undefined, refType: "manual", voucherNo: voucher,
+          note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
+        });
       }
     });
-    let receiptNo = "";
-    const rf = receiptFor.draft;
-    if (rf) {
-      try {
-        const r = await receiptForAdvance({
-          clientId: rf.clientId, advanceIds: rf.advanceIds,
-          amountUsd: rf.amountUsd, date: now, method: rf.method,
-          lockerTxnId: clientTxnId, userId: user!.id,
-        });
-        receiptNo = ` · ${r.receiptNo}`;
-      } catch {
-        toast.error("Entry saved, but its receipt number could not be reserved");
-      }
-    }
-    toast.success(`Transaction recorded${receiptNo}`);
-    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnClientId(""); setTxnInvoiceId(""); setTxnMode(false);
+    toast.success("Transaction recorded");
+    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnMode(false);
   };
 
   /** A ledger row's ⋯: apply loose money to a client's bill, correct or cancel
@@ -433,6 +396,9 @@ export function LockerPage() {
         : t.exchangeRate ? (own === "USD" ? "INR" : "USD") : own;
       [from, to] = t.type === "transfer_out" ? [own, other] : [other, own];
       r = rateOf(t, from, to);
+    } else if (t.refType === "clientRefund") {
+      // A client's dollars paid back from here: this account's currency for $1.
+      [from, to, r] = ["USD", own, t.exchangeRate];
     } else if (t.refType === "clientPayment") {
       // A client's dollars landing here: exchangeRate is this locker's currency for $1.
       [from, to] = ["USD", own];
@@ -627,7 +593,7 @@ export function LockerPage() {
             actions={can("locker", "add") && (
               // A deactivated account takes no new money — greyed, saying why.
               // Outlined: "New Locker" in the header is the page's one main button.
-              <Button variant="outline" onClick={() => setTxnMode(true)} disabled={selectedInactive}
+              <Button variant="outline" onClick={() => { setTxnWho(null); setTxnMode(true); }} disabled={selectedInactive}
                 title={selectedInactive ? "Inactive — activate it from its card's ⋯ to record entries" : undefined}
                 className="rounded-xl gap-2">
                 <Plus className="h-4 w-4" /> Record Transaction
@@ -696,135 +662,158 @@ export function LockerPage() {
       )}
 
       {/* Record Transaction slides in over the ledger instead of pushing it down,
-          so the entry being matched stays in view. Closing it keeps what was
-          typed (as Cancel always did); saving clears it. */}
+          so the entry being matched stays in view. Money in or out, then who it
+          is with: each party opens its own form right here (the one Payments
+          uses), with this account already chosen — so the money reaches that
+          party's books, not just this ledger. Transfers and "Other" are this
+          account's own entries. */}
       {selected && (() => {
         const sym = ccySymbol(selected.currency).trim();
         const amt = Number(txnAmount) || 0;
         const bal = lockerBalance(selected, db.lockerTransactions);
         const after = bal + (txnType === "income" ? amt : -amt);
+        const dir: "in" | "out" = txnType === "income" ? "in" : "out";
+        const rupees = ccy(selected.currency) === "INR";
+        const mayPay = can("payments", "add");
+        const isAdmin = user?.role === "admin";
+        const who = txnType === "transfer_out" ? null : txnWho;
+        // Why a party can't be picked here, or nothing when it can.
+        const whyNot = (w: Who): string | undefined => {
+          if (w === "other") return undefined;
+          if (!mayPay) return needsAccess("payments", "add");
+          if (WHO[w].rupees && !rupees) return `In rupees only — record it from an INR account`;
+          if (WHO[w].admin === dir && !isAdmin) return "Admins only";
+          return undefined;
+        };
+        // This page's own entry: a transfer, or "Other".
+        const own = txnType === "transfer_out" || who === "other";
+        const embed = { open: txnMode, onOpenChange: setTxnMode, lockerId: selected.id, frame: embedFrame(txnFoot) };
+        const pickType = (t: typeof txnType) => { setTxnType(t); setTxnWho(null); setTxnExchangeRate(""); };
+        const cancelOnly = (
+          <div className="flex items-center justify-end">
+            <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
+          </div>
+        );
+        const ownFooter = (
+          <div className="space-y-3">
+            {amt > 0 && (
+              <div className="flex items-end justify-between gap-3 flex-wrap">
+                <div className="min-w-0">
+                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                    {txnType === "income" ? "Money in" : txnType === "expense" ? "Money out" : "Transfer out"}
+                  </p>
+                  <p className={`font-display text-xl font-bold tabular-nums leading-tight ${txnType === "income" ? "text-success" : "text-destructive"}`}>{fmtCcy(amt, selected.currency)}</p>
+                </div>
+                <p className="text-xs text-muted-foreground text-right">
+                  Balance after <span className={`font-semibold ${after < 0 ? "text-destructive" : "text-foreground"}`}>{fmtCcy(after, selected.currency)}</span>
+                </p>
+              </div>
+            )}
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
+              <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save</AsyncButton>
+            </div>
+          </div>
+        );
         return (
-          <ActionSheet open={txnMode} onOpenChange={setTxnMode} size="md"
+          <ActionSheet open={txnMode} onOpenChange={setTxnMode} size={who === "broker" && dir === "out" ? "lg" : "md"}
             icon={selected.type === "bank" ? Landmark : Wallet}
             title="Record Transaction"
             description={<>{selected.name} · {ccy(selected.currency)} · balance {fmtCcy(bal, selected.currency)}</>}
-            footer={
-              <div className="space-y-3">
-                {amt > 0 && (
-                  <div className="flex items-end justify-between gap-3 flex-wrap">
-                    <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                        {txnType === "income" ? "Money in" : txnType === "expense" ? "Money out" : "Transfer out"}
-                      </p>
-                      <p className={`font-display text-xl font-bold tabular-nums leading-tight ${txnType === "income" ? "text-success" : "text-destructive"}`}>{fmtCcy(amt, selected.currency)}</p>
-                    </div>
-                    <p className="text-xs text-muted-foreground text-right">
-                      Balance after <span className={`font-semibold ${after < 0 ? "text-destructive" : "text-foreground"}`}>{fmtCcy(after, selected.currency)}</span>
-                    </p>
-                  </div>
-                )}
-                <div className="flex items-center justify-end gap-2">
-                  <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
-                  <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save</AsyncButton>
-                </div>
-              </div>
-            }>
+            footer={<>{own ? ownFooter : !who || !whoReady ? cancelOnly : null}<div ref={setTxnFoot} /></>}>
             <div className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <Label className="text-xs">Type</Label>
-                  <Select value={txnType} onValueChange={v => { setTxnType(v as typeof txnType); setTxnExchangeRate(""); }}>
-                    <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="income">Income (money in)</SelectItem>
-                      <SelectItem value="expense">Expense (money out)</SelectItem>
-                      <SelectItem value="transfer_out">Transfer to another locker</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label className="text-xs">Amount ({sym})</Label>
-                  <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={`Amount (${sym})`} />
-                </div>
-                {txnType === "transfer_out" ? (
-                  <div>
-                    <Label className="text-xs">To locker *</Label>
-                    <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
-                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Destination locker" /></SelectTrigger>
-                      <SelectContent>
-                        {lockers.filter(l => l.id !== selected.id).map(l => {
-                          const sameCcy = ccy(l.currency) === ccy(selected.currency);
-                          return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
-                        })}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : (
-                  <div>
-                    <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
-                    <Select value={txnCategory} onValueChange={setTxnCategory}>
-                      <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Category *" /></SelectTrigger>
-                      <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                    </Select>
-                  </div>
-                )}
-                <div>
-                  <Label className="text-xs">Note</Label>
-                  <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Note (optional)" />
-                </div>
+              {/* 1. In, out, or between our own accounts. */}
+              <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl" role="radiogroup" aria-label="Type">
+                {([
+                  ["income", "Money in", ArrowDownCircle],
+                  ["expense", "Money out", ArrowUpCircle],
+                  ["transfer_out", "Transfer", ArrowLeftRight],
+                ] as const).map(([t, label, Icon]) => (
+                  <button key={t} type="button" role="radio" aria-checked={txnType === t} onClick={() => pickType(t)}
+                    className={`h-9 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors ${txnType === t ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"}`}>
+                    <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span>
+                  </button>
+                ))}
               </div>
 
-              {txnType === "income" && (
-                <div className="p-3 rounded-xl bg-secondary space-y-2.5">
-                  <Label className="text-xs">From a client? Pick them to record their payment.</Label>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                    <Select value={txnClientId || "none"} onValueChange={v => { setTxnClientId(v === "none" ? "" : v); setTxnInvoiceId(""); }}>
-                      <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Not a client payment</SelectItem>
-                        {clientsSorted.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
-                    {txnClientId && (
-                      <Select value={txnInvoiceId || "fifo"} onValueChange={v => setTxnInvoiceId(v === "fifo" ? "" : v)}>
-                        <SelectTrigger className="h-10 rounded-xl bg-white"><SelectValue /></SelectTrigger>
+              {/* 2. Who it is with. */}
+              {txnType !== "transfer_out" && (
+                <div>
+                  <Label className="text-xs">{dir === "in" ? "Received from" : "Paid to"}</Label>
+                  <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2" role="radiogroup" aria-label={dir === "in" ? "Received from" : "Paid to"}>
+                    {WHO_FOR[dir].map(w => {
+                      const why = whyNot(w);
+                      const on = who === w;
+                      const Icon = w === "client" && dir === "out" ? Undo2 : WHO[w].icon;
+                      return (
+                        <button key={w} type="button" role="radio" aria-checked={on} disabled={!!why}
+                          title={why ?? WHO[w].hint[dir]} onClick={() => setTxnWho(w)}
+                          className={`h-10 px-2.5 rounded-xl border text-sm font-medium inline-flex items-center gap-2 transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${on ? "border-primary bg-primary/10 text-primary" : "border-border bg-white text-foreground hover:border-primary/50"}`}>
+                          <Icon className="h-4 w-4 shrink-0" />
+                          <span className="truncate">{w === "client" && dir === "out" ? "Client refund" : WHO[w].label}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    {who ? WHO[who].hint[dir] : "Choose who the money is with — it is recorded in their account too."}
+                  </p>
+                  {who === "other" && dir === "out" && (
+                    <p className="text-[11px] text-amber-700 mt-1">This account only — not in Expenses or Profit &amp; Loss. A business expense goes under Expense; pay to an employee under Employee.</p>
+                  )}
+                </div>
+              )}
+
+              {/* 3a. A party: its own form, this account already chosen. */}
+              {!own && who && !whoReady && (
+                <p className="border-t border-border/60 pt-4 text-sm text-muted-foreground">Loading their account…</p>
+              )}
+              {!own && who && whoReady && (
+                <div className="border-t border-border/60 pt-4">
+                  {who === "client" && dir === "in" && <ReceiveFromClient {...embed} />}
+                  {who === "client" && dir === "out" && <RefundClientSheet {...embed} />}
+                  {who === "supplier" && <PaySupplier {...embed} key={dir} preset={dir === "in" ? "receive" : "pay"} lockDir />}
+                  {who === "factory" && <PayFactory {...embed} />}
+                  {who === "broker" && dir === "out" && <PayBrokerSheet {...embed} />}
+                  {who === "broker" && dir === "in" && <ReceiveFromBrokerSheet {...embed} />}
+                  {who === "employee" && <PayExpense {...embed} key="employee" forEmployee />}
+                  {who === "expense" && <PayExpense {...embed} key="expense" />}
+                </div>
+              )}
+
+              {/* 3b. This account's own entry: a transfer, or "Other". */}
+              {own && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs">Amount ({sym})</Label>
+                    <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={`Amount (${sym})`} />
+                  </div>
+                  {txnType === "transfer_out" ? (
+                    <div>
+                      <Label className="text-xs">To locker *</Label>
+                      <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
+                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Destination locker" /></SelectTrigger>
                         <SelectContent>
-                          {/* No invoice named: settleClientAccount holds it all as credit. */}
-                          <SelectItem value="fifo">No invoice — hold as credit</SelectItem>
-                          {clientInvoices.map(({ inv, bal }) => (
-                            <SelectItem key={inv.id} value={inv.id}>
-                              Invoice {inv.number} — {bal > 0 ? `${fmtMoney(bal)} pending` : "settled"}
-                            </SelectItem>
-                          ))}
+                          {lockers.filter(l => l.id !== selected.id).map(l => {
+                            const sameCcy = ccy(l.currency) === ccy(selected.currency);
+                            return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
+                          })}
                         </SelectContent>
                       </Select>
-                    )}
+                    </div>
+                  ) : (
+                    <div>
+                      <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
+                      <Select value={txnCategory} onValueChange={setTxnCategory}>
+                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Category *" /></SelectTrigger>
+                        <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                  <div className="sm:col-span-2">
+                    <Label className="text-xs">Note</Label>
+                    <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Note (optional)" />
                   </div>
-                  {txnClientId && ccy(selected.currency) !== "USD" && (
-                    // The client is billed in dollars: how many of this locker's
-                    // currency one dollar was — what turns the amount into their bill.
-                    <RateInput id="txn-client-rate" from="USD" to={ccy(selected.currency)}
-                      value={txnExchangeRate} onChange={setTxnExchangeRate} />
-                  )}
-                  {txnClientId && (
-                    <p className="text-[11px] text-muted-foreground">
-                      {(() => {
-                        const amt = Number(txnAmount) || 0;
-                        const r = Number(txnExchangeRate) || 0;
-                        const billed = ccy(selected.currency) === "USD" ? amt : (r > 0 ? amt / r : 0);
-                        const chosen = clientInvoices.find(x => x.inv.id === txnInvoiceId);
-                        if (!billed) return "Enter the amount to see what it settles.";
-                        // What settleClientAccount does: this money and any credit they
-                        // already hold go onto the named invoice up to what it owes;
-                        // the rest is their credit. With none named, all of it is credit.
-                        const held = db.clients.find(x => x.id === txnClientId)?.creditBalance || 0;
-                        if (!chosen) return `${fmtMoney(billed)} held as credit — pick an invoice to settle one.`;
-                        const onInv = Math.round(Math.min(billed + held, chosen.bal) * 100) / 100;
-                        const after = Math.round((billed + held - onInv) * 100) / 100;
-                        return `${fmtMoney(onInv)} goes on invoice ${chosen.inv.number}${held > 0.005 ? " (with their held credit)" : ""}; credit after: ${fmtMoney(after)}.`;
-                      })()}
-                    </p>
-                  )}
                 </div>
               )}
 

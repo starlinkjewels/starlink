@@ -175,6 +175,22 @@ export function lockerTxnDetails(
     out.push(!!s && { label: "Supplier", value: refLink(`/suppliers/${s.id}`, s.name, can("suppliers")) });
   }
 
+  if (t.refType === "clientRefund" && t.refId) {
+    // Paid back out of the client's held credit (lib/clientRefunds.ts).
+    const client = db.clients.find(c => c.id === t.refId);
+    const r = own !== "USD" ? t.exchangeRate : undefined;
+    out.push(
+      !!client && { label: "Refunded to", value: refLink(`/clients/${client.id}`, client.companyName, can("clients")) },
+      !!t.refundUsd && { label: "Off their credit", value: fmtMoney(t.refundUsd) },
+      !!r && { label: "Rate", value: rateText("USD", own, r) },
+    );
+  }
+
+  if ((t.refType === "brokerPayment" || t.refType === "brokerReceipt") && t.refId) {
+    const b = (db.brokers ?? []).find(x => x.id === t.refId);
+    out.push(!!b && { label: "Broker", value: refLink(`/suppliers/brokers/${b.id}`, b.name, can("suppliers")) });
+  }
+
   out.push(
     t.notClientPayment && { label: "Marked", value: "Not a client payment" },
     { label: "Recorded", value: recorded(db, t.createdAt, t.recordedBy) },
