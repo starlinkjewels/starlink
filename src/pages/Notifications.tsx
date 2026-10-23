@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { loadDb, updateDb, currentUserOrders, type Notification } from "@/lib/db";
 import { filled, refLink, linkList, type Detail } from "@/components/rowDetails";
-import { Bell, Info, Package, AlertCircle, Trash2, Pencil, Mail, MailOpen } from "lucide-react";
+import { Bell, Info, Package, AlertCircle, Trash2, Pencil, Mail, MailOpen, MessageSquare } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
@@ -11,6 +11,7 @@ import { confirmBox } from "@/lib/confirm";
 const typeIcon = (type: string) => {
   if (type === "order") return <Package className="h-4 w-4 text-primary" />;
   if (type === "alert") return <AlertCircle className="h-4 w-4 text-destructive" />;
+  if (type === "message") return <MessageSquare className="h-4 w-4 text-primary" />;
   return <Info className="h-4 w-4 text-primary" />;
 };
 

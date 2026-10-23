@@ -33,6 +33,7 @@ import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/cur
 import { useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
+import { adminIds, notifyUsers } from "@/lib/notify";
 import { PageHeader } from "@/components/PageHeader";
 import { uploadDataUrl } from "@/lib/storage";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
@@ -523,13 +524,14 @@ export function NewOrderPage() {
       }
 
       if (isClient) {
-        const admin = d.users.find(u => u.role === "admin");
-        if (admin) d.notifications.unshift({
-          id: uid("n_"), userId: admin.id,
+        // Every admin and the client's account manager — it used to reach only
+        // the first admin on the list, so most of the team never heard of it.
+        const cl = d.clients.find(c => c.id === clientId);
+        notifyUsers(d, [...adminIds(d), cl?.accountManagerId], {
           title: "New Order Request",
-          body: `${order.orderNumber} from ${d.clients.find(c => c.id === clientId)?.companyName ?? "client"}${advance > 0 ? ` · Advance $${advance}` : ""}`,
-          type: "order", read: false, createdAt: new Date().toISOString(),
-        });
+          body: `${order.orderNumber} from ${cl?.companyName ?? "client"}${advance > 0 ? ` · Advance $${advance}` : ""}`,
+          type: "order",
+        }, user!.id);
       }
 
       if ((isAdmin || isEmployee) && !forReadyStock) {

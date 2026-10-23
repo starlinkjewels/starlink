@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Send, ArrowLeft, Trash2 } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { notifyUsers } from "@/lib/notify";
 import { PageHeader } from "@/components/PageHeader";
 
 export function MessagesPage() {
@@ -40,7 +41,12 @@ export function MessagesPage() {
 
   const send = () => {
     if (!text.trim() || !selected) return;
-    updateDb(d => { d.messages.push({ id: uid("m_"), fromUserId: user!.id, toUserId: selected, text: text.trim(), createdAt: new Date().toISOString(), read: false }); });
+    const body = text.trim();
+    updateDb(d => {
+      d.messages.push({ id: uid("m_"), fromUserId: user!.id, toUserId: selected, text: body, createdAt: new Date().toISOString(), read: false });
+      // The other person hears of it in Alerts (and on their phone), not only when they next open Messages.
+      notifyUsers(d, [selected], { title: `Message from ${user!.name}`, body: body.length > 140 ? `${body.slice(0, 140)}…` : body, type: "message" }, user!.id);
+    });
     setText("");
   };
 
