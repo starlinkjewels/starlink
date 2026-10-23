@@ -53,19 +53,22 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
-/* Desktop sidebar — grouped into collapsible sections ("folders") so a long
-   flat list reads as a professional, organised menu. Mobile is unchanged. */
+/* Desktop sidebar — grouped into sections ("folders"), one open at a time:
+   the one holding the page you are on. Opening another closes the rest, so
+   the menu stays short and reads as an organised list. Mobile is unchanged. */
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Overview", items: [
-    { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
-    { to: "/product-photos", label: "Product Photos", icon: Camera },
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
     { to: "/orders", label: "Orders", icon: Package },
+  ] },
+  { title: "Catalog", items: [
+    { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
+    { to: "/product-photos", label: "Product Photos", icon: Camera },
+    { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
   ] },
   { title: "Clients & Billing", items: [
     { to: "/clients", label: "Clients", icon: Users, roles: ["admin", "employee"] },
     { to: "/invoices", label: "Invoices", icon: FileText },
-    { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
     { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
     { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin", "employee"] },
   ] },
@@ -87,6 +90,8 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
     { to: "/reminders", label: "Reminders", icon: AlarmClock, roles: ["admin", "employee"] },
     { to: "/ai", label: "Assistant", icon: Sparkles },
     { to: "/reports", label: "Reports", icon: BarChart3 },
+  ] },
+  { title: "Admin", items: [
     { to: "/employees", label: "Employees", icon: Briefcase, roles: ["admin"] },
     { to: "/activity", label: "Activity", icon: History, roles: ["admin"] },
     { to: "/autopilot", label: "Autopilot", icon: Workflow, roles: ["admin"] },
@@ -343,15 +348,18 @@ export function AppLayout() {
   const navGroups = studio ? studioSidebarGroups(allItems) : NAV_GROUPS
     .map(g => ({ ...g, items: g.items.filter(navFilter) }))
     .filter(g => g.items.length > 0);
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("sidebar-collapsed") || "[]")); } catch { return new Set(); }
-  });
-  const toggleGroup = (title: string) => setCollapsedGroups(prev => {
-    const next = new Set(prev);
-    next.has(title) ? next.delete(title) : next.add(title);
-    try { localStorage.setItem("sidebar-collapsed", JSON.stringify([...next])); } catch { /* ignore */ }
-    return next;
-  });
+  // One group open: the one holding the page you are on. Moving to a page in
+  // another group opens that one; a page outside the menu leaves it as it was.
+  const groupOf = (path: string) => navGroups.find(g => g.items.some(i =>
+    i.to === "/" ? path === "/" : path === i.to || path.startsWith(i.to + "/")))?.title;
+  const [openGroup, setOpenGroup] = useState<string | null>(() => groupOf(loc.pathname) ?? navGroups[0]?.title ?? null);
+  useEffect(() => {
+    const g = groupOf(loc.pathname);
+    if (g) setOpenGroup(g);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loc.pathname]);
+  // Opening a group closes the others; the open one closes on a second tap.
+  const toggleGroup = (title: string) => setOpenGroup(cur => (cur === title ? null : title));
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
   const pageTitle = PAGE_TITLES[loc.pathname] ??
@@ -389,11 +397,11 @@ export function AppLayout() {
         </div>
         <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
-            const isCollapsed = collapsedGroups.has(group.title);
+            const isCollapsed = !!group.title && openGroup !== group.title;
             return (
               <div key={group.title || "top"} className="mb-1.5">
                 {group.title && <button
-                  onClick={() => toggleGroup(group.title)}
+                  onClick={() => toggleGroup(group.title)} aria-expanded={!isCollapsed}
                   className="app-nav-group hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
                 >
                   <span>{group.title}</span>
