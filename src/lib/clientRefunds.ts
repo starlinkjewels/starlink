@@ -33,6 +33,9 @@ export interface RefundInput {
   amountUsd: number;
   /** The locker's currency for $1 — needed for any locker not in dollars. */
   rate?: number;
+  /** What left the account, when it was typed in the account's currency (the
+   *  Locker's form) — otherwise it is worked out as amountUsd × rate. */
+  lockerAmount?: number;
   note?: string;
   voucherNo?: string;
   userId: string;
@@ -69,7 +72,7 @@ export function writeClientRefund(d: DB, x: RefundInput): LockerTransaction | un
   c.creditBalance = left > 0.005 ? left : undefined;
   const t: LockerTransaction = {
     id: x.txnId ?? uid("ltx_"), lockerId: l.id, type: "expense",
-    amountInr: cur === "USD" ? usd : roundCcy(usd * Number(x.rate), cur), currency: cur,
+    amountInr: x.lockerAmount != null && x.lockerAmount > 0 ? roundCcy(x.lockerAmount, cur) : cur === "USD" ? usd : roundCcy(usd * Number(x.rate), cur), currency: cur,
     category: `Refund to ${c.companyName}`, refType: "clientRefund", refId: c.id, refundUsd: usd,
     exchangeRate: cur === "USD" ? undefined : Number(x.rate),
     voucherNo: x.voucherNo, note: x.note?.trim() || undefined, recordedBy: x.userId, createdAt: x.at,

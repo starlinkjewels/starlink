@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { ArrowDownCircle } from "lucide-react";
 import { toast } from "sonner";
-import { todayLocal, stampFor, updateDb, uid } from "@/lib/db";
+import { todayLocal, stampFor, updateDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { brokerAccount } from "@/lib/brokers";
@@ -12,6 +12,7 @@ import { Field, PanelActions } from "@/components/BillLayout";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { writeBrokerReceipt } from "@/lib/partyPayments";
 
 /**
  * Money a broker hands over to us — what they collected from suppliers for us
@@ -50,14 +51,7 @@ export function ReceiveFromBrokerSheet({ open, onOpenChange, brokerId: fixedBrok
     if (!(amt > 0)) { toast.error("Enter the amount"); return; }
     if (!lockerId) { toast.error("Choose the account it went into"); return; }
     if (ccy(db.lockers.find(l => l.id === lockerId)?.currency) !== "INR") { toast.error("Brokers deal in rupees — choose an INR account"); return; }
-    updateDb(d => {
-      if (!d.lockerTransactions) d.lockerTransactions = [];
-      d.lockerTransactions.push({
-        id: uid("ltx_"), lockerId, type: "income", amountInr: amt, currency: "INR", category: `Received from ${broker.name} (broker)`,
-        refType: "brokerReceipt", refId: broker.id, notClientPayment: true,
-        note: note.trim() || undefined, recordedBy: user!.id, createdAt: stampFor(date),
-      });
-    });
+    updateDb(d => writeBrokerReceipt(d, { brokerId: broker.id, lockerId, amount: amt, note, userId: user!.id, at: stampFor(date) }));
     toast.success(`${fmtMoneyInr(amt)} received from ${broker.name}`);
     setAmount(""); setNote(""); setLockerId(""); setDate(todayLocal()); onOpenChange(false);
   };

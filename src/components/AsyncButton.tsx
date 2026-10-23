@@ -21,7 +21,9 @@ export const AsyncButton = React.forwardRef<HTMLButtonElement, AsyncButtonProps>
   ({ onClick, children, disabled, ...props }, ref) => {
     const [busy, setBusy] = React.useState(false);
     const mounted = React.useRef(true);
-    React.useEffect(() => () => { mounted.current = false; }, []);
+    // Set again on every mount: React's development mode mounts twice, and a
+    // flag only ever cleared left the button spinning after a refused save.
+    React.useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 
     const handle = async (e: React.MouseEvent<HTMLButtonElement>) => {
       if (busy) return;

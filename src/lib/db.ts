@@ -799,6 +799,9 @@ export interface CatalogFolder {
   createdAt: string;
   bannerItemId?: string; // explicitly chosen cover image — falls back to the first image found if unset
   bannerUrl?: string; // that item's image URL, denormalized here so folder cards render without an extra fetch
+  /** Its place among the folders beside it, set in "Arrange folders" (0 first).
+   *  Unset — a folder made since — goes after the arranged ones. */
+  order?: number;
 }
 
 export type CatalogItemType = "image" | "video" | "file";

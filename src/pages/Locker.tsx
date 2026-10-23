@@ -3,9 +3,7 @@ import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } f
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { loadDb, updateDb, uid, fmtDate, collectionsLoaded, DEFAULT_LOCKER_CATEGORIES, type Locker, type LockerType, type LockerTransaction, type LockerTxnType } from "@/lib/db";
-import { reserveVoucherNumber } from "@/lib/counters";
-import { TOTALS_COLS, type LazyCol } from "@/lib/pageData";
+import { loadDb, updateDb, fmtDate, collectionsLoaded, type Locker, type LockerType, type LockerTransaction, type LockerTxnType } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useLoaded } from "@/hooks/useLoaded";
 import { ENTRY_COLS, listEntries, type MoneyEntry } from "@/lib/moneyEntries";
@@ -16,21 +14,16 @@ import { ApplyToClientDialog, applyBlock } from "@/components/ApplyToClientDialo
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { useAuth } from "@/lib/auth";
 import { lockerBalance } from "@/lib/manufacturing";
-import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateFields, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
-import { CurrencySelect, RateInput } from "@/components/CurrencyFields";
-import { ActionSheet } from "@/components/ActionSheet";
+import { ccy, ccySymbol, fmtCcy, fmtCcyNumber, fmtCcyPdf, rateOf, rateText, roundCcy, type CurrencyCode } from "@/lib/currency";
+import { CurrencySelect } from "@/components/CurrencyFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins, Power, Trash2, Users, Truck, Factory as FactoryIcon, Handshake, Receipt, UserRound, Undo2, MoreHorizontal, type LucideIcon } from "lucide-react";
-import { embedFrame } from "@/components/SheetFrame";
-import { ReceiveFromClient, PaySupplier, PayFactory, PayExpense } from "@/pages/Payments";
-import { PayBrokerSheet } from "@/components/PayBrokerSheet";
-import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
-import { RefundClientSheet } from "@/components/RefundClientSheet";
+import { Plus, Landmark, Wallet, ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, History, Pencil, Download, HandCoins, Power, Trash2 } from "lucide-react";
+import { LockerEntrySheet } from "@/components/LockerEntrySheet";
 import { toast } from "sonner";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
@@ -46,39 +39,6 @@ import { SectionTitle } from "@/components/SectionTitle";
 function pdfNum(n: number, currency?: string): string {
   return `${n < 0 ? "-" : ""}${fmtCcyNumber(n, currency)}`;
 }
-
-/**
- * Who the money is with, on "Record transaction". Each party is recorded
- * through the same form, and into the same books, as on Payments — a supplier's
- * payment settles their bills, a factory's its making charges, a team member's
- * pay lands on their salary ledger, an expense in Expenses and Profit & Loss, a
- * client's money on their invoices (a numbered receipt), a refund off their
- * credit, a broker's on the broker's account. "Other" is an entry in this
- * account only: an owner's deposit or drawing, bank charges.
- */
-type Who = "client" | "supplier" | "factory" | "broker" | "employee" | "expense" | "other";
-const WHO: Record<Who, { label: string; icon: LucideIcon; hint: Record<"in" | "out", string>; rupees?: boolean; admin?: "in" }> = {
-  client: { label: "Client", icon: Users, hint: { in: "Their payment — on their invoices, as a numbered receipt", out: "Refund their held credit" } },
-  supplier: { label: "Supplier", icon: Truck, rupees: true, hint: { in: "A refund, or money back on returned goods", out: "Their bill, or an advance" } },
-  factory: { label: "Factory", icon: FactoryIcon, rupees: true, hint: { in: "", out: "Making charges, or an advance" } },
-  broker: { label: "Broker", icon: Handshake, rupees: true, admin: "in", hint: { in: "Money they collected for us", out: "One payment — he pays the suppliers and keeps his brokerage" } },
-  employee: { label: "Employee", icon: UserRound, hint: { in: "", out: "Salary, an advance or a bonus — on their salary ledger" } },
-  expense: { label: "Expense", icon: Receipt, hint: { in: "", out: "Rent, courier, office… — in Expenses and Profit & Loss" } },
-  other: { label: "Other", icon: MoreHorizontal, hint: { in: "Owner's deposit, extra income — this account only", out: "Owner's drawing, bank charges — this account only" } },
-};
-/** What each party's form reads beyond this page's own records — asked for
- *  when it is picked, and the form waits for them (a supplier's balance read
- *  before their bills arrive would be wrong). */
-const WHO_NEEDS: Partial<Record<Who, readonly LazyCol[]>> = {
-  client: ["clientReceipts"],
-  supplier: TOTALS_COLS.supplier,
-  factory: TOTALS_COLS.factory,
-  broker: ["purchases", "supplierSales", "supplierReceipts"],
-};
-const WHO_FOR: Record<"in" | "out", Who[]> = {
-  in: ["client", "supplier", "broker", "other"],
-  out: ["supplier", "factory", "broker", "employee", "expense", "client", "other"],
-};
 
 /** A line of the ledger table. `t: null` is the opening balance — pinned under
  *  the oldest entry, never sorted or searched with the rest. */
@@ -111,28 +71,8 @@ export function LockerPage() {
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
   const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "transfer_in" | "transfer_out">("all");
-  const [txnMode, setTxnMode] = useState(false);
-  const [txnType, setTxnType] = useState<"income" | "expense" | "transfer_out">("expense");
-  const [txnAmount, setTxnAmount] = useState("");
-  const [txnCategory, setTxnCategory] = useState("");
-  // Managed in Settings → Categories, and required on every entry so the ledger
-  // can be grouped and totalled rather than holding free text.
-  // The fallback is db.ts's list, shared with Payments and Settings → Categories.
-  const lockerCats = db.settings.lockerCategories?.length
-    ? db.settings.lockerCategories
-    : DEFAULT_LOCKER_CATEGORIES;
-  const [txnNote, setTxnNote] = useState("");
-  const [txnTargetLocker, setTxnTargetLocker] = useState("");
-  // "1 from = rate to": for a transfer, this locker → the destination; for a
-  // client's payment, 1 USD in this locker's currency. Cleared whenever the
-  // pair changes, so a rate typed for one pair is never saved for another.
-  const [txnExchangeRate, setTxnExchangeRate] = useState<number | "">("");
-  // Who the money is with (WHO above). Nothing until it is picked: the form
-  // that follows depends on it.
-  const [txnWho, setTxnWho] = useState<Who | null>(null);
-  // The panel's footer, where an embedded form puts its totals and Save.
-  const [txnFoot, setTxnFoot] = useState<HTMLDivElement | null>(null);
-  const whoReady = useLoaded(txnMode && txnWho ? WHO_NEEDS[txnWho] ?? [] : []);
+  // "Record entry" — one form for every entry (components/LockerEntrySheet).
+  const [entryOpen, setEntryOpen] = useState(false);
   // Repairing an income row that was typed in as a loose entry when it was
   // really a client payment — the cash is already in the locker, only the
   // allocation to their orders is missing. (src/components/ApplyToClientDialog.tsx)
@@ -255,83 +195,6 @@ export function LockerPage() {
     ];
   };
 
-  const recordTxn = async () => {
-    if (!selected) return;
-    const amt = Number(txnAmount);
-    if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
-    if (txnType !== "transfer_out" && !txnCategory) { toast.error("Choose a category"); return; }
-    if (txnType === "transfer_out" && !txnTargetLocker) { toast.error("Choose a destination locker"); return; }
-    const target = txnType === "transfer_out" ? lockers.find(l => l.id === txnTargetLocker) : undefined;
-    const currency = ccy(selected.currency);
-    const targetCcy = target ? ccy(target.currency) : currency;
-    const crossCurrency = !!target && targetCcy !== currency;
-    const rate = Number(txnExchangeRate);
-    if (crossCurrency && (!rate || rate <= 0)) { toast.error("Enter a valid exchange rate"); return; }
-    // Overdraw warning — money leaving the locker (expense / transfer out) that
-    // would take it below zero is almost always a mistake (wrong locker, or a
-    // deposit that was never recorded). Warn, but let them proceed knowingly.
-    // Reads only the SOURCE locker's own balance/currency, and the raw,
-    // unconverted amount leaving it — correct as-is for cross-currency transfers too.
-    if (txnType === "expense" || txnType === "transfer_out") {
-      const bal = lockerBalance(selected, db.lockerTransactions);
-      if (amt > bal) {
-        const ok = (await confirmBox(
-          `This ${txnType === "expense" ? "expense" : "transfer"} of ${fmtCcy(amt, currency)} is more than ${selected.name}'s balance of ${fmtCcy(bal, currency)} ${currency}.\n\nThe balance will go negative. Continue only if you're sure a deposit is still missing.`,
-        ));
-        if (!ok) return;
-      }
-    }
-    const now = new Date().toISOString();
-    // Everything that can refuse this entry is checked BEFORE the voucher
-    // number is claimed. A number taken and then not used leaves a hole in the
-    // book that nothing closes — which is exactly how the invoice sequence
-    // ended up missing five numbers.
-    if (txnType === "transfer_out" && !db.lockers.find(l => l.id === txnTargetLocker)) {
-      toast.error("That destination locker couldn't be found — pick it again and retry.");
-      return;
-    }
-
-    // A voucher number is what a person quotes when they refer to a cash entry.
-    // Reserved in the database, so two people banking at once cannot share one.
-    const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
-    const xferId = uid("xfer_");
-    updateDb(d => {
-      if (!d.lockerTransactions) d.lockerTransactions = [];
-      if (txnType === "transfer_out") {
-        const target = d.lockers.find(l => l.id === txnTargetLocker);
-        if (!target) return;
-        // Any two currencies: the rate is "1 of this locker's = rate of the
-        // destination's", so what arrives is simply amount × rate.
-        const destAmount = crossCurrency ? roundCcy(amt * rate, targetCcy) : amt;
-        // The same rate on both legs ({fx}, plus the old ₹-per-$ figure for a
-        // rupee/dollar pair); nothing at all on a same-currency transfer.
-        const fx = crossCurrency ? rateFields(currency, targetCcy, rate) : {};
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency,
-          category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: target.id, note: txnNote.trim() || undefined,
-          ...fx,
-          recordedBy: user!.id, createdAt: now,
-        });
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: target.id, type: "transfer_in", amountInr: destAmount, currency: targetCcy,
-          category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: selected.id, note: txnNote.trim() || undefined,
-          ...fx,
-          recordedBy: user!.id, createdAt: now,
-        });
-      } else {
-        // "Other": an entry in this account only. Money with a client,
-        // supplier, factory, broker or team member, and a business expense,
-        // go through their own forms (WHO) so they reach their books.
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId: selected.id, type: txnType, amountInr: amt, currency,
-          category: txnCategory || undefined, refType: "manual", voucherNo: voucher,
-          note: txnNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
-        });
-      }
-    });
-    toast.success("Transaction recorded");
-    setTxnAmount(""); setTxnCategory(""); setTxnNote(""); setTxnTargetLocker(""); setTxnExchangeRate(""); setTxnMode(false);
-  };
 
   /** A ledger row's ⋯: apply loose money to a client's bill, correct or cancel
    *  it — or, for a row made by another record, where that is done. */
@@ -531,7 +394,8 @@ export function LockerPage() {
       <PageHeader
         title="Locker"
         subtitle="Bank and cash accounts"
-        primary={can("locker", "add") ? { label: "New Locker", icon: Plus, onClick: () => setOpen(true) } : null}
+        primary={can("locker", "add") || can("payments", "add") ? { label: "Record entry", icon: Plus, onClick: () => setEntryOpen(true), disabled: lockers.length === 0 } : null}
+        menu={can("locker", "add") ? [{ label: "New account", icon: Landmark, hint: "A bank or cash account", onSelect: () => setOpen(true) }] : undefined}
       />
       {can("locker", "add") && <LockerCreateDialog open={open} onOpenChange={setOpen} />}
 
@@ -548,8 +412,8 @@ export function LockerPage() {
               role="button"
               tabIndex={0}
               aria-pressed={isSelected}
-              onClick={() => { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); }}
-              onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) { setSelectedId(l.id); setTxnMode(false); setTxnExchangeRate(""); } }}
+              onClick={() => setSelectedId(l.id)}
+              onKeyDown={e => { if (e.key === "Enter" && e.target === e.currentTarget) setSelectedId(l.id); }}
               className={`card-luxe snap-start shrink-0 flex-1 min-w-[15rem] sm:min-w-0 px-4 py-3.5 text-left transition-all cursor-pointer relative ${isSelected ? "ring-2 ring-primary" : "hover:shadow-md"} ${off ? "opacity-70" : ""}`}
             >
               {/* The account's own menu. Its clicks (portalled, but still bubbling
@@ -589,16 +453,7 @@ export function LockerPage() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-4 sm:p-5 space-y-4">
           <SectionTitle title="Ledger" icon={History}
             sub={`${selected.name}${selectedInactive ? " · inactive" : ""}`}
-            info={selectedInactive ? "Inactive — activate it from its card's ⋯ to record entries." : undefined}
-            actions={can("locker", "add") && (
-              // A deactivated account takes no new money — greyed, saying why.
-              // Outlined: "New Locker" in the header is the page's one main button.
-              <Button variant="outline" onClick={() => { setTxnWho(null); setTxnMode(true); }} disabled={selectedInactive}
-                title={selectedInactive ? "Inactive — activate it from its card's ⋯ to record entries" : undefined}
-                className="rounded-xl gap-2">
-                <Plus className="h-4 w-4" /> Record Transaction
-              </Button>
-            )} />
+            info={selectedInactive ? "Inactive — activate it from its card's ⋯ to record entries." : undefined} />
 
           {/* Opening balance — the starting point every running balance builds on —
               pinned at the very bottom (after the oldest entry) so the numbers make sense.
@@ -661,184 +516,8 @@ export function LockerPage() {
         </motion.div>
       )}
 
-      {/* Record Transaction slides in over the ledger instead of pushing it down,
-          so the entry being matched stays in view. Money in or out, then who it
-          is with: each party opens its own form right here (the one Payments
-          uses), with this account already chosen — so the money reaches that
-          party's books, not just this ledger. Transfers and "Other" are this
-          account's own entries. */}
-      {selected && (() => {
-        const sym = ccySymbol(selected.currency).trim();
-        const amt = Number(txnAmount) || 0;
-        const bal = lockerBalance(selected, db.lockerTransactions);
-        const after = bal + (txnType === "income" ? amt : -amt);
-        const dir: "in" | "out" = txnType === "income" ? "in" : "out";
-        const rupees = ccy(selected.currency) === "INR";
-        const mayPay = can("payments", "add");
-        const isAdmin = user?.role === "admin";
-        const who = txnType === "transfer_out" ? null : txnWho;
-        // Why a party can't be picked here, or nothing when it can.
-        const whyNot = (w: Who): string | undefined => {
-          if (w === "other") return undefined;
-          if (!mayPay) return needsAccess("payments", "add");
-          if (WHO[w].rupees && !rupees) return `In rupees only — record it from an INR account`;
-          if (WHO[w].admin === dir && !isAdmin) return "Admins only";
-          return undefined;
-        };
-        // This page's own entry: a transfer, or "Other".
-        const own = txnType === "transfer_out" || who === "other";
-        const embed = { open: txnMode, onOpenChange: setTxnMode, lockerId: selected.id, frame: embedFrame(txnFoot) };
-        const pickType = (t: typeof txnType) => { setTxnType(t); setTxnWho(null); setTxnExchangeRate(""); };
-        const cancelOnly = (
-          <div className="flex items-center justify-end">
-            <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
-          </div>
-        );
-        const ownFooter = (
-          <div className="space-y-3">
-            {amt > 0 && (
-              <div className="flex items-end justify-between gap-3 flex-wrap">
-                <div className="min-w-0">
-                  <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
-                    {txnType === "income" ? "Money in" : txnType === "expense" ? "Money out" : "Transfer out"}
-                  </p>
-                  <p className={`font-display text-xl font-bold tabular-nums leading-tight ${txnType === "income" ? "text-success" : "text-destructive"}`}>{fmtCcy(amt, selected.currency)}</p>
-                </div>
-                <p className="text-xs text-muted-foreground text-right">
-                  Balance after <span className={`font-semibold ${after < 0 ? "text-destructive" : "text-foreground"}`}>{fmtCcy(after, selected.currency)}</span>
-                </p>
-              </div>
-            )}
-            <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setTxnMode(false)} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
-              <AsyncButton onClick={recordTxn} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save</AsyncButton>
-            </div>
-          </div>
-        );
-        return (
-          <ActionSheet open={txnMode} onOpenChange={setTxnMode} size={who === "broker" && dir === "out" ? "lg" : "md"}
-            icon={selected.type === "bank" ? Landmark : Wallet}
-            title="Record Transaction"
-            description={<>{selected.name} · {ccy(selected.currency)} · balance {fmtCcy(bal, selected.currency)}</>}
-            footer={<>{own ? ownFooter : !who || !whoReady ? cancelOnly : null}<div ref={setTxnFoot} /></>}>
-            <div className="space-y-4">
-              {/* 1. In, out, or between our own accounts. */}
-              <div className="grid grid-cols-3 gap-1 p-1 bg-secondary rounded-xl" role="radiogroup" aria-label="Type">
-                {([
-                  ["income", "Money in", ArrowDownCircle],
-                  ["expense", "Money out", ArrowUpCircle],
-                  ["transfer_out", "Transfer", ArrowLeftRight],
-                ] as const).map(([t, label, Icon]) => (
-                  <button key={t} type="button" role="radio" aria-checked={txnType === t} onClick={() => pickType(t)}
-                    className={`h-9 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors ${txnType === t ? "bg-white shadow-soft text-brand-dark" : "text-muted-foreground hover:text-foreground"}`}>
-                    <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span>
-                  </button>
-                ))}
-              </div>
-
-              {/* 2. Who it is with. */}
-              {txnType !== "transfer_out" && (
-                <div>
-                  <Label className="text-xs">{dir === "in" ? "Received from" : "Paid to"}</Label>
-                  <div className="mt-1.5 grid grid-cols-2 sm:grid-cols-3 gap-2" role="radiogroup" aria-label={dir === "in" ? "Received from" : "Paid to"}>
-                    {WHO_FOR[dir].map(w => {
-                      const why = whyNot(w);
-                      const on = who === w;
-                      const Icon = w === "client" && dir === "out" ? Undo2 : WHO[w].icon;
-                      return (
-                        <button key={w} type="button" role="radio" aria-checked={on} disabled={!!why}
-                          title={why ?? WHO[w].hint[dir]} onClick={() => setTxnWho(w)}
-                          className={`h-10 px-2.5 rounded-xl border text-sm font-medium inline-flex items-center gap-2 transition-colors disabled:opacity-45 disabled:cursor-not-allowed ${on ? "border-primary bg-primary/10 text-primary" : "border-border bg-white text-foreground hover:border-primary/50"}`}>
-                          <Icon className="h-4 w-4 shrink-0" />
-                          <span className="truncate">{w === "client" && dir === "out" ? "Client refund" : WHO[w].label}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-1.5">
-                    {who ? WHO[who].hint[dir] : "Choose who the money is with — it is recorded in their account too."}
-                  </p>
-                  {who === "other" && dir === "out" && (
-                    <p className="text-[11px] text-amber-700 mt-1">This account only — not in Expenses or Profit &amp; Loss. A business expense goes under Expense; pay to an employee under Employee.</p>
-                  )}
-                </div>
-              )}
-
-              {/* 3a. A party: its own form, this account already chosen. */}
-              {!own && who && !whoReady && (
-                <p className="border-t border-border/60 pt-4 text-sm text-muted-foreground">Loading their account…</p>
-              )}
-              {!own && who && whoReady && (
-                <div className="border-t border-border/60 pt-4">
-                  {who === "client" && dir === "in" && <ReceiveFromClient {...embed} />}
-                  {who === "client" && dir === "out" && <RefundClientSheet {...embed} />}
-                  {who === "supplier" && <PaySupplier {...embed} key={dir} preset={dir === "in" ? "receive" : "pay"} lockDir />}
-                  {who === "factory" && <PayFactory {...embed} />}
-                  {who === "broker" && dir === "out" && <PayBrokerSheet {...embed} />}
-                  {who === "broker" && dir === "in" && <ReceiveFromBrokerSheet {...embed} />}
-                  {who === "employee" && <PayExpense {...embed} key="employee" forEmployee />}
-                  {who === "expense" && <PayExpense {...embed} key="expense" />}
-                </div>
-              )}
-
-              {/* 3b. This account's own entry: a transfer, or "Other". */}
-              {own && (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <Label className="text-xs">Amount ({sym})</Label>
-                    <Input type="number" min={1} value={txnAmount} onChange={e => setTxnAmount(e.target.value)} className="rounded-xl h-10 mt-1" placeholder={`Amount (${sym})`} />
-                  </div>
-                  {txnType === "transfer_out" ? (
-                    <div>
-                      <Label className="text-xs">To locker *</Label>
-                      <Select value={txnTargetLocker} onValueChange={v => { setTxnTargetLocker(v); setTxnExchangeRate(""); }}>
-                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Destination locker" /></SelectTrigger>
-                        <SelectContent>
-                          {lockers.filter(l => l.id !== selected.id).map(l => {
-                            const sameCcy = ccy(l.currency) === ccy(selected.currency);
-                            return <SelectItem key={l.id} value={l.id}>{l.name} {sameCcy ? "(same currency)" : `(${ccy(l.currency)})`}</SelectItem>;
-                          })}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  ) : (
-                    <div>
-                      <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
-                      <Select value={txnCategory} onValueChange={setTxnCategory}>
-                        <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Category *" /></SelectTrigger>
-                        <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-                      </Select>
-                    </div>
-                  )}
-                  <div className="sm:col-span-2">
-                    <Label className="text-xs">Note</Label>
-                    <Input value={txnNote} onChange={e => setTxnNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Note (optional)" />
-                  </div>
-                </div>
-              )}
-
-              {txnType === "transfer_out" && txnTargetLocker && (() => {
-                const target = lockers.find(l => l.id === txnTargetLocker);
-                if (!target) return null;
-                const fromCcy = ccy(selected.currency), toCcy = ccy(target.currency);
-                if (fromCcy === toCcy) return null;
-                return (
-                  <div className="p-3 rounded-xl bg-secondary space-y-2">
-                    {/* Shows what the amount becomes in the destination's currency. */}
-                    <RateInput id="txn-transfer-rate" from={fromCcy} to={toCcy}
-                      value={txnExchangeRate} onChange={setTxnExchangeRate} amount={amt || undefined} />
-                    {!(Number(txnExchangeRate) > 0) && (
-                      <p className="text-xs text-muted-foreground">
-                        {target.name} holds {toCcy} — enter the rate to save.
-                      </p>
-                    )}
-                  </div>
-                );
-              })()}
-            </div>
-          </ActionSheet>
-        );
-      })()}
+      {/* Every entry, one form: account · in / out / transfer · who · amount… */}
+      <LockerEntrySheet open={entryOpen} onOpenChange={setEntryOpen} lockerId={selected?.active === false ? undefined : selected?.id} />
 
       <Dialog open={!!editId} onOpenChange={open => !open && setEditId(null)}>
         <DialogContent className="max-w-2xl rounded-2xl">

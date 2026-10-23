@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { type Share } from "@/lib/db";
@@ -11,8 +11,11 @@ import { confirmBox } from "@/lib/confirm";
 
 /** Shares an entire folder (all its images + videos, incl. sub-folders) as a
  *  public, no-login link. Drops into the Catalog and Product Photos folder views. */
-export function ShareFolderButton({ kind, folderId, folderName, compact }: {
+export function ShareFolderButton({ kind, folderId, folderName, compact, autoOpen, onClose }: {
   kind: Share["kind"]; folderId: string; folderName: string; compact?: boolean;
+  /** Opened from a folder's ⋯ ("Share link"): no button of its own — the link
+   *  is made (or the existing one shown) at once, and onClose runs when done. */
+  autoOpen?: boolean; onClose?: () => void;
 }) {
   const { user } = useAuth();
   const db = useDb(); // re-render when shares change
@@ -26,18 +29,30 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
 
   const generate = async (refresh: boolean) => {
     setBusy(true);
+    // No button to spin when opened from a folder's ⋯ — say it is working.
+    const wait = autoOpen && !refresh ? toast.loading(`Making a link for ${folderName}…`) : undefined;
     try {
       const { items, folders } = await buildSnapshot();
-      if (items.length === 0) { toast.error("This folder has no photos or videos to share yet."); return; }
+      if (items.length === 0) { toast.error("This folder has no photos or videos to share yet."); if (!refresh) onClose?.(); return; }
       await saveShare({ kind, sourceFolderId: folderId, title: folderName, items, folders, createdBy: user!.id });
       setOpen(true);
       if (refresh) toast.success(`Link updated · ${items.length} item${items.length !== 1 ? "s" : ""}`);
       if (items.length >= MAX_SHARE_ITEMS) toast.message(`Shared the first ${MAX_SHARE_ITEMS} items (folder is very large).`);
-    } catch { toast.error("Couldn't create the share link."); }
-    finally { setBusy(false); }
+    } catch { toast.error("Couldn't create the share link."); if (!refresh) onClose?.(); }
+    finally { setBusy(false); if (wait !== undefined) toast.dismiss(wait); }
   };
 
   const onClick = () => { if (existing) setOpen(true); else generate(false); };
+  // From a folder's ⋯: straight to the link, once.
+  // Once only — development mode mounts twice, and two at once would make two links.
+  const started = useRef(false);
+  useEffect(() => {
+    if (!autoOpen || started.current) return;
+    started.current = true;
+    onClick();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const setOpenAndTell = (v: boolean) => { setOpen(v); if (!v) onClose?.(); };
 
   const url = existing ? shareUrl(existing.id) : "";
   const copy = async () => {
@@ -48,7 +63,7 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
     if (!existing) return;
     if (!(await confirmBox("Stop sharing this folder? The public link will stop working."))) return;
     void deleteShare(existing.id, existing.pageCount);
-    setOpen(false);
+    setOpenAndTell(false);
     toast.success("Sharing stopped");
   };
 
@@ -69,7 +84,7 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
 
   return (
     <>
-      <button
+      {!autoOpen && <button
         onClick={onClick}
         disabled={busy}
         className={compact
@@ -79,9 +94,9 @@ export function ShareFolderButton({ kind, folderId, folderName, compact }: {
         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
         {existing ? "Shared" : "Share"}
         {existing && <span className="h-1.5 w-1.5 rounded-full bg-success" />}
-      </button>
+      </button>}
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={setOpenAndTell}>
         <DialogContent className="max-w-xl rounded-2xl">
           <DialogHeader>
             <DialogTitle className="font-display text-xl flex items-center gap-2"><Link2 className="h-5 w-5 text-primary" /> Public link</DialogTitle>

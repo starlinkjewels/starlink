@@ -9,6 +9,7 @@ import { fmtMoneyInr, lockerBalance, purchasePending } from "@/lib/manufacturing
 import { ccy } from "@/lib/currency";
 import { confirmBox } from "@/lib/confirm";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { writeBrokerPayment } from "@/lib/partyPayments";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Button } from "@/components/ui/button";
@@ -107,28 +108,10 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId
       const at = stampFor(date);
       const txnId = uid("ltx_");
       const lines = bills.filter(p => Number(alloc[p.id] ?? 0) > 0);
-      updateDb(d => {
-        if (amt > 0 && locker) {
-          if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({
-            id: txnId, lockerId: locker.id, type: "expense", amountInr: amt, currency: "INR",
-            category: `Paid to broker ${broker.name}${lines.length ? ` — ${lines.length} bill${lines.length === 1 ? "" : "s"}` : ""}`,
-            refType: "brokerPayment", refId: broker.id,
-            note: note.trim() || undefined, recordedBy: user!.id, createdAt: at,
-          });
-        }
-        // Each bill he pays: a supplier payment through him — no account of its own.
-        for (const p0 of lines) {
-          const p = d.purchases.find(x => x.id === p0.id);
-          if (!p) continue;
-          if (!p.payments) p.payments = [];
-          p.payments.push({
-            id: uid("ppay_"), amountInr: r2(Number(alloc[p0.id])), lockerId: "",
-            viaBrokerId: broker.id, brokerPaymentId: amt > 0 ? txnId : undefined,
-            recordedBy: user!.id, createdAt: at, note: `Via broker ${broker.name}${note.trim() ? ` · ${note.trim()}` : ""}`,
-          });
-        }
-      });
+      updateDb(d => writeBrokerPayment(d, {
+        brokerId: broker.id, lockerId: amt > 0 ? locker?.id : undefined, amount: amt, txnId, note, userId: user!.id, at,
+        lines: lines.map(p => ({ purchaseId: p.id, amount: Number(alloc[p.id]) })),
+      }));
       toast.success(`${amt > 0 ? `${fmtMoneyInr(amt)} to ${broker.name}` : `From what ${broker.name} holds`}${lines.length ? ` · ${lines.length} bill${lines.length === 1 ? "" : "s"} settled` : ""}`);
       reset();
       onOpenChange(false);
