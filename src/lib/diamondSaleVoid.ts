@@ -52,6 +52,16 @@ export function canVoidSale(db: DB, sale: DiamondSale): { ok: boolean; reason?: 
   return { ok: true };
 }
 
+/** Every account entry the sale brought in: its money when made, and each
+ *  payment taken later on an unpaid sale (all tagged to it), or — an older
+ *  sale — the one matched by account, amount and moment. */
+export function saleTxns(txns: LockerTransaction[] | undefined, sale: DiamondSale): LockerTransaction[] {
+  const tagged = (txns ?? []).filter(t => t.refType === "diamondSale" && t.refId === sale.id);
+  if (tagged.length) return tagged;
+  const one = saleTxn(txns, sale);
+  return one ? [one] : [];
+}
+
 /** What reversing it changes, spelled out before it is confirmed. */
 export function saleVoidImpact(db: DB, sale: DiamondSale): string[] {
   const out: string[] = [];
@@ -62,11 +72,12 @@ export function saleVoidImpact(db: DB, sale: DiamondSale): string[] {
     ? (db.clients.find(c => c.id === sale.clientId)?.companyName ?? "the client")
     : (sale.buyerName ?? "the buyer");
   out.push(`• the sale to ${buyer} is removed`);
-  const txn = saleTxn(db.lockerTransactions, sale);
-  if (txn) {
+  const txns = saleTxns(db.lockerTransactions, sale);
+  for (const txn of txns) {
     const locker = db.lockers.find(l => l.id === txn.lockerId);
     out.push(`• ${locker?.name ?? "the account"} goes down by ${fmtCcy(txn.amountInr, txn.currency ?? proceedsCcy(sale))}`);
-  } else if (sale.lockerId) {
+  }
+  if (!txns.length && sale.lockerId) {
     // Said rather than assumed: nothing will come off the account.
     out.push("• no account entry was found for its money, so no account changes");
   }
@@ -94,9 +105,9 @@ export async function voidDiamondSale(db: DB, sale: DiamondSale, userId: string)
       if (p && p.status === "sold") { p.status = "in_stock"; p.orderId = undefined; }
     }
     d.diamondSales = (d.diamondSales ?? []).filter(s => s.id !== sale.id);
-    // The money it brought in — by its tag, or (an older sale) by the
-    // account, the amount and the moment. See saleTxn.
-    const txn = saleTxn(d.lockerTransactions, sale);
-    if (txn) d.lockerTransactions = d.lockerTransactions.filter(t => t.id !== txn.id);
+    // The money it brought in — every entry tagged to it (its payments too),
+    // or (an older sale) the one found by account, amount and moment.
+    const gone = new Set(saleTxns(d.lockerTransactions, sale).map(t => t.id));
+    if (gone.size) d.lockerTransactions = d.lockerTransactions.filter(t => !gone.has(t.id));
   });
 }

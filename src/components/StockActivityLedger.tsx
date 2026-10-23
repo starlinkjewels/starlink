@@ -8,7 +8,10 @@ import {
   canEditPurchase, canVoidPurchase, editPurchase, purchaseLabel, voidImpact, purchaseEditScope,
   voidPurchase as voidPurchaseCascade, type PurchaseEdit,
 } from "@/lib/purchaseVoid";
-import { ExternalLink, Gem, Pencil, ShoppingCart, Trash2 } from "lucide-react";
+import { ExternalLink, Gem, HandCoins, Pencil, ShoppingCart, Trash2 } from "lucide-react";
+import { SalePaymentSheet } from "@/components/SalePaymentSheet";
+import { saleCcy, saleOwed } from "@/lib/diamondSalePay";
+import { fmtCcy } from "@/lib/currency";
 import { StatStrip } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
@@ -17,7 +20,7 @@ import { OpeningStockEditSheet, openingStockActions } from "@/components/Opening
 import { needsAccess } from "@/lib/actionHints";
 import { canVoidSale, saleVoidImpact, voidDiamondSale } from "@/lib/diamondSaleVoid";
 import { toast } from "sonner";
-import { fmtDate, type MaterialIssuance, type Purchase, type StockMovement } from "@/lib/db";
+import { fmtDate, type DiamondSale, type MaterialIssuance, type Purchase, type StockMovement } from "@/lib/db";
 import { fmtMoneyInr, discountLabel } from "@/lib/manufacturing";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
@@ -86,6 +89,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
+  // Money for a diamond sold on credit (lib/diamondSalePay.ts).
+  const [paySale, setPaySale] = useState<DiamondSale | null>(null);
   const [editingOpening, setEditingOpening] = useState<StockMovement | null>(null);
   const navigate = useNavigate();
   // Stock and what was issued to a factory are changed by an admin only — as
@@ -289,7 +294,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
         : [bagNoOf(db, s.bucket || s.shape), s.bucket || s.shape, s.pieces ? `${s.pieces} pcs` : undefined].filter(Boolean).join(" · "),
       rate: s.ratePerCarat || undefined,
       mats: ["diamond"], co: companyOf(s),
-      qty: s.carat, unit: "ct", amountInr: s.totalInr, remark: s.notes,
+      qty: s.carat, unit: "ct", amountInr: s.totalInr,
+      // On credit: what is still owed, where the remark is read.
+      remark: [s.unpaid ? (saleOwed(db.lockerTransactions, s) > 0 ? `Owes ${fmtCcy(saleOwed(db.lockerTransactions, s), saleCcy(s))}` : "Paid in full") : "", s.notes].filter(Boolean).join(" · ") || undefined,
     });
   }
 
@@ -389,6 +396,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   // paid, already used — is greyed out with the reason, never left out and
   // never refused only after the click.
   const mayEdit = can("buyAssign", "edit"), mayDelete = can("buyAssign", "delete");
+  const mayAddMoney = can("payments", "add");
   // Why a pool delivery / opening stock may not be changed by this person.
   const issueDenied = !isAdmin ? ISSUE_ADMIN_ONLY : undefined;
   const stockDenied = !isAdmin ? STOCK_ADMIN_ONLY : undefined;
@@ -429,6 +437,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       if (!sale) return [];
       const voidable = canVoidSale(db, sale);
       return [
+        ...(sale.unpaid ? [{ label: "Receive payment", icon: HandCoins, onSelect: () => setPaySale(sale), disabled: !mayAddMoney,
+          hint: !mayAddMoney ? needsAccess("payments", "add") : saleOwed(db.lockerTransactions, sale) > 0 ? `${fmtCcy(saleOwed(db.lockerTransactions, sale), saleCcy(sale))} still owed` : "Paid in full — see the payments" }] : []),
         ...(sale.clientId ? [viewAction("View client", r.party, `/clients/${sale.clientId}`, "clients")] : []),
         // A sale moves a stone, a buyer and money at once; correcting one of
         // them alone is how they fall out of step.
@@ -569,6 +579,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
         lockNote={editing ? purchaseEditScope(db, editing).reason : undefined}
       />
       <IssuanceEditSheet issuance={editingIssuance} onClose={() => setEditingIssuance(null)} />
+      <SalePaymentSheet sale={paySale} onClose={() => setPaySale(null)} />
       <OpeningStockEditSheet movement={editingOpening} onClose={() => setEditingOpening(null)} />
     </div>
   );

@@ -66,7 +66,7 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   // the sale, not alone — the day book and Account entries read that (ENTRY_COLS).
   "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments", "diamondSales", "supplierSales"],
   "/clients": [],
-  "/clients/:id": ["clientReceipts", "lockerTransactions"],
+  "/clients/:id": ["clientReceipts", "lockerTransactions", "diamondSales", "diamondPackets"],
   "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales"],
   "/factories/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "factoryPayments"],
   // + materialIssuances: its Opening stock form (Buy & Assign's) records opening gold at a factory.
