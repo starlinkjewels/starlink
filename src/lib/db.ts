@@ -1242,8 +1242,26 @@ export interface DiamondSale {
   clientId?: string; // set iff sold to an existing client
   buyerName?: string; // free text — set iff no clientId
   lockerId?: string; // set iff sale proceeds were deposited into a Locker
+  /** Saved as "Not received yet": the buyer owes the total until payments
+   *  cover it (lib/diamondSalePay.ts). Unset on a sale paid at once — and on
+   *  every sale made before this, which is never read as owed. */
+  unpaid?: boolean;
+  /** Money received for an unpaid sale, each into an account (in the sale's currency). */
+  payments?: DiamondSalePayment[];
   notes?: string;
   soldBy: string; // userId
+  createdAt: string;
+}
+
+export interface DiamondSalePayment {
+  id: string;
+  /** In the sale's currency — dollars for a sale in dollars, else rupees. */
+  amount: number;
+  lockerId: string;
+  /** The account entry it made (refType "diamondSale", refId the sale). */
+  lockerTxnId: string;
+  note?: string;
+  recordedBy: string;
   createdAt: string;
 }
 

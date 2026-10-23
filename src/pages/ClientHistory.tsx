@@ -51,6 +51,9 @@ import { FileSpreadsheet } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
 import { clientRefunds, deleteClientRefund } from "@/lib/clientRefunds";
+import { saleCcy, saleOwed, saleReceived, saleTotal } from "@/lib/diamondSalePay";
+import { SalePaymentSheet } from "@/components/SalePaymentSheet";
+import type { DiamondSale } from "@/lib/db";
 import type { LockerTransaction } from "@/lib/db";
 
 /**
@@ -93,6 +96,8 @@ function ClientHistoryPageBody() {
   const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
   // Paying their held credit back (lib/clientRefunds.ts).
   const [refunding, setRefunding] = useState(false);
+  // Taking money for a diamond sold to them on credit (lib/diamondSalePay.ts).
+  const [paySale, setPaySale] = useState<DiamondSale | null>(null);
 
   const client = db.clients.find(c => c.id === id);
 
@@ -293,6 +298,27 @@ function ClientHistoryPageBody() {
   const removeClient = async () => {
     if (await deleteClientFlow(id!)) navigate("/clients");
   };
+
+  // ── Diamonds sold to them out of stock (Buy & Assign → Sell a diamond) ──
+  const diamondSales = (db.diamondSales ?? []).filter(x => x.clientId === id);
+  const owedByCcy = (["INR", "USD"] as const)
+    .map(c => ({ c, v: diamondSales.filter(x => saleCcy(x) === c).reduce((t, x) => t + saleOwed(db.lockerTransactions, x), 0) }))
+    .filter(x => x.v > 0.005).map(x => fmtCcy(x.v, x.c));
+  const diamondSaleColumns: DataColumn<DiamondSale>[] = [
+    { key: "date", header: "Date", kind: "date", sortValue: x => +new Date(x.createdAt), cell: x => <CellDate>{fmtDate(x.createdAt)}</CellDate> },
+    { key: "stone", header: "Diamond", always: true, sortValue: x => x.carat,
+      cell: x => <span className="text-sm">{x.carat}ct {x.kind === "certified" ? "certified " : ""}{x.shape}{x.notes ? <span className="block text-[11px] text-muted-foreground">{x.notes}</span> : null}</span> },
+    { key: "total", header: "Sale", align: "right", kind: "number", sortValue: x => saleTotal(x), cell: x => <CellAmount>{fmtCcy(saleTotal(x), saleCcy(x))}</CellAmount> },
+    // Paid at once into an account; on credit, what has come in. An older sale saved
+    // with no account says nothing it can't show.
+    { key: "received", header: "Received", align: "right", kind: "number", sortValue: x => (x.unpaid ? saleReceived(db.lockerTransactions, x) : x.lockerId ? saleTotal(x) : 0),
+      cell: x => (x.unpaid || x.lockerId
+        ? <CellAmount tone="in">{fmtCcy(x.unpaid ? saleReceived(db.lockerTransactions, x) : saleTotal(x), saleCcy(x))}</CellAmount>
+        : <span className="text-[11px] text-muted-foreground">Not recorded</span>) },
+    { key: "owed", header: "Owed", align: "right", kind: "number", sortValue: x => saleOwed(db.lockerTransactions, x),
+      cell: x => (saleOwed(db.lockerTransactions, x) > 0 ? <CellAmount tone="out">{fmtCcy(saleOwed(db.lockerTransactions, x), saleCcy(x))}</CellAmount>
+        : x.unpaid || x.lockerId ? <CellTag tone="green">Paid</CellTag> : <span className="text-muted-foreground/60">—</span>) },
+  ];
 
   // ── Refunds: their held credit paid back ──
   const refunds = clientRefunds(db, id!);
@@ -709,6 +735,25 @@ function ClientHistoryPageBody() {
           sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
       ]} />
 
+      {/* Diamonds sold to them straight out of stock — paid at once, or on credit
+          until their payments cover it (lib/diamondSalePay.ts). */}
+      {diamondSales.length > 0 && (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Diamond sales" className="px-5 py-4 border-b border-border/60"
+            sub={owedByCcy.length ? `Still owed: ${owedByCcy.join(" + ")}` : "Sold from stock — all paid"} />
+          <div className="p-3 sm:p-4">
+            <DataTable id="client-diamond-sales" noun="sale" rows={diamondSales} rowKey={x => x.id} columns={diamondSaleColumns}
+              defaultSort={{ key: "date", dir: "desc" }} details={false}
+              rowActions={x => [
+                { label: "Receive payment", icon: Wallet, show: !!x.unpaid, disabled: !can("payments", "add"),
+                  hint: !can("payments", "add") ? needsAccess("payments", "add") : saleOwed(db.lockerTransactions, x) > 0 ? `${fmtCcy(saleOwed(db.lockerTransactions, x), saleCcy(x))} still owed` : "Paid in full — see the payments",
+                  onSelect: () => setPaySale(x) },
+                { label: "Open in Buy & Assign", icon: Eye, onSelect: () => navigate("/buy-assign"), hint: "Cancel or check the sale there" },
+              ]} />
+          </div>
+        </div>
+      )}
+
       {/* Credit paid back to them — each refund, and Delete puts the credit back. */}
       {refunds.length > 0 && (
         <div className="card-luxe overflow-hidden">
@@ -746,6 +791,7 @@ function ClientHistoryPageBody() {
       <ClientEditDialog clientId={editingClient ? client.id : null} onClose={() => setEditingClient(false)} />
       <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
       {can("payments", "add") && <RefundClientSheet open={refunding} onOpenChange={setRefunding} clientId={client.id} />}
+      <SalePaymentSheet sale={paySale} onClose={() => setPaySale(null)} />
 
       {/* Account Statement — same ledger as Stock and Locker: summary, filters,
           then every entry with a running balance. */}

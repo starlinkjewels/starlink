@@ -385,6 +385,8 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
           clientId: buyerMode === "client" ? clientId : undefined,
           buyerName: buyerMode === "other" ? buyerName.trim() : undefined,
           lockerId: paid === "now" ? lockerId || undefined : undefined,
+          // Not received yet: the buyer owes it until payments cover it (lib/diamondSalePay.ts).
+          ...(paid === "later" ? { unpaid: true } : {}),
           notes: notes.trim() || undefined,
           soldBy: user!.id, createdAt: now,
         });
@@ -524,7 +526,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
               )}</Field>
             ) : (
               <p className="text-xs rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2.5">
-                No account entry is made now. When the money comes, record it from the Locker (Record entry → Money in).
+                No account entry is made now — the buyer owes the total. It shows as owed on {buyerMode === "client" ? "the client's page and " : ""}this page's history; when the money comes, use <span className="font-semibold">Receive payment</span> on the sale.
               </p>
             )}
           </div>

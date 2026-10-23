@@ -490,7 +490,12 @@ function lockerEntries(db: DB): MoneyEntry[] {
     let locked: string | undefined, lockedWhere: string | undefined, lockedLabel: string | undefined, orphan: string | undefined;
     let unlinked: string | undefined;
     const sharers = where ? undefined : shared.get(t.id);
-    if (saleRows.has(t.id)) {
+    if (saleRows.has(t.id) && (db.diamondSales ?? []).some(s => s.id === t.refId && s.unpaid)) {
+      // A payment taken later on a diamond sold on credit (lib/diamondSalePay.ts).
+      lockedWhere = RECORDED_IN.diamondSale;
+      lockedLabel = "Remove it in the sale's Receive payment";
+      locked = "This is a payment on a diamond sold on credit. Remove it from the sale (Buy & Assign → the sale's ⋯ → Receive payment, or the client's page) — that takes it out of the account and puts it back on what they owe.";
+    } else if (saleRows.has(t.id)) {
       lockedWhere = RECORDED_IN.diamondSale;
       lockedLabel = "Cancel the sale in Buy & Assign";
       locked = "This is the money from a diamond sale. Cancelling the sale in Buy & Assign puts the stone back in stock and takes this out of the account together; changing it here would leave the two disagreeing.";
