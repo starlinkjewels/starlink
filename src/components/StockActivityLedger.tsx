@@ -81,6 +81,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const [material, setMaterial] = useState("");
   const [company, setCompany] = useState("");
   const [billFilter, setBillFilter] = useState("");
+  // One party — a supplier (bought from, or sold to), a factory, a buyer.
+  const [party, setParty] = useState("");
   const [editing, setEditing] = useState<Purchase | null>(null);
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [editingIssuance, setEditingIssuance] = useState<MaterialIssuance | null>(null);
@@ -312,6 +314,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
       if (kind && r.kind !== kind) return false;
       if (material && !r.mats.includes(material)) return false;
       if (company && r.co !== company) return false;
+      if (party && r.party !== party) return false;
       // Purchases entered before the bill number was required — the ones that
       // still need tying back to a chitthi.
       if (billFilter === "none" && r.billNo) return false;
@@ -324,7 +327,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     })
     .sort((a, b) => +new Date(b.date) - +new Date(a.date));
 
-  const filtered = !!(ql || from || to || kind || material || billFilter || company);
+  const filtered = !!(ql || from || to || kind || material || billFilter || company || party);
+  // Everyone on the ledger, for the Party filter.
+  const parties = [...new Set(all.map(r => r.party).filter(x => x && x !== "—"))].sort((a, b) => a.localeCompare(b));
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const totalOut = rows.filter(r => r.kind === "Diamond sold" || r.kind === "Sold to supplier").reduce((s, r) => s + (r.amountInr ?? 0), 0);
@@ -517,6 +522,8 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           q, onQ: setQ, placeholder: "Search bill no., party, material, remark…",
           from, to, onFrom: setFrom, onTo: setTo,
           selects: [
+            { label: "Party", value: party, onChange: setParty, allLabel: "All parties",
+              options: parties.map(x => ({ value: x, label: x })) },
             { label: "Entry", value: kind, onChange: setKind,
               options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier"].map(k => ({ value: k, label: k })) },
             { label: "Material", value: material, onChange: setMaterial,
@@ -529,7 +536,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           ],
           onPdf: exportPdf, onCsv: exportCsv,
         })}
-        resetKey={JSON.stringify([ql, from, to, kind, material, billFilter, company])}
+        resetKey={JSON.stringify([ql, from, to, kind, material, billFilter, company, party])}
         id="stock-activity"
         noun="record"
         rows={rows}
