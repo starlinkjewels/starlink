@@ -331,7 +331,8 @@ export function ShippingCostFields({ value, onChange, pieces }: {
   pieces: number;
 }) {
   const db = loadDb();
-  const lockers = (db.lockers ?? []).filter(l => l.active);
+  // Only an account switched off (active === false) is left out — older ones carry no flag at all.
+  const lockers = (db.lockers ?? []).filter(l => l.active !== false);
   const locker = lockers.find(l => l.id === value.lockerId);
   // The paying account's own currency, whatever it is (an AUD account's freight
   // is A$); with no account, the ₹ / $ the courier bills in.

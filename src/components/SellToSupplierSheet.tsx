@@ -4,7 +4,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { todayLocal, stampFor } from "@/lib/db";
-import { deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
+import { deriveStockBalances, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
+import { fmtCcy } from "@/lib/currency";
 import { lotBalances, lotLabel } from "@/lib/diamondLots";
 import { materialName, materialUnit, fmtQty } from "@/lib/materials";
 import { billBrokerageInr, type BillBrokerage } from "@/lib/brokers";
@@ -85,7 +86,8 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
 
   const suppliers = db.suppliers.filter(s => s.active !== false || s.id === supplierId).sort((a, b) => a.name.localeCompare(b.name));
   const supplier = db.suppliers.find(s => s.id === supplierId);
-  const lockers = db.lockers.filter(l => l.active && (l.currency || "INR") === "INR");
+  // Every rupee account that isn't switched off — older ones carry no "active" flag at all.
+  const lockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR");
   const co = companyId === "main" ? undefined : companyId;
   const goldBal = deriveStockBalances(db.stockMovements ?? [], "gold", companyId);
   const lots = lotBalances(db.stockMovements ?? [], companyId);
@@ -146,6 +148,7 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
     };
     const problem = saleProblem(db, input);
     if (problem) { toast.error(problem); return; }
+    if (money === "locker" && !lockerId) { toast.error("Choose the account the money went into"); return; }
     try {
       const sale = await recordSupplierSale(db, input, user!);
       toast.success(`Sold to ${supplier?.name ?? "the supplier"} — ${fmtMoneyInr(sale.totalInr)}`);
@@ -304,7 +307,7 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
                   <Field label="Into account">{id => (
                     <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
                       <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose account" /></SelectTrigger>
-                      <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+                      <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}{l.type === "bank" && l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""} · {fmtCcy(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
                     </Select>
                   )}</Field>
                 )}
