@@ -49,6 +49,9 @@ import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
+import { RefundClientSheet } from "@/components/RefundClientSheet";
+import { clientRefunds, deleteClientRefund } from "@/lib/clientRefunds";
+import type { LockerTransaction } from "@/lib/db";
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -88,6 +91,8 @@ function ClientHistoryPageBody() {
   // Before the early return below, so they run on every draw.
   const [editingClient, setEditingClient] = useState(false);
   const [editReceiptId, setEditReceiptId] = useState<string | null>(null);
+  // Paying their held credit back (lib/clientRefunds.ts).
+  const [refunding, setRefunding] = useState(false);
 
   const client = db.clients.find(c => c.id === id);
 
@@ -287,6 +292,28 @@ function ClientHistoryPageBody() {
 
   const removeClient = async () => {
     if (await deleteClientFlow(id!)) navigate("/clients");
+  };
+
+  // ── Refunds: their held credit paid back ──
+  const refunds = clientRefunds(db, id!);
+  const refundedUsd = refunds.reduce((s, t) => s + (t.refundUsd || 0), 0);
+  const refundColumns: DataColumn<LockerTransaction>[] = [
+    { key: "date", header: "Date", kind: "date", sortValue: t => +new Date(t.createdAt), cell: t => <CellDate>{fmtDate(t.createdAt)}</CellDate> },
+    { key: "account", header: "Paid from", always: true, sortValue: t => db.lockers.find(l => l.id === t.lockerId)?.name ?? "",
+      cell: t => <span className="text-sm">{db.lockers.find(l => l.id === t.lockerId)?.name ?? "Account"}{t.note ? <span className="block text-[11px] text-muted-foreground">{t.note}</span> : null}</span> },
+    { key: "usd", header: "Off their credit", align: "right", kind: "number", sortValue: t => t.refundUsd ?? 0, cell: t => <CellAmount tone="out">{fmtMoney(t.refundUsd || 0)}</CellAmount> },
+    { key: "paid", header: "Paid out", align: "right", kind: "number", sortValue: t => t.amountInr, cell: t => <CellAmount>{fmtCcy(t.amountInr, t.currency)}</CellAmount> },
+  ];
+  const removeRefund = async (t: LockerTransaction) => {
+    const acct = db.lockers.find(l => l.id === t.lockerId)?.name ?? "the account";
+    const ok = await confirmBox([
+      `Delete this refund of ${fmtMoney(t.refundUsd || 0)}?`, "",
+      `• ${fmtMoney(t.refundUsd || 0)} goes back onto ${client?.companyName ?? "their"}'s credit`,
+      `• ${acct} goes back up by ${fmtCcy(t.amountInr, t.currency)}`,
+    ], { confirmText: "Delete refund" });
+    if (!ok) return;
+    if (deleteClientRefund(t.id)) toast.success("Refund deleted — the credit is back on their account");
+    else toast.error("That refund is no longer there");
   };
 
   const receiptNo = (rid?: string) => (rid ? (db.clientReceipts ?? []).find(r => r.id === rid)?.receiptNo : undefined);
@@ -612,6 +639,9 @@ function ClientHistoryPageBody() {
         menu={[
           { label: "Apply credit", icon: CreditCard, hint: `Use ${fmtMoney(account.credit)} on what's owed`, onSelect: applyCredit,
             show: account.credit > 0 && account.outstanding > 0 && can("payments", "edit") },
+          { label: "Refund credit", icon: Undo2, onSelect: () => setRefunding(true), show: can("payments", "add"),
+            disabled: !((client.creditBalance || 0) > 0.005),
+            hint: (client.creditBalance || 0) > 0.005 ? `Pay their ${fmtMoney(client.creditBalance || 0)} back to them` : "They hold no credit to refund" },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingClient(true), disabled: !mayEditClient,
             hint: mayEditClient ? "Name, contact, address, opening balance" : needsAccess("clients", "edit") },
           { label: client.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggleClientActive(client.id), disabled: !mayEditClient,
@@ -675,8 +705,26 @@ function ClientHistoryPageBody() {
           sub: openingDebitAmt(client) > 0 ? "With balance brought forward" : undefined },
         { label: "Received", value: fmtMoney(account.allocated), tone: "in", op: "−", sub: "Applied to bills" },
         { label: "Outstanding", value: account.outstanding > 0 ? fmtMoney(account.outstanding) : "✓ Cleared", tone: account.outstanding > 0 ? "out" : "in", op: "=" },
-        { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet, sub: "Held for them" },
+        { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet,
+          sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
       ]} />
+
+      {/* Credit paid back to them — each refund, and Delete puts the credit back. */}
+      {refunds.length > 0 && (
+        <div className="card-luxe overflow-hidden">
+          <SectionTitle title="Refunds" sub="Credit paid back to them" className="px-5 py-4 border-b border-border/60" />
+          <div className="p-3 sm:p-4">
+            <DataTable id="client-refunds" noun="refund" rows={refunds} rowKey={t => t.id} columns={refundColumns}
+              defaultSort={{ key: "date", dir: "desc" }} details={false}
+              rowActions={t => [
+                { label: "Delete refund", icon: Trash2, danger: true, disabled: !mayPayDelete,
+                  hint: mayPayDelete ? "The credit goes back on their account" : needsAccess("payments", "delete"),
+                  onSelect: () => { void removeRefund(t); } },
+              ]}
+              totals={{ usd: list => fmtMoney(list.reduce((s, t) => s + (t.refundUsd || 0), 0)) }} />
+          </div>
+        </div>
+      )}
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${client.companyName} statement`} options={[
         { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
         { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
@@ -697,6 +745,7 @@ function ClientHistoryPageBody() {
       />
       <ClientEditDialog clientId={editingClient ? client.id : null} onClose={() => setEditingClient(false)} />
       <ReceiptEditSheet receiptId={editReceiptId} onClose={() => setEditReceiptId(null)} />
+      {can("payments", "add") && <RefundClientSheet open={refunding} onOpenChange={setRefunding} clientId={client.id} />}
 
       {/* Account Statement — same ledger as Stock and Locker: summary, filters,
           then every entry with a running balance. */}

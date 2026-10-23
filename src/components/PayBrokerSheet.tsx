@@ -8,7 +8,7 @@ import { allocateOldestFirst, brokerAccount, brokerPendingBills } from "@/lib/br
 import { fmtMoneyInr, lockerBalance, purchasePending } from "@/lib/manufacturing";
 import { ccy } from "@/lib/currency";
 import { confirmBox } from "@/lib/confirm";
-import { ActionSheet } from "@/components/ActionSheet";
+import { sheetFrame, type Frame } from "@/components/SheetFrame";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Button } from "@/components/ui/button";
@@ -31,10 +31,13 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  * (held) until it is marked against bills later; with nothing paid now, this
  * marks bills paid out of what he already holds.
  */
-export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
+export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId, lockerId: fixedLocker, frame = sheetFrame }: {
   open: boolean; onOpenChange: (v: boolean) => void;
   /** Paying this broker; absent = chosen in the form. */
   brokerId?: string;
+  /** Paid from this account (the Locker's "Record transaction"); absent = chosen. */
+  lockerId?: string;
+  frame?: Frame;
 }) {
   const db = useDb();
   const { user } = useAuth();
@@ -42,7 +45,8 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
   const [brokerId, setBrokerId] = useState(fixedId ?? "");
   const [amount, setAmount] = useState("");
   const [amountTyped, setAmountTyped] = useState(false);
-  const [lockerId, setLockerId] = useState("");
+  const [lockerPick, setLockerId] = useState("");
+  const lockerId = fixedLocker ?? lockerPick;
   const [note, setNote] = useState("");
   const [date, setDate] = useState(todayLocal());
   // Bill id → the amount this payment settles on it ("" = not ticked).
@@ -131,10 +135,10 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
     } finally { setSaving(false); }
   };
 
-  return (
-    <ActionSheet open={open} onOpenChange={onOpenChange} size="lg" icon={Handshake}
-      title="Pay through broker" description="One payment to the broker — he pays the suppliers and keeps his brokerage"
-      footer={
+  return frame({
+    open, onOpenChange, size: "lg", icon: Handshake,
+    title: "Pay through broker", description: "One payment to the broker — he pays the suppliers and keeps his brokerage",
+    footer: (
         <div className="flex items-end justify-between gap-3 flex-wrap">
           <div className="min-w-0">
             <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Giving the broker</p>
@@ -151,7 +155,8 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
             <AsyncButton onClick={save} disabled={saving} className="btn-hero rounded-xl h-10 px-6">{saving ? "Saving…" : "Record Payment"}</AsyncButton>
           </div>
         </div>
-      }>
+    ),
+    children: (
       <div className="space-y-4">
         {!fixedId && (
           <div>
@@ -237,7 +242,7 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
             <Input id="pb-date" type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10 mt-1" />
           </div>
         </div>
-        {amt > 0 && (
+        {amt > 0 && !fixedLocker && (
           <div>
             <Label className="text-xs">Paid from</Label>
             <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
@@ -248,6 +253,6 @@ export function PayBrokerSheet({ open, onOpenChange, brokerId: fixedId }: {
         )}
         <Input value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
       </div>
-    </ActionSheet>
-  );
+    ),
+  });
 }
