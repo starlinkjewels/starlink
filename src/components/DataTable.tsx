@@ -66,6 +66,26 @@ function Tick({ state, onClick, label }: { state: "on" | "off" | "some"; onClick
   );
 }
 
+/** One collator for every table: numbers inside text by value ("SL03-9"
+ *  before "SL03-10"), capitals or not alike. */
+const COLLATOR = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+const NUMBER_TEXT = /^[-+]?\d+(\.\d+)?$/;
+/** Text as a person reads it: a stray space around a dash or slash ("SL03 -72")
+ *  doesn't count, and runs of spaces are one. */
+const sortText = (v: string | number) => String(v).replace(/\s*([-/._,:#])\s*/g, "$1").replace(/\s+/g, " ").trim();
+
+/**
+ * How two cells of a column compare when it is sorted — numbers by value,
+ * text the way a person orders it (bill "SL03 -72" after "SL03-67", "Ab" with
+ * "ab", "9" before "10").
+ */
+export function compareCells(a: string | number, b: string | number): number {
+  if (typeof a === "number" && typeof b === "number") return a - b;
+  const sa = sortText(a), sb = sortText(b);
+  if (NUMBER_TEXT.test(sa) && NUMBER_TEXT.test(sb)) return Number(sa) - Number(sb);
+  return COLLATOR.compare(sa, sb);
+}
+
 export function DataTable<T>({
   id, rows, columns, rowKey, defaultSort = null, searchText, exportName, emptyText = "Nothing to show.",
   pageSizes = [25, 50, 100], maxHeight, footer, toolbarExtra, onRowClick, rowActions, onRowActionsOpen, selected, onSelectedChange,
@@ -218,7 +238,7 @@ export function DataTable<T>({
           // Blanks always last, whichever way round.
           const an = a.v === null || a.v === undefined || a.v === "", bn = b.v === null || b.v === undefined || b.v === "";
           if (an || bn) return an === bn ? a.i - b.i : an ? 1 : -1;
-          const c = typeof a.v === "number" && typeof b.v === "number" ? a.v - b.v : String(a.v).localeCompare(String(b.v), undefined, { numeric: true, sensitivity: "base" });
+          const c = compareCells(a.v!, b.v!);
           return c === 0 ? a.i - b.i : c * dir;
         })
         .map(x => x.r);
