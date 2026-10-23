@@ -21,7 +21,7 @@
 export const LAZY_COLS = [
   "materialIssuances", "purchases", "lockerTransactions", "stockMovements",
   "supplierReceipts", "supplierPayments", "factoryPayments",
-  "clientReceipts", "diamondPackets", "diamondSales",
+  "clientReceipts", "diamondPackets", "diamondSales", "supplierSales",
   // The catalog and product photos — only their two pages use them.
   "catalogFolders", "catalogFavorites", "productPhotoFolders", "productPhotoItems", "shares",
 ] as const;
@@ -30,7 +30,7 @@ export type LazyCol = (typeof LAZY_COLS)[number];
 /** The collections behind each kind of server total. */
 export const TOTALS_COLS = {
   factory: ["materialIssuances", "factoryPayments"],
-  supplier: ["purchases", "supplierReceipts", "supplierPayments"],
+  supplier: ["purchases", "supplierReceipts", "supplierPayments", "supplierSales"],
   locker: ["lockerTransactions"],
 } as const satisfies Record<string, readonly LazyCol[]>;
 export type TotalsKind = keyof typeof TOTALS_COLS;
@@ -64,15 +64,15 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/invoices": ["purchases", "materialIssuances", "diamondPackets", "clientReceipts", "lockerTransactions"],
   // diamondSales: an account entry a diamond sale paid in is corrected with
   // the sale, not alone — the day book and Account entries read that (ENTRY_COLS).
-  "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments", "diamondSales"],
+  "/payments": ["clientReceipts", "lockerTransactions", "purchases", "materialIssuances", "supplierReceipts", "supplierPayments", "factoryPayments", "diamondSales", "supplierSales"],
   "/clients": [],
   "/clients/:id": ["clientReceipts", "lockerTransactions"],
-  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments"],
+  "/suppliers/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "supplierReceipts", "supplierPayments", "supplierSales"],
   "/factories/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "lockerTransactions", "factoryPayments"],
   // + materialIssuances: its Opening stock form (Buy & Assign's) records opening gold at a factory.
   "/stock": ["diamondPackets", "stockMovements", "materialIssuances"],
-  "/stock/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales"],
-  "/buy-assign": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "lockerTransactions"],
+  "/stock/:id": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales"],
+  "/buy-assign": ["purchases", "materialIssuances", "diamondPackets", "stockMovements", "diamondSales", "supplierSales", "lockerTransactions", "supplierReceipts", "supplierPayments"],
   "/locker": ["clientReceipts", "lockerTransactions"],
   "/expenses": ["lockerTransactions"],
   "/income": ["lockerTransactions"],

@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight } from "lucide-react";
-import { fmtDate, type Purchase } from "@/lib/db";
+import { Handshake, Pencil, Wallet, Truck, Receipt, Coins, ArrowDownRight, Tag, ArrowDownCircle } from "lucide-react";
+import { toast } from "sonner";
+import { fmtDate, todayLocal, stampFor, updateDb, uid, type Purchase, type SupplierSale } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
-import { brokerAccount, brokerPassed, brokerPayments, brokerSuppliers, brokerageWePay } from "@/lib/brokers";
+import { brokerAccount, brokerCollected, brokerHandovers, brokerPassed, brokerPayments, brokerSuppliers, brokerageWePay, saleBrokerageWePay } from "@/lib/brokers";
 import { fmtMoneyInr, purchasePending, purchasePaid } from "@/lib/manufacturing";
 import { purchaseText } from "@/lib/materials";
 import { PageHeader, TabBar } from "@/components/PageHeader";
@@ -12,8 +13,13 @@ import { StatStrip } from "@/components/TableToolbar";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { BrokerCreateDialog } from "@/components/create/BrokerCreateDialog";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
+import { ActionSheet } from "@/components/ActionSheet";
+import { AsyncButton } from "@/components/AsyncButton";
+import { Field, PanelActions } from "@/components/BillLayout";
+import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-type Tab = "bills" | "suppliers" | "money";
+type Tab = "bills" | "sales" | "suppliers" | "money";
 
 /**
  * One broker (dalal): the suppliers they deal with, every bill they brought —
@@ -30,6 +36,7 @@ export function BrokerHistoryPage() {
   const [tab, setTab] = useState<Tab>("bills");
   const [paying, setPaying] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [receiving, setReceiving] = useState(false);
   const broker = (db.brokers ?? []).find(b => b.id === id);
 
   if (!broker) {
@@ -76,8 +83,22 @@ export function BrokerHistoryPage() {
       cell: r => (r.pending > 0.5 ? <CellAmount tone="out">{fmtMoneyInr(r.pending)}</CellAmount> : <CellTag tone="green">Settled</CellTag>) },
   ];
 
-  // ── Money: given to them, and passed on to suppliers ──
-  type MoneyRow = { id: string; at: string; kind: "given" | "passed"; amount: number; text: string; sub?: string };
+  // ── Sales to suppliers they brought (lib/supplierSales.ts) ──
+  const sales = (db.supplierSales ?? []).filter(x => x.brokerId === broker.id).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const collectedFor = (sale: SupplierSale) => (sale.receiptId ? brokerCollected(db, broker.id).find(r => r.id === sale.receiptId)?.amountInr ?? 0 : 0);
+  const saleCols: DataColumn<SupplierSale>[] = [
+    { key: "date", header: "Date", kind: "date", sortValue: x => +new Date(x.createdAt), cell: x => <CellDate>{fmtDate(x.createdAt)}</CellDate> },
+    { key: "supplier", header: "Sold to", always: true, sortValue: x => supplierName(x.supplierId), csv: x => supplierName(x.supplierId),
+      cell: x => <CellMain title={<Link to={`/suppliers/${x.supplierId}`} className="hover:underline">{supplierName(x.supplierId)}</Link>} sub={x.lines.map(l => l.label).join(", ")} /> },
+    { key: "amount", header: "Sale", align: "right", kind: "number", sortValue: x => x.totalInr, cell: x => <CellAmount>{fmtMoneyInr(x.totalInr)}</CellAmount> },
+    { key: "brokerage", header: "Brokerage", align: "right", kind: "number", sortValue: x => x.brokerageInr ?? 0,
+      cell: x => <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(x.brokerageInr ?? 0)}{x.brokeragePaidBy === "supplier" && <span className="text-[10px] text-muted-foreground"> · supplier pays</span>}</span> },
+    { key: "collected", header: "Collected for us", align: "right", kind: "number", sortValue: x => collectedFor(x),
+      cell: x => (collectedFor(x) > 0 ? <CellAmount tone="in">{fmtMoneyInr(collectedFor(x))}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
+  ];
+
+  // ── Money: given to them, passed on to suppliers; collected for us, handed over ──
+  type MoneyRow = { id: string; at: string; kind: "given" | "passed" | "collected" | "handed"; amount: number; text: string; sub?: string };
   const money: MoneyRow[] = [
     ...brokerPayments(db, broker.id).map(t => ({
       id: t.id, at: t.createdAt, kind: "given" as const, amount: t.amountInr,
@@ -87,14 +108,24 @@ export function BrokerHistoryPage() {
       id: pay.id, at: pay.createdAt, kind: "passed" as const, amount: pay.amountInr,
       text: `Passed to ${supplierName(purchase.supplierId)}`, sub: purchase.invoiceNumber ? `Bill ${purchase.invoiceNumber}` : undefined,
     })),
+    ...brokerCollected(db, broker.id).map(r => ({
+      id: r.id, at: r.createdAt, kind: "collected" as const, amount: r.amountInr,
+      text: `Collected from ${supplierName(r.supplierId)} for us`, sub: r.note,
+    })),
+    ...brokerHandovers(db, broker.id).map(t => ({
+      id: t.id, at: t.createdAt, kind: "handed" as const, amount: t.amountInr,
+      text: "Handed to us", sub: [db.lockers.find(l => l.id === t.lockerId)?.name, t.note].filter(Boolean).join(" · ") || undefined,
+    })),
   ];
+  const into = (r: MoneyRow) => r.kind === "given" || r.kind === "collected";
   const moneyCols: DataColumn<MoneyRow>[] = [
     { key: "date", header: "Date", kind: "date", sortValue: r => +new Date(r.at), cell: r => <CellDate>{fmtDate(r.at)}</CellDate> },
     { key: "what", header: "Movement", always: true, sortValue: r => r.text, cell: r => <CellMain title={r.text} sub={r.sub} /> },
-    { key: "given", header: "Given", align: "right", kind: "number", sortValue: r => (r.kind === "given" ? r.amount : null),
-      cell: r => (r.kind === "given" ? <CellAmount tone="out">{fmtMoneyInr(r.amount)}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
-    { key: "passed", header: "Passed on", align: "right", kind: "number", sortValue: r => (r.kind === "passed" ? r.amount : null),
-      cell: r => (r.kind === "passed" ? <CellAmount tone="in">{fmtMoneyInr(r.amount)}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
+    // Into their hands (given by us, collected for us) and out of them (passed to a supplier, handed to us).
+    { key: "given", header: "Given / collected", align: "right", kind: "number", sortValue: r => (into(r) ? r.amount : null),
+      cell: r => (into(r) ? <CellAmount tone="out">{fmtMoneyInr(r.amount)}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
+    { key: "passed", header: "Passed on / handed over", align: "right", kind: "number", sortValue: r => (!into(r) ? r.amount : null),
+      cell: r => (!into(r) ? <CellAmount tone="in">{fmtMoneyInr(r.amount)}</CellAmount> : <span className="text-muted-foreground/50">—</span>) },
   ];
 
   const weOwe = Math.max(0, acc.due);
@@ -107,6 +138,9 @@ export function BrokerHistoryPage() {
         subtitle={[broker.phone, broker.brokeragePct != null ? `${broker.brokeragePct}% usual brokerage` : null, broker.active === false ? "switched off" : null].filter(Boolean).join(" · ") || "Broker"}
         primary={{ label: "Pay through broker", icon: Wallet, onClick: () => setPaying(true) }}
         secondary={isAdmin ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
+        menu={[
+          { label: "Receive from broker", icon: ArrowDownCircle, hint: acc.held > 0.5 ? `They hold ${fmtMoneyInr(acc.held)} of ours` : "Money they collected for us", onSelect: () => setReceiving(true), show: isAdmin },
+        ]}
       />
 
       <StatStrip items={[
@@ -115,13 +149,14 @@ export function BrokerHistoryPage() {
         { label: "Brokerage owed", value: fmtMoneyInr(weOwe), icon: Coins, tone: weOwe > 0.5 ? "out" : undefined,
           sub: `${fmtMoneyInr(acc.brokerage)} in all${acc.bySupplier ? ` · ${fmtMoneyInr(acc.bySupplier)} paid by suppliers` : ""}` },
         { label: "Held by broker", value: fmtMoneyInr(acc.held), icon: Handshake,
-          sub: acc.held > 0.5 ? "Given, not passed on yet" : `Given ${fmtMoneyInr(acc.paid)} · passed ${fmtMoneyInr(acc.passed)}` },
+          sub: acc.held > 0.5 ? (acc.collected - acc.handedOver > 0.5 ? "Given or collected, not passed on yet" : "Given, not passed on yet") : `Given ${fmtMoneyInr(acc.paid)} · passed ${fmtMoneyInr(acc.passed)}` },
         { label: "To settle", value: fmtMoneyInr(acc.toPay), icon: ArrowDownRight, tone: acc.toPay > 0.5 ? "out" : undefined, sub: "Bills + brokerage − held" },
       ]} />
 
       <div className="space-y-3">
         <TabBar label="Broker" value={tab} onChange={setTab} tabs={[
           { key: "bills", label: "Bills", icon: Receipt, count: bills.length },
+          ...(sales.length ? [{ key: "sales" as const, label: "Sales", icon: Tag, count: sales.length }] : []),
           { key: "suppliers", label: "Suppliers", icon: Truck, count: supRows.length },
           { key: "money", label: "Money", icon: Wallet, count: money.length },
         ]} />
@@ -138,6 +173,17 @@ export function BrokerHistoryPage() {
               }}
               emptyText="No bills brought by this broker yet — pick them as the broker on a purchase." />
           )}
+          {tab === "sales" && (
+            <DataTable id="broker-sales" noun="sale" rows={sales} rowKey={x => x.id} columns={saleCols}
+              defaultSort={{ key: "date", dir: "desc" }} searchText={x => [supplierName(x.supplierId), ...x.lines.map(l => l.label)].join(" ")}
+              exportName={`Broker-${broker.name}-Sales`} rowHref={x => `/suppliers/${x.supplierId}`}
+              totals={{
+                amount: list => fmtMoneyInr(list.reduce((s, x) => s + x.totalInr, 0)),
+                brokerage: list => fmtMoneyInr(list.reduce((s, x) => s + saleBrokerageWePay(x), 0)),
+                collected: list => <span className="text-success">{fmtMoneyInr(list.reduce((s, x) => s + collectedFor(x), 0))}</span>,
+              }}
+              emptyText="No sales brought by this broker yet." />
+          )}
           {tab === "suppliers" && (
             <DataTable id="broker-suppliers" noun="supplier" rows={supRows} rowKey={r => r.id} columns={supCols}
               defaultSort={{ key: "pending", dir: "desc" }} rowHref={r => `/suppliers/${r.id}`} details={false}
@@ -147,8 +193,8 @@ export function BrokerHistoryPage() {
             <DataTable id="broker-money" noun="movement" rows={money} rowKey={r => r.id} columns={moneyCols}
               defaultSort={{ key: "date", dir: "desc" }} details={false}
               totals={{
-                given: list => fmtMoneyInr(list.filter(r => r.kind === "given").reduce((s, r) => s + r.amount, 0)),
-                passed: list => fmtMoneyInr(list.filter(r => r.kind === "passed").reduce((s, r) => s + r.amount, 0)),
+                given: list => fmtMoneyInr(list.filter(into).reduce((s, r) => s + r.amount, 0)),
+                passed: list => fmtMoneyInr(list.filter(r => !into(r)).reduce((s, r) => s + r.amount, 0)),
               }}
               emptyText="Nothing given to or passed on by this broker yet." />
           )}
@@ -157,6 +203,57 @@ export function BrokerHistoryPage() {
 
       <PayBrokerSheet open={paying} onOpenChange={setPaying} brokerId={broker.id} />
       {isAdmin && <BrokerCreateDialog open={editing} onOpenChange={setEditing} broker={broker} />}
+      {isAdmin && <ReceiveFromBroker open={receiving} onOpenChange={setReceiving} brokerId={broker.id} brokerName={broker.name} held={acc.held} />}
     </div>
+  );
+}
+
+/**
+ * Money a broker hands over to us — what they collected from suppliers for us
+ * (or simply gives back). One account entry from them (refType "brokerReceipt");
+ * the broker's account reads it (lib/brokers.ts), and it is corrected or deleted
+ * in Payments → Account entries like any entry of our own.
+ */
+function ReceiveFromBroker({ open, onOpenChange, brokerId, brokerName, held }: {
+  open: boolean; onOpenChange: (v: boolean) => void; brokerId: string; brokerName: string; held: number;
+}) {
+  const db = useDb();
+  const { user } = useAuth();
+  const [amount, setAmount] = useState("");
+  const [lockerId, setLockerId] = useState("");
+  const [date, setDate] = useState(todayLocal());
+  const [note, setNote] = useState("");
+  const lockers = db.lockers.filter(l => l.active && (l.currency || "INR") === "INR");
+  const save = () => {
+    const amt = Math.round((Number(amount) || 0) * 100) / 100;
+    if (!(amt > 0)) { toast.error("Enter the amount"); return; }
+    if (!lockerId) { toast.error("Choose the account it went into"); return; }
+    updateDb(d => {
+      if (!d.lockerTransactions) d.lockerTransactions = [];
+      d.lockerTransactions.push({
+        id: uid("ltx_"), lockerId, type: "income", amountInr: amt, category: `Received from ${brokerName} (broker)`,
+        refType: "brokerReceipt", refId: brokerId, notClientPayment: true,
+        note: note.trim() || undefined, recordedBy: user!.id, createdAt: stampFor(date),
+      });
+    });
+    toast.success(`${fmtMoneyInr(amt)} received from ${brokerName}`);
+    setAmount(""); setNote(""); setLockerId(""); onOpenChange(false);
+  };
+  return (
+    <ActionSheet open={open} onOpenChange={onOpenChange} size="md" icon={ArrowDownCircle} title="Receive from broker"
+      description={held > 0.5 ? `${brokerName} holds ${fmtMoneyInr(held)} of ours` : `Money ${brokerName} hands over to us`}
+      footer={<PanelActions onCancel={() => onOpenChange(false)}><AsyncButton onClick={save} className="btn-hero rounded-xl h-11 flex-1 sm:flex-none sm:min-w-48">Record</AsyncButton></PanelActions>}>
+      <div className="grid grid-cols-2 gap-3">
+        <Field label="Amount (₹)">{id => <Input id={id} type="number" min={0} step="0.01" value={amount} placeholder={held > 0.5 ? String(held) : "0"} onChange={e => setAmount(e.target.value)} className="rounded-xl h-10" />}</Field>
+        <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
+        <Field label="Into account" className="col-span-2">{id => (
+          <Select value={lockerId} onValueChange={setLockerId}>
+            <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose account" /></SelectTrigger>
+            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+          </Select>
+        )}</Field>
+        <Field label="Note" className="col-span-2">{id => <Input id={id} value={note} onChange={e => setNote(e.target.value)} className="rounded-xl h-10" placeholder="Optional" />}</Field>
+      </div>
+    </ActionSheet>
   );
 }

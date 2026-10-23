@@ -69,7 +69,7 @@ export function supplierFigures(db: DB, sup: Supplier): SupplierFigures {
   if (s) {
     return {
       totalPurchased: num(s.totalPurchased), totalPaid: num(s.totalPaid), balanceOwed: num(s.balanceOwed),
-      overpaid: num(s.overpaid), received: num(s.received), advanced: num(s.advanced), net: num(s.net),
+      overpaid: num(s.overpaid), received: num(s.received), advanced: num(s.advanced), sold: num(s.sold), net: num(s.net),
     };
   }
   return supplierAccount(
@@ -77,6 +77,7 @@ export function supplierFigures(db: DB, sup: Supplier): SupplierFigures {
     (db.supplierReceipts ?? []).filter(r => r.supplierId === sup.id),
     sup,
     (db.supplierPayments ?? []).filter(x => x.supplierId === sup.id),
+    (db.supplierSales ?? []).filter(x => x.supplierId === sup.id),
   );
 }
 

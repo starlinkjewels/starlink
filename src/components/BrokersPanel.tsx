@@ -14,7 +14,7 @@ import { BrokerCreateDialog } from "@/components/create/BrokerCreateDialog";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
 
 /** What the brokers' figures are read from — loaded when the tab opens. */
-const NEEDS = ["purchases", "lockerTransactions"] as const;
+const NEEDS = ["purchases", "lockerTransactions", "supplierSales", "supplierReceipts"] as const;
 
 /**
  * Suppliers → Brokers: each broker (dalal), their usual brokerage, and their

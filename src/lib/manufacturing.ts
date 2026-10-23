@@ -314,6 +314,7 @@ interface StockLinkContext {
   factories: Factory[];
   suppliers: Supplier[];
   diamondSales?: DiamondSale[];
+  supplierSales?: { id: string; supplierId: string }[];
   clients?: Client[];
 }
 
@@ -359,6 +360,14 @@ export function resolveStockMovementLink(m: StockMovement, ctx: StockLinkContext
       return { label: `Sold to ${client?.companyName ?? "client"}`, clientId: sale.clientId };
     }
     return { label: `Sold to ${sale.buyerName || "buyer"}` };
+  }
+  // Sold to one of our suppliers (lib/supplierSales.ts) — and back again when that sale is deleted.
+  if (m.refType === "supplierSale") {
+    const sale = ctx.supplierSales?.find(s => s.id === m.refId);
+    const supplierId = sale?.supplierId;
+    const name = ctx.suppliers.find(s => s.id === supplierId)?.name;
+    if (m.type === "purchase_in") return { label: `Sale to ${name ?? "a supplier"} deleted — back in stock`, ...(supplierId ? { supplierId } : {}) };
+    return { label: name ? `Sold to ${name} (supplier)` : m.note || "Sold to a supplier", ...(supplierId ? { supplierId } : {}) };
   }
   return { label: m.note || "Manual adjustment" };
 }

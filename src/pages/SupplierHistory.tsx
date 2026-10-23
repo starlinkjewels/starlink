@@ -23,6 +23,9 @@ import {
 import { listEntries, type MoneyEntry } from "@/lib/moneyEntries";
 import { MoneyEntryEditor, confirmDeleteEntry, entryRowActions } from "@/components/MoneyEntryEditor";
 import { SupplierEditDialog } from "@/components/SupplierEditDialog";
+import { SellToSupplierSheet } from "@/components/SellToSupplierSheet";
+import { saleLineCost, saleUndoBlocker, saleUndoImpact, undoSupplierSale } from "@/lib/supplierSales";
+import { saleBrokerageWePay } from "@/lib/brokers";
 import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { needsAccess } from "@/lib/actionHints";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
@@ -34,7 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   Mail, Phone, MapPin, Hash, Plus, CreditCard,
   Download, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
-  Handshake,
+  Handshake, Tag,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -93,7 +96,9 @@ function SupplierHistoryPageBody() {
   const receipts = (db.supplierReceipts ?? []).filter(r => r.supplierId === id);
   // Advances and loans — paid to this supplier but settling no particular bill.
   const advances = (db.supplierPayments ?? []).filter(x => x.supplierId === id);
-  const account = supplierAccount(purchases, receipts, supplier, advances);
+  // Goods we sold them — come off what we owe (lib/supplierSales.ts).
+  const sales = (db.supplierSales ?? []).filter(x => x.supplierId === id).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  const account = supplierAccount(purchases, receipts, supplier, advances, sales);
 
   // ── Opening balance (migration) ──
   const [obOpen, setObOpen] = useState(false);
@@ -187,6 +192,7 @@ function SupplierHistoryPageBody() {
 
   // ── Receive money FROM the supplier (refund / return credit) ──
   const [showReceiveForm, setShowReceiveForm] = useState(false);
+  const [showSell, setShowSell] = useState(false);
   const [rcvAmount, setRcvAmount] = useState("");
   const [rcvLockerId, setRcvLockerId] = useState("");
   const [rcvNote, setRcvNote] = useState("");
@@ -294,7 +300,24 @@ function SupplierHistoryPageBody() {
       const p = purchases.find(x => x.id === r.id);
       return p ? purchaseActions(p) : [];
     }
+    if (r.kind === "Sale") {
+      const sale = sales.find(x => x.id === r.id);
+      if (!sale) return [];
+      const block = saleUndoBlocker(db, sale);
+      return [
+        { label: "Edit", icon: Lock, disabled: true, hint: "Delete it and record it again", onSelect: () => {} },
+        { label: "Delete sale", icon: Trash2, danger: true, disabled: !isAdmin || !!block, hint: !isAdmin ? "Admins only" : block ?? "Back into stock; its money removed",
+          onSelect: async () => {
+            if (!(await confirmBox([`Delete this sale to ${supplier.name}?`, ...saleUndoImpact(db, sale)], { danger: true, confirmText: "Delete sale" }))) return;
+            try { await undoSupplierSale(db, sale, user!); toast.success("Sale deleted — back in stock"); }
+            catch (e) { toast.error(e instanceof Error ? e.message : "The sale couldn't be deleted"); }
+          } },
+      ];
+    }
     if (r.kind !== "Payment" && r.kind !== "Received" && r.kind !== "Advance") return [];
+    // Money received for a sale belongs to the sale: corrected alone, the two would disagree.
+    const forSale = r.kind === "Received" ? receipts.find(x => x.id === r.id)?.saleId : undefined;
+    if (forSale) return [{ label: "Edit", icon: Lock, disabled: true, hint: "Part of a sale to them — delete the sale to change it", onSelect: () => {} }];
     const e = entryOf(r.id);
     if (!e) {
       const why = "Correct it in Payments → Supplier payments";
@@ -410,7 +433,15 @@ function SupplierHistoryPageBody() {
     // advance in full drove the balance twice as far the wrong way instead of
     // bringing it back to zero.
     for (const r of receipts) {
-      rows.push({ id: r.id, date: r.createdAt, particulars: `Received from supplier${r.note ? ` — ${r.note}` : ""}`, debit: r.amountInr, credit: 0, balance: 0, kind: "Received" });
+      const via = r.viaBrokerId ? (db.brokers ?? []).find(b => b.id === r.viaBrokerId)?.name ?? "the broker" : "";
+      rows.push({ id: r.id, date: r.createdAt, particulars: `${via ? `Paid to ${via} for us` : "Received from supplier"}${r.note ? ` — ${r.note}` : ""}`, debit: r.amountInr, credit: 0, balance: 0, kind: "Received" });
+    }
+    // Goods we sold them: owed to us, so it comes off what we owe — a credit, as a payment is.
+    for (const sale of sales) {
+      rows.push({ id: sale.id, date: sale.createdAt, particulars: `Sold to them — ${sale.lines.map(l => l.label).join(", ")}${sale.notes ? ` · ${sale.notes}` : ""}`,
+        qty: sale.lines.length === 1 ? sale.lines[0].qty : undefined, unit: sale.lines.length === 1 ? sale.lines[0].unit : undefined,
+        rate: sale.lines.length === 1 ? sale.lines[0].rateInr : undefined,
+        debit: 0, credit: sale.totalInr, balance: 0, kind: "Sale" });
     }
     // Advances and loans — money out against no bill, so a credit like any
     // other payment. Without these the statement would not add up to the
@@ -470,6 +501,7 @@ function SupplierHistoryPageBody() {
         // refunds received and any purchase that was overpaid.
         { label: "Closing Balance", value: fmtInrPlain(account.net) },
         { label: "Overpaid", value: fmtInrPlain(account.overpaid) },
+        ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtInrPlain(account.sold) }] : []),
       ],
       // Landscape: a jeweller’s ledger line is the weight, the supplier’s invoice
       // number, the order it was for, the rate and the amount. None of that fits a
@@ -590,9 +622,23 @@ function SupplierHistoryPageBody() {
         { label: "Recorded", value: recorded(db, pay.createdAt, pay.recordedBy) },
       ]);
     }
+    const sale = sales.find(x => x.id === r.id);
+    if (sale) {
+      const broker = sale.brokerId ? (db.brokers ?? []).find(b => b.id === sale.brokerId) : undefined;
+      const costs = sale.lines.map(l => saleLineCost(db, sale, l));
+      const cost = costs.every(c => c != null) ? costs.reduce((t: number, c) => t + (c ?? 0), 0) : null;
+      return filled([
+        { label: "Sold", value: sale.lines.map(l => `${l.label} — ${fmtMoneyInr(l.amountInr)}`).join("; ") },
+        broker && { label: "Broker", value: `${broker.name} · ${fmtMoneyInr(sale.brokerageInr ?? 0)} ${sale.brokeragePaidBy === "supplier" ? "(supplier pays)" : "(we pay)"}` },
+        isAdmin && { label: "Cost to us", value: cost == null ? "Not known for every line" : `${fmtMoneyInr(cost)} · profit ${fmtMoneyInr(sale.totalInr - cost - saleBrokerageWePay(sale))}` },
+        hasCompanies(db.settings) && { label: "Company", value: companyById(db.settings, sale.companyId).name },
+        { label: "Note", value: noteText(sale.notes) },
+        { label: "Recorded", value: recorded(db, sale.createdAt, sale.soldBy) },
+      ]);
+    }
     const other = receipts.find(x => x.id === r.id) ?? advances.find(x => x.id === r.id);
     if (other) return filled([
-      { label: r.kind === "Received" ? "Into account" : "Paid from", value: lockerLabel(db, other.lockerId) },
+      { label: r.kind === "Received" ? "Into account" : "Paid from", value: "viaBrokerId" in other && other.viaBrokerId ? `Held by ${(db.brokers ?? []).find(b => b.id === other.viaBrokerId)?.name ?? "the broker"}` : lockerLabel(db, other.lockerId) },
       { label: "Note", value: noteText(other.note) },
       { label: "Recorded", value: recorded(db, other.createdAt, other.recordedBy) },
     ]);
@@ -610,6 +656,7 @@ function SupplierHistoryPageBody() {
         primary={isAdmin ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
         secondary={isAdmin ? { label: "Pay", icon: CreditCard, onClick: () => setShowPayForm(true) } : null}
         menu={[
+          { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: isAdmin },
           { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
           { label: "Export statement", icon: Download, hint: "PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingSupplier(supplier), disabled: !isAdmin,
@@ -700,6 +747,7 @@ function SupplierHistoryPageBody() {
           { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
           { label: "Total paid", value: fmtMoneyInr(account.totalPaid), tone: "in" },
           { label: "Received (refunds)", value: fmtMoneyInr(account.received) },
+          ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold) }] : []),
           // net = what is owed AFTER refunds received and any overpayment, which
           // is exactly where the running balance below ends up.
           { label: account.net < 0 ? "Supplier owes you" : "Net balance",
@@ -750,6 +798,7 @@ function SupplierHistoryPageBody() {
       />
       <MoneyEntryEditor entry={editingEntry} onClose={() => setEditingEntry(null)} mayDelete={can("payments", "delete")} />
       <SupplierEditDialog supplier={editingSupplier} onClose={() => setEditingSupplier(null)} />
+      <SellToSupplierSheet open={showSell} onOpenChange={setShowSell} supplierId={id!} />
 
       {/* The three money actions slide in from the right, so the ledger and the
           statement behind stay where they were. Closing a panel keeps what was

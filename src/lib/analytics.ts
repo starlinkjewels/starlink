@@ -196,6 +196,7 @@ export function payables(db: DB): { suppliersInr: number; factoriesInr: number }
       (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id),
       s,
       (db.supplierPayments ?? []).filter(x => x.supplierId === s.id),
+      (db.supplierSales ?? []).filter(x => x.supplierId === s.id),
     );
     suppliersInr += Math.max(0, a.net);
   }

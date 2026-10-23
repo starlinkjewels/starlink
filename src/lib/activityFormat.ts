@@ -64,7 +64,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   expenses: "expenses", lockers: "locker", lockerTransactions: "locker",
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
-  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", diamondBags: "stock",
+  stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", diamondBags: "stock",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
   productPhotoFolders: "productPhotos", productPhotoItems: "productPhotos",
@@ -77,7 +77,7 @@ const COL_NOUN: Record<string, string> = {
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
   factoryPayments: "factory payment", stockMovements: "stock movement", diamondPackets: "certified stone",
-  diamondSales: "diamond sale", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
+  diamondSales: "diamond sale", supplierSales: "sale to a supplier", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
   tasks: "task", meta: "settings", adminRecords: "admin figure",
@@ -88,7 +88,7 @@ const COL_NOUN: Record<string, string> = {
 const PRIORITY = [
   "orders", "clients", "users", "invoices", "clientReceipts", "purchases", "expenses",
   "suppliers", "brokers", "factories", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
-  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "lockers",
+  "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
   "tasks", "meta", "adminRecords", "lockerTransactions", "diamondBags", "stockMovements",
 ];
@@ -132,6 +132,7 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "stockMovements": return `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
+    case "supplierSales": return `₹${num(d.totalInr)} sale`;
     case "diamondBags": return s(d.no) ? `${s(d.no)} · ${s(d.key)}` : s(d.key) || id;
     case "readyStock": return s(d.sku) ? `${s(d.sku)} ${s(d.name)}` : s(d.name) || id;
     case "giftCards": return `$${num(d.amount)}`;
@@ -226,6 +227,15 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
   // receiving or cancelling one does too. Its own Cancel return undoes it whole.
   if (changes.some(c => c.col === "orders" && JSON.stringify(c.after?.returns ?? null) !== JSON.stringify(c.before?.returns ?? null))) {
     return "A return changed the client's bill, their credit and Ready Stock. Use \"Cancel return\" on the order instead.";
+  }
+  // A sale out of stock (to a supplier, or a diamond sold straight from stock) took its
+  // stock out in a write of its own, which this entry does not hold: putting the records
+  // back would bring the sale or its money back without the stock — or the other way round.
+  if (changes.some(c => c.col === "supplierSales")) {
+    return "A sale to a supplier moves stock and money together. Delete it, or record it again, on the supplier's page.";
+  }
+  if (changes.some(c => c.col === "diamondSales")) {
+    return "A diamond sale moves the stone and its money together. Cancel it in Buy & Assign instead.";
   }
   if (changes.some(c => c.col === "stockMovements")) {
     return "Stock levels moved with this. Reverse it with the record's own Remove or Cancel, which puts the stock back too.";

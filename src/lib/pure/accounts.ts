@@ -195,6 +195,8 @@ export function supplierAccount(
   opening?: OpeningBalanceInfo,
   /** Payments that settle no particular bill — advances and loans. */
   standalonePayments: SupplierPayment[] = [],
+  /** Goods we sold TO them (SupplierSale) — what they owe us for those. */
+  sales: { totalInr: number }[] = [],
 ) {
   let totalPurchased = 0,
     totalPaid = 0,
@@ -233,10 +235,16 @@ export function supplierAccount(
   // so it belongs in the net for the same reason. It was left out, which made
   // an overpayment invisible: pay ₹5,00,000 against ₹4,00,000 of bills and the
   // account still read square.
-  const net = Math.round((balanceOwed - overpaid - oDebit + received - advanced) * 100) / 100;
+  //
+  // Goods we sold them are owed to us, so they come off what we owe — the same
+  // way as an opening debit. Money they then hand over for those goods is an
+  // ordinary receipt, which raises the net back: sell ₹50,000 and be paid it,
+  // and the account is where it started.
+  const sold = sales.reduce((s, x) => s + (x.totalInr || 0), 0);
+  const net = Math.round((balanceOwed - overpaid - oDebit + received - advanced - sold) * 100) / 100;
   return {
     totalPurchased: r0(totalPurchased), totalPaid: r0(totalPaid), balanceOwed: r0(balanceOwed),
-    overpaid: r0(overpaid), received: r0(received), advanced: r0(advanced), net: r0(net),
+    overpaid: r0(overpaid), received: r0(received), advanced: r0(advanced), sold: r0(sold), net: r0(net),
   };
 }
 

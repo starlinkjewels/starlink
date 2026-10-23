@@ -32,6 +32,7 @@ function appFigures() {
       d.purchases.filter(p => p.supplierId === s.id),
       (d.supplierReceipts ?? []).filter(r => r.supplierId === s.id), s,
       (d.supplierPayments ?? []).filter(x => x.supplierId === s.id),
+      (d.supplierSales ?? []).filter(x => x.supplierId === s.id),
     );
     out.push({ id: `supplier_${s.id}`, name: `Supplier · ${s.name}`, fig: a });
   }
@@ -75,7 +76,8 @@ export function ServerTotalsCheck() {
         for (const [field, app] of Object.entries(p.fig)) {
           figures++;
           const v = s?.[field];
-          const sv = typeof v === "number" ? v : null;
+          // A supplier's total from before sales to suppliers existed has no "sold": nothing sold, 0.
+          const sv = typeof v === "number" ? v : field === "sold" && v === undefined && s ? 0 : null;
           // Gold and diamonds run to three decimals; money is whole rupees.
           if (sv === null || Math.abs(sv - app) > 0.0015) bad.push({ party: p.name, field, app, server: sv });
         }

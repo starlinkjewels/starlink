@@ -68,11 +68,13 @@ export async function rebuildFactory(fs: Firestore, factoryId: string): Promise<
 export async function rebuildSupplier(fs: Firestore, supplierId: string): Promise<void> {
   if (!supplierId) return;
   await fs.runTransaction(async t => {
-    const [sup, pur, rec, pay] = await Promise.all([
+    const [sup, pur, rec, pay, sold] = await Promise.all([
       t.get(fs.collection("suppliers").doc(supplierId)),
       t.get(fs.collection("purchases").where("supplierId", "==", supplierId)),
       t.get(fs.collection("supplierReceipts").where("supplierId", "==", supplierId)),
       t.get(fs.collection("supplierPayments").where("supplierId", "==", supplierId)),
+      // Goods we sold them (supplierSales) — come off what we owe.
+      t.get(fs.collection("supplierSales").where("supplierId", "==", supplierId)),
     ]);
     const ref = fs.collection(SUM).doc(`supplier_${supplierId}`);
     if (!sup.exists) { t.delete(ref); return; }
@@ -81,6 +83,7 @@ export async function rebuildSupplier(fs: Firestore, supplierId: string): Promis
       rec.docs.map(d => data<SupplierReceipt>(d)),
       sup.data() as OpeningBalanceInfo,
       pay.docs.map(d => data<SupplierPayment>(d)),
+      sold.docs.map(d => data<{ totalInr: number }>(d)),
     );
     t.set(ref, { kind: "supplier", partyId: supplierId, v: VERSION, ...acct, records: pur.size, computedAt: FieldValue.serverTimestamp() });
   });
@@ -144,6 +147,7 @@ export function makeSummaries(db: DbName) {
     purchase: on("purchases", "supplierId", rebuildSupplier),
     supplierReceipt: on("supplierReceipts", "supplierId", rebuildSupplier),
     supplierPayment: on("supplierPayments", "supplierId", rebuildSupplier),
+    supplierSale: on("supplierSales", "supplierId", rebuildSupplier),
     locker: on("lockers", null, rebuildLocker),
     lockerEntry: on("lockerTransactions", "lockerId", rebuildLocker),
 

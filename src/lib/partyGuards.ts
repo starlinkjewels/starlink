@@ -40,15 +40,19 @@ export function supplierDeleteGuard(db: DB, s: Supplier, figures?: SupplierFigur
     // and goes with them; anything beyond it is a real purchase.
     const bought = figures.totalPurchased - openingCreditAmt(s) > 0.5;
     const paid = figures.totalPaid > 0.5 || figures.received > 0.5;
-    return bought || paid ? { ok: false, reason: "Has purchases / payments — deactivate instead" } : { ok: true };
+    // Goods sold to them are on their account too.
+    const sold = (figures.sold ?? 0) > 0.5;
+    return bought || paid || sold ? { ok: false, reason: "Has purchases / payments / sales — deactivate instead" } : { ok: true };
   }
   if (!collectionsLoaded(TOTALS_COLS.supplier)) return CHECKING_GUARD;
   const purchases = (db.purchases ?? []).filter(p => p.supplierId === s.id).length;
   const payments = (db.supplierPayments ?? []).filter(p => p.supplierId === s.id).length
     + (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id).length;
+  const sales = (db.supplierSales ?? []).filter(x => x.supplierId === s.id).length;
   return has([
     purchases ? plural(purchases, "purchase") : "",
     payments ? plural(payments, "payment") : "",
+    sales ? plural(sales, "sale") : "",
   ].filter(Boolean));
 }
 

@@ -24,9 +24,10 @@ import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } fro
 import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
 import { coField, companyOf } from "@/lib/companies";
 import { Field, Group, PanelActions, Segmented, Stat, Stats, UnitInput } from "@/components/BillLayout";
+import { SellToSupplierSheet } from "@/components/SellToSupplierSheet";
 
 const GOLD_PURITIES = ["9K", "10K", "14K", "18K", "22K", "24K"];
-type Mode = "buy" | "assign" | "sell" | "opening";
+type Mode = "buy" | "assign" | "sell" | "sellSupplier" | "opening";
 /** Open and close one of the page's panels. */
 type PanelProps = { open: boolean; onOpenChange: (open: boolean) => void };
 
@@ -59,6 +60,7 @@ export function BuyAssignPage() {
         menu={may ? [
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setPanel("opening") },
           { label: "Sell diamond", icon: Tag, hint: "From stock, without an order", onSelect: () => setPanel("sell") },
+          { label: "Sell to a supplier", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe them", onSelect: () => setPanel("sellSupplier") },
         ] : undefined}
       >
         {!may && <p className="text-xs text-muted-foreground mt-1">View only — your role can't add entries.</p>}
@@ -76,6 +78,7 @@ export function BuyAssignPage() {
           <OpeningStock {...panelFor("opening")} />
           <AssignGold {...panelFor("assign")} />
           <SellDiamond {...panelFor("sell")} />
+          <SellToSupplierSheet {...panelFor("sellSupplier")} />
         </>
       )}
     </div>
