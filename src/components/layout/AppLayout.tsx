@@ -566,6 +566,9 @@ export function AppLayout() {
         </header>
 
         {/* ── Page content ── */}
+        {/* On a phone the page ends clear of the floating tab bar and the
+            phone's own home bar (safe area), with room to breathe below the
+            last row — 6rem alone left the end of a page under the tab bar. */}
         {/* opacity-only (no x/y/scale) — a transform here would make this the
             containing block for every `position: fixed` element inside any
             page, clipping full-screen modals/backdrops to this box's height
@@ -575,7 +578,7 @@ export function AppLayout() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.25 }}
-          className="app-main flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-24 md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
+          className="app-main flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-[calc(env(safe-area-inset-bottom)+7.5rem)] md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
               only while a page's chunk is fetched the first time. */}

@@ -40,6 +40,8 @@ import { updateCatalogItem, folderPath } from "@/lib/catalogItemEdit";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
+import { findShare } from "@/lib/share";
+import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
@@ -496,6 +498,42 @@ function downloadName(item: CatalogItem): string {
   return ext ? `${name}.${ext}` : name;
 }
 
+/**
+ * "Share link" on the Catalog's main page: the folders there, each with
+ * whether it already has a public link — one tap opens it (or makes it).
+ */
+function ShareFoldersSheet({ open, onClose, folders, counts, onPick }: {
+  open: boolean; onClose(): void; folders: CatalogFolder[]; counts: Record<string, number>; onPick(f: CatalogFolder): void;
+}) {
+  useDb(); // re-read when a link is made or stopped
+  return (
+    <ActionSheet open={open} onOpenChange={(v) => { if (!v) onClose(); }} size="md" icon={Share2}
+      title="Share link" description="Pick a folder — anyone with its link can view it, no login needed">
+      <ul className="rounded-xl border border-border/60 divide-y divide-border/50 bg-white">
+        {folders.map((f) => {
+          const shared = !!findShare("catalog", f.id);
+          return (
+            <li key={f.id}>
+              <button type="button" onClick={() => onPick(f)}
+                className="w-full flex items-center gap-3 px-3 py-3 text-left hover:bg-secondary/60 active:bg-secondary">
+                <Folder className="h-4 w-4 text-amber-500 shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <span className="block truncate text-sm font-medium text-brand-dark">{f.name}</span>
+                  {counts[f.id] != null && <span className="block text-[11px] text-muted-foreground">{counts[f.id]} item{counts[f.id] !== 1 ? "s" : ""}</span>}
+                </span>
+                <span className={`inline-flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-medium shrink-0 ${shared ? "border-success/40 text-success bg-success/5" : "border-border text-brand-dark bg-white"}`}>
+                  <Share2 className="h-3.5 w-3.5" />{shared ? "Shared" : "Share"}
+                  {shared && <span className="h-1.5 w-1.5 rounded-full bg-success" />}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </ActionSheet>
+  );
+}
+
 /** A position typed in: moved when it is done (Enter, or leaving the box), so
  *  typing "12" doesn't first jump the folder to 1. */
 function PositionInput({ value, max, label, onCommit }: { value: number; max: number; label: string; onCommit(n: number): void }) {
@@ -910,6 +948,7 @@ export function CatalogPage() {
   // "Share link" from a folder's ⋯, and "Arrange folders".
   const [sharingFolder, setSharingFolder] = useState<CatalogFolder | null>(null);
   const [arranging, setArranging] = useState(false);
+  const [sharePicker, setSharePicker] = useState(false);
 
   /* ── Load folders + favourite ids (small, bounded collections — still the shared cache) ── */
   const reload = useCallback(() => {
@@ -1719,6 +1758,16 @@ export function CatalogPage() {
               <span className="max-sm:hidden">Upload Folder</span>
             </button>
             </>)}
+            {canShare && isRoot && subfolders.length > 0 && (
+              <button
+                onClick={() => setSharePicker(true)}
+                aria-label="Share link"
+                className="flex items-center gap-2 px-3 sm:px-3.5 h-10 shrink-0 rounded-xl border border-border bg-white text-sm font-medium text-foreground hover:bg-secondary active:bg-secondary transition-colors"
+              >
+                <Share2 className="h-4 w-4" />
+                <span className="max-sm:hidden">Share link</span>
+              </button>
+            )}
             {canShare && currentFolderId && (
               <ShareFolderButton
                 kind="catalog"
@@ -1940,6 +1989,8 @@ export function CatalogPage() {
       <DeleteModal />
       <ArrangeFoldersSheet open={arranging} onClose={() => setArranging(false)} onSaved={reload} folders={subfolders}
         title={breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "Catalog"} />
+      <ShareFoldersSheet open={sharePicker} onClose={() => setSharePicker(false)} folders={subfolders} counts={folderCounts}
+        onPick={(f) => { setSharePicker(false); setSharingFolder(f); }} />
       {sharingFolder && (
         <ShareFolderButton key={sharingFolder.id} kind="catalog" folderId={sharingFolder.id} folderName={sharingFolder.name}
           autoOpen onClose={() => setSharingFolder(null)} />
