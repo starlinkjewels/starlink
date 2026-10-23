@@ -53,9 +53,9 @@ const NAV: NavItem[] = [
   { to: "/settings", label: "Settings", icon: Settings, roles: ["admin"] },
 ];
 
-/* Desktop sidebar — grouped into sections ("folders"), one open at a time:
-   the one holding the page you are on. Opening another closes the rest, so
-   the menu stays short and reads as an organised list. Mobile is unchanged. */
+/* Desktop sidebar — grouped into sections ("folders"). It opens with only the
+   group holding the page you are on, so the menu starts short and organised;
+   after that any group opens or closes on its own. Mobile is unchanged. */
 const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Overview", items: [
     { to: "/", label: "Dashboard", icon: LayoutDashboard },
@@ -348,18 +348,25 @@ export function AppLayout() {
   const navGroups = studio ? studioSidebarGroups(allItems) : NAV_GROUPS
     .map(g => ({ ...g, items: g.items.filter(navFilter) }))
     .filter(g => g.items.length > 0);
-  // One group open: the one holding the page you are on. Moving to a page in
-  // another group opens that one; a page outside the menu leaves it as it was.
+  // The app opens with one group open — the one holding the page you are on.
+  // After that each group opens and closes on its own, as many as you like;
+  // going to a page in a closed group opens it (the others stay as they are).
   const groupOf = (path: string) => navGroups.find(g => g.items.some(i =>
     i.to === "/" ? path === "/" : path === i.to || path.startsWith(i.to + "/")))?.title;
-  const [openGroup, setOpenGroup] = useState<string | null>(() => groupOf(loc.pathname) ?? navGroups[0]?.title ?? null);
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
+    const g = groupOf(loc.pathname) ?? navGroups[0]?.title;
+    return new Set(g ? [g] : []);
+  });
   useEffect(() => {
     const g = groupOf(loc.pathname);
-    if (g) setOpenGroup(g);
+    if (g) setOpenGroups(cur => (cur.has(g) ? cur : new Set([...cur, g])));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.pathname]);
-  // Opening a group closes the others; the open one closes on a second tap.
-  const toggleGroup = (title: string) => setOpenGroup(cur => (cur === title ? null : title));
+  const toggleGroup = (title: string) => setOpenGroups(cur => {
+    const next = new Set(cur);
+    if (next.has(title)) next.delete(title); else next.add(title);
+    return next;
+  });
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
   const pageTitle = PAGE_TITLES[loc.pathname] ??
@@ -397,7 +404,7 @@ export function AppLayout() {
         </div>
         <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
-            const isCollapsed = !!group.title && openGroup !== group.title;
+            const isCollapsed = !!group.title && !openGroups.has(group.title);
             return (
               <div key={group.title || "top"} className="mb-1.5">
                 {group.title && <button
