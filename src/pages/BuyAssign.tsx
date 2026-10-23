@@ -10,7 +10,7 @@ import { BuyMaterialForm, OpeningStockForm } from "@/components/BuyMaterialForm"
 import { updateDb, uid, toPureGold, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { decreaseStockSelfHealing } from "@/lib/stock";
-import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances } from "@/lib/manufacturing";
+import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
 import { fmtCcy, ccySymbol } from "@/lib/currency";
 import { AsyncButton } from "@/components/AsyncButton";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -326,12 +326,16 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
   const [clientId, setClientId] = useState("");
   const [buyerName, setBuyerName] = useState("");
   const [lockerId, setLockerId] = useState("");
+  // Asked every time: was the money received now — and into which account? A
+  // sale saved with no account appears in no account's history.
+  const [paid, setPaid] = useState<"now" | "later">("now");
   const [notes, setNotes] = useState("");
   const [date, setDate] = useState(todayLocal());
   const [saving, setSaving] = useState(false);
 
   const clients = db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
-  const lockers = db.lockers.filter(l => l.active && (l.currency || "INR") === currency);
+  // Every account in the sale's currency that isn't switched off — older ones carry no "active" flag at all.
+  const lockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === currency);
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));
   const selectedPacket = inStockPackets.find(p => p.id === packetId);
   const looseInStock = deriveStockBalances(db.stockMovements, "diamond", companyId)[shape] ?? 0;
@@ -352,6 +356,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
     if (buyerMode === "client" && !clientId) { toast.error("Choose a client"); return; }
     if (buyerMode === "other" && !buyerName.trim()) { toast.error("Enter the buyer's name"); return; }
     if (totalInr <= 0) { toast.error("Total comes to ₹0 — check the rate"); return; }
+    if (paid === "now" && !lockerId) { toast.error("Choose the account the money went into"); return; }
 
     const saleId = uid("ds_");
     const now = stampFor(date);
@@ -379,7 +384,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
           totalInr,
           clientId: buyerMode === "client" ? clientId : undefined,
           buyerName: buyerMode === "other" ? buyerName.trim() : undefined,
-          lockerId: lockerId || undefined,
+          lockerId: paid === "now" ? lockerId || undefined : undefined,
           notes: notes.trim() || undefined,
           soldBy: user!.id, createdAt: now,
         });
@@ -387,7 +392,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
           const p = d.diamondPackets.find(x => x.id === packetId);
           if (p) p.status = "sold";
         }
-        if (lockerId) {
+        if (paid === "now" && lockerId) {
           if (!d.lockerTransactions) d.lockerTransactions = [];
           d.lockerTransactions.push({
             id: uid("ltx_"), lockerId, type: "income",
@@ -404,7 +409,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
         }
       });
       toast.success(`Sold ${effectiveCarat}ct ${saleShape} to ${buyerLabel} — ${fmtMoneyInr(totalInr)}`);
-      setCarat(""); setPcs(""); setRate(""); setXrate(""); setPacketId(""); setBuyerName(""); setClientId(""); setNotes(""); setLockerId("");
+      setCarat(""); setPcs(""); setRate(""); setXrate(""); setPacketId(""); setBuyerName(""); setClientId(""); setNotes(""); setLockerId(""); setPaid("now");
       onOpenChange(false);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to record sale");
@@ -504,16 +509,24 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
             ) : (
               <Input id={id} value={buyerName} onChange={e => setBuyerName(e.target.value)} className="rounded-xl h-10" placeholder="Buyer's name" />
             )}</Field>
-            <Field label="Deposit proceeds into (optional)"
-              hint={lockerId === "" && lockers.length === 0 ? `No ${currency} locker — no cash entry is made.` : undefined}>{id => (
-              <Select value={lockerId || "__none"} onValueChange={addNew("locker", v => setLockerId(v === "__none" ? "" : v))}>
-                <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Don't record a cash movement" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="__none">Don't record a cash movement</SelectItem>
-                  {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}
-                <AddNewItem kind="locker" /></SelectContent>
-              </Select>
-            )}</Field>
+            <Field label="Money">
+              <Segmented value={paid} onChange={setPaid} options={[["now", "Received now"], ["later", "Not received yet"]] as const} />
+            </Field>
+            {paid === "now" ? (
+              <Field label="Into account *"
+                hint={lockers.length === 0 ? `No ${currency} account yet — add one with "+ Add new".` : "The sale shows in this account's history."}>{id => (
+                <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
+                  <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder={`Choose the ${currency} account`} /></SelectTrigger>
+                  <SelectContent>
+                    {lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}{l.type === "bank" && l.accountNumberLast4 ? ` ····${l.accountNumberLast4}` : ""} · {fmtCcy(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}
+                  <AddNewItem kind="locker" /></SelectContent>
+                </Select>
+              )}</Field>
+            ) : (
+              <p className="text-xs rounded-xl border border-amber-200 bg-amber-50 text-amber-800 px-3 py-2.5">
+                No account entry is made now. When the money comes, record it from the Locker (Record entry → Money in).
+              </p>
+            )}
           </div>
         </Group>
       </div>
