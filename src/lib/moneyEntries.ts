@@ -324,11 +324,19 @@ function partyEntries(db: DB, kind: Exclude<EntryKind, "locker">): MoneyEntry[] 
     }
     for (const r of db.supplierReceipts ?? []) {
       const supplier = db.suppliers.find(s => s.id === r.supplierId);
+      const broker = r.viaBrokerId ? (db.brokers ?? []).find(b => b.id === r.viaBrokerId)?.name ?? "the broker" : "";
       out.push({
         id: r.id, kind, date: r.createdAt,
-        party: supplier?.name ?? "Supplier", partyId: r.supplierId, against: "Refund / return",
+        party: supplier?.name ?? "Supplier", partyId: r.supplierId,
+        against: r.saleId ? (broker ? `For goods sold · collected by ${broker}` : "For goods sold to them") : "Refund / return",
         amount: r.amountInr, currency: "INR",
         lockerId: r.lockerId, note: r.note, direction: "in",
+        // Money for goods we sold them belongs to that sale (lib/supplierSales.ts): deleting the
+        // sale removes it with the stock and the account; changed here alone, the two would disagree.
+        ...(r.saleId ? {
+          locked: "This is money for goods we sold them. Deleting the sale on their page puts the goods back and takes this out together; changing it here would leave the two disagreeing.",
+          lockedWhere: "the supplier's page", lockedLabel: "Delete the sale on the supplier's page",
+        } : {}),
       });
     }
     // Advances and loans — paid to the supplier against no particular bill.
@@ -491,7 +499,8 @@ function lockerEntries(db: DB): MoneyEntry[] {
       orphan = `${unlinked}. Corrected or cancelled here, it changes the account only. Once it is cancelled, each of those entries shows no account movement and can be cancelled on its own without moving the account again.`;
     // A brokerage payment is the record itself — the broker's due is read from
     // it (lib/brokers.ts) — so it is corrected here like any entry of our own.
-    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && !t.pairedLockerId) {
+    // So is money a broker handed over to us (what they collected from a supplier for us).
+    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && !t.pairedLockerId) {
       const why = unclaimedRow(db, t);
       if ("gone" in why) {
         orphan = `${why.gone}, so it is corrected here — that changes the account only.`;

@@ -516,6 +516,7 @@ function PaySupplier({ open, onOpenChange, preset }: SheetProps & { preset: Supp
     (db.supplierReceipts ?? []).filter(r => r.supplierId === supplierId),
     db.suppliers.find(s => s.id === supplierId),
     (db.supplierPayments ?? []).filter(x => x.supplierId === supplierId),
+    (db.supplierSales ?? []).filter(x => x.supplierId === supplierId),
   );
   const pendingPurchases = purchases.filter(p => purchasePending(p) > 0);
 

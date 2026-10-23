@@ -17,7 +17,13 @@
 // `viaBrokerId` with no account of its own (lockerId "") — the supplier's due
 // comes down there. What the broker still holds of ours is what we gave him
 // less what he passed on and his brokerage.
-import type { Broker, DB, Purchase } from "./db";
+//
+// SELLING to a supplier through a broker (lib/supplierSales.ts) works the same
+// way the other round: brokerage on the sale is owed to him when we pay it, and
+// money he COLLECTS from the supplier for us (a SupplierReceipt with
+// `viaBrokerId`, no account of ours) is ours in his hands — until he hands it
+// over (an account entry from him, refType "brokerReceipt").
+import type { Broker, DB, Purchase, SupplierSale } from "./db";
 import { openingCreditAmt, openingDebitAmt } from "./pure/basics";
 import { purchasePending } from "./manufacturing";
 
@@ -33,14 +39,35 @@ export function landedInr(p: Pick<Purchase, "totalInr" | "brokerId" | "brokerage
   return (p.totalInr || 0) + brokerageWePay(p);
 }
 
+/** Brokerage on a sale to a supplier that we pay (0 when none, or the supplier pays). */
+export function saleBrokerageWePay(s: Pick<SupplierSale, "brokerId" | "brokerageInr" | "brokeragePaidBy">): number {
+  return s.brokerId && s.brokeragePaidBy === "us" ? Math.max(0, s.brokerageInr || 0) : 0;
+}
+
+/** Money a broker collected from suppliers for us (their receipts marked viaBrokerId). */
+export function brokerCollected(db: Partial<Pick<DB, "supplierReceipts">>, brokerId: string) {
+  return (db.supplierReceipts ?? []).filter(r => r.viaBrokerId === brokerId);
+}
+
+/** Money a broker handed over to us (account entries from them). */
+export function brokerHandovers(db: Pick<DB, "lockerTransactions">, brokerId: string) {
+  return (db.lockerTransactions ?? []).filter(t => t.refType === "brokerReceipt" && t.refId === brokerId && t.type === "income");
+}
+
 /** Payments made to a broker (account entries tagged to them). */
 export function brokerPayments(db: Pick<DB, "lockerTransactions">, brokerId: string) {
   return (db.lockerTransactions ?? []).filter(t => t.refType === "brokerPayment" && t.refId === brokerId && t.type === "expense");
 }
 
 export interface BrokerAccount {
-  /** Brokerage we pay, on every bill they brought. */
+  /** Brokerage we pay, on every bill they brought and every sale they brought. */
   brokerage: number;
+  /** Of that, on sales to suppliers. */
+  saleBrokerage: number;
+  /** Money they collected from suppliers for us. */
+  collected: number;
+  /** Of what they collected, handed over to us. */
+  handedOver: number;
   /** Brokerage the suppliers paid — for reference. */
   bySupplier: number;
   /** Money we gave the broker (account entries to them). */
@@ -66,18 +93,23 @@ export function brokerPassed(db: Pick<DB, "purchases">, brokerId: string) {
   return (db.purchases ?? []).flatMap(p => (p.payments ?? []).filter(x => x.viaBrokerId === brokerId).map(pay => ({ purchase: p, pay })));
 }
 
-export function brokerAccount(db: Pick<DB, "purchases" | "lockerTransactions">, broker: Broker): BrokerAccount {
+export function brokerAccount(db: Pick<DB, "purchases" | "lockerTransactions"> & Partial<Pick<DB, "supplierSales" | "supplierReceipts">>, broker: Broker): BrokerAccount {
   const ps = (db.purchases ?? []).filter(p => p.brokerId === broker.id);
-  const brokerage = r2(ps.reduce((s, p) => s + brokerageWePay(p), 0));
+  const saleBrokerage = r2((db.supplierSales ?? []).filter(s => s.brokerId === broker.id).reduce((s, x) => s + saleBrokerageWePay(x), 0));
+  const brokerage = r2(ps.reduce((s, p) => s + brokerageWePay(p), 0) + saleBrokerage);
+  // Ours in their hands: what they collected for us, less what they handed over.
+  const collected = r2(brokerCollected(db, broker.id).reduce((s, r) => s + (r.amountInr || 0), 0));
+  const handedOver = r2(brokerHandovers(db, broker.id).reduce((s, t) => s + (t.amountInr || 0), 0));
   const bySupplier = r2(ps.filter(p => p.brokeragePaidBy === "supplier").reduce((s, p) => s + (p.brokerageInr || 0), 0));
   const paid = r2(brokerPayments(db, broker.id).reduce((s, t) => s + (t.amountInr || 0), 0));
   const passed = r2(brokerPassed(db, broker.id).reduce((s, x) => s + (x.pay.amountInr || 0), 0));
   const opening = r2(openingCreditAmt(broker) - openingDebitAmt(broker));
   const bills = new Set(ps.map(p => `${p.supplierId}|${p.invoiceNumber?.trim() || p.createdAt}`)).size;
-  const due = r2(opening + brokerage + passed - paid);
+  // + we owe them; − they hold money of ours (given and not yet passed on, or collected and not yet handed over).
+  const due = r2(opening + brokerage + passed - paid - collected + handedOver);
   const billsPending = r2(ps.reduce((s, p) => s + purchasePending(p), 0));
   return {
-    brokerage, bySupplier, paid, passed, opening, due,
+    brokerage, saleBrokerage, collected, handedOver, bySupplier, paid, passed, opening, due,
     held: Math.max(0, r2(-due)), billsPending,
     toPay: Math.max(0, r2(billsPending + due)), bills,
   };
@@ -167,9 +199,13 @@ export function brokerageForLines(b: BillBrokerage, lineTotals: number[]): Pick<
 }
 
 /** May this broker be deleted? Not once anything refers to them. */
-export function brokerDeleteWhy(db: Pick<DB, "purchases" | "lockerTransactions">, broker: Broker): string | undefined {
+export function brokerDeleteWhy(db: Pick<DB, "purchases" | "lockerTransactions"> & Partial<Pick<DB, "supplierSales" | "supplierReceipts">>, broker: Broker): string | undefined {
   const bills = (db.purchases ?? []).filter(p => p.brokerId === broker.id).length;
   const pays = brokerPayments(db, broker.id).length;
   if (bills || pays) return `On ${bills} purchase line${bills === 1 ? "" : "s"} and ${pays} payment${pays === 1 ? "" : "s"} — switch them off instead`;
+  // Sales they brought, money they collected for us or handed over: their account holds it — never deleted with them.
+  const sales = (db.supplierSales ?? []).filter(s => s.brokerId === broker.id).length;
+  const money = brokerCollected(db, broker.id).length + brokerHandovers(db, broker.id).length;
+  if (sales || money) return `On ${sales} sale${sales === 1 ? "" : "s"} and ${money} money entr${money === 1 ? "y" : "ies"} — switch them off instead`;
   return undefined;
 }

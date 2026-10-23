@@ -17,6 +17,7 @@ import { filled, when, recorded, userName, refLink, linkList, noteText, refNo, l
 import { fmtMoneyInr, purchasePaid, purchasePending, materialLedger } from "@/lib/manufacturing";
 import { downloadLedgerPdf } from "@/lib/ledgerExport";
 import { profitReport, recognisedSale, saleDate, operatingExpenses, exchangeDifferenceTotal, markupOf } from "@/lib/orderCost";
+import { supplierSalesProfit } from "@/lib/supplierSales";
 import { exportProfitCsv } from "@/lib/productExport";
 import { useDbVersion } from "@/hooks/useDb";
 import { exportAllowed } from "@/lib/access";
@@ -414,13 +415,32 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     // each sale was booked at. Not anybody's margin on a piece, so it sits
     // between gross profit and the running costs.
     const fx = exchangeDifferenceTotal(db, gross.rows.map(r => r.order));
+    // Goods sold to our suppliers (lib/supplierSales.ts): their own sales, cost and
+    // brokerage — the business's, so only on the whole business's (or one company's)
+    // figures, never on one client's or one employee's.
+    const supAll = !clientId && (!scope || !!companyId)
+      ? supplierSalesProfit(db, iso => inRange(iso)).rows.filter(r => !companyId || (r.sale.companyId || "main") === companyId)
+      : [];
+    // Cost and profit add up only the sales whose cost (and day's rate) is known — the rest
+    // are said to be left out, never counted as costing nothing.
+    const counted = supAll.filter(r => r.profitUsd != null);
+    const sup = {
+      rows: supAll,
+      sellingInr: counted.reduce((t, r) => t + r.sellingInr, 0),
+      costInr: counted.reduce((t, r) => t + (r.costInr ?? 0), 0),
+      brokerageInr: counted.reduce((t, r) => t + r.brokerageInr, 0),
+      profitInr: counted.reduce((t, r) => t + (r.profitInr ?? 0), 0),
+      profitUsd: Math.round(supAll.reduce((t, r) => t + (r.profitUsd ?? 0), 0) * 100) / 100,
+      /** Left out of the profit: a line's cost, or the day's rate, not known. */
+      uncounted: supAll.filter(r => r.profitUsd == null).length,
+    };
     const netUsd = gross.totals.profitUsd !== null && opex.totalUsd !== null && fx.usd !== null
-      ? Math.round((gross.totals.profitUsd + fx.usd - opex.totalUsd) * 100) / 100
+      ? Math.round((gross.totals.profitUsd + fx.usd + sup.profitUsd - opex.totalUsd) * 100) / 100
       : null;
     const netMargin = netUsd !== null && gross.totals.sellingUsd > 0
       ? Math.round((netUsd / gross.totals.sellingUsd) * 1000) / 10
       : null;
-    return { ...gross, opex, fx, netUsd, netMargin };
+    return { ...gross, opex, fx, sup, netUsd, netMargin };
   // eslint-disable-next-line react-hooks/exhaustive-deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dbVersion, scopeKey, profitFrom, profitTo, isAdmin]);
@@ -562,7 +582,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const movementLedger = (material: "gold" | "diamond") => {
     const all = materialLedger(db.stockMovements ?? [], material, {
       purchases: db.purchases ?? [], issuances: db.materialIssuances ?? [], orders: db.orders ?? [],
-      factories: db.factories ?? [], suppliers: db.suppliers ?? [], diamondSales: db.diamondSales ?? [], clients: db.clients ?? [],
+      factories: db.factories ?? [], suppliers: db.suppliers ?? [], diamondSales: db.diamondSales ?? [], supplierSales: db.supplierSales ?? [], clients: db.clients ?? [],
     }, companyId);
     return all.filter(r => {
       const k = ymd(r.createdAt);
@@ -1346,6 +1366,13 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
                 {line("Gross profit", profit.totals.profitUsd === null ? "—" : le + fmtMoney(profit.totals.profitUsd),
                   { strong: true, tone: tone(profit.totals.profitUsd),
                     sub: [profit.totals.profitInr != null ? `${le}${fmtMoneyInr(profit.totals.profitInr)}` : "", profit.totals.marginPct === null ? "" : `${le}${profit.totals.marginPct}% gross margin`].filter(Boolean).join(" · ") || undefined })}
+                {profit.sup.rows.length > 0 && line(
+                  `Sales to suppliers — ${profit.sup.rows.length} sale${profit.sup.rows.length !== 1 ? "s" : ""}`,
+                  `${profit.sup.profitUsd < 0 ? "− " : "+ "}${fmtMoney(Math.abs(profit.sup.profitUsd))}`,
+                  { indent: true, sub: [
+                      `sold ${fmtMoneyInr(profit.sup.sellingInr)} · cost ${fmtMoneyInr(profit.sup.costInr)}${profit.sup.brokerageInr ? ` · brokerage ${fmtMoneyInr(profit.sup.brokerageInr)}` : ""} · profit ${fmtMoneyInr(profit.sup.profitInr)}`,
+                      profit.sup.uncounted ? `${profit.sup.uncounted} not counted — a line's cost or the day's rate isn't on record` : "",
+                    ].filter(Boolean).join(" · ") })}
                 {line(
                   profit.fx.usd !== null && profit.fx.usd < 0 ? "Exchange loss on collections" : "Exchange gain on collections",
                   profit.fx.usd === null ? "—" : `${profit.fx.usd < 0 ? "− " : "+ "}${fmtMoney(Math.abs(profit.fx.usd))}`,

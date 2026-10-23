@@ -133,7 +133,7 @@ export async function increaseStock(args: {
   companyId?: string;
   purityOrQuality: string;
   quantity: number;
-  refType: "purchase" | "manual" | "opening" | "transfer";
+  refType: "purchase" | "manual" | "opening" | "transfer" | "supplierSale";
   refId?: string;
   valueInr?: number; // an "opening" entry's ₹ valuation, or a "transfer"'s cost at the sending company
   createdBy: string;
@@ -185,7 +185,7 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "transfer";
+  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer";
   refId?: string;
   createdBy: string;
   note?: string;

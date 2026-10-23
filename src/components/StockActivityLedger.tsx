@@ -36,7 +36,7 @@ const STOCK_ADMIN_ONLY = "Only an admin can change stock";
 interface Row {
   id: string;
   date: string;
-  kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold";
+  kind: "Purchase" | "Opening stock" | "Assigned to factory" | "Diamond sold" | "Sold to supplier";
   party: string;
   material: string;
   /** Its details under the material: a lot's size · colour · clarity · pcs, a stone's report, a grade. */
@@ -291,6 +291,20 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
     });
   }
 
+  // Sold to one of our suppliers (lib/supplierSales.ts) — one row a line; the sale is managed on the supplier's page.
+  for (const sale of db.supplierSales ?? []) {
+    const party = db.suppliers.find(x => x.id === sale.supplierId)?.name ?? "Supplier";
+    sale.lines.forEach((l, i) => {
+      const mat = l.kind === "certified" || l.kind === "diamond" ? "diamond" : l.kind === "gold" ? "gold" : l.kind === "piece" ? "piece" : l.material;
+      all.push({
+        id: `${sale.id}#${i}`, date: sale.createdAt, kind: "Sold to supplier", party,
+        material: l.kind === "piece" ? "Jewellery piece" : l.kind === "certified" ? "Certified diamond" : l.kind === "diamond" ? "Loose diamond" : materialName(db.settings, l.material),
+        detail: l.label, rate: l.rateInr || undefined, mats: [mat], co: companyOf(sale),
+        qty: l.qty, unit: l.unit as MaterialUnit, amountInr: l.amountInr, remark: sale.notes,
+      });
+    });
+  }
+
   const ql = q.trim().toLowerCase();
   const rows = all
     .filter(r => {
@@ -313,9 +327,9 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   const filtered = !!(ql || from || to || kind || material || billFilter || company);
 
   const totalIn = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").reduce((s, r) => s + (r.amountInr ?? 0), 0);
-  const totalOut = rows.filter(r => r.kind === "Diamond sold").reduce((s, r) => s + (r.amountInr ?? 0), 0);
+  const totalOut = rows.filter(r => r.kind === "Diamond sold" || r.kind === "Sold to supplier").reduce((s, r) => s + (r.amountInr ?? 0), 0);
   const nBought = rows.filter(r => r.kind === "Purchase" || r.kind === "Opening stock").length;
-  const nSold = rows.filter(r => r.kind === "Diamond sold").length;
+  const nSold = rows.filter(r => r.kind === "Diamond sold" || r.kind === "Sold to supplier").length;
   // The totals show in the page's figure strip, beside the month's — handed up
   // whenever the rows (or the filters on them) change.
   useEffect(() => {
@@ -418,6 +432,11 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           hint: !mayDelete ? needsAccess("buyAssign", "delete") : !voidable.ok ? oneLine(voidable.reason) : "Undoes stone, sale and money" },
       ];
     }
+    if (r.kind === "Sold to supplier") {
+      const sale = (db.supplierSales ?? []).find(x => x.id === r.id.split("#")[0]);
+      if (!sale) return [];
+      return [viewAction("View supplier", `${r.party} — the sale is changed or deleted there`, `/suppliers/${sale.supplierId}`, "suppliers")];
+    }
     if (r.kind === "Opening stock") {
       const m = (db.stockMovements ?? []).find(x => x.id === r.id);
       if (!m) return [];
@@ -440,7 +459,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   };
 
   const TONE: Record<Row["kind"], "blue" | "neutral" | "amber" | "green"> = {
-    "Purchase": "blue", "Opening stock": "neutral", "Assigned to factory": "amber", "Diamond sold": "green",
+    "Purchase": "blue", "Opening stock": "neutral", "Assigned to factory": "amber", "Diamond sold": "green", "Sold to supplier": "green",
   };
   const columns: DataColumn<Row>[] = [
     { key: "party", header: "Party", always: true, sortValue: r => r.party,
@@ -499,7 +518,7 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
           from, to, onFrom: setFrom, onTo: setTo,
           selects: [
             { label: "Entry", value: kind, onChange: setKind,
-              options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold"].map(k => ({ value: k, label: k })) },
+              options: ["Purchase", "Opening stock", "Assigned to factory", "Diamond sold", "Sold to supplier"].map(k => ({ value: k, label: k })) },
             { label: "Material", value: material, onChange: setMaterial,
               options: [{ value: "gold", label: "Gold" }, { value: "diamond", label: "Diamond" },
                 ...materialDefs(db.settings).map(m => ({ value: m.id, label: m.name }))] },

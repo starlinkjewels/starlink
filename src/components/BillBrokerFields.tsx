@@ -15,10 +15,12 @@ const NONE = "__none";
  * form — Buy & Assign and an order's Buy — so the brokerage is recorded the
  * same way wherever a bill is entered.
  */
-export function BillBrokerFields({ value, onChange, billTotalInr, className = "", supplierId }: {
+export function BillBrokerFields({ value, onChange, billTotalInr, className = "", supplierId, sale = false }: {
   value: BillBrokerage; onChange: (v: BillBrokerage) => void; billTotalInr: number; className?: string;
   /** The bill's supplier: choosing one brings in their usual broker (only into an empty box). */
   supplierId?: string;
+  /** A sale TO the supplier (lib/supplierSales.ts) rather than a purchase — says what the brokerage does there. */
+  sale?: boolean;
 }) {
   const db = useDb();
   const lastSupplier = useRef(supplierId);
@@ -83,9 +85,13 @@ export function BillBrokerFields({ value, onChange, billTotalInr, className = ""
             <button type="button" role="radio" aria-checked={value.paidBy === "supplier"} onClick={() => onChange({ ...value, paidBy: "supplier" })} className={seg(value.paidBy === "supplier")}>Supplier pays</button>
           </div>
           <p className="text-[11px] text-muted-foreground">
-            {value.paidBy === "us"
-              ? <>Brokerage <span className="font-semibold text-foreground">{fmtMoneyInr(inr)}</span> owed to {broker?.name ?? "the broker"} — added to what this material cost. The supplier's bill stays the same.</>
-              : <>Brokerage {fmtMoneyInr(inr)} paid by the supplier — written on the bill only; nothing owed by us.</>}
+            {sale
+              ? value.paidBy === "us"
+                ? <>Brokerage <span className="font-semibold text-foreground">{fmtMoneyInr(inr)}</span> owed to {broker?.name ?? "the broker"} — comes off this sale's profit. What the supplier owes stays the same.</>
+                : <>Brokerage {fmtMoneyInr(inr)} paid by the supplier — written on the sale only; nothing owed by us.</>
+              : value.paidBy === "us"
+                ? <>Brokerage <span className="font-semibold text-foreground">{fmtMoneyInr(inr)}</span> owed to {broker?.name ?? "the broker"} — added to what this material cost. The supplier's bill stays the same.</>
+                : <>Brokerage {fmtMoneyInr(inr)} paid by the supplier — written on the bill only; nothing owed by us.</>}
           </p>
         </>
       )}

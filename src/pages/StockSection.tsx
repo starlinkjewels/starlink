@@ -74,7 +74,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 
   const rawRows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
-    diamondSales: db.diamondSales, clients: db.clients,
+    diamondSales: db.diamondSales, supplierSales: db.supplierSales ?? [], clients: db.clients,
   }, co);
 
   // Deterministic chronological order so the running balance is stable AND its
@@ -576,6 +576,8 @@ function CertifiedSection() {
     const issue = p.status !== "in_stock" ? (db.materialIssuances ?? []).find(mi => mi.diamondPacketIds?.includes(p.id)) : undefined;
     const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
     const buyer = sale?.clientId ? db.clients.find(x => x.id === sale.clientId) : undefined;
+    // Or sold to one of our suppliers (lib/supplierSales.ts).
+    const supSale = p.status === "sold" && !sale ? (db.supplierSales ?? []).find(x => x.lines.some(l => l.packetId === p.id)) : undefined;
     return filled([
       { label: "Color", value: p.color },
       { label: "Clarity", value: p.clarity },
@@ -590,6 +592,7 @@ function CertifiedSection() {
       { label: "Bill no.", value: pu?.invoiceNumber },
       !!issue && { label: "Issued to", value: <>{refLink(`/factories/${issue.factoryId}`, db.factories.find(f => f.id === issue.factoryId)?.name ?? "Factory", can("factories"))} · {fmtDate(issue.issuedAt)}</> },
       !!sale && { label: "Sold to", value: buyer ? refLink(`/clients/${buyer.id}`, buyer.companyName, can("clients")) : sale.buyerName || "Buyer" },
+      !!supSale && { label: "Sold to", value: refLink(`/suppliers/${supSale.supplierId}`, `${supplierName(supSale.supplierId) ?? "A supplier"} (supplier)`, can("suppliers")) },
       !!sale && { label: "Sold on", value: fmtDate(sale.createdAt) },
       multiCo && { label: "Company", value: companyById(db.settings, p.companyId).name },
       { label: "Added", value: recorded(db, p.createdAt, p.createdBy) },
@@ -762,14 +765,18 @@ function CertifiedSection() {
   const packetActions = (p: DiamondPacket): MoreAction[] => {
     const del = packetDeletion(p);
     const sale = p.status === "sold" ? (db.diamondSales ?? []).find(s => s.packetId === p.id) : undefined;
+    const supSale = p.status === "sold" && !sale ? (db.supplierSales ?? []).find(x => x.lines.some(l => l.packetId === p.id)) : undefined;
     const inStock = p.status === "in_stock";
     return [
       { label: "View order", icon: ExternalLink, show: !!p.orderId, disabled: !can("orders"),
         hint: can("orders") ? `${inStock ? "Reserved for" : p.status === "used" ? "Used in" : "Issued to"} ${orderNoOf(p.orderId) ?? "the order"}` : needsAccess("orders", "view"),
         onSelect: () => navigate(`/orders/${p.orderId}`) },
-      { label: "View sale", icon: ExternalLink, show: p.status === "sold", disabled: !can("buyAssign"),
+      { label: "View sale", icon: ExternalLink, show: p.status === "sold" && !supSale, disabled: !can("buyAssign"),
         hint: can("buyAssign") ? `In Buy & Assign${sale ? ` · ${fmtDate(sale.createdAt)}` : ""}` : needsAccess("buyAssign", "view"),
         onSelect: () => navigate("/buy-assign") },
+      { label: "View sale", icon: ExternalLink, show: !!supSale, disabled: !can("suppliers"),
+        hint: can("suppliers") ? `Sold to ${supplierName(supSale?.supplierId) ?? "a supplier"} · ${supSale ? fmtDate(supSale.createdAt) : ""}` : needsAccess("suppliers", "view"),
+        onSelect: () => navigate(`/suppliers/${supSale!.supplierId}`) },
       { label: "View purchase", icon: ExternalLink, show: !!p.supplierId, disabled: !can("suppliers"),
         hint: can("suppliers") ? `On ${supplierName(p.supplierId) ?? "the supplier"}'s page` : needsAccess("suppliers", "view"),
         onSelect: () => navigate(`/suppliers/${p.supplierId}`) },
