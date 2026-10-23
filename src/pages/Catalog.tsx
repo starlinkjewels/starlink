@@ -23,6 +23,10 @@ import {
   ImagePlus,
   FileText,
   FolderInput,
+  Share2,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
@@ -492,6 +496,88 @@ function downloadName(item: CatalogItem): string {
   return ext ? `${name}.${ext}` : name;
 }
 
+/** A position typed in: moved when it is done (Enter, or leaving the box), so
+ *  typing "12" doesn't first jump the folder to 1. */
+function PositionInput({ value, max, label, onCommit }: { value: number; max: number; label: string; onCommit(n: number): void }) {
+  const [draft, setDraft] = useState(String(value));
+  useEffect(() => setDraft(String(value)), [value]);
+  const commit = () => {
+    const n = Math.round(Number(draft));
+    if (n >= 1 && n <= max && n !== value) onCommit(n); else setDraft(String(value));
+  };
+  return (
+    <input type="number" inputMode="numeric" min={1} max={max} value={draft} aria-label={label}
+      onChange={(e) => setDraft(e.target.value)} onBlur={commit}
+      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); commit(); } }}
+      className="h-9 w-14 rounded-lg border border-border bg-secondary/40 text-center text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-primary/30" />
+  );
+}
+
+/**
+ * The folders at one level, in the order everyone sees them — clients too.
+ * Moved with ↑ ↓ or by typing a position, saved together as each folder's
+ * `order`. Folders made later go after these until arranged again.
+ */
+function ArrangeFoldersSheet({ open, onClose, onSaved, folders, title }: {
+  open: boolean; onClose(): void; onSaved(): void; folders: CatalogFolder[]; title: string;
+}) {
+  const [ids, setIds] = useState<string[]>([]);
+  const [saving, setSaving] = useState(false);
+  // Taken once as it opens: a folder arriving meanwhile doesn't reshuffle the list being arranged.
+  useEffect(() => {
+    if (open) setIds(folders.map((f) => f.id));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+  const nameOf = (id: string) => folders.find((f) => f.id === id)?.name ?? "Folder";
+  const moveTo = (from: number, to: number) => setIds((cur) => {
+    const t = Math.max(0, Math.min(cur.length - 1, to));
+    if (t === from) return cur;
+    const next = [...cur];
+    const [x] = next.splice(from, 1);
+    next.splice(t, 0, x);
+    return next;
+  });
+  const changed = ids.some((id, i) => folders[i]?.id !== id);
+  const save = () => {
+    setSaving(true);
+    try {
+      updateDb((db) => {
+        ids.forEach((id, i) => {
+          const f = db.catalogFolders.find((x) => x.id === id);
+          if (f) f.order = i;
+        });
+      });
+      toast.success("Folder order saved");
+      onSaved(); // the grid shows the new order at once
+      onClose();
+    } finally { setSaving(false); }
+  };
+  return (
+    <ActionSheet open={open} onOpenChange={(v) => { if (!v) onClose(); }} size="md" icon={ArrowUpDown}
+      title="Arrange folders" description={`${title} · the order everyone sees them in`}
+      footer={
+        <div className="flex items-center justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl h-10 flex-1 sm:flex-none">Cancel</Button>
+          <AsyncButton onClick={save} disabled={saving || !changed} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save order</AsyncButton>
+        </div>
+      }>
+      <ol className="rounded-xl border border-border/60 divide-y divide-border/50 bg-white">
+        {ids.map((id, i) => (
+          <li key={id} className="flex items-center gap-2 px-2.5 py-2">
+            <PositionInput value={i + 1} max={ids.length} label={`Position of ${nameOf(id)}`} onCommit={(n) => moveTo(i, n - 1)} />
+            <Folder className="h-4 w-4 text-amber-500 shrink-0" />
+            <span className="flex-1 min-w-0 truncate text-sm font-medium text-brand-dark">{nameOf(id)}</span>
+            <button type="button" onClick={() => moveTo(i, i - 1)} disabled={i === 0} aria-label={`Move ${nameOf(id)} up`}
+              className="h-9 w-9 grid place-items-center rounded-lg border border-border bg-white hover:bg-secondary disabled:opacity-30"><ArrowUp className="h-4 w-4" /></button>
+            <button type="button" onClick={() => moveTo(i, i + 1)} disabled={i === ids.length - 1} aria-label={`Move ${nameOf(id)} down`}
+              className="h-9 w-9 grid place-items-center rounded-lg border border-border bg-white hover:bg-secondary disabled:opacity-30"><ArrowDown className="h-4 w-4" /></button>
+          </li>
+        ))}
+      </ol>
+    </ActionSheet>
+  );
+}
+
 /**
  * Move a folder, with everything in it, under another folder or to the top of
  * the Catalog — one field on the folder; its items and subfolders go with it.
@@ -821,11 +907,16 @@ export function CatalogPage() {
   const [itemSheet, setItemSheet] = useState<{ item: CatalogItem; mode: "rename" | "move" } | null>(null);
   const [movingFolder, setMovingFolder] = useState<CatalogFolder | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
+  // "Share link" from a folder's ⋯, and "Arrange folders".
+  const [sharingFolder, setSharingFolder] = useState<CatalogFolder | null>(null);
+  const [arranging, setArranging] = useState(false);
 
   /* ── Load folders + favourite ids (small, bounded collections — still the shared cache) ── */
   const reload = useCallback(() => {
     const db = loadDb();
-    setFolders(db.catalogFolders ?? []);
+    // A new array each time: a change made in place (a new order, a new
+    // name) would otherwise look like the same list and not redraw.
+    setFolders([...(db.catalogFolders ?? [])]);
     const myFavs = (db.catalogFavorites ?? [])
       .filter((f) => f.userId === user!.id)
       .map((f) => f.itemId);
@@ -839,8 +930,14 @@ export function CatalogPage() {
   }, [reload]);
 
   /* ── Derived ── */
+  // In the order set in "Arrange folders"; folders never arranged keep the
+  // order they arrive in, after the arranged ones.
   const subfolders = useMemo(
-    () => folders.filter((f) => (f.parentId ?? null) === currentFolderId),
+    () => folders
+      .map((f, i) => ({ f, i }))
+      .filter(({ f }) => (f.parentId ?? null) === currentFolderId)
+      .sort((a, b) => (a.f.order ?? Infinity) - (b.f.order ?? Infinity) || a.i - b.i)
+      .map(({ f }) => f),
     [folders, currentFolderId],
   );
   const breadcrumb = folderPath
@@ -1253,6 +1350,8 @@ export function CatalogPage() {
     { label: downloadingId === folder.id ? "Downloading…" : "Download", icon: Download,
       hint: !canShare ? needsAccess("catalog", "export") : "Everything in it, as one zip",
       disabled: !canShare || downloadingId !== null, onSelect: () => downloadFolder(folder) },
+    { label: "Share link", icon: Share2, hint: !canShare ? needsAccess("catalog", "export") : "A public link — no login needed",
+      disabled: !canShare, onSelect: () => setSharingFolder(folder) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit,
       onSelect: () => { setRenamingId(folder.id); setRenameVal(folder.name); } },
     { label: "Move", icon: FolderInput, hint: isAdmin ? "With everything inside it" : ADMIN_MOVE, disabled: !isAdmin,
@@ -1552,6 +1651,9 @@ export function CatalogPage() {
               .filter(Boolean)
               .join(" · ") || "Empty"}
         primary={canAdd ? { label: "New Folder", icon: Plus, onClick: () => { setShowNewFolder((v) => !v); setNewFolderName(""); } } : null}
+        menu={canEdit && !viewingFavorites && subfolders.length > 1 ? [
+          { label: "Arrange folders", icon: ArrowUpDown, hint: "Set the order they show in", onSelect: () => setArranging(true) },
+        ] : undefined}
         actions={(canAdd || canShare) ? (
           <>
             {/* Upload — only shown when inside a folder */}
@@ -1836,6 +1938,12 @@ export function CatalogPage() {
 
       {/* ── Modals ── */}
       <DeleteModal />
+      <ArrangeFoldersSheet open={arranging} onClose={() => setArranging(false)} onSaved={reload} folders={subfolders}
+        title={breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : "Catalog"} />
+      {sharingFolder && (
+        <ShareFolderButton key={sharingFolder.id} kind="catalog" folderId={sharingFolder.id} folderName={sharingFolder.name}
+          autoOpen onClose={() => setSharingFolder(null)} />
+      )}
       {movingFolder && (
         <FolderMoveSheet folder={movingFolder} folders={folders}
           blocked={[movingFolder.id, ...descendantIds(movingFolder.id)]} onClose={() => setMovingFolder(null)} />

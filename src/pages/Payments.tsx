@@ -7,7 +7,7 @@ import { useEffect, useLayoutEffect, useState, type ReactNode } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import {
-  updateDb, uid, fmtMoney,
+  updateDb, fmtMoney,
   invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
   DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor, dayOf,
 } from "@/lib/db";
@@ -20,12 +20,12 @@ import { DayBook } from "@/components/DayBook";
 import { ActionSheet } from "@/components/ActionSheet";
 import { PageHeader, ScrollRow, TabBar } from "@/components/PageHeader";
 import {
-  supplierAccount, purchasePending, allocateSupplierPaymentFIFO,
-  factoryAccount, issuancePending, allocateFactoryChargePaymentFIFO,
+  supplierAccount, purchasePending,
+  factoryAccount, issuancePending,
   fmtMoneyInr, lockerBalance,
 } from "@/lib/manufacturing";
 import { lockerFigure } from "@/lib/partyTotals";
-import { ccy, ccySymbol, fmtCcy, fmtCcyMix, rateFields, roundCcy, sumByCcy } from "@/lib/currency";
+import { ccy, ccySymbol, fmtCcy, fmtCcyMix, roundCcy, sumByCcy } from "@/lib/currency";
 import { RateInput } from "@/components/CurrencyFields";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -40,6 +40,7 @@ import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PayBrokerSheet } from "@/components/PayBrokerSheet";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
+import { notifyClientPayment, writeAccountEntry, writeExpense, writeFactoryPayment, writeSupplierPayment, writeSupplierReceipt, writeTransfer } from "@/lib/partyPayments";
 import { ReceiveFromBrokerSheet } from "@/components/ReceiveFromBrokerSheet";
 import { RefundClientSheet } from "@/components/RefundClientSheet";
 
@@ -359,17 +360,7 @@ export function ReceiveFromClient({ open, onOpenChange, lockerId: fixedLocker, f
         invoiceId: invoiceId || undefined,
         userId: user!.id,
       });
-      updateDb(d => {
-        const clientUser = d.users.find(u => u.clientId === clientId);
-        if (clientUser) d.notifications.unshift({
-          id: uid("n_"), userId: clientUser.id, title: "Payment Received",
-          // Says what happened: against the invoice named, or held as their credit.
-          body: invoiceId
-            ? `${fmtMoney(amt)} received via ${method} against invoice ${d.invoices.find(i => i.id === invoiceId)?.number ?? ""}.`.replace(" .", ".")
-            : `${fmtMoney(amt)} received via ${method} — held as credit on your account.`,
-          type: "info", read: false, createdAt: now,
-        });
-      });
+      updateDb(d => notifyClientPayment(d, clientId, amt, method, invoiceId || undefined, now));
       toast.success(`Receipt ${receipt.receiptNo} — ${fmtMoney(amt)} received from ${c.companyName}`);
       setClientId(""); setAmount(""); setNote(""); setLockerId(""); setExchangeRate(""); setInvoiceId(""); setDate(todayLocal());
       onOpenChange(false);
@@ -557,16 +548,7 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
       setSaving(true);
       try {
         const now = stampFor(date);
-        updateDb(d => {
-          if (!d.supplierReceipts) d.supplierReceipts = [];
-          // The account movement is tagged with the receipt it belongs to, so
-          // correcting it from the supplier tab moves both and the Locker tab
-          // sends you there rather than letting the two drift apart.
-          const receiptId = uid("srcpt_");
-          d.supplierReceipts.push({ id: receiptId, supplierId, amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-          if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({ id: uid("ltx_"), lockerId, type: "income", amountInr: amt, currency: "INR", category: `Received from ${s.name}`, refType: "supplierReceipt", refId: supplierId, paymentId: receiptId, note: note.trim() || undefined, recordedBy: user!.id, createdAt: now });
-        });
+        updateDb(d => writeSupplierReceipt(d, { supplierId, lockerId, amount: amt, note, userId: user!.id, at: now }));
         toast.success(`${fmtMoneyInr(amt)} received from ${s.name}`);
         setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
         onOpenChange(false);
@@ -580,46 +562,7 @@ export function PaySupplier({ open, onOpenChange, preset, lockerId: fixedLocker,
     setSaving(true);
     try {
       const now = stampFor(date);
-      updateDb(d => {
-        const supplierPurchases = d.purchases.filter(p => p.supplierId === supplierId);
-        const asAdvance = (sum: number) => {
-          if (!d.supplierPayments) d.supplierPayments = [];
-          d.supplierPayments.push({ id: uid("spay_"), supplierId, amountInr: sum, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-        };
-        if (target === "__advance") {
-          asAdvance(amt);
-        } else if (target === "__fifo") {
-          const leftover = allocateSupplierPaymentFIFO(supplierPurchases, amt, lockerId, user!.id, now, note.trim() || undefined);
-          if (leftover > 0) {
-            const newest = [...supplierPurchases].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))[0];
-            if (newest) {
-              if (!newest.payments) newest.payments = [];
-              newest.payments.push({ id: uid("ppay_"), amountInr: leftover, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-            } else {
-              // Nothing to settle — a supplier with no bills at all. Standing on
-              // its own is the only place this money can go; it used to vanish.
-              asAdvance(leftover);
-            }
-          }
-        } else {
-          const p = d.purchases.find(p => p.id === target);
-          if (p) {
-            if (!p.payments) p.payments = [];
-            p.payments.push({ id: uid("ppay_"), amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-          } else {
-            // The bill went while the form was open. The money still left the
-            // account, so it is booked as an advance rather than discarded.
-            asAdvance(amt);
-          }
-        }
-        if (!d.lockerTransactions) d.lockerTransactions = [];
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId, type: "expense", amountInr: amt, currency: "INR",
-          category: `Supplier Payment — ${s.name}`, refType: "purchase",
-          refId: target === "__fifo" || target === "__advance" ? undefined : target,
-          note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
-        });
-      });
+      updateDb(d => writeSupplierPayment(d, { supplierId, lockerId, amount: amt, target, note, userId: user!.id, at: now }));
       toast.success(`${fmtMoneyInr(amt)} paid to ${s.name}`);
       setSupplierId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
       onOpenChange(false);
@@ -743,45 +686,7 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
     setSaving(true);
     try {
       const now = stampFor(date);
-      updateDb(d => {
-        const factoryIssuances = d.materialIssuances.filter(i => i.factoryId === factoryId);
-        const asAdvance = (sum: number) => {
-          if (!d.factoryPayments) d.factoryPayments = [];
-          d.factoryPayments.push({ id: uid("fadv_"), factoryId, amountInr: sum, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-        };
-        if (target === "__advance") {
-          asAdvance(amt);
-        } else if (target === "__fifo") {
-          const leftover = allocateFactoryChargePaymentFIFO(factoryIssuances, amt, lockerId, user!.id, now, note.trim() || undefined);
-          if (leftover > 0) {
-            // Park the excess on the newest issuance so Total Paid / Overpaid reflect it.
-            const newest = [...factoryIssuances].sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt))[0];
-            if (newest) {
-              if (!newest.makingCharges.payments) newest.makingCharges.payments = [];
-              newest.makingCharges.payments.push({ id: uid("fpay_"), amountInr: leftover, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-            } else {
-              // No job to settle at all — an advance to a factory that has not
-              // started anything yet. It used to be discarded.
-              asAdvance(leftover);
-            }
-          }
-        } else {
-          const mi = d.materialIssuances.find(x => x.id === target);
-          if (mi) {
-            if (!mi.makingCharges.payments) mi.makingCharges.payments = [];
-            mi.makingCharges.payments.push({ id: uid("fpay_"), amountInr: amt, lockerId, recordedBy: user!.id, createdAt: now, note: note.trim() || undefined });
-          } else {
-            asAdvance(amt);
-          }
-        }
-        if (!d.lockerTransactions) d.lockerTransactions = [];
-        d.lockerTransactions.push({
-          id: uid("ltx_"), lockerId, type: "expense", amountInr: amt, currency: "INR",
-          category: `Making Charges — ${f.name}`, refType: "materialIssuance",
-          refId: target === "__fifo" ? undefined : target,
-          note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
-        });
-      });
+      updateDb(d => writeFactoryPayment(d, { factoryId, lockerId, amount: amt, target, note, userId: user!.id, at: now }));
       toast.success(`${fmtMoneyInr(amt)} paid to ${f.name}`);
       setFactoryId(""); setAmount(""); setTarget("__fifo"); setNote(""); setLockerId(""); setDate(todayLocal());
       onOpenChange(false);
@@ -893,24 +798,10 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
     setSaving(true);
     try {
       const now = stampFor(date);
-      const expense: Expense = {
-        id: uid("exp_"), title: titleText, amount: amt, category,
-        note: note.trim() || undefined, employeeId: user!.id,
-        paidToEmployeeId: forEmployee || category === "Salary" ? (paidToEmployeeId || undefined) : undefined,
-        currency: curr, createdAt: now, lockerId,
-      };
-      updateDb(d => {
-        d.expenses.push(expense);
-        const l = d.lockers.find(x => x.id === lockerId);
-        if (l) {
-          if (!d.lockerTransactions) d.lockerTransactions = [];
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId, type: "expense", amountInr: amt,
-            currency: ccy(l.currency), category: `Expense — ${titleText}`,
-            refType: "expense", refId: expense.id, recordedBy: user!.id, createdAt: now,
-          });
-        }
-      });
+      updateDb(d => writeExpense(d, {
+        lockerId, amount: amt, title: titleText, category, note, userId: user!.id, at: now,
+        paidToEmployeeId: forEmployee || category === "Salary" ? paidToEmployeeId : undefined,
+      }));
       toast.success("Expense recorded");
       setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(""); setDate(todayLocal());
       onOpenChange(false);
@@ -1071,36 +962,9 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
     try {
       const now = stampFor(date);
       const voucher = await reserveVoucherNumber(db.lockerTransactions ?? []);
-      const xferId = uid("xfer_");
       updateDb(d => {
-        if (!d.lockerTransactions) d.lockerTransactions = [];
-        if (action === "transfer_out") {
-          const dest = d.lockers.find(l => l.id === targetLocker);
-          if (!dest) return;
-          // What arrives is amount × rate, in the destination's currency.
-          const destAmount = crossCurrency ? roundCcy(amt * rate, targetCcy) : amt;
-          // The same rate on both legs ({fx}, plus the old ₹-per-$ figure for a
-          // rupee/dollar pair); nothing at all on a same-currency transfer.
-          const fx = crossCurrency ? rateFields(cur, targetCcy, rate) : {};
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: selected.id, type: "transfer_out", amountInr: amt, currency: cur,
-            category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: dest.id, note: note.trim() || undefined,
-            ...fx,
-            recordedBy: user!.id, createdAt: now,
-          });
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: dest.id, type: "transfer_in", amountInr: destAmount, currency: ccy(dest.currency),
-            category: "Transfer", refType: "transfer", transferId: xferId, voucherNo: voucher, pairedLockerId: selected.id, note: note.trim() || undefined,
-            ...fx,
-            recordedBy: user!.id, createdAt: now,
-          });
-        } else {
-          d.lockerTransactions.push({
-            id: uid("ltx_"), lockerId: selected.id, type: action, amountInr: amt, currency: cur,
-            category: category || undefined, refType: "manual", voucherNo: voucher,
-            note: note.trim() || undefined, recordedBy: user!.id, createdAt: now,
-          });
-        }
+        if (action === "transfer_out") writeTransfer(d, { lockerId: selected.id, toLockerId: targetLocker, amount: amt, rate: crossCurrency ? rate : undefined, voucherNo: voucher, note, userId: user!.id, at: now });
+        else writeAccountEntry(d, { lockerId: selected.id, type: action, amount: amt, category, voucherNo: voucher, note, userId: user!.id, at: now });
       });
       toast.success(
         action === "income" ? `${fmtCcy(amt, cur)} deposited to ${selected.name}`
