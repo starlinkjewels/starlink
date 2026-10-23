@@ -112,8 +112,14 @@ export function EmployeesPage() {
   const clientCount = (userId: string) =>
     db.clients.filter(c => c.accountManagerId === userId).length;
 
-  /** Salary, wages and advances paid to them in the month shown (their salary ledger's lines), by currency. */
-  const salaryIn = (userId: string) => sumByCcy((db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && inPeriod(e.createdAt)), e => e.amount, e => e.currency);
+  /** Salary, wages and advances paid to them in the month shown (their salary ledger's lines), by currency —
+   *  with what was already paid before this app (its opening line, dated as the details page dates it). */
+  const salaryIn = (userId: string) => {
+    const u = db.users.find(x => x.id === userId);
+    const lines: { amount: number; currency?: string }[] = (db.expenses ?? []).filter(e => e.paidToEmployeeId === userId && inPeriod(e.createdAt));
+    if (u?.openingPaid && u.openingPaid > 0 && inPeriod(u.openingPaidDate || u.createdAt)) lines.push({ amount: u.openingPaid, currency: u.openingPaidCurrency ?? "INR" });
+    return sumByCcy(lines, e => e.amount, e => e.currency);
+  };
   const salaryText = (userId: string) => {
     const m = salaryIn(userId);
     return [...m.entries()].filter(([, v]) => v).sort(([a], [b]) => ccyOrder(a, b)).map(([c, v]) => fmtCcy(v, c)).join(" + ");

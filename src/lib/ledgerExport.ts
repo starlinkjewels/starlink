@@ -60,6 +60,9 @@ export function downloadLedgerPdf(opts: {
   /** The company named at the top — a client's own statement carries the
    *  company that sells to them. Blank = the first company, as always. */
   company?: string;
+  /** A small picture on each row (same order as `rows`; data URLs from pdfThumb, null = none),
+   *  in a column of its own at `x`. Rows grow tall enough to show it. */
+  pictures?: { header: string; x: number; images: (string | null | undefined)[] };
 }): void {
   const doc = new jsPDF(opts.landscape ? { orientation: "landscape" } : undefined);
   const PAGE_W = opts.landscape ? 297 : 210;
@@ -92,6 +95,7 @@ export function downloadLedgerPdf(opts: {
   };
 
   const groupHeaders = opts.groupHeaders;
+  const pics = opts.pictures;
   const tableHead = (y: number) => {
     if (groupHeaders?.length) {
       doc.setFillColor(214, 223, 240);
@@ -104,6 +108,7 @@ export function downloadLedgerPdf(opts: {
     doc.rect(L - 2, y - 4.6, R - L + 4, 7, "F");
     doc.setFont("helvetica", "bold"); doc.setFontSize(8.5); doc.setTextColor(35, 55, 95);
     cols.forEach((c, i) => cell(c.header, i, y));
+    if (pics) doc.text(pics.header, pics.x, y);
     doc.setTextColor(45);
     return y + 6.5;
   };
@@ -126,14 +131,22 @@ export function downloadLedgerPdf(opts: {
 
   doc.setFont("helvetica", "normal"); doc.setFontSize(8.5);
   let zebra = false;
-  for (const row of opts.rows) {
-    if (y > yBreak) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
-    if (zebra) { doc.setFillColor(247, 249, 252); doc.rect(L - 2, y - 4.3, R - L + 4, 6.4, "F"); }
+  // With pictures, each row is as tall as its picture and the words sit in its middle.
+  const PIC = 12;
+  const rowH = pics ? PIC + 2.4 : 6.4;
+  const textDy = pics ? (PIC / 2) - 2.2 : 0;
+  opts.rows.forEach((row, ri) => {
+    if (y + (pics ? PIC - 4 : 0) > yBreak) { doc.addPage(); pageHeader(); y = tableHead(34); doc.setFont("helvetica", "normal"); doc.setFontSize(8.5); zebra = false; }
+    if (zebra) { doc.setFillColor(247, 249, 252); doc.rect(L - 2, y - 4.3, R - L + 4, rowH, "F"); }
     zebra = !zebra;
     doc.setTextColor(50);
-    row.forEach((c, i) => cell(String(c ?? ""), i, y));
-    y += 6.4;
-  }
+    row.forEach((c, i) => cell(String(c ?? ""), i, y + textDy));
+    const img = pics?.images[ri];
+    if (pics && img) {
+      try { doc.addImage(img, "JPEG", pics.x, y - 3.4, PIC, PIC); } catch { /* a picture that can't be drawn is left out */ }
+    }
+    y += rowH;
+  });
   if (opts.rows.length === 0) { doc.setTextColor(120); doc.text("No records.", L, y + 2); doc.setTextColor(50); }
 
   if (opts.totalsRow) {
@@ -262,4 +275,40 @@ export function downloadLedgerPdfMulti(opts: {
   if (!exportAllowed()) return;
   logEvent("export", `Downloaded ${opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`} — ${opts.title}`, { file: opts.filename, title: opts.title });
   doc.save(opts.filename.endsWith(".pdf") ? opts.filename : `${opts.filename}.pdf`);
+}
+
+/**
+ * A picture made small for a PDF row: fetched, shrunk to `max` px on its long
+ * side on a white ground, as a JPEG data URL. Null when it can't be had (no
+ * picture, a broken link, the storage refusing) — the row then prints without it.
+ */
+export async function pdfThumb(url: string | undefined, max = 160): Promise<string | null> {
+  if (!url) return null;
+  try {
+    const blob = url.startsWith("data:") ? await (await fetch(url)).blob() : await (await fetch(url, { mode: "cors" })).blob();
+    const bmp = await createImageBitmap(blob);
+    const scale = Math.min(1, max / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale)), h = Math.max(1, Math.round(bmp.height * scale));
+    // Square, the picture centred in it — every row's picture the same size.
+    const side = Math.max(w, h);
+    const canvas = document.createElement("canvas");
+    canvas.width = side; canvas.height = side;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#ffffff"; ctx.fillRect(0, 0, side, side);
+    ctx.drawImage(bmp, (side - w) / 2, (side - h) / 2, w, h);
+    bmp.close?.();
+    return canvas.toDataURL("image/jpeg", 0.8);
+  } catch {
+    return null;
+  }
+}
+
+/** Several at once, a few at a time — the order kept. */
+export async function pdfThumbs(urls: (string | undefined)[], max = 160): Promise<(string | null)[]> {
+  const out: (string | null)[] = new Array(urls.length).fill(null);
+  let next = 0;
+  const worker = async () => { while (next < urls.length) { const i = next++; out[i] = await pdfThumb(urls[i], max); } };
+  await Promise.all(Array.from({ length: Math.min(6, urls.length) }, worker));
+  return out;
 }

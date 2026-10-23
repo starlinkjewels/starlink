@@ -1,4 +1,4 @@
-import { isDiamondOnlyOrder } from "@/lib/db";
+import { isDiamondOnlyOrder, orderImage } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
 import { ListCombo } from "@/components/ListCombo";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -36,7 +36,7 @@ import type { Order } from "@/lib/db";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { pieceWeights } from "@/lib/weights";
 import {
-  Package, Mail, Phone, MapPin, Globe, Undo2,
+  Package, Gem, Mail, Phone, MapPin, Globe, Undo2,
   FileText, Clock, AlertCircle,
   Download, Hash, Wallet, Plus, CreditCard, DollarSign,
   Pencil, Trash2, Power, Eye, Printer, XCircle,
@@ -44,7 +44,7 @@ import {
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
-import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti } from "@/lib/ledgerExport";
+import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, pdfThumbs } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { FileSpreadsheet } from "lucide-react";
@@ -439,7 +439,14 @@ function ClientHistoryPageBody() {
     { key: "order", header: "Order #", always: true, sortValue: o => o.orderNumber,
       cell: o => {
         const progress = progressOf(o);
+        // Each order's picture in the row, as on the Orders list — no opening them one by one to see what they are.
+        const img = orderImage(o);
         return (
+          <div className="flex items-center gap-3 min-w-0">
+          <div className="h-11 w-11 rounded-lg overflow-hidden bg-white ring-1 ring-border/60 shrink-0 grid place-items-center">
+            {img ? <img src={img} alt="" loading="lazy" className="w-full h-full object-contain" />
+              : isDiamondOnlyOrder(o) ? <Gem className="h-4 w-4 text-sky-500/50" /> : <Package className="h-4 w-4 text-primary/30" />}
+          </div>
           <div className="min-w-0">
             <p className="font-mono text-xs font-semibold text-brand-dark whitespace-nowrap">{o.orderNumber}</p>
             <div className="mt-1 flex items-center gap-1.5">
@@ -448,6 +455,7 @@ function ClientHistoryPageBody() {
               </div>
               <span className="text-[10px] tabular-nums text-muted-foreground">{progress}%</span>
             </div>
+          </div>
           </div>
         );
       } },
@@ -526,12 +534,16 @@ function ClientHistoryPageBody() {
    * the same exporter as every other ledger: branded, landscape, paginated, and
    * wide enough that nothing is cut.
    */
-  const downloadClientReport = () => {
+  const downloadClientReport = async () => {
     const rows = allOrders
       .slice()
       .sort((a, b) => +new Date(a.createdAt) - +new Date(b.createdAt));
     const value = rows.reduce((s, o) => s + orderTotal(o), 0);
     const paid = rows.reduce((s, o) => s + totalAdvance(o), 0);
+    // Each order's picture beside it, as on the page — fetched first, small.
+    const wait = rows.length ? toast.loading("Preparing the report with photos…") : undefined;
+    const images = await pdfThumbs(rows.map(o => orderImage(o)));
+    if (wait !== undefined) toast.dismiss(wait);
     downloadLedgerPdf({
       company: statementCompany,
       title: "Client Order Report",
@@ -550,12 +562,13 @@ function ClientHistoryPageBody() {
         { label: "Outstanding", value: fmtMoney(Math.max(0, value - paid)) },
       ],
       landscape: true,
+      pictures: { header: "Photo", x: 14, images },
       columns: [
-        { header: "Order #", x: 14 },
-        { header: "Date", x: 52 },
-        { header: "Item", x: 80 },
-        { header: "Metal", x: 118 },
-        { header: "Design #", x: 156 },
+        { header: "Order #", x: 30 },
+        { header: "Date", x: 64 },
+        { header: "Item", x: 88 },
+        { header: "Metal", x: 122 },
+        { header: "Design #", x: 158 },
         { header: "Qty", x: 186 },
         { header: "Order Value", x: 200 },
         { header: "Received", x: 228 },
@@ -565,9 +578,9 @@ function ClientHistoryPageBody() {
       rows: rows.map(o => [
         o.orderNumber,
         fmtDate(o.createdAt),
-        fit(o.jewelleryType, 36),
-        fit(o.metal, 36),
-        fit(o.designNumber || "", 28),
+        fit(o.jewelleryType, 22),
+        fit(o.metal, 22),
+        fit(o.designNumber || "", 16),
         String(o.quantity),
         fmtMoney(orderTotal(o)),
         totalAdvance(o) ? fmtMoney(totalAdvance(o)) : "",
