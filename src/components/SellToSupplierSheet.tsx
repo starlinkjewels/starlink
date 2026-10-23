@@ -13,6 +13,7 @@ import type { SupplierSaleKind, SupplierSaleLine } from "@/lib/db";
 import { ActionSheet } from "@/components/ActionSheet";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Field, Group, PanelActions, Segmented, Stat, Stats, UnitInput } from "@/components/BillLayout";
+import { MoreMenu } from "@/components/MoreMenu";
 import { BillBrokerFields } from "@/components/BillBrokerFields";
 import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
 import { LotPicker } from "@/components/LotFields";
@@ -94,10 +95,13 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
 
   /** A draft as a sale line — or null while it isn't filled in enough to be one. */
   const toLine = (d: Draft): Omit<SupplierSaleLine, "costInr"> | null => {
-    const qty = num(d.qty), rate = num(d.rate);
+    const rate = num(d.rate);
+    // A certified stone's weight is the stone's own (its carat), never typed.
+    const stone = d.kind === "certified" ? packets.find(x => x.id === d.packetId) : undefined;
+    const qty = stone ? stone.carat : num(d.qty);
     const amountInr = d.amount.trim() !== "" ? r2(num(d.amount)) : r2(qty * rate);
     if (d.kind === "certified") {
-      const p = packets.find(x => x.id === d.packetId);
+      const p = stone;
       if (!p) return null;
       return { kind: "certified", material: "certified", packetId: p.id, qty: p.carat, unit: "ct", amountInr,
         ...(rate ? { rateInr: rate } : {}),
@@ -197,10 +201,17 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
               const piece = d.kind === "piece" ? pieces.find(x => x.id === d.itemId) : undefined;
               return (
                 <div key={d.key} className="rounded-xl border border-border/70 bg-white p-3 space-y-2.5">
-                  <div className="flex items-center justify-between gap-2">
-                    <p className="flex items-center gap-1.5 text-xs font-semibold text-brand-dark"><k.icon className="h-3.5 w-3.5 text-primary" />{k.label}</p>
-                    <button type="button" aria-label="Remove this line" onClick={() => setLines(ls => ls.length > 1 ? ls.filter(x => x.key !== d.key) : [newDraft("diamond")])}
-                      className="h-8 w-8 grid place-items-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="h-7 w-7 rounded-lg bg-primary/10 text-primary grid place-items-center shrink-0"><k.icon className="h-3.5 w-3.5" /></span>
+                    <span className="text-sm font-medium text-foreground truncate">{k.label}</span>
+                    <span className="text-xs text-muted-foreground tabular-nums shrink-0">#{i + 1}</span>
+                    <span className="ml-auto text-sm font-semibold text-brand-dark tabular-nums shrink-0 pl-2">{line?.amountInr ? fmtMoneyInr(line.amountInr) : "—"}</span>
+                    {/* What this line is — a loose diamond, a certified stone, gold… — changed here, as on a purchase. */}
+                    <MoreMenu size="sm" label={`Line ${i + 1}: change what it is`} title="Change this line to"
+                      className="border-transparent shadow-none text-muted-foreground"
+                      actions={KINDS.filter(x => x.kind !== d.kind).map(x => ({ label: x.label, icon: x.icon, onSelect: () => setLines(ls => ls.map(l => (l.key === d.key ? { ...newDraft(x.kind), key: l.key } : l))) }))} />
+                    <button type="button" aria-label="Remove this line" title="Remove this line" onClick={() => setLines(ls => ls.length > 1 ? ls.filter(x => x.key !== d.key) : [newDraft("diamond")])}
+                      className="h-8 w-8 -mr-1 grid place-items-center rounded-lg shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 className="h-4 w-4" /></button>
                   </div>
                   <div className="grid grid-cols-2 gap-2.5">
                     {d.kind === "diamond" && (
@@ -254,7 +265,7 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
                     {d.kind !== "piece" && (
                       <Field label={`Rate (₹ / ${unit})`}>{id => <UnitInput id={id} min={0} unit={`₹/${unit}`} value={d.rate} onChange={e => set(d.key, { rate: e.target.value, amount: "" })} />}</Field>
                     )}
-                    <Field label="Amount (₹)" hint={d.amount.trim() === "" && line?.amountInr ? "quantity × rate" : undefined}>{id => (
+                    <Field label="Amount (₹)" hint={d.amount.trim() === "" && line?.amountInr ? (d.kind === "certified" && line.qty ? `${line.qty}ct × rate` : "quantity × rate") : undefined}>{id => (
                       <UnitInput id={id} min={0} unit="₹" value={d.amount} placeholder={line?.amountInr ? String(line.amountInr) : "0"} onChange={e => set(d.key, { amount: e.target.value })} />
                     )}</Field>
                   </div>

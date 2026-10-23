@@ -17,7 +17,9 @@ import { ActionSheet } from "@/components/ActionSheet";
 import { PageHeader } from "@/components/PageHeader";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers, Plus } from "lucide-react";
+import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layers, Plus, Truck } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
 import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
@@ -50,17 +52,27 @@ export function BuyAssignPage() {
   const panelFor = (m: Mode): PanelProps => ({ open: panel === m, onOpenChange: o => setPanel(o ? m : null) });
   // The ledger's own total, shown as the fourth figure up top.
   const [ledgerTotals, setLedgerTotals] = useState<LedgerTotals | null>(null);
+  // A phone has room for two named buttons: there Assign to factory waits in the ⋯.
+  const phone = useIsMobile();
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader
         title="Buy & Assign"
         subtitle="Material into stock, out to factories"
         primary={may ? { label: "New purchase", icon: Plus, onClick: () => setPanel("buy") } : null}
-        secondary={may ? { label: "Assign to factory", icon: ArrowRightLeft, onClick: () => setPanel("assign") } : null}
+        // Selling out of stock, in sight: to one of our suppliers, or a diamond to a client or any buyer.
+        secondary={may ? { label: "Sell", icon: Tag, items: [
+          { label: "Sell to a supplier", icon: Truck, hint: "Diamonds, gold, a piece — off what we owe them", onSelect: () => setPanel("sellSupplier") },
+          { label: "Sell a diamond", icon: Gem, hint: "To a client or any buyer — no order", onSelect: () => setPanel("sell") },
+        ] } : null}
+        actions={may && !phone ? (
+          <Button variant="outline" onClick={() => setPanel("assign")} className="h-10 rounded-xl px-3.5 gap-2">
+            <ArrowRightLeft className="h-4 w-4" />Assign to factory
+          </Button>
+        ) : undefined}
         menu={may ? [
+          { label: "Assign to factory", icon: ArrowRightLeft, hint: "Stock gold or material to a factory", onSelect: () => setPanel("assign"), show: phone },
           { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setPanel("opening") },
-          { label: "Sell diamond", icon: Tag, hint: "From stock, without an order", onSelect: () => setPanel("sell") },
-          { label: "Sell to a supplier", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe them", onSelect: () => setPanel("sellSupplier") },
         ] : undefined}
       >
         {!may && <p className="text-xs text-muted-foreground mt-1">View only — your role can't add entries.</p>}
@@ -111,6 +123,9 @@ function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
   const diamondCt = total(issued.filter(i => i.material === "diamond"), i => i.quantityIssued);
   const others = issued.filter(i => i.material !== "gold" && i.material !== "diamond").length;
   const sold = (db.diamondSales ?? []).filter(s => inMonth(s.createdAt));
+  // Sold to our suppliers this month (lib/supplierSales.ts) — and to how many.
+  const toSuppliers = (db.supplierSales ?? []).filter(s => inMonth(s.createdAt) && !s.deletingAt);
+  const supplierCount = new Set(toSuppliers.map(s => s.supplierId)).size;
 
   // The month's three figures, then the ledger's total below them — in the
   // app's one figure strip. The ledger's follows its filters, and says so.
@@ -126,6 +141,8 @@ function MonthFigures({ ledger }: { ledger: LedgerTotals | null }) {
           others ? `${others} other` : ""].filter(Boolean).join(" · "),
       },
       { label: "Diamonds sold", value: fmtQty(total(sold, s => s.carat), "ct"), icon: Tag, sub: `${fmtMoneyInr(total(sold, s => s.totalInr))} · ${sold.length} sale${sold.length !== 1 ? "s" : ""}` },
+      { label: `Sold to suppliers in ${month}`, value: fmtMoneyInr(total(toSuppliers, s => s.totalInr)), icon: Truck,
+        sub: toSuppliers.length ? `${toSuppliers.length} sale${toSuppliers.length !== 1 ? "s" : ""} · ${supplierCount} supplier${supplierCount !== 1 ? "s" : ""}` : "none yet" },
       ...(all ? [{
         label: all.filtered ? "Bought in · filtered" : "Bought in · all time", icon: ShoppingCart,
         value: fmtMoneyInr(all.totalIn),
