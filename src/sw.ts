@@ -79,10 +79,14 @@ const firebaseApp = initializeApp(firebaseConfig);
 const messaging = getMessaging(firebaseApp);
 
 onBackgroundMessage(messaging, payload => {
-  const title = payload.notification?.title || "Shree Suktam Diamond";
-  const body = payload.notification?.body;
+  // A push that carries its own notification is shown by Firebase itself;
+  // showing it here as well put every alert on the screen twice.
+  if (payload.notification) return;
+  const title = payload.data?.title || "Shree Suktam Diamond";
+  const body = payload.data?.body;
   self.registration.showNotification(title, {
     body,
+    tag: payload.data?.id,
     icon: "/icon.png",
     data: { link: payload.fcmOptions?.link || payload.data?.link || "/notifications" },
   });

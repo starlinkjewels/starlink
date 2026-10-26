@@ -3514,10 +3514,11 @@ function subscribeAll(scope: Scope): Promise<void> {
           query(msgs, where("fromUserId", "==", client.appId)),
           LISTEN,
           serverFirst("messages(from)", (snap) => {
-            if (!writePending["messages"]) {
-              fromMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
-              apply();
-            }
+            // Always keep the latest half. Skipping it while a send was saving
+            // left this half stale, and the other half's next update then
+            // wrote the conversation back WITHOUT the client's own messages.
+            fromMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
+            if (!writePending["messages"]) apply();
             firedFrom = true;
             doneMsg();
           }),
@@ -3533,10 +3534,11 @@ function subscribeAll(scope: Scope): Promise<void> {
           query(msgs, where("toUserId", "==", client.appId)),
           LISTEN,
           serverFirst("messages(to)", (snap) => {
-            if (!writePending["messages"]) {
-              toMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
-              apply();
-            }
+            // Always keep the latest half. Skipping it while a send was saving
+            // left this half stale, and the other half's next update then
+            // wrote the conversation back WITHOUT the client's own messages.
+            toMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>);
+            if (!writePending["messages"]) apply();
             firedTo = true;
             doneMsg();
           }),
