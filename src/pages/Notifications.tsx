@@ -139,8 +139,10 @@ export function NotificationsPage() {
         return (
         <div className="flex items-start gap-2.5">
           {img ? (
-            <div className="relative h-10 w-10 rounded-lg overflow-hidden bg-white ring-1 ring-border/60 shrink-0">
-              <img src={img} alt="" loading="lazy" className="h-full w-full object-contain" />
+            // The middle of the photo, filling the box: an order's picture is
+            // often a wide CAD sheet, and shrunk whole it reads as a blank square.
+            <div className="relative h-12 w-12 rounded-lg overflow-hidden bg-white ring-1 ring-border/60 shrink-0">
+              <img src={img} alt="" loading="lazy" className="h-full w-full object-cover scale-125" />
               {n.items.length > 1 && <span className="absolute bottom-0 right-0 min-w-[1.1rem] h-[1.1rem] px-1 rounded-tl-md bg-primary text-primary-foreground text-[10px] font-bold grid place-items-center">{n.items.length}</span>}
             </div>
           ) : (
