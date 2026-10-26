@@ -4,6 +4,7 @@
 //   • "label" — a 50×30mm spec label (barcode + type/metal/weights + optional price).
 // Each can be Printed (opens PDF + print dialog) or Downloaded. Works for both an
 // Order and a Ready Stock item via a normalised BandData shape.
+import { isInstalledApp } from "./printView";
 import { brandFor, companyOf, companyOfOrder } from "./companies";
 import { pieceWeights } from "./weights";
 import { jsPDF } from "jspdf";
@@ -93,7 +94,10 @@ function runBand(d: BandData, settings: Settings, opts: BandOpts) {
     if (opts.style === "tag") drawTag(doc, d, img);
     else drawLabel(doc, d, settings, img);
   }
-  if (opts.mode === "print") {
+  // In the installed app a new window can't be closed: the PDF is saved instead, to print from there.
+  if (opts.mode === "print" && isInstalledApp()) {
+    doc.save(`Band-${d.code}-${opts.style}.pdf`);
+  } else if (opts.mode === "print") {
     doc.autoPrint();
     window.open(doc.output("bloburl") as unknown as string, "_blank");
   } else {

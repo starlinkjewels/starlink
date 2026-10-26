@@ -1,3 +1,4 @@
+import { showPrintPage } from "./printView";
 import type { Order, Client, Settings, DB } from "./db";
 import { totalAdvance, orderTotal, balanceDue, returnedCredit, returnedQty, logEvent, loadDb, isDiamondOnlyOrder, certStoneLines } from "./db";
 import { hasDiamonds, stoneOf } from "./orderText";
@@ -517,12 +518,11 @@ function buildInvoiceDoc(opts: {
 </html>`;
 }
 
+/** The bill over the app, with Print and Close — never a new window the
+ *  installed app can't close (lib/printView.ts). */
 function openAndPrint(html: string) {
-  const w = window.open("", "_blank", "width=860,height=1120");
-  if (!w) { alert("Please allow popups to print/download the invoice."); return; }
-  w.document.open();
-  w.document.write(html);
-  w.document.close();
+  const title = html.match(/<title>([^<]*)<\/title>/i)?.[1]?.trim();
+  showPrintPage(html, { title: title || "Invoice" });
 }
 
 export function printInvoice(

@@ -1,3 +1,4 @@
+import { showPrintPage } from "@/lib/printView";
 import { FillHandlersSheet } from "@/components/FillHandlersSheet";
 import { handlerName, handlerOf } from "@/lib/clientHandlers";
 import { studioOn } from "@/lib/studio";
@@ -38,9 +39,9 @@ const OWN_CLICK = "button,a,input,label,[role=menu],[role=menuitem],[data-no-row
 
 /** Open a new window with an A5 shipping label and auto-print it */
 function printLabel(c: Client) {
-  const win = window.open("", "_blank", "width=620,height=880");
-  if (!win) { alert("Allow popups to print labels."); return; }
-  win.document.write(`<!DOCTYPE html>
+  // Over the app with Print and Close (lib/printView.ts): a new window can't
+  // be closed in the installed app.
+  const html = (`<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8">
@@ -126,9 +127,7 @@ function printLabel(c: Client) {
   </div>
 </body>
 </html>`);
-  win.document.close();
-  win.focus();
-  setTimeout(() => { win.print(); }, 400);
+  showPrintPage(html, { title: `Shipping label — ${c.companyName}` });
 }
 
 export function ClientsPage() {
@@ -454,9 +453,12 @@ export function ClientsPage() {
             <div key={c.id} onClick={openCard(`/clients/${c.id}`)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
               <div className="flex items-start gap-3">
                 <div className="relative shrink-0">
-                  <div className="h-11 w-11 rounded-full bg-primary/10 text-primary text-base font-semibold grid place-items-center">
-                    {(c.companyName || "?").charAt(0).toUpperCase()}
-                  </div>
+                  {/* Their own photo (My Profile), else the company's first letter. */}
+                  {clientUser?.photo
+                    ? <img src={clientUser.photo} alt="" className="h-11 w-11 rounded-full object-cover ring-1 ring-border/60" draggable={false} />
+                    : <div className="h-11 w-11 rounded-full bg-primary/10 text-primary text-base font-semibold grid place-items-center">
+                        {(c.companyName || "?").charAt(0).toUpperCase()}
+                      </div>}
                   <span className={`absolute bottom-0 right-0 h-3 w-3 rounded-full ring-2 ring-white ${online ? "bg-success" : "bg-muted-foreground/40"}`} />
                 </div>
                 <div className="min-w-0 flex-1">

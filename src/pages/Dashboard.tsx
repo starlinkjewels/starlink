@@ -1,8 +1,10 @@
+import { stageLabel } from "@/lib/stages";
 import { expensesInUsd, inrOn } from "@/lib/orderCost";
 import { SectionTitle } from "@/components/SectionTitle";
 import { PageHeader } from "@/components/PageHeader";
 import { factoryFigures, supplierFigures, lockerFigure } from "@/lib/partyTotals";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { OrderThumb } from "@/components/OrderThumb";
 import { useAuth } from "@/lib/auth";
 import { loadDb, fmtMoney, fmtDate, currentUserOrders, orderTotal, balanceDue, totalAdvance, giftCardStats, keptValue } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -47,10 +49,10 @@ function Kpi({ label, value, icon: Icon, tone, sub, to }: {
 /** Most recent tracking step: whichever step is in progress, else the last completed one, else the first step. */
 function lastTrackingStep(o: Order): string {
   const inProgress = o.timeline.find(t => t.status === "in_progress");
-  if (inProgress) return inProgress.step;
+  if (inProgress) return stageLabel(inProgress.step);
   const done = o.timeline.filter(t => t.status === "done");
-  if (done.length) return done[done.length - 1].step;
-  return o.timeline[0]?.step ?? "";
+  if (done.length) return stageLabel(done[done.length - 1].step);
+  return o.timeline[0] ? stageLabel(o.timeline[0].step) : "";
 }
 
 export function Dashboard() {
@@ -429,9 +431,8 @@ export function Dashboard() {
             return (
               <Link key={o.id} to={`/orders/${o.id}`}
                 className="flex items-start gap-3 p-3 rounded-xl hover:bg-secondary active:bg-secondary/70 transition">
-                <div className="h-9 w-9 rounded-xl bg-gradient-to-br from-primary/10 to-brand-light/10 grid place-items-center shrink-0 mt-0.5">
-                  <Package className="h-4 w-4 text-primary" />
-                </div>
+                {/* The piece's picture, as on the Orders page. */}
+                <div className="mt-0.5"><OrderThumb o={o} size="sm" /></div>
                 <div className="flex-1 min-w-0">
                   {/* Row 1: order# + status */}
                   <div className="flex items-start justify-between gap-2">

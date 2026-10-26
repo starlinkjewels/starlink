@@ -34,6 +34,8 @@ import { useSuggestedRate } from "@/components/CurrencyFields";
 import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { adminIds, notifyUsers } from "@/lib/notify";
+import { AssignPicker } from "@/components/AssignOrder";
+import { netFromGross } from "@/lib/weights";
 import { PageHeader } from "@/components/PageHeader";
 import { uploadDataUrl } from "@/lib/storage";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
@@ -118,6 +120,9 @@ export function NewOrderPage() {
     jewelleryType: listOf("jewelleryTypes")[0] ?? "Ring",
     metal: listOf("metals")[0] ?? "Yellow Gold",
     diamondType: listOf("diamondTypes")[0] ?? "Natural",
+    diamondShape: "",
+    // An admin's new order is theirs unless they give it to someone else (AssignPicker).
+    assignedTo: isAdmin ? user!.id : "",
     quantity: 1,
     diamondWeight: 0.5,
     estimatedGrossWeight: 0,
@@ -175,6 +180,11 @@ export function NewOrderPage() {
 
   const set = (key: string, value: unknown) =>
     setF(prev => ({ ...prev, [key]: value }));
+  // Net follows the gross and the diamonds: gross − stones (1 ct = 0.2 g).
+  const setGross = (g: number) =>
+    setF(prev => ({ ...prev, estimatedGrossWeight: g, estimatedNetWeight: g > 0 ? netFromGross(g, Number(prev.diamondWeight)) : 0 }));
+  const setDiamondCt = (ct: number) =>
+    setF(prev => ({ ...prev, diamondWeight: ct, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netFromGross(prev.estimatedGrossWeight, ct) } : {}) }));
 
   const metalHasKarats = hasKarats(f.metal);
   // A pure diamond sale, no jewellery piece at all — hides every field that
@@ -409,12 +419,15 @@ export function NewOrderPage() {
     updateDb(d => {
       const num = reservedNumber;
 
-      // Assign the order to an employee so it shows in their views: the creating
-      // employee, otherwise the client's account manager (if any).
-      // (An admin named as the client's handler doesn't take its orders — orders go to employees.)
+      // Who has the order (shows in their views and lists).
       const managerId = d.clients.find(c => c.id === clientId)?.accountManagerId;
-      const managerIsEmployee = !!managerId && d.users.some(u => u.id === managerId && u.role === "employee");
-      const assignedEmployeeId = isEmployee ? user!.id : managerIsEmployee ? managerId : undefined;
+      // The person placing it has it — an employee themselves, an admin unless they
+      // chose someone else on the form; a client's order goes to whoever manages
+      // that client (employee or admin).
+      const managerActive = !!managerId && d.users.some(u => u.id === managerId && (u.role === "employee" || u.role === "admin") && u.status !== "inactive");
+      const assignedEmployeeId = isClient ? (managerActive ? managerId : undefined)
+        : isEmployee ? user!.id
+        : (f.assignedTo || undefined);
 
       const order: Order = {
         id: orderId,
@@ -428,6 +441,7 @@ export function NewOrderPage() {
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
         metal: f.metal as Order["metal"],
         diamondType: (isGemSale ? "" : f.diamondType) as Order["diamondType"],
+        diamondShape: !isDiamondOnly && f.diamondShape.trim() ? f.diamondShape.trim() : undefined,
         quantity: Number(f.quantity),
         diamondWeight: Number(f.diamondWeight),
         metalWeight: 0,
@@ -532,6 +546,10 @@ export function NewOrderPage() {
           body: `${order.orderNumber} from ${cl?.companyName ?? "client"}${advance > 0 ? ` · Advance $${advance}` : ""}`,
           type: "order",
         }, user!.id);
+      }
+      // Given to someone else as it was placed: they are told, as a reassignment tells them.
+      if (!isClient && assignedEmployeeId && assignedEmployeeId !== user!.id) {
+        notifyUsers(d, [assignedEmployeeId], { title: "Order assigned to you", body: `${order.orderNumber} · by ${user!.name}`, type: "order" }, user!.id);
       }
 
       if ((isAdmin || isEmployee) && !forReadyStock) {
@@ -697,6 +715,13 @@ export function NewOrderPage() {
                 </div>
               ) : null;
             })()}
+            {/* Who has the order: the admin placing it, unless they give it to someone now. */}
+            {isAdmin && (
+              <div className="mt-3">
+                <p className="text-xs text-muted-foreground mb-1.5">Assigned to</p>
+                <AssignPicker value={f.assignedTo} onChange={v => set("assignedTo", v)} />
+              </div>
+            )}
           </SectionCard>
         )}
 
@@ -847,9 +872,15 @@ export function NewOrderPage() {
 
             <Field label={isDiamondOnly ? "Carats (est.)" : "Est. Diamond Weight (ct)"}>
               <Input type="number" step="0.01" min={0} value={f.diamondWeight}
-                onChange={e => set("diamondWeight", +e.target.value)}
+                onChange={e => setDiamondCt(+e.target.value)}
                 className="rounded-xl h-11" placeholder="0.00" />
             </Field>
+
+            {!isDiamondOnly && (
+              <Field label="Diamond Shape">
+                <ListCombo list="diamondShapes" value={f.diamondShape} onChange={v => set("diamondShape", v)} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Diamond Shape" />
+              </Field>
+            )}
 
             {isDiamondOnly && (
               <div className="col-span-2 space-y-1.5">
@@ -859,7 +890,8 @@ export function NewOrderPage() {
               </div>
             )}
 
-            {!isDiamondOnly && (
+            {/* Clients don't see the weights — the team works them out. */}
+            {!isDiamondOnly && !isClient && (
               <>
                 {/* Estimated weight note */}
                 <div className="col-span-2 flex items-center gap-2 rounded-lg bg-amber-50 border border-amber-200 px-3 py-2 text-xs text-amber-800">
@@ -869,13 +901,13 @@ export function NewOrderPage() {
 
                 <Field label="Est. Gross Weight (g)  —  optional">
                   <Input type="number" step="0.001" min={0} value={f.estimatedGrossWeight || ""}
-                    onChange={e => set("estimatedGrossWeight", +e.target.value)}
+                    onChange={e => setGross(+e.target.value)}
                     className="rounded-xl h-11" placeholder="0.000" />
                 </Field>
-                <Field label="Est. Net Weight (g)  —  optional">
-                  <Input type="number" step="0.001" min={0} value={f.estimatedNetWeight || ""}
-                    onChange={e => set("estimatedNetWeight", +e.target.value)}
-                    className="rounded-xl h-11" placeholder="0.000" />
+                {/* Net = gross − the stones' weight (1 ct = 0.2 g): worked out, not typed. */}
+                <Field label="Est. Net Weight (g)  —  auto">
+                  <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight || ""}
+                    className="rounded-xl h-11 bg-secondary/60 text-muted-foreground cursor-default" placeholder="gross − diamonds" aria-label="Est. Net Weight (worked out)" />
                 </Field>
                 <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight)} net={Number(f.estimatedNetWeight)} diamondCt={Number(f.diamondWeight)} />
               </>

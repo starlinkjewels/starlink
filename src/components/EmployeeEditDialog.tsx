@@ -6,7 +6,9 @@ import { KeyRound, Loader2, Mail, UserRound, Wallet } from "lucide-react";
 import { httpsCallable } from "firebase/functions";
 import { loadDb, updateDb, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
-import { functions, isAdminEmail } from "@/lib/firebase";
+import { auth, functions, isAdminEmail } from "@/lib/firebase";
+import { useAuth } from "@/lib/auth";
+import { Link } from "react-router-dom";
 import { hasCompanies } from "@/lib/companies";
 import { CompanyTicks } from "@/components/EmployeeCompanies";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -35,6 +37,7 @@ export function EmployeeEditDialog({ userId, onClose }: { userId: string | null;
 
 function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
   const db = useDb();
+  const { user: me } = useAuth();
   const isEmployee = u.role === "employee";
   const multiCo = hasCompanies(db.settings);
   const [f, setF] = useState({
@@ -76,6 +79,11 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
   };
 
   const owner = isAdminEmail(u.email);
+  // The main owner login may also change an admin's (a partner's) login. The
+  // server checks the same: only an owner's call reaches an admin's account.
+  const callerIsOwner = isAdminEmail(auth.currentUser?.email ?? me?.email);
+  const isMe = u.id === me?.id;
+  const mayChangeLogin = !!u.authUid && !owner && !isMe && (isEmployee || (u.role === "admin" && callerIsOwner));
   return (
     <ActionSheet open onOpenChange={o => { if (!o) onClose(); }} size="md" icon={UserRound}
       title="Edit details"
@@ -105,16 +113,21 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
         </div>
         {isEmployee && multiCo && <CompanyTicks value={coIds} onChange={setCoIds} />}
 
-        {/* An employee's login: the admin can change its email and password. An admin's
-            (a partner's) or an owner's is shown, not changed. */}
-        {isEmployee && u.authUid && !owner ? <EmployeeLogin u={u} /> : (
+        {/* An employee's login: any admin can change its email and password; an
+            admin's (a partner's), only the main owner login. An owner's is shown,
+            not changed — and your own password is changed in My Profile. */}
+        {mayChangeLogin ? <EmployeeLogin u={u} /> : (
         <div className="rounded-xl border border-border/70 bg-secondary/30 p-3.5 flex items-start gap-3">
           <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Email (login ID)</p>
             <p className="text-sm font-medium break-all">{u.email || <span className="italic text-muted-foreground font-normal">No login — salary only</span>}</p>
             <p className="text-[11px] text-muted-foreground mt-1">
-              {u.authUid || u.role === "admin"
+              {isMe
+                ? <>Your own password: <Link to="/profile" className="text-primary font-medium hover:underline">My Profile → Change password</Link>.</>
+                : u.role === "admin" && !owner && u.authUid
+                ? "Only the main owner login can change an admin's login. Locked out? Send password reset."
+                : u.authUid || u.role === "admin"
                 ? "Can't be changed here — locked out? Send password reset."
                 : "To let them sign in, use Give login on the Employees page."}
             </p>
@@ -153,10 +166,11 @@ function EmployeeSheet({ u, onClose }: { u: User; onClose: () => void }) {
 const EMAIL_RE = /^[^\s@<>()",;:]+@[^\s@<>()",;:]+\.[^\s@<>()",;:]{2,}$/;
 
 /**
- * An employee's sign-in (admin only): a new email they sign in with, and/or a
- * new password — they are signed out everywhere and sign in with the new one.
- * Done on the server (setClientLogin, which takes an employee's or a client's
- * login, never an admin's or an owner's). The password is never kept on any record.
+ * An employee's sign-in (admin only) — or an admin's, for the main owner login:
+ * a new email they sign in with, and/or a new password — they are signed out
+ * everywhere and sign in with the new one. Done on the server (setClientLogin:
+ * an employee's or a client's login, an admin's only for an owner, never an
+ * owner's). The password is never kept on any record.
  */
 function EmployeeLogin({ u }: { u: User }) {
   const [email, setEmail] = useState(u.email ?? "");

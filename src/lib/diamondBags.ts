@@ -12,6 +12,7 @@
 //
 // Each bag's document id comes from its lot, so the same lot can never end up
 // with two bags, whoever adds stock to it at the same moment.
+import { showPrintPage } from "./printView";
 import { updateDb, type DB, type DiamondBag, type Purchase } from "./db";
 import { purchaseBucket } from "./materials";
 import { LOT_SEP, lotParts, lotLabel, type LotSpec } from "./diamondLots";
@@ -100,8 +101,6 @@ const esc = (v: unknown) => String(v ?? "").replace(/[&<>"]/g, c => ({ "&": "&am
  */
 export function printBagLabels(items: { no: string; key: string; ct?: number; pcs?: number | null }[], company?: string): boolean {
   if (!items.length) return false;
-  const w = window.open("", "_blank", "width=820,height=900");
-  if (!w) return false;
   const cards = items.map(it => {
     const s = lotParts(it.key);
     const size = [s.mm, s.size].filter(Boolean).join(" · ");
@@ -111,7 +110,9 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
       + `${size ? `<div class="ln">${esc(size)}</div>` : ""}${grade ? `<div class="ln">${esc(grade)}</div>` : ""}`
       + `${holds ? `<div class="holds">${esc(holds)}</div>` : ""}${company ? `<div class="co">${esc(company)}</div>` : ""}</div>`;
   }).join("");
-  w.document.write(`<!doctype html><html><head><meta charset="utf-8"><title>Bag labels</title><style>
+  // Shown over the app with Print and Close (lib/printView.ts) — a new window
+  // can't be closed in the installed app.
+  const html = (`<!doctype html><html><head><meta charset="utf-8"><title>Bag labels</title><style>
     @page { margin: 8mm; }
     body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #111; }
     .grid { display: flex; flex-wrap: wrap; gap: 3mm; }
@@ -122,8 +123,8 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
     .holds { font-size: 8pt; color: #333; margin-top: 0.5mm; }
     .co { font-size: 7pt; color: #666; }
   </style></head><body><div class="grid">${cards}</div>
-  <script>window.onload = function () { setTimeout(function () { window.print(); }, 150); };</script></body></html>`);
-  w.document.close();
+  </body></html>`);
+  showPrintPage(html, { title: "Bag labels" });
   return true;
 }
 

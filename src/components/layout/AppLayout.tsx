@@ -1,3 +1,4 @@
+import { UserAvatar } from "@/components/UserAvatar";
 import { applyTableUi, tableUiOf, type TableUi } from "@/lib/tableStyle";
 import { BrandLogo, useBrandMark } from "@/components/BrandLogo";
 import { useBrand, brandName } from "@/lib/brand";
@@ -377,7 +378,6 @@ export function AppLayout() {
      loc.pathname.startsWith("/factories/") ? "Factory Ledger" :
      loc.pathname.startsWith("/ready-stock/") ? "Ready Stock Piece" : "");
 
-  const initials = user?.name.split(" ").map(w => w[0]).join("").slice(0, 2).toUpperCase() ?? "?";
 
   /* Is the current path one of the More items? (highlight "More" tab) */
   // A page that has its own tab (Catalog) lights that tab, not More as well.
@@ -528,9 +528,7 @@ export function AppLayout() {
               onClick={() => setProfileOpen(v => !v)}
               className="flex items-center gap-2.5 pl-1 pr-2.5 py-1 rounded-xl hover:bg-secondary transition-colors group">
               {/* Avatar */}
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs font-bold grid place-items-center shadow-soft">
-                {initials}
-              </div>
+              <UserAvatar photo={user?.photo} name={user?.name} initials={2} className="h-8 w-8 rounded-full text-xs font-bold shadow-soft" />
               {/* Name + role (desktop only) */}
               <div className="hidden md:flex flex-col items-start leading-tight">
                 <span className="text-sm font-semibold text-foreground">{user?.name.split(" ")[0]}</span>
@@ -723,9 +721,7 @@ export function AppLayout() {
               <div className="flex-1 overflow-y-auto overscroll-contain">
                 {/* User avatar strip */}
                 <div className="px-5 py-4 flex items-center gap-3 bg-secondary/30">
-                  <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-base font-bold grid place-items-center shrink-0 shadow-soft">
-                    {initials}
-                  </div>
+                  <UserAvatar photo={user?.photo} name={user?.name} initials={2} className="h-12 w-12 rounded-full text-base font-bold shadow-soft" />
                   <div className="min-w-0">
                     <p className="font-semibold text-brand-dark truncate">{user?.name}</p>
                     <p className="text-xs text-muted-foreground">{ROLE_LABEL[user?.role ?? ""] ?? user?.role}</p>

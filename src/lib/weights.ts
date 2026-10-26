@@ -30,6 +30,14 @@ export interface WeightInput {
 const pos = (x: number | undefined) => (x != null && isFinite(x) && x > 0 ? x : 0);
 
 /**
+ * The metal's weight from the scale: gross − the stones (1 ct = 0.2 g) − a
+ * second metal on a two-tone piece. 2.30 g with 0.45 ct of stones is 2.21 g.
+ */
+export function netFromGross(grossG: number, stoneCt: number, otherMetalG = 0): number {
+  return n3(Math.max(0, pos(grossG) - pos(stoneCt) * CARAT_TO_GRAM - pos(otherMetalG)));
+}
+
+/**
  * What is wrong with these weights, in words someone at the counter can act
  * on — or null when they hang together. Blank fields are not checked: a weight
  * nobody has entered yet is not a mistake.

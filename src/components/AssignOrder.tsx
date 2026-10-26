@@ -124,6 +124,18 @@ export function AssignOrderField({ order }: { order: Order }) {
   );
 }
 
+/** New Order: who the order will belong to — the person placing it, unless changed. */
+export function AssignPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const db = useDb();
+  const current = db.users.find(u => u.id === value);
+  return (
+    <Select value={value && current ? value : NOBODY} onValueChange={v => onChange(v === NOBODY ? "" : v)}>
+      <PersonTrigger label="Assigned to" u={current} />
+      <SelectContent className="max-h-80"><StaffOptions db={db} current={value} /></SelectContent>
+    </Select>
+  );
+}
+
 /** Orders page: give every ticked order to one person. */
 export function AssignOrdersDialog({ orders, onClose }: { orders: Order[]; onClose: () => void }) {
   const db = useDb();

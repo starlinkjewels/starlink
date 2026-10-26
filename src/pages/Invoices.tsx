@@ -6,6 +6,7 @@ import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { useState } from "react";
+import { OrderThumb } from "@/components/OrderThumb";
 import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
 import {
@@ -306,7 +307,7 @@ export function InvoicesPage() {
   const ledgerClient = (o: Order) => db.clients.find(c => c.id === o.clientId)?.companyName ?? "";
   const ledgerColumns: DataColumn<Order>[] = [
     { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
-      cell: o => <Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold whitespace-nowrap">{o.orderNumber}</Link> },
+      cell: o => <div className="flex items-center gap-2.5"><OrderThumb o={o} size="sm" /><Link to={`/orders/${o.id}`} className="text-primary hover:underline font-mono text-xs font-semibold whitespace-nowrap">{o.orderNumber}</Link></div> },
     { key: "client", header: "Client", sortValue: ledgerClient,
       cell: o => <span className="text-muted-foreground text-xs max-w-[180px] truncate block">{ledgerClient(o) || "—"}</span> },
     { key: "total", header: "Order total", align: "right", kind: "number", sortValue: o => orderTotal(o),

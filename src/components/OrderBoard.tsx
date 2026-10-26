@@ -14,11 +14,13 @@ import { useCan } from "@/hooks/useCan";
 import { loadDb, updateDbAs, fmtDate, orderImage, type Order } from "@/lib/db";
 import { sendMail, orderApprovedEmail } from "@/lib/email";
 import {
-  DONE_COLUMN, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission,
+  DONE_COLUMN, stageLabel, applyApprove, applyComplete, applyRevert, boardColumnOf, boardColumns, planMove, stageKind, stagePermission,
   type MovePlan,
 } from "@/lib/stages";
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { confirmBox } from "@/lib/confirm";
+import { ProductionInfo } from "@/components/ProductionInfo";
+import type { ProductionTrack } from "@/lib/production";
 
 const PRIORITY_RANK: Record<string, number> = { Urgent: 0, "High Priority": 1, Normal: 2 };
 const DONE_SHOWN = 20;
@@ -72,7 +74,7 @@ function columnHint(step: string): string {
  * finished on the order. Moving back re-opens plain stages only; anything with
  * records of its own is undone on the order, where they are shown.
  */
-export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o: Order) => MoreAction[] }) {
+export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actions?: (o: Order) => MoreAction[]; tracks?: Map<string, ProductionTrack> }) {
   const { user } = useAuth();
   const db = useDb();
   // The store is edited in place — a moved order is the same object with a new
@@ -109,7 +111,7 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
   const dragging = dragId ? active.find(o => o.id === dragId) ?? null : null;
 
   const openOrderPrompt = (o: Order, step: string) =>
-    toast(`${o.orderNumber}: ${step} is recorded on the order`, {
+    toast(`${o.orderNumber}: ${stageLabel(step)} is recorded on the order`, {
       description: step === "Final Approval" ? "Enter the actual gold, diamonds and labour there." : "Add the finished piece to Ready Stock there.",
       action: { label: "Open order", onClick: () => nav(`/orders/${o.id}`) },
     });
@@ -117,6 +119,8 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
   const move = async (orderId: string, target: string) => {
     const o = loadDb().orders.find(x => x.id === orderId);
     if (!o) return;
+    // The business's own stage names in what's shown; the stages themselves underneath.
+    const name = (s: string) => stageLabel(s);
     const denied = blockedFor(o);
     if (denied) { toast.error(denied); return; }
     const plan = planMove(o, target);
@@ -124,9 +128,9 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
     if (plan.blocked) { toast.error(plan.blocked); return; }
 
     if (plan.revertFrom != null) {
-      if (!(await confirmBox(`Move ${o.orderNumber} back to ${target}?\n\nThese stages will be marked not done again: ${plan.names.join(", ")}.`))) return;
-      updateDbAs({ summary: `Moved ${o.orderNumber} back to ${target} on the board` }, d => applyRevert(d, o.id, plan.revertFrom!));
-      toast.success(`${o.orderNumber} moved back to ${target}`);
+      if (!(await confirmBox(`Move ${o.orderNumber} back to ${name(target)}?\n\nThese stages will be marked not done again: ${plan.names.map(name).join(", ")}.`))) return;
+      updateDbAs({ summary: `Moved ${o.orderNumber} back to ${name(target)} on the board` }, d => applyRevert(d, o.id, plan.revertFrom!));
+      toast.success(`${o.orderNumber} moved back to ${name(target)}`);
       return;
     }
 
@@ -136,17 +140,17 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
       if (plan.then === "dispatch") setDispatchFor(o);
       else if (plan.then === "deliver") setDeliverFor(o);
       else if (plan.then) {
-        if ((await confirmBox(`${thenStep} for ${o.orderNumber} is recorded on the order itself.\n\nOpen the order now?`))) nav(`/orders/${o.id}`);
+        if ((await confirmBox(`${name(thenStep)} for ${o.orderNumber} is recorded on the order itself.\n\nOpen the order now?`))) nav(`/orders/${o.id}`);
       }
       return;
     }
 
     const lines = [
       plan.approve ? "• Approve the order — the client is notified and emailed" : "",
-      plan.complete.length ? `• Mark done: ${plan.complete.map(i => o.timeline[i].step).join(", ")}` : "",
-      plan.then ? `• Then ${thenStep} — ${plan.then === "dispatch" || plan.then === "deliver" ? "its form opens next" : "finished on the order"}` : "",
+      plan.complete.length ? `• Mark done: ${plan.complete.map(i => name(o.timeline[i].step)).join(", ")}` : "",
+      plan.then ? `• Then ${name(thenStep)} — ${plan.then === "dispatch" || plan.then === "deliver" ? "its form opens next" : "finished on the order"}` : "",
     ].filter(Boolean);
-    if (!(await confirmBox(`Move ${o.orderNumber}${plan.then ? ` towards ${target}` : ` to ${target}`}?\n\n${lines.join("\n")}`))) return;
+    if (!(await confirmBox(`Move ${o.orderNumber}${plan.then ? ` towards ${name(target)}` : ` to ${name(target)}`}?\n\n${lines.join("\n")}`))) return;
 
     const at = new Date().toISOString();
     updateDbAs({ summary: `Moved ${o.orderNumber} on the board: ${lines.map(l => l.replace(/^• /, "")).join("; ")}` }, d => {
@@ -207,7 +211,7 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
               <div className="px-3 pt-3 pb-2 border-b border-border/40">
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5 min-w-0">
-                    <StageIcon step={col} /><span className="truncate">{col}</span>
+                    <StageIcon step={col} /><span className="truncate">{stageLabel(col, db.settings)}</span>
                   </p>
                   <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-white border border-border/60 text-muted-foreground shrink-0">{list.length}</span>
                 </div>
@@ -255,6 +259,11 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
                           <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
                         </div>
                       </div>
+                      {(() => {
+                        // Days in production and its diamonds, while it is being made.
+                        const t = tracks?.get(o.id);
+                        return t?.running ? <div className="mt-2"><ProductionInfo t={t} compact /></div> : null;
+                      })()}
                       <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                         {o.priority !== "Normal" && (
                           <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full ${o.priority === "Urgent" ? "bg-destructive/10 text-destructive" : "bg-amber-500/15 text-amber-700"}`}>{o.priority}</span>
@@ -281,7 +290,7 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
                                   <DropdownMenuItem key={t.col} onSelect={() => move(o.id, t.col)} className="rounded-lg px-2 py-1.5 cursor-pointer gap-2 items-start">
                                     <span className="mt-0.5 text-primary"><StageIcon step={t.col} />{stageKind(t.col) === "plain" && t.col !== DONE_COLUMN && <ArrowRight className="h-3.5 w-3.5" />}</span>
                                     <span className="min-w-0">
-                                      <span className="block text-xs font-medium text-brand-dark">{t.col}</span>
+                                      <span className="block text-xs font-medium text-brand-dark">{stageLabel(t.col, db.settings)}</span>
                                       <span className="block text-[10px] text-muted-foreground">{moveHint(t.plan)}</span>
                                     </span>
                                   </DropdownMenuItem>
@@ -292,7 +301,7 @@ export function OrderBoard({ orders, actions }: { orders: Order[]; actions?: (o:
                                   <DropdownMenuItem key={t.col} onSelect={() => move(o.id, t.col)} className="rounded-lg px-2 py-1.5 cursor-pointer gap-2 items-start">
                                     <span className="mt-0.5 text-muted-foreground"><Undo2 className="h-3.5 w-3.5" /></span>
                                     <span className="min-w-0">
-                                      <span className="block text-xs font-medium text-brand-dark">{t.col}</span>
+                                      <span className="block text-xs font-medium text-brand-dark">{stageLabel(t.col, db.settings)}</span>
                                       <span className="block text-[10px] text-muted-foreground">Re-opens {t.plan.names.join(", ")}</span>
                                     </span>
                                   </DropdownMenuItem>

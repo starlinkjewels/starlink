@@ -34,6 +34,7 @@ export function copyFields(o: Order) {
     jewelleryType: o.jewelleryType as string,
     metal: o.metal as string,
     diamondType: (o.diamondType as string) || "",
+    diamondShape: o.diamondShape || "",
     quantity: o.quantity || 1,
     diamondWeight: o.diamondWeight || 0,
     estimatedGrossWeight: o.estimatedGrossWeight || 0,
