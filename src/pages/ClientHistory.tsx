@@ -33,6 +33,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { RateInput } from "@/components/CurrencyFields";
 import { ccy, fmtCcy, roundCcy } from "@/lib/currency";
 import { DataTable, CellAmount, CellDate, CellTag, type DataColumn } from "@/components/DataTable";
+import { ClientMaterialCard } from "@/components/ClientMaterialCard";
 import type { Order } from "@/lib/db";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { pieceWeights } from "@/lib/weights";
@@ -775,6 +776,9 @@ function ClientHistoryPageBody() {
         { label: "Invoice Statement — PDF", sublabel: "Invoice by invoice, with the pieces on each one", kind: "pdf", run: exportInvoiceStatementPdf },
         { label: "Invoice Statement — Excel", sublabel: "Invoice by invoice, with the pieces on each one", kind: "excel", run: exportInvoiceStatementCsv },
       ]} />
+
+      {/* Their own gold and diamonds, held for them (lib/clientMaterial.ts). */}
+      {user!.role !== "client" && <ClientMaterialCard clientId={id!} />}
 
       {/* ── Gift Card & Cashback (admin only) ── */}
       <GiftCardAdminPanel clientId={id!} />

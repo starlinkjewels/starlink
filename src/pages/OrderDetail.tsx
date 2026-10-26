@@ -14,6 +14,10 @@ import { LotPicker, BagSelect } from "@/components/LotFields";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 import { lotBalances, lotParts } from "@/lib/diamondLots";
 import { stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
+import { clientMaterialBalance, deliveryFine, fmtCt, fmtFine, orderClientSends, orderUse, recordClientUse, shortfallChargeId, undoClientSend, undoClientSendBlocker } from "@/lib/clientMaterial";
+import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
+import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
+import { inrPerUnit } from "@/lib/currency";
 import { factoryRatesFor } from "@/components/FactoryLabourFields";
 import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -39,7 +43,7 @@ import { OrderProfitCard } from "@/components/OrderProfitCard";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import { collectionLoaded,
-  loadDb, updateDb, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
+  loadDb, updateDb, updateDbAs, fmtMoney, fmtDate, totalAdvance, orderTotal, orderGrossTotal, balanceDue, returnedCredit, uid, capOrderAdvances, toPureGold, pureFromPurity, CARAT_TO_GRAM, KARAT_PURITY, FACTORY_PURITY, findInvoiceForOrder, invoiceOrderIds, activeGiftCardsFor, maxGiftRedeem, giftMaxRedeemPctFor, cashbackPercentFor, issueGiftCard,
   type Order, type Purchase, type MaterialIssuance,
   mainDiamondShape,
   isDiamondOnlyOrder, isProductionStep, statusFromTimeline, todayLocal, stampFor, dayOf, logEvent, worksOnOrder, orderImage,
@@ -724,6 +728,11 @@ function OrderDetailPageBody() {
   const [faFilledFrom, setFaFilledFrom] = useState<string[]>([]);
   const [faOrderValue, setFaOrderValue] = useState("");
   const [faShipping, setFaShipping] = useState("");
+  // The client's own gold ran short: what our added gold is billed at ($).
+  const [faShortUsd, setFaShortUsd] = useState("");
+  // The client's own material: a send / receive panel, and whose material the piece is.
+  const [cmSheet, setCmSheet] = useState<{ mode: "send" | "receive"; material?: "gold" | "diamond" } | null>(null);
+  const [csEdit, setCsEdit] = useState(false);
   const [faSaving, setFaSaving] = useState(false);
 
   // Pure informational tag — "this factory will make this order." Moves no
@@ -1114,6 +1123,8 @@ function OrderDetailPageBody() {
     setFaOtherPurity(order.otherMetalPurity != null ? String(order.otherMetalPurity) : "");
     setFaOrderValue(order.amount ? String(order.amount) : "");
     setFaShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+    const shortCharge = (order.otherCharges ?? []).find(c => c.id === shortfallChargeId(order.id));
+    setFaShortUsd(shortCharge?.amountUsd ? String(shortCharge.amountUsd) : "");
     setFaIdx(idx);
   };
 
@@ -1238,11 +1249,12 @@ function OrderDetailPageBody() {
           const mi = d.materialIssuances.find(x => x.id === i.id);
           if (!mi) continue;
           mi.status = "closed";
-          if (i.diamondKind === "certified" && i.diamondPacketIds) {
-            // Whole packets — used or returned.
+          if (i.diamondKind === "certified") {
+            // Whole stones — used or returned. Ours are packets; a client's own
+            // certified stone has none, but its Used / Returned counts just the same.
             const disp = faDia[i.id] ?? "used";
             mi.finishDisposition = disp;
-            for (const p of d.diamondPackets) if (i.diamondPacketIds.includes(p.id)) {
+            for (const p of d.diamondPackets) if (i.diamondPacketIds?.includes(p.id)) {
               if (disp === "used") { p.status = "used"; p.orderId = order.id; }
               else { p.status = "in_stock"; p.orderId = undefined; }
             }
@@ -1294,6 +1306,24 @@ function OrderDetailPageBody() {
         // Client billing.
         if (!isNaN(orderVal) && orderVal > 0) o.amount = orderVal;
         if (faShipping.trim() !== "" && !isNaN(ship) && ship >= 0) o.shippingCharge = ship;
+        // The client's own material: what this piece took from it. Gold — the
+        // fine gold in the piece plus the agreed loss, from their gold; any
+        // shortfall is ours and goes on the bill. Diamonds — what their stones
+        // lost to the piece. Replaces what an earlier save recorded.
+        // Also when an earlier save recorded something the order no longer
+        // calls for (its switches changed after a revert) — so it is cleared.
+        const hadUse = !!d.clients.find(c => c.id === o.clientId)?.materialLedger?.some(e => e.kind === "use" && e.orderId === o.id);
+        const hadCharge = !!o.otherCharges?.some(c => c.id === shortfallChargeId(o.id));
+        if (o.clientSupplied?.gold || hadUse || hadCharge || d.materialIssuances.some(i => i.orderId === o.id && i.source === "client")) {
+          const fineInPiece = o.clientSupplied?.gold && hasNet ? (purity > 0 ? pureFromPurity(netW, purity) : toPureGold(netW, karat)) : 0;
+          const used = recordClientUse(d, o, o.clientSupplied?.gold ? { fineInPiece, lossPct: o.clientSupplied.goldLossPct ?? 0 } : null, { id: user!.id, name: user!.name });
+          o.otherCharges = (o.otherCharges ?? []).filter(c => c.id !== shortfallChargeId(o.id));
+          if (used.shortfallFine > 0) {
+            const amt = parseFloat(faShortUsd);
+            o.otherCharges.push({ id: shortfallChargeId(o.id), name: `Gold supplied by us — ${used.shortfallFine} g fine`, amountUsd: amt > 0 ? Math.round(amt * 100) / 100 : 0 });
+          }
+          if (!o.otherCharges.length) delete o.otherCharges;
+        }
         const back = capOrderAdvances(o);
         if (back > 0) { const c = d.clients.find(x => x.id === o.clientId); if (c) c.creditBalance = Math.round(((c.creditBalance || 0) + back) * 100) / 100; }
         if (!o.manufacturingLog) o.manufacturingLog = [];
@@ -3266,7 +3296,11 @@ function OrderDetailPageBody() {
               setRwDiaShape(linkedIssuances.find(i => i.material === "diamond" && i.diamondKind !== "certified")?.purityOrQuality || "Round");
               setShowRework(true);
             };
+            // The client's own material, offered first when the piece is made of it.
+            const csOk = !!order.clientId && !order.forReadyStock;
             const addActions: MoreAction[] = [
+              { label: "Client's diamonds", icon: Gem, show: csOk && (needsDia || !!order.clientSupplied?.diamonds) && !!order.clientSupplied?.diamonds, disabled: !!blockWhy, hint: blockWhy ?? "Their own stones, to the factory — no cost to us", onSelect: () => setCmSheet({ mode: "send", material: "diamond" }) },
+              { label: "Client's gold", icon: Coins, show: csOk && !!order.clientSupplied?.gold, disabled: !!blockWhy, hint: blockWhy ?? "Their own gold, to the factory", onSelect: () => setCmSheet({ mode: "send", material: "gold" }) },
               { label: "Diamond from stock", icon: Gem, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "A lot or a certified stone we hold", onSelect: () => openDiamond("stock") },
               { label: "Buy new from a supplier", icon: ShoppingCart, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "Bought for this order, sent to the factory", onSelect: () => openDiamond("buy") },
               { label: "Other material from stock", icon: Box, show: otherMaterials.length > 0, disabled: !!blockWhy,
@@ -3277,6 +3311,9 @@ function OrderDetailPageBody() {
               { label: hasEstimate ? "Edit estimate" : "Add estimate", icon: Calculator, show: !faDone, onSelect: openEstimate },
               { label: faDone || hasActuals ? "Edit actual details" : "Record actual details", icon: PackageCheck, show: faDone || faStepIdx < 0,
                 onSelect: () => openFinalApproval(faDone ? faStepIdx : -1) },
+              { label: "Client's own material…", icon: Coins, show: csOk && editable,
+                hint: faDone ? "Final Approval is done — the piece's material is settled" : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && "gold", order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}` : "If the client gives their gold or diamonds",
+                disabled: faDone, onSelect: () => setCsEdit(true) },
               { label: "No diamond in this piece", icon: XCircle, show: !faDone && needsDia, hint: "Gold only", onSelect: () => setNoDiamond(true) },
               { label: "This piece has diamond", icon: Gem, show: !faDone && !!order.noDiamond, onSelect: () => setNoDiamond(false) },
               { label: "Rework / Alteration", icon: RotateCcw, show: !faDone, hint: "The piece came back for changes", onSelect: openRework },
@@ -3297,6 +3334,7 @@ function OrderDetailPageBody() {
                 <div className="flex items-start justify-between gap-3 flex-wrap">
                   <SectionTitle title={diamondOnly ? "Diamond" : "Manufacturing"}
                     sub={diamondOnly ? "Bought for this order — nothing is made"
+                      : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && `gold${order.clientSupplied.goldLossPct ? ` (${order.clientSupplied.goldLossPct}% loss)` : ""}`, order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}`
                       : order.materialSourcing === "stock" ? "Plan: use from stock"
                       : order.materialSourcing === "purchase" ? "Plan: buy new for this order"
                       : "No sourcing plan"} />
@@ -3328,6 +3366,45 @@ function OrderDetailPageBody() {
                     </div>
                   )}
                 </div>
+
+                {/* The client's own material on this piece: theirs with us, what went to the factory. */}
+                {csOk && (order.clientSupplied || orderClientSends(db, order).length > 0) && (() => {
+                  const cl = db.clients.find(c => c.id === order.clientId);
+                  const bal = cl ? clientMaterialBalance(db, cl) : null;
+                  const sends = orderClientSends(db, order);
+                  return (
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Coins className="h-4 w-4 text-amber-600" /> Client's own material</p>
+                        {editable && <Button size="sm" variant="outline" onClick={() => setCmSheet({ mode: "receive" })} className="h-8 rounded-lg">Receive from client</Button>}
+                      </div>
+                      {bal && <p className="text-xs text-muted-foreground">With us now: <b className="text-foreground">{fmtFine(bal.goldInHand)}</b> gold · <b className="text-foreground">{bal.diaInHand} ct</b> diamonds{(bal.goldAtFactory || bal.diaAtFactory) ? ` · at factories: ${fmtFine(bal.goldAtFactory)}, ${bal.diaAtFactory} ct` : ""}</p>}
+                      {sends.length > 0 ? (
+                        <ul className="divide-y divide-border/50 rounded-lg bg-white border border-border/60">
+                          {sends.map(i => {
+                            const why = undoClientSendBlocker(db, i);
+                            return (
+                              <li key={i.id} className="flex items-center gap-2 px-3 py-2 text-xs">
+                                {i.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-sky-600 shrink-0" />}
+                                <span className="flex-1 min-w-0 truncate">
+                                  {i.material === "gold" ? `Gold to the factory — ${i.quantityIssued} g ${i.purityOrQuality} (${deliveryFine(i)} g fine)` : `Diamonds to the factory — ${fmtCt(i.quantityIssued, i.piecesIssued)}${i.diamondKind === "certified" ? " · certified" : ""}${i.purityOrQuality && i.purityOrQuality !== "Client's" ? ` · ${i.purityOrQuality}` : ""}`}
+                                  <span className="text-muted-foreground"> · {fmtDate(i.issuedAt)}</span>
+                                </span>
+                                {editable && !why && (
+                                  <button type="button" onClick={async () => {
+                                    if (!(await confirmBox("Undo this send? It goes back to the client's material with us."))) return;
+                                    try { updateDbAs({ summary: `${order.orderNumber}: undid a send of the client's ${i.material === "gold" ? "gold" : "diamonds"}` }, d => undoClientSend(d, i.id)); toast.success("Undone"); }
+                                    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't undo"); }
+                                  }} className="text-muted-foreground hover:text-destructive font-medium">Undo</button>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : <p className="text-xs text-muted-foreground">Nothing of theirs sent to the factory yet — Add material → {order.clientSupplied?.gold ? "Client's gold" : "Client's diamonds"}.</p>}
+                    </div>
+                  );
+                })()}
 
                 {!diamondOnly && (
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -3504,7 +3581,7 @@ function OrderDetailPageBody() {
               const [status, tone]: [string, MatRow["tone"]] = faDone && mi.material === "diamond"
                 ? (mi.diamondKind !== "certified" && returnedCt > 0
                     ? [`${Math.round((mi.quantityIssued - returnedCt) * 1000) / 1000} ct used · ${returnedCt} ct back`, "amber"]
-                    : mi.finishDisposition === "returned" ? ["Back to stock", "amber"] : ["Used in piece", "green"])
+                    : mi.finishDisposition === "returned" ? [mi.source === "client" ? "Back to the client" : "Back to stock", "amber"] : ["Used in piece", "green"])
                 : mi.status === "open" ? ["In progress", "blue"] : ["Closed", "green"];
               const check = !srcPurchase && isStockIssuance(mi) && isStaffUser ? canEditIssuance(db, mi) : undefined;
               const issueWhy = check ? (orderEditAccess(db, user, can, order) ?? (check.ok ? undefined : check.reason)) : undefined;
@@ -3943,6 +4020,10 @@ function OrderDetailPageBody() {
       </Dialog>
 
       {/* ── 360° 3D model viewer (Starlink360 embed) — responsive, full-screen ── */}
+      {cmSheet && order.clientId && (
+        <ClientMaterialSheet clientId={order.clientId} mode={cmSheet.mode} material={cmSheet.material} order={order} onClose={() => setCmSheet(null)} />
+      )}
+      {csEdit && <ClientSuppliedSheet order={order} onClose={() => setCsEdit(false)} />}
       {show360 && viewer360Url && (
         <div className="fixed inset-0 z-50 bg-black/70 flex flex-col p-2 sm:p-4" onClick={() => setShow360(false)}>
           <div className="flex items-center justify-between px-2 pb-2 shrink-0">
@@ -4075,6 +4156,34 @@ function OrderDetailPageBody() {
                     </div>
                   </div>
                   {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(faEffNet, Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                  {order.clientSupplied?.gold && (() => {
+                    // The client gives the gold: what the piece takes from theirs.
+                    const cl = db.clients.find(c => c.id === order.clientId);
+                    const loss = order.clientSupplied.goldLossPct ?? 0;
+                    const inPiece = faEffNet > 0 && Number(faGoldPurity) > 0 ? pureFromPurity(faEffNet, Number(faGoldPurity)) : 0;
+                    const need = Math.round(inPiece * (1 + loss / 100) * 1000) / 1000;
+                    const have = cl ? Math.round((clientMaterialBalance(db, cl).goldFine + (orderUse(cl, order.id, "gold")?.fine ?? 0)) * 1000) / 1000 : 0;
+                    const from = Math.min(need, Math.max(0, have));
+                    const short = Math.round((need - from) * 1000) / 1000;
+                    const fg = stockFineGoldRate(db, new Date().toISOString(), workCompanyOf(db, order));
+                    const usdInr = inrPerUnit(db.settings.currencyRates ?? [], "USD");
+                    const suggest = fg && usdInr ? Math.round(short * fg.rate / usdInr * 100) / 100 : 0;
+                    return (
+                      <div className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 p-2.5 space-y-1 text-[11px]">
+                        <p className="font-semibold text-amber-800">The client's gold</p>
+                        <p className="text-muted-foreground">Theirs with us: <span className="font-medium text-foreground">{have} g fine</span> · this piece takes <span className="font-medium text-foreground">{need} g fine</span>{loss ? ` (${inPiece} + ${loss}% loss)` : ""}</p>
+                        {need > 0 && (short > 0 ? (
+                          <div className="space-y-1">
+                            <p className="text-destructive font-medium">{short} g fine short — that gold is ours, billed as "Gold supplied by us"</p>
+                            <div className="flex items-center gap-2">
+                              <Input type="number" min={0} step="0.01" value={faShortUsd} onChange={e => setFaShortUsd(e.target.value)} className="h-8 w-32 rounded-lg" placeholder={suggest ? String(suggest) : "$ amount"} aria-label="Gold supplied by us ($)" />
+                              {suggest > 0 && <button type="button" className="text-primary font-medium hover:underline" onClick={() => setFaShortUsd(String(suggest))}>Use {fmtMoney(suggest)} (our fine-gold rate)</button>}
+                            </div>
+                          </div>
+                        ) : <p className="text-success font-medium">All from their gold — {Math.round((have - need) * 1000) / 1000} g fine stays with them</p>)}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
 

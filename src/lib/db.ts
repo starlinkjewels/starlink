@@ -102,6 +102,8 @@ export interface Client {
   // Overpayment carried forward as advance credit — auto-applied (oldest bill
   // first) whenever a payment is recorded or "Apply Credit" is used.
   creditBalance?: number;
+  /** The client's own gold and diamonds held for them — every movement (lib/clientMaterial.ts). */
+  materialLedger?: ClientMaterialEntry[];
   // Explicit per-client grant for the Product Photos page — unset/false means
   // that client can't see it (avoids exposing other clients' designs by default).
   productPhotoAccess?: boolean;
@@ -192,6 +194,41 @@ export const DIAMOND_ONLY_METAL = "None (Diamond only)";
 
 /** A named extra charge on an order, in USD. */
 export interface OrderCharge { id: string; name: string; amountUsd: number }
+
+/**
+ * A client's own material, held for them (lib/clientMaterial.ts): what they
+ * gave us ("in"), what went into their pieces ("use", written at Final
+ * Approval, one per order and material), and what we handed back ("out").
+ * Never ours — it is not stock, has no cost, and is not in our stock value.
+ */
+export interface ClientMaterialEntry {
+  id: string;
+  at: string;
+  by: string;
+  byName?: string;
+  kind: "in" | "out" | "use";
+  material: "gold" | "diamond";
+  /** Gold: as weighed, its purity (‰), and the fine (24K) grams that make. */
+  grams?: number;
+  purity?: number;
+  fine?: number;
+  /** Diamonds: carats and stones, and what they are. */
+  ct?: number;
+  pcs?: number;
+  shape?: string;
+  size?: string;
+  color?: string;
+  clarity?: string;
+  certLab?: string;
+  certNo?: string;
+  /** "use": the order; "in"/"out": optional, the order it was for. */
+  orderId?: string;
+  /** "use" of gold: fine gold the piece took beyond what the client had — ours, billed. */
+  shortfallFine?: number;
+  /** "use" of gold: the agreed loss % it included. */
+  lossPct?: number;
+  note?: string;
+}
 /** What a loose-diamond order's stones are. Every part optional — as much as the client asked for. */
 /**
  * The stones of a loose order. `stone` is what they are — "Emerald", "Ruby",
@@ -568,6 +605,10 @@ export interface Order {
   deletedBy?: string;
   /** Named extra charges on top of the order value ("Setting charge", "Engraving"…), USD — part of the order's total. */
   otherCharges?: OrderCharge[];
+  /** The client gives their own material for this piece — gold, diamonds, or
+   *  both (lib/clientMaterial.ts). Their gold: the piece's fine gold plus the
+   *  agreed loss % comes off their gold balance at Final Approval. */
+  clientSupplied?: { gold?: boolean; diamonds?: boolean; goldLossPct?: number };
   /** A loose-diamond order: what the stones are (the piece's metal, size and finish don't apply). */
   stoneSpec?: StoneSpec;
 
@@ -1631,7 +1672,14 @@ export interface MaterialIssuance {
   /** "melt": gold from a melted piece handed back to the factory (lib/melt.ts) —
    *  a delivery into its pool like any other, but not out of our stock. */
   /** "transfer": a share of a factory's pool moved from one company to another. */
-  source: "stock" | "purchase" | "factoryPool" | "melt" | "transfer";
+  /** "client": the client's own material (clientId), sent to the factory for
+   *  them — not from our stock, no cost to us. */
+  source: "stock" | "purchase" | "factoryPool" | "melt" | "transfer" | "client";
+  /** source "client": whose material it is. */
+  clientId?: string;
+  /** source "client" gold: the order it was sent for (it goes into the
+   *  factory's gold like ours, so it has no orderId of its own). */
+  forOrderId?: string;
   /** source "melt": the order whose piece was melted. */
   meltOf?: string;
   sourcePurchaseId?: string; // set iff source === "purchase"
