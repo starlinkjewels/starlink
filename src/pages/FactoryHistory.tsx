@@ -482,7 +482,9 @@ function FactoryHistoryPageBody() {
           });
         }
       });
-      toast.success(issuance.source === "stock" || issuance.source === "melt" ? `${qty}${unit} returned to stock` : `${qty}${unit} returned (was bought for this order — not added to stock)`);
+      toast.success(issuance.source === "stock" || issuance.source === "melt" ? `${qty}${unit} returned to stock`
+        : issuance.source === "client" ? `${qty}${unit} returned — the client's own, held for them (not our stock)`
+        : `${qty}${unit} returned (was bought for this order — not added to stock)`);
       closeAction();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to return material");
@@ -698,7 +700,9 @@ function FactoryHistoryPageBody() {
       const ref = order?.orderNumber || melted?.orderNumber || (mi.source === "factoryPool" ? "Pool" : "");
       // Gold given to the factory (fine 24KT, matching the "Fine Gold at Factory" card).
       if (mi.material === "gold" && mi.source !== "factoryPool" && !(mi.source === "melt" && mi.quantityIssued === 0)) {
-        rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}` : `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
+        rows.push({ ...zero(), id: mi.id + "-gin", date: mi.issuedAt, ref, particular: mi.source === "melt" ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}`
+          : mi.source === "client" ? `Client's gold — ${mi.quantityIssued}g ${mi.purityOrQuality}${mi.forOrderId ? ` for ${db.orders.find(o => o.id === mi.forOrderId)?.orderNumber ?? "an order"}` : ""}`
+          : `Gold issued — ${mi.quantityIssued}g ${mi.purityOrQuality}`, drGold: toPureGold(mi.quantityIssued, mi.purityOrQuality) });
       }
       // Finished piece returned by the factory (converted to fine 24KT).
       if (mi.material === "gold" && mi.finishedNetWeight != null) {
@@ -1153,6 +1157,7 @@ function FactoryHistoryPageBody() {
                     {mi.source === "purchase" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">Direct purchase</span>}
                     {mi.source === "factoryPool" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-orange-500/10 text-orange-700">From factory pool</span>}
                     {mi.source === "transfer" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-primary/10 text-primary">Moved from another company</span>}
+                    {mi.source === "client" && <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-700">Client's · {db.clients.find(c => c.id === mi.clientId)?.companyName ?? "client"}</span>}
                     {view === "all" && <CompanyBadge id={companyOf(mi)} />}
                   </div>
                   {mi.source === "melt" && mi.quantityIssued === 0 ? (

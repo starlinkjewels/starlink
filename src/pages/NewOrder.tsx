@@ -42,6 +42,7 @@ import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,7 +51,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
+import { Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -121,6 +122,10 @@ export function NewOrderPage() {
     metal: listOf("metals")[0] ?? "Yellow Gold",
     diamondType: listOf("diamondTypes")[0] ?? "Natural",
     diamondShape: "",
+    // The client's own material for this piece (lib/clientMaterial.ts).
+    csGold: false,
+    csDiamonds: false,
+    csLoss: "",
     // An admin's new order is theirs unless they give it to someone else (AssignPicker).
     assignedTo: isAdmin ? user!.id : "",
     quantity: 1,
@@ -341,7 +346,8 @@ export function NewOrderPage() {
       // Loose stones have no metal — nor its karat or colour, whatever an older record kept.
       ...(k === "loose" ? { jewelleryType: "Diamond Only", metal: DIAMOND_ONLY_METAL, productKarats: "", productColor: "" } : {}),
       clientId: src.forReadyStock ? READY_STOCK_CLIENT : clientOk ? src.clientId : "",
-      otherCharges: chargeDrafts(src.otherCharges).map(c => ({ ...c, id: uid("ch_") })),
+      // Not "Gold supplied by us": that belonged to the piece it was worked out for.
+      otherCharges: chargeDrafts((src.otherCharges ?? []).filter(c => !c.id.startsWith("cs_gold_"))).map(c => ({ ...c, id: uid("ch_") })),
       assignedFactoryId: mayPlan && k === "piece" ? src.assignedFactoryId ?? "" : "",
       materialSourcing: "later", readyStockItemId: "",
     }));
@@ -442,6 +448,10 @@ export function NewOrderPage() {
         metal: f.metal as Order["metal"],
         diamondType: (isGemSale ? "" : f.diamondType) as Order["diamondType"],
         diamondShape: !isDiamondOnly && f.diamondShape.trim() ? f.diamondShape.trim() : undefined,
+        ...(!isClient && !forReadyStock && kind === "piece" && (f.csGold || f.csDiamonds) ? { clientSupplied: {
+          ...(f.csGold ? { gold: true, ...(Number(f.csLoss) > 0 ? { goldLossPct: Math.min(25, Number(f.csLoss)) } : {}) } : {}),
+          ...(f.csDiamonds ? { diamonds: true } : {}),
+        } } : {}),
         quantity: Number(f.quantity),
         diamondWeight: Number(f.diamondWeight),
         metalWeight: 0,
@@ -1079,6 +1089,27 @@ export function NewOrderPage() {
         <div className="space-y-4 min-w-0">
 
         {/* ══ 4b. Production plan — staff: the factory, what comes from stock, what is bought ══ */}
+        {/* Whose material: the client may give their own gold, diamonds, or both. */}
+        {!isClient && !forReadyStock && kind === "piece" && !isDiamondOnly && (
+          <SectionCard icon={<Coins className="h-4 w-4 text-amber-600" />} title="Client's own material" subtitle="Only if the client gives their gold or diamonds — the rest is ours">
+            <div className="grid gap-2 sm:grid-cols-2">
+              {([["csGold", "The client gives the gold", "Comes off their gold balance at Final Approval"], ["csDiamonds", "The client gives the diamonds", "Their stones — we bill setting and labour"]] as const).map(([k, label, hint]) => (
+                <label key={k} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 px-3 py-2.5 cursor-pointer">
+                  <span><span className="block text-sm font-medium text-brand-dark">{label}</span><span className="block text-[11px] text-muted-foreground">{hint}</span></span>
+                  <Switch checked={f[k]} onCheckedChange={v => setF(prev => ({ ...prev, [k]: v }))} aria-label={label} />
+                </label>
+              ))}
+            </div>
+            {f.csGold && (
+              <div className="mt-3 flex items-center gap-2">
+                <Label htmlFor="cs-loss" className="text-xs text-muted-foreground">Gold loss agreed</Label>
+                <Input id="cs-loss" type="number" min={0} max={25} step="0.1" value={f.csLoss} onChange={e => setF(prev => ({ ...prev, csLoss: e.target.value }))} className="h-9 w-24 rounded-lg" placeholder="%" />
+                <span className="text-xs text-muted-foreground">%</span>
+              </div>
+            )}
+          </SectionCard>
+        )}
+
         {mayPlan && kind !== "readyStock" && (
           <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title={kind === "loose" ? "Stones for this sale" : "Production plan"}
             subtitle="From stock or bought — recorded with the order">

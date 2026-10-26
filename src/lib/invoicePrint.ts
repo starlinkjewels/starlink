@@ -81,6 +81,26 @@ function orderStones(orderId: string, invoiceNumber?: string): string[] {
   return inv?.stones?.[orderId] ?? [];
 }
 
+/**
+ * The client's own material in the piece, listed and not charged: what it
+ * took from their gold and their diamonds (recorded at Final Approval), or —
+ * before that — that they give it. Read from the client's own record, so a
+ * client's copy of the bill shows it too.
+ */
+function clientMaterialHtml(order: Order): string {
+  const cs = order.clientSupplied;
+  const client = loadDb().clients.find(c => c.id === order.clientId);
+  const uses = (client?.materialLedger ?? []).filter(e => e.kind === "use" && e.orderId === order.id);
+  const lines: string[] = [];
+  const gold = uses.find(e => e.material === "gold");
+  const dia = uses.find(e => e.material === "diamond");
+  if (gold && (gold.fine ?? 0) > 0) lines.push(`Client's own gold: ${gold.fine} g fine${gold.lossPct ? ` (incl. ${gold.lossPct}% loss)` : ""} — not charged`);
+  else if (cs?.gold) lines.push("Gold: client's own — not charged");
+  if (dia && (dia.ct ?? 0) > 0) lines.push(`Client's own diamonds: ${dia.ct} ct${dia.pcs ? ` · ${dia.pcs} pcs` : ""} — not charged`);
+  else if (cs?.diamonds) lines.push("Diamonds: client's own — not charged");
+  return lines.map(t => `<div style="font-size:9px;color:#0f766e;margin-top:1px;">${esc(t)}</div>`).join("");
+}
+
 function itemRowHtml(sr: number, order: Order, mainShape?: string, stones: string[] = []): string {
   const stockId = order.designNumber || order.orderNumber;
   const weight = order.diamondWeight ? `${order.diamondWeight}CT` : "—";
@@ -89,7 +109,7 @@ function itemRowHtml(sr: number, order: Order, mainShape?: string, stones: strin
   return `<tr class="item-row">
         <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${itemDescription(order, mainShape)}${stonesHtml(stones)}${returnedQty(order) > 0
+        <td class="l">${itemDescription(order, mainShape)}${stonesHtml(stones)}${clientMaterialHtml(order)}${returnedQty(order) > 0
           ? `<div style="font-size:9px;color:#b91c1c;margin-top:1px;">${returnedQty(order)} of ${order.quantity} returned — ${[...new Set((order.returns ?? []).map(r => r.creditNoteNo))].join(", ")}</div>` : ""}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>

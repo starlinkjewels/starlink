@@ -1,3 +1,4 @@
+import { orderUse } from "./clientMaterial";
 import { brokerageWePay, landedInr } from "./brokers";
 import { ccy, ccyOrder, inrPerUnit, roundCcy, sumByCcy, type CurrencyCode } from "@/lib/currency";
 import { orderTotal, returnedCredit, returnedQty, dayOf, fxTableOf, stockCostOf, toPureGold, pureFromPurity, isDiamondOnlyOrder, type DB, type Expense, type MaterialIssuance, type Order, type Purchase } from "@/lib/db";
@@ -297,7 +298,14 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   // sent and the gold in the piece would count it twice.
   const goldFinished = issuances.some(i => i.material === "gold" && i.finishedNetWeight != null);
 
+  // The client's own gold: what the piece took from it costs us nothing —
+  // only gold we had to add when theirs ran short (recorded at Final Approval).
+  const clientGold = !!order.clientSupplied?.gold;
+  const goldUse = clientGold ? orderUse(db.clients.find(c => c.id === order.clientId), order.id, "gold") : undefined;
+
   for (const mi of issuances) {
+    // The client's own material (their diamonds): not ours, no cost.
+    if (mi.source === "client") continue;
     const unit = materialUnit(db.settings, mi.material);
     const bucket = mi.material === "gold" ? out.gold : mi.material === "diamond" ? out.diamond : out.materials;
     // A material other than gold or diamond is named with its grade: "2g 950 Platinum".
@@ -305,7 +313,12 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
 
     if (mi.material === "gold" && mi.finishedNetWeight != null) {
       if (mi.sourcePurchaseId) counted.add(mi.sourcePurchaseId);
-      const fine = finishedFine(mi);
+      let fine = finishedFine(mi);
+      if (clientGold) {
+        // Only the shortfall is ours; the rest was the client's gold.
+        fine = r2(goldUse?.shortfallFine ?? 0);
+        if (fine <= 0) continue;
+      }
       if (fine <= 0) continue;
       const when = mi.finishedPieces?.[0]?.recordedAt ?? mi.issuedAt;
       const fg = fineGoldRate(db, when, companyOf(mi));
@@ -318,7 +331,9 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
         continue;
       }
       bucket.push({
-        label: `${mi.finishedNetWeight}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`,
+        label: clientGold
+          ? `Gold we added — the client's gold was ${fine}g fine short × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`
+          : `${mi.finishedNetWeight}g at ${purityTxt} = ${fine}g fine × ${fmtRate(fg.rate, "g fine")} (${fg.basis})`,
         amountInr: r2(fine * fg.rate),
       });
       continue;
@@ -439,7 +454,7 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
   // gold in stock is worth now (stockFineGoldRate). Shown as an estimate, and replaced the moment real gold is
   // issued or bought for it — so a profit is never stated without the gold.
   const anyGold = issuances.some(i => i.material === "gold") || purchases.some(p => p.orderId === order.id && p.material === "gold");
-  if (!anyGold && order.materialSourcing !== "readyStock" && !isDiamondOnlyOrder(order) && metalHasKarats(order.metal, db.settings)) {
+  if (!anyGold && !clientGold && order.materialSourcing !== "readyStock" && !isDiamondOnlyOrder(order) && metalHasKarats(order.metal, db.settings)) {
     const w = order.estimatedNetWeight || order.estimatedGrossWeight || order.metalWeight || 0;
     if (w > 0 && !order.productKarats) {
       out.missing.push({ label: `Estimated gold ${w}g`, reason: "the order has no karat, so its fine gold can't be worked out" });

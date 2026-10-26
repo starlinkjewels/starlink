@@ -62,6 +62,13 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
         //  • stock/pool → keep only what was genuinely consumed (remainder went back);
         //  • purchase → fully returned to Stock above, so zero it out.
         if (mi.source === "purchase") { mi.quantityIssued = 0; mi.finishedPieces = []; }
+        // The client's own diamonds: back from the factory to them (their
+        // balance) — never into our stock.
+        else if (mi.source === "client") {
+          if (mi.diamondKind === "certified") mi.finishDisposition = "returned";
+          else { mi.finishReturnedCt = mi.quantityIssued; if (mi.piecesIssued) mi.finishReturnedPcs = mi.piecesIssued; }
+          mi.finishedPieces = [];
+        }
         else if (mi.source === "factoryPool" || mi.source === "stock") {
           const used = Math.round(usedOnUndo(order, mi) * 100) / 100;
           mi.quantityIssued = used;

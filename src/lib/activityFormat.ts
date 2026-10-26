@@ -237,6 +237,14 @@ export function undoBlocker(changes: LoggedChange[], truncated: boolean): string
   if (changes.some(c => c.col === "diamondSales")) {
     return "A diamond sale moves the stone and its money together. Cancel it in Buy & Assign instead.";
   }
+  // The client's own gold and diamonds: a receipt, a hand-back or a send.
+  // Undone here, a send already used — or a receipt already sent on — would
+  // leave their balance and the factory's gold out of step.
+  if (changes.some(c =>
+    (c.col === "clients" && JSON.stringify(c.after?.materialLedger ?? null) !== JSON.stringify(c.before?.materialLedger ?? null))
+    || (c.col === "materialIssuances" && (c.after?.source === "client" || c.before?.source === "client")))) {
+    return "The client's own material moved with this. Use Hand back on the client's page, or Undo on the order's send, instead.";
+  }
   if (changes.some(c => c.col === "stockMovements")) {
     return "Stock levels moved with this. Reverse it with the record's own Remove or Cancel, which puts the stock back too.";
   }
