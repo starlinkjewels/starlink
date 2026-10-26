@@ -69,7 +69,7 @@ export function ReminderSheet({ open, onClose, editing }: { open: boolean; onClo
           <div className="space-y-1.5"><Label htmlFor="rm-date" className="text-xs font-semibold">Day</Label><Input id="rm-date" type="date" value={f.date} onChange={e => setF({ ...f, date: e.target.value })} className="rounded-xl h-10" /></div>
           <div className="space-y-1.5"><Label htmlFor="rm-time" className="text-xs font-semibold">Time</Label><Input id="rm-time" type="time" value={f.time} onChange={e => setF({ ...f, time: e.target.value })} className="rounded-xl h-10" /></div>
         </div>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-1.5">
           {[{ l: "In 1 hour", at: inHours(1) }, { l: "Tonight 7 pm", at: (() => { const d = new Date(); d.setHours(19, 0, 0, 0); return d.toISOString(); })() }, { l: "Tomorrow 10 am", at: tomorrowAt(10) }, { l: "In a week", at: inHours(24 * 7) }].map(q => (
             <button key={q.l} type="button" onClick={() => setF({ ...f, ...toInputs(q.at) })} className="h-8 px-3 rounded-full border border-border text-xs hover:border-primary hover:text-primary">{q.l}</button>
           ))}

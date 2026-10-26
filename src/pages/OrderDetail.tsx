@@ -2644,34 +2644,38 @@ function OrderDetailPageBody() {
         <div className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <SectionTitle icon={ImagePlus} title="CAD Design" sub={order.cadImage ? "On file · the client sees it" : "Not uploaded yet"} />
-            <div className="flex items-center gap-2 flex-wrap">
-              {/* Visible to everyone (incl. client) once a 3D model is on file. */}
-              {order.cad3dmUrl && (
-                <Button size="sm" onClick={() => setShow360(true)} className="btn-hero rounded-xl gap-2">
-                  <Box className="h-4 w-4" /> View 360°
-                </Button>
-              )}
-              {canEditStage() && (
-                <>
-                  <input
-                    ref={cadRef} type="file" accept="image/*" className="hidden"
-                    onChange={async e => { const file = e.target.files?.[0]; if (file) await saveCadImage(file); e.target.value = ""; }}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => cadRef.current?.click()} disabled={cadUploading} className="rounded-xl gap-2">
-                    <ImagePlus className="h-4 w-4" />
-                    {cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD" : "Upload CAD Image"}
-                  </Button>
-                  <input
-                    ref={model3dmRef} type="file" accept=".3dm" className="hidden"
-                    onChange={async e => { const file = e.target.files?.[0]; if (file) await save3dmModel(file); e.target.value = ""; }}
-                  />
-                  <Button size="sm" variant="outline" onClick={() => model3dmRef.current?.click()} disabled={model3dmUploading} className="rounded-xl gap-2">
-                    <Box className="h-4 w-4" />
-                    {model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D Model" : "Upload 3D Model (.3dm)"}
-                  </Button>
-                </>
-              )}
-            </div>
+            {/* One main button and the rest under ⋯ — three side by side ran
+                onto a second line on a narrower card. */}
+            {(() => {
+              const edit = canEditStage();
+              const busy = cadUploading || model3dmUploading;
+              const uploadCad: MoreAction = { label: cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD image" : "Upload CAD image", icon: ImagePlus, disabled: busy, onSelect: () => cadRef.current?.click() };
+              const upload3dm: MoreAction = { label: model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D model" : "Upload 3D model (.3dm)", icon: Box, disabled: busy, onSelect: () => model3dmRef.current?.click() };
+              // Visible to everyone (incl. client) once a 3D model is on file; else the first thing missing.
+              const main: MoreAction | null = order.cad3dmUrl ? { label: "View 360°", icon: Box, onSelect: () => setShow360(true) }
+                : !edit ? null : !order.cadImage ? uploadCad : upload3dm;
+              const rest = edit ? [uploadCad, upload3dm].filter(a => a !== main) : [];
+              const MainIcon = main?.icon;
+              return (
+                <div className="flex items-center gap-2 shrink-0">
+                  {edit && (
+                    <>
+                      <input ref={cadRef} type="file" accept="image/*" className="hidden"
+                        onChange={async e => { const file = e.target.files?.[0]; if (file) await saveCadImage(file); e.target.value = ""; }} />
+                      <input ref={model3dmRef} type="file" accept=".3dm" className="hidden"
+                        onChange={async e => { const file = e.target.files?.[0]; if (file) await save3dmModel(file); e.target.value = ""; }} />
+                    </>
+                  )}
+                  {main && (
+                    <Button size="sm" onClick={() => main.onSelect()} disabled={main.disabled}
+                      className={`rounded-xl gap-2 whitespace-nowrap ${order.cad3dmUrl ? "btn-hero" : ""}`} variant={order.cad3dmUrl ? "default" : "outline"}>
+                      {MainIcon && <MainIcon className="h-4 w-4" />} {main.label}
+                    </Button>
+                  )}
+                  {rest.length > 0 && <MoreMenu title="CAD design" label="More CAD actions" actions={rest} />}
+                </div>
+              );
+            })()}
           </div>
 
           {order.cadImage && (
