@@ -854,9 +854,37 @@ export interface ShareItem {
   folder?: string;   // originating sub-folder name, for grouping/labels
   folderId?: string; // which ShareFolder it belongs to; absent = the root
 }
+/** One Ready Stock piece as a share link shows it — a snapshot of only what
+ *  was chosen to show. Never a cost. (lib/readyStockShare.ts) */
+export interface SharePiece {
+  id: string;
+  name: string;
+  sku?: string;
+  type: string;
+  metal?: string;
+  karat?: string;
+  colour?: string;
+  grossG?: number;
+  netG?: number;
+  diamondCt?: number;
+  diamondPcs?: number;
+  diamondShape?: string;
+  diamondType?: string;
+  /** Colour · clarity, e.g. "G-H · VS". */
+  diamondQuality?: string;
+  photos: string[];
+  cad?: string;
+  /** USD; only when prices are shown. */
+  price?: number;
+}
+
+/** The company a piece share is from, as its header shows it. */
+export interface ShareBrand { name: string; logo?: string; website?: string; email?: string; phone?: string }
+
 export interface Share {
   id: string;
-  kind: "catalog" | "productPhotos";
+  /** "readyStock": chosen pieces (`pieces`), not a folder. */
+  kind: "catalog" | "productPhotos" | "readyStock";
   sourceFolderId: string; // the folder this snapshot was taken from (to find/refresh)
   title: string; // folder name shown to the public viewer
   items: ShareItem[];
@@ -870,6 +898,11 @@ export interface Share {
   createdAt: string;
   updatedAt: string;
   expiresAt?: string; // ISO; empty/absent = never expires. After this, the public link redirects to the main site.
+  /** kind "readyStock": the pieces, their company, and a line for the client. */
+  pieces?: SharePiece[];
+  brand?: ShareBrand;
+  note?: string;
+  showPrice?: boolean;
 }
 
 /**

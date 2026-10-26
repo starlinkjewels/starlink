@@ -13,7 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX } from "lucide-react";
+import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX, Share2 } from "lucide-react";
+import { ShareProductsSheet } from "@/components/ShareProductsSheet";
 import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
@@ -69,6 +70,8 @@ export function ReadyStockPage() {
   const [coSel, setCoSel] = useState("all");
   const coView = !multiCo ? "all" : user?.role === "client" ? companyIdOfClient(db.clients.find(c => c.id === user.clientId)) : coSel;
   const [bandItem, setBandItem] = useState<ReadyStockItem | null>(null); // item whose barcode band modal is open
+  // Pieces being shared with a client (a PDF or a link).
+  const [sharing, setSharing] = useState<ReadyStockItem[] | null>(null);
   const [view, setView] = useState<"list" | "grid">(() => {
     try { return (localStorage.getItem("readystock-view") as "list" | "grid") || "grid"; } catch { return "grid"; }
   });
@@ -191,6 +194,7 @@ export function ReadyStockPage() {
       { label: "Edit", icon: Pencil, hint: editWhy, disabled: !!editWhy, onSelect: () => openEdit(item) },
       { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(officeOf(item))}` : "Sold out — nothing to move"),
         disabled: !!editWhy || item.quantity <= 0, onSelect: () => setMoving([item]) },
+      { label: "Share / PDF", icon: Share2, hint: mayExport ? "Photos, CAD, gold, diamonds, price" : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setSharing([item]) },
       { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandItem(item), show: db.settings.barcodeBandEnabled !== false },
       { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: () => del(item) },
     ];
@@ -340,6 +344,9 @@ export function ReadyStockPage() {
       )}
       {mayExport && <span className="text-xs text-muted-foreground">Downloads hold just these.</span>}
       <div className="ml-auto flex items-center gap-2">
+        {mayExport && chosen.length > 0 && (
+          <Button size="sm" onClick={() => setSharing(chosen)} className="h-8 rounded-lg gap-1.5 btn-hero"><Share2 className="h-3.5 w-3.5" />Share / PDF</Button>
+        )}
         {can("readyStock", "edit") && chosen.length > 0 && (
           <Button size="sm" variant="outline" onClick={() => setMoving(chosen)} className="h-8 rounded-lg gap-1.5"><ArrowRightLeft className="h-3.5 w-3.5" />Move to office</Button>
         )}
@@ -515,6 +522,7 @@ export function ReadyStockPage() {
       {officesOpen && <OfficesDialog onClose={() => setOfficesOpen(false)} />}
 
       {/* Barcode band for a ready-stock piece (barcode = SKU) */}
+      {sharing && <ShareProductsSheet items={sharing} onClose={() => setSharing(null)} />}
       <BandDialog
         open={!!bandItem}
         onOpenChange={o => { if (!o) setBandItem(null); }}
