@@ -22,6 +22,8 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { IfExport } from "@/components/IfExport";
+import { MoreMenu } from "@/components/MoreMenu";
+import { useMayExport } from "@/hooks/useCan";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -361,6 +363,7 @@ export async function cancelReturnFlow(order: Order, ret: OrderReturn, by: { id:
 export function OrderReturns({ order }: { order: Order }) {
   const { user } = useAuth();
   const may = useMayReturn();
+  const mayPrint = useMayExport("invoices");
   const [receiving, setReceiving] = useState<OrderReturn | null>(null);
   const rets = order.returns ?? [];
   if (!rets.length) return null;
@@ -378,10 +381,15 @@ export function OrderReturns({ order }: { order: Order }) {
               {r.cashbackBackUsd ? ` · cashback ${fmtMoney(r.cashbackBackUsd)} taken back` : ""}
             </p>
           </div>
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <IfExport module="invoices"><Button size="sm" variant="outline" className="rounded-lg h-8 gap-1" onClick={() => printNote(r.noteId)}><Printer className="h-3.5 w-3.5" /> Credit note</Button></IfExport>
-            {may && r.status === "coming" && <Button size="sm" className="rounded-lg h-8 gap-1 btn-hero" onClick={() => setReceiving(r)}><PackageCheck className="h-3.5 w-3.5" /> Mark received</Button>}
-            {may && <Button size="sm" variant="ghost" className="rounded-lg h-8 gap-1 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => user && cancelReturnFlow(order, r, user)}><XCircle className="h-3.5 w-3.5" /> Cancel return</Button>}
+          {/* One main button and the rest under ⋯, so the row never runs onto a second line. */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            {may && r.status === "coming"
+              ? <Button size="sm" className="rounded-lg h-8 gap-1 btn-hero whitespace-nowrap" onClick={() => setReceiving(r)}><PackageCheck className="h-3.5 w-3.5" /> Mark received</Button>
+              : mayPrint && <Button size="sm" variant="outline" className="rounded-lg h-8 gap-1 whitespace-nowrap" onClick={() => printNote(r.noteId)}><Printer className="h-3.5 w-3.5" /> Credit note</Button>}
+            <MoreMenu size="sm" title={r.creditNoteNo} label={`More for ${r.creditNoteNo}`} actions={[
+              { label: "Credit note", icon: Printer, show: mayPrint && may && r.status === "coming", onSelect: () => printNote(r.noteId) },
+              { label: "Cancel return", icon: XCircle, danger: true, show: may, onSelect: () => { if (user) void cancelReturnFlow(order, r, user); } },
+            ]} />
           </div>
         </div>
       ))}

@@ -541,9 +541,18 @@ export function NewOrderPage() {
         // Every admin and the client's account manager — it used to reach only
         // the first admin on the list, so most of the team never heard of it.
         const cl = d.clients.find(c => c.id === clientId);
-        notifyUsers(d, [...adminIds(d), cl?.accountManagerId], {
+        notifyUsers(d, [...adminIds(d), cl?.accountManagerId, assignedEmployeeId], {
           title: "New Order Request",
           body: `${order.orderNumber} from ${cl?.companyName ?? "client"}${advance > 0 ? ` · Advance $${advance}` : ""}`,
+          type: "order",
+        }, user!.id);
+      }
+      // An employee's order: every admin hears of it, as they do a client's.
+      if (isEmployee) {
+        const cl = d.clients.find(c => c.id === clientId);
+        notifyUsers(d, adminIds(d), {
+          title: "New Order",
+          body: `${order.orderNumber} · ${forReadyStock ? "Ready Stock (in-house)" : cl?.companyName ?? "client"} · by ${user!.name}`,
           type: "order",
         }, user!.id);
       }

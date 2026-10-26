@@ -541,8 +541,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             ))}
           </div>
           {/* Each line is added as its material, so it only ever shows that material's fields. */}
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-1">Add a line:</span>
+          {/* A phone: two by two, rather than three and one left over. */}
+          <div className="mt-3 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+            <span className="col-span-2 text-xs text-muted-foreground mr-1">Add a line:</span>
             {KIND_ORDER.map(k => {
               const Icon = KIND[k].icon;
               return (
@@ -846,8 +847,9 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
                 onChange={patch => set(i, patch)} onRemove={() => removeLine(i)} base={valueOf(l)} inr={valueOf(l)} />
             ))}
           </div>
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-xs text-muted-foreground mr-1">Add a line:</span>
+          {/* A phone: two by two, rather than three and one left over. */}
+          <div className="mt-3 grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+            <span className="col-span-2 text-xs text-muted-foreground mr-1">Add a line:</span>
             {KIND_ORDER.map(k => {
               const Icon = KIND[k].icon;
               return (
