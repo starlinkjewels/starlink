@@ -25,6 +25,7 @@ import {
   FolderInput,
   Share2,
   ArrowUpDown,
+  ListChecks,
   ArrowUp,
   ArrowDown,
 } from "lucide-react";
@@ -36,7 +37,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { needsAccess } from "@/lib/actionHints";
-import { updateCatalogItem, folderPath } from "@/lib/catalogItemEdit";
+import { updateCatalogItem, folderPath, moveCatalogItems } from "@/lib/catalogItemEdit";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
@@ -365,6 +366,9 @@ function ItemCard({
   onDelete,
   onSetBanner,
   menu,
+  picking,
+  picked,
+  onPick,
 }: {
   item: CatalogItem;
   isFav: boolean;
@@ -377,15 +381,21 @@ function ItemCard({
   onSetBanner?(): void;
   /** Staff: rename, move, delete — greyed with the reason when not theirs to do. */
   menu?: MoreAction[];
+  /** Picking several to move: a tap ticks the item instead of opening it. */
+  picking?: boolean;
+  picked?: boolean;
+  onPick?(): void;
 }) {
   return (
     <motion.div
       whileTap={{ scale: 0.97 }}
-      className="relative rounded-2xl overflow-hidden border border-border/60 bg-white shadow-sm flex flex-col"
+      className={`relative rounded-2xl overflow-hidden border bg-white shadow-sm flex flex-col ${picked ? "border-primary ring-2 ring-primary" : "border-border/60"}`}
     >
       {/* Thumbnail */}
       <button
-        onClick={onOpen}
+        onClick={picking ? onPick : onOpen}
+        aria-pressed={picking ? !!picked : undefined}
+        aria-label={picking ? `${picked ? "Untick" : "Tick"} ${item.name}` : undefined}
         className="block w-full aspect-square bg-secondary/30 overflow-hidden relative"
       >
         {item.type === "image" ? (
@@ -410,8 +420,9 @@ function ItemCard({
             </div>
           </div>
         )}
+        {picking && <div className="absolute top-2 left-2 z-10"><PickTick on={!!picked} /></div>}
         {/* Type badge */}
-        <div className="absolute top-2 left-2">
+        <div className={`absolute top-2 left-2 ${picking ? "hidden" : ""}`}>
           <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[10px] font-medium bg-black/50 text-white backdrop-blur-sm">
             {item.type === "video" ? (
               <Video className="h-2.5 w-2.5" />
@@ -424,7 +435,7 @@ function ItemCard({
           </span>
         </div>
         {/* Delete (admin/employee) */}
-        {canEdit && onDelete && (
+        {canEdit && onDelete && !picking && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -436,7 +447,7 @@ function ItemCard({
           </button>
         )}
         {/* Set as folder banner (admin/employee, images only) */}
-        {canEdit && onSetBanner && item.type === "image" && (
+        {canEdit && onSetBanner && item.type === "image" && !picking && (
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -475,7 +486,7 @@ function ItemCard({
             </p>
           )}
         </div>
-        {menu && <MoreMenu size="sm" label={`Actions for ${item.name}`} title={item.name} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
+        {menu && !picking && <MoreMenu size="sm" label={`Actions for ${item.name}`} title={item.name} actions={menu} className="h-7 w-7 border-0 shadow-none" />}
         <HeartBtn
           active={isFav}
           onToggle={(e) => {
@@ -668,6 +679,83 @@ function FolderMoveSheet({ folder, folders, blocked, onClose }: {
   );
 }
 
+/** The round tick on a card while picking several to move. */
+function PickTick({ on }: { on: boolean }) {
+  return (
+    <span aria-hidden className={`h-6 w-6 rounded-full grid place-items-center border-2 shadow-sm transition-colors ${on ? "bg-primary border-primary text-primary-foreground" : "bg-white/95 border-white text-transparent ring-1 ring-black/10"}`}>
+      <Check className="h-3.5 w-3.5" />
+    </span>
+  );
+}
+
+/**
+ * Several folders and items at once, into one folder (or, folders only, the
+ * top of the Catalog). Folders take everything inside them; a folder can't go
+ * inside itself or one of its own subfolders. Admin only, like a single move.
+ */
+function BulkMoveSheet({ folderIds, itemIds, folders, blocked, here, onClose, onMoved }: {
+  folderIds: string[];
+  itemIds: string[];
+  folders: CatalogFolder[];
+  /** The picked folders and all their subfolders — not places they can go. */
+  blocked: string[];
+  /** The folder on screen (null = top of the Catalog). */
+  here: string | null;
+  onClose(): void;
+  onMoved(target: string | null): void;
+}) {
+  const ROOT = "__root__";
+  const [target, setTarget] = useState("");
+  // Items always live in a folder, so the top level is only for folders.
+  const options = [
+    ...(itemIds.length ? [] : [{ id: ROOT, label: "Catalog (top level)" }]),
+    ...folders.filter((f) => !blocked.includes(f.id)).map((f) => ({ id: f.id, label: folderPath(folders, f.id) })).sort((a, b) => a.label.localeCompare(b.label)),
+  ];
+  const what = [folderIds.length && `${folderIds.length} folder${folderIds.length !== 1 ? "s" : ""}`, itemIds.length && `${itemIds.length} file${itemIds.length !== 1 ? "s" : ""}`].filter(Boolean).join(" and ");
+  const save = async () => {
+    if (!target) { toast.error("Choose where they go"); return; }
+    const to = target === ROOT ? null : target;
+    if (to && blocked.includes(to)) { toast.error("A folder can't go inside itself"); return; }
+    if (to === here) { toast.info("They're already here"); return; }
+    if (itemIds.length && !to) { toast.error("Files go into a folder"); return; }
+    if (folderIds.length) {
+      updateDb((db) => {
+        for (const id of folderIds) {
+          const f = db.catalogFolders.find((x) => x.id === id);
+          if (f && (f.parentId ?? null) !== to) f.parentId = to;
+        }
+      });
+    }
+    if (itemIds.length && to) await moveCatalogItems(itemIds, to);
+    toast.success(`${what} moved to ${to ? folderPath(folders, to) : "the top of the Catalog"}`);
+    onMoved(to);
+  };
+  return (
+    <ActionSheet open onOpenChange={(o) => { if (!o) onClose(); }} icon={FolderInput}
+      title={`Move ${what}`}
+      description="Folders move with everything inside them. Links already sent keep the old place."
+      footer={
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>
+          <AsyncButton onClick={save} disabled={!target} className="btn-hero rounded-xl px-6">Move</AsyncButton>
+        </div>
+      }>
+      <div className="space-y-1.5">
+        <Label className="text-xs">Move into</Label>
+        <Select value={target} onValueChange={setTarget}>
+          <SelectTrigger className="h-10 rounded-xl" aria-label="Move into"><SelectValue placeholder="Choose a folder…" /></SelectTrigger>
+          <SelectContent>
+            {options.map((o) => <SelectItem key={o.id} value={o.id}>{o.label}{(o.id === ROOT ? null : o.id) === here ? " (here now)" : ""}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        {folderIds.length > 0 && blocked.length > folderIds.length && (
+          <p className="text-[11px] text-muted-foreground">The picked folders' own subfolders aren't listed — a folder can't go inside itself.</p>
+        )}
+      </div>
+    </ActionSheet>
+  );
+}
+
 /**
  * Rename an item, or move it to another folder — one field on the item, in
  * the side panel. Moving leaves favourites alone (they follow the item).
@@ -820,6 +908,9 @@ function ItemGallery({
   onSetBanner,
   onSortChange,
   itemMenu,
+  picking,
+  pickedIds,
+  onPick,
 }: {
   items: CatalogItem[];
   itemsLoading: boolean;
@@ -837,6 +928,9 @@ function ItemGallery({
   onSetBanner(item: CatalogItem): void;
   onSortChange(sort: CatalogSort): void;
   itemMenu?(item: CatalogItem): MoreAction[];
+  picking?: boolean;
+  pickedIds?: Set<string>;
+  onPick?(id: string): void;
 }) {
   if (items.length === 0 && !itemsLoading && !canEdit) return null;
   return (
@@ -876,6 +970,9 @@ function ItemGallery({
                 onDelete={canDelete ? () => onDelete(item.id) : undefined}
                 onSetBanner={canEdit ? () => onSetBanner(item) : undefined}
                 menu={itemMenu?.(item)}
+                picking={picking}
+                picked={pickedIds?.has(item.id)}
+                onPick={() => onPick?.(item.id)}
               />
             )}
           />
@@ -949,6 +1046,13 @@ export function CatalogPage() {
   const [sharingFolder, setSharingFolder] = useState<CatalogFolder | null>(null);
   const [arranging, setArranging] = useState(false);
   const [sharePicker, setSharePicker] = useState(false);
+  // Picking several folders and files to move together (admin).
+  const [picking, setPicking] = useState(false);
+  const [pickedFolders, setPickedFolders] = useState<Set<string>>(new Set());
+  const [pickedItems, setPickedItems] = useState<Set<string>>(new Set());
+  const [bulkMoving, setBulkMoving] = useState(false);
+  const stopPicking = () => { setPicking(false); setPickedFolders(new Set()); setPickedItems(new Set()); setBulkMoving(false); };
+  const flip = (set: Set<string>, id: string) => { const n = new Set(set); if (n.has(id)) n.delete(id); else n.add(id); return n; };
 
   /* ── Load folders + favourite ids (small, bounded collections — still the shared cache) ── */
   const reload = useCallback(() => {
@@ -983,6 +1087,9 @@ export function CatalogPage() {
     .map((id) => folders.find((f) => f.id === id))
     .filter(Boolean) as CatalogFolder[];
   const isRoot = folderPath.length === 0 && !viewingFavorites;
+
+  // Picks belong to the folder on screen.
+  useEffect(() => { stopPicking(); }, [currentFolderId, viewingFavorites]);
 
   /* ── Load current folder's first page of items whenever it changes ── */
   useEffect(() => {
@@ -1468,9 +1575,11 @@ export function CatalogPage() {
               <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
                 <button
                   onClick={() => {
-                    if (!isRenaming) enterFolder(folder.id);
+                    if (picking) setPickedFolders((prev) => flip(prev, folder.id));
+                    else if (!isRenaming) enterFolder(folder.id);
                   }}
-                  className="w-full flex flex-col rounded-2xl border border-border/60 active:border-primary/40 bg-white shadow-sm overflow-hidden text-left"
+                  aria-pressed={picking ? pickedFolders.has(folder.id) : undefined}
+                  className={`w-full flex flex-col rounded-2xl border bg-white shadow-sm overflow-hidden text-left ${picking && pickedFolders.has(folder.id) ? "border-primary ring-2 ring-primary" : "border-border/60 active:border-primary/40"}`}
                 >
                   <div className="aspect-video w-full bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden relative">
                     {coverUrl ? (
@@ -1511,7 +1620,8 @@ export function CatalogPage() {
                     {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                   </div>
                 </button>
-                {isStaff && !isRenaming && (
+                {picking && <div className="absolute top-2 left-2 pointer-events-none"><PickTick on={pickedFolders.has(folder.id)} /></div>}
+                {isStaff && !isRenaming && !picking && (
                   <div className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
                     <MoreMenu size="sm" label={`${folder.name}: more actions`} actions={folderMenu(folder)} />
                   </div>
@@ -1690,8 +1800,10 @@ export function CatalogPage() {
               .filter(Boolean)
               .join(" · ") || "Empty"}
         primary={canAdd ? { label: "New Folder", icon: Plus, onClick: () => { setShowNewFolder((v) => !v); setNewFolderName(""); } } : null}
-        menu={canEdit && !viewingFavorites && subfolders.length > 1 ? [
-          { label: "Arrange folders", icon: ArrowUpDown, hint: "Set the order they show in", onSelect: () => setArranging(true) },
+        menu={!viewingFavorites && ((canEdit && subfolders.length > 1) || (isStaff && (subfolders.length > 0 || items.length > 0))) ? [
+          { label: "Select to move", icon: ListChecks, show: isStaff && (subfolders.length > 0 || items.length > 0),
+            hint: isAdmin ? "Several folders and files at once" : ADMIN_MOVE, disabled: !isAdmin, onSelect: () => setPicking(true) },
+          { label: "Arrange folders", icon: ArrowUpDown, show: canEdit && subfolders.length > 1, hint: "Set the order they show in", onSelect: () => setArranging(true) },
         ] : undefined}
         actions={(canAdd || canShare) ? (
           <>
@@ -1779,6 +1891,25 @@ export function CatalogPage() {
         ) : undefined}
       />
 
+      {/* Picking several to move: what is ticked, and Move. */}
+      {picking && (() => {
+        const n = pickedFolders.size + pickedItems.size;
+        const all = subfolders.length + items.length;
+        return (
+          <div className="sticky top-2 z-20 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-2xl border border-primary/25 bg-white/95 backdrop-blur px-3 py-2.5 shadow-md">
+            <span className="text-sm font-semibold text-brand-dark tabular-nums">{n ? `${n} selected` : "Tap folders and files to select"}</span>
+            {n < all && (
+              <button type="button" onClick={() => { setPickedFolders(new Set(subfolders.map((f) => f.id))); setPickedItems(new Set(items.map((i) => i.id))); }}
+                className="text-xs font-medium text-primary hover:underline">Select all {all}{itemsHasMore ? " shown" : ""}</button>
+            )}
+            <div className="ml-auto flex items-center gap-2">
+              <Button size="sm" variant="ghost" onClick={stopPicking} className="rounded-xl h-9">Cancel</Button>
+              <Button size="sm" disabled={!n} onClick={() => setBulkMoving(true)} className="btn-hero rounded-xl h-9 gap-1.5"><FolderInput className="h-4 w-4" /> Move{n ? ` ${n}` : ""}</Button>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* New folder input (no height animation — avoids full-screen bug) */}
       {showNewFolder && (
         <div className="flex items-center gap-3 p-4 rounded-2xl border border-primary/30 bg-primary/5">
@@ -1856,9 +1987,11 @@ export function CatalogPage() {
                   <motion.div key={folder.id} whileTap={{ scale: 0.97 }} className="relative">
                     <button
                       onClick={() => {
-                        if (!isRenaming) enterFolder(folder.id);
+                        if (picking) setPickedFolders((prev) => flip(prev, folder.id));
+                    else if (!isRenaming) enterFolder(folder.id);
                       }}
-                      className="w-full flex flex-col rounded-2xl border border-border/60 active:border-primary/40 bg-white shadow-sm overflow-hidden text-left"
+                      aria-pressed={picking ? pickedFolders.has(folder.id) : undefined}
+                  className={`w-full flex flex-col rounded-2xl border bg-white shadow-sm overflow-hidden text-left ${picking && pickedFolders.has(folder.id) ? "border-primary ring-2 ring-primary" : "border-border/60 active:border-primary/40"}`}
                     >
                       <div className="aspect-video w-full bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden relative">
                         {coverUrl ? (
@@ -1899,7 +2032,8 @@ export function CatalogPage() {
                         {count === null ? "…" : `${count} item${count !== 1 ? "s" : ""}`}
                       </div>
                     </button>
-                    {isStaff && !isRenaming && (
+                    {picking && <div className="absolute top-2 left-2 pointer-events-none"><PickTick on={pickedFolders.has(folder.id)} /></div>}
+                {isStaff && !isRenaming && !picking && (
                       <div className="absolute top-2 right-2" onClick={(e) => e.stopPropagation()}>
                         <MoreMenu size="sm" label={`${folder.name}: more actions`} actions={folderMenu(folder)} />
                       </div>
@@ -1966,6 +2100,9 @@ export function CatalogPage() {
 
           {/* Item gallery */}
           <ItemGallery
+            picking={picking}
+            pickedIds={pickedItems}
+            onPick={(id) => setPickedItems((prev) => flip(prev, id))}
             items={items}
             itemsLoading={itemsLoading}
             itemsHasMore={itemsHasMore}
@@ -2002,6 +2139,27 @@ export function CatalogPage() {
       {itemSheet && (
         <CatalogItemSheet item={itemSheet.item} mode={itemSheet.mode} folders={folders}
           onClose={() => setItemSheet(null)} onSaved={(next) => itemSaved(next, itemSheet.item)} />
+      )}
+      {bulkMoving && (
+        <BulkMoveSheet folderIds={[...pickedFolders]} itemIds={[...pickedItems]} folders={folders} here={currentFolderId}
+          blocked={[...pickedFolders].flatMap((id) => [id, ...descendantIds(id)])}
+          onClose={() => setBulkMoving(false)}
+          onMoved={(to) => {
+            // Moved files leave the grid on screen; a banner that went with them is dropped.
+            const moved = new Set(pickedItems);
+            if (moved.size && to) {
+              setItems((prev) => prev.filter((it) => !moved.has(it.id)));
+              setFavoriteItems((prev) => prev.map((it) => (moved.has(it.id) ? { ...it, folderId: to } : it)));
+              const banner = folders.find((f) => f.id === currentFolderId)?.bannerItemId;
+              if (banner && moved.has(banner)) {
+                updateDb((db) => {
+                  const f = db.catalogFolders.find((x) => x.id === currentFolderId);
+                  if (f?.bannerItemId === banner) { delete f.bannerItemId; delete f.bannerUrl; }
+                });
+              }
+            }
+            stopPicking();
+          }} />
       )}
       <AnimatePresence>
         {lightbox && (
