@@ -574,7 +574,7 @@ function ArrangeFoldersSheet({ open, onClose, onSaved, folders, title }: {
   const [saving, setSaving] = useState(false);
   // Taken once as it opens: a folder arriving meanwhile doesn't reshuffle the list being arranged.
   useEffect(() => {
-    if (open) setIds(folders.map((f) => f.id));
+    if (open) { setIds(folders.map((f) => f.id)); setSortedBy(""); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
   const nameOf = (id: string) => folders.find((f) => f.id === id)?.name ?? "Folder";
@@ -587,6 +587,22 @@ function ArrangeFoldersSheet({ open, onClose, onSaved, folders, title }: {
     return next;
   });
   const changed = ids.some((id, i) => folders[i]?.id !== id);
+  // The whole list at once, then fine-tuned with the arrows. Names compare the
+  // way a person reads them: SBR0009 before SBR0089, SBR2 before SBR10.
+  const [sortedBy, setSortedBy] = useState("");
+  const SORTS: Record<string, { label: string; cmp: (a: CatalogFolder, b: CatalogFolder) => number }> = {
+    nameAsc: { label: "Name A → Z", cmp: (a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) },
+    nameDesc: { label: "Name Z → A", cmp: (a, b) => b.name.localeCompare(a.name, undefined, { numeric: true, sensitivity: "base" }) },
+    newest: { label: "Newest first", cmp: (a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? "") },
+    oldest: { label: "Oldest first", cmp: (a, b) => (a.createdAt ?? "").localeCompare(b.createdAt ?? "") },
+  };
+  const sortAll = (key: string) => {
+    const s = SORTS[key];
+    if (!s) return;
+    const byId = new Map(folders.map((f) => [f.id, f]));
+    setIds((cur) => [...cur].sort((a, b) => s.cmp(byId.get(a)!, byId.get(b)!)));
+    setSortedBy(key);
+  };
   const save = () => {
     setSaving(true);
     try {
@@ -610,6 +626,15 @@ function ArrangeFoldersSheet({ open, onClose, onSaved, folders, title }: {
           <AsyncButton onClick={save} disabled={saving || !changed} className="btn-hero rounded-xl h-10 flex-1 sm:flex-none sm:px-8">Save order</AsyncButton>
         </div>
       }>
+      <div className="flex flex-wrap items-center gap-2 mb-3">
+        <Select value={sortedBy} onValueChange={sortAll}>
+          <SelectTrigger className="h-10 rounded-xl w-full sm:w-56" aria-label="Sort all by"><ArrowUpDown className="h-4 w-4 mr-2 shrink-0 text-muted-foreground" /><SelectValue placeholder="Sort all by…" /></SelectTrigger>
+          <SelectContent>
+            {Object.entries(SORTS).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{sortedBy ? `Sorted: ${SORTS[sortedBy].label} — fine-tune with the arrows, then Save order.` : `${ids.length} folders · sort them all, or move one at a time.`}</p>
+      </div>
       <ol className="rounded-xl border border-border/60 divide-y divide-border/50 bg-white">
         {ids.map((id, i) => (
           <li key={id} className="flex items-center gap-2 px-2.5 py-2">
