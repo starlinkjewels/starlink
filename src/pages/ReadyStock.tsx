@@ -15,7 +15,9 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX, Share2 } from "lucide-react";
 import { ShareProductsSheet } from "@/components/ShareProductsSheet";
-import { exportReadyStockCsv, exportReadyStockPdf } from "@/lib/productExport";
+import { exportReadyStockCsv } from "@/lib/productExport";
+import { downloadStockListPdf } from "@/lib/piecesPdf";
+import { shareBrand } from "@/lib/readyStockShare";
 import { BandDialog } from "@/components/BandDialog";
 import { generateStockBand, labelPresets } from "@/lib/band";
 import { toast } from "sonner";
@@ -311,8 +313,21 @@ export function ReadyStockPage() {
   const onSearch = (v: string) => { setQ(v); setPage(1); };
   const searchHint = "Search name or SKU — SKU-1, SKU-2";
   const which = chosen.length ? `The ${chosen.length} selected` : `The ${items.length} shown`;
+  const listPdf = async () => {
+    const t = toast.loading(`Making the PDF — ${exportItems.length} item${exportItems.length !== 1 ? "s" : ""} with photos…`);
+    try {
+      const missing = await downloadStockListPdf(exportItems.map(i => ({
+        photo: i.images?.[0], name: i.name, sku: i.sku, type: i.jewelleryType, metal: `${i.metal}${i.productKarats ? ` ${i.productKarats}` : ""}`,
+        grossG: i.grossWeight, netG: i.netWeight, diamondCt: i.diamondWeight, qty: i.quantity, price: i.price,
+      })), shareBrand(db, exportItems), { title: "Ready Stock", subject: exportSubject(), filename: exportName() });
+      if (missing) toast.warning(`PDF saved — ${missing} photo${missing !== 1 ? "s" : ""} couldn't be read`, { id: t });
+      else toast.success("PDF saved", { id: t });
+    } catch { toast.error("Couldn't make the PDF", { id: t }); }
+  };
   const exports: TableExport[] = canManage && items.length ? [
-    { label: "PDF", icon: FileText, hint: which, onSelect: () => exportReadyStockPdf(exportItems, exportName(), exportSubject()) },
+    // With a photo on every row; "Product sheets" is a page a piece, as a client gets it.
+    { label: "PDF", icon: FileText, hint: `${which} · with photos`, onSelect: () => void listPdf() },
+    { label: "Product sheets", icon: Share2, hint: "A page a piece — photos, CAD, details, price", onSelect: () => setSharing(exportItems) },
     { label: "Excel", icon: FileSpreadsheet, hint: which, onSelect: () => exportReadyStockCsv(exportItems, exportName(), isAdmin, i => stockCostOf(db, i)) },
   ] : [];
   // Lots on the shelf ("items", as the pages count them) — the pieces in them are the figures below.

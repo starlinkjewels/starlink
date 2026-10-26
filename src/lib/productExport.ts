@@ -174,40 +174,6 @@ export function exportReadyStockCsv(
   }));
 }
 
-export function exportReadyStockPdf(items: ReadyStockItem[], name: string, subject: string): void {
-  const sum = (f: (i: ReadyStockItem) => number) =>
-    Math.round(items.reduce((s, i) => s + f(i), 0) * 1000) / 1000;
-  downloadLedgerPdf({
-    title: "Ready Stock",
-    subjectLines: [
-      subject,
-      `${items.length} item${items.length !== 1 ? "s" : ""}`,
-      `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
-    ],
-    summary: [
-      { label: "Pieces", value: String(sum(i => i.quantity)) },
-      { label: "Gross weight", value: `${sum(i => (i.grossWeight ?? 0) * i.quantity)} g` },
-      { label: "Diamond", value: `${sum(i => (i.diamondWeight ?? 0) * i.quantity)} ct` },
-      { label: "Value", value: fmtMoney(sum(i => i.price * i.quantity)) },
-    ],
-    landscape: true,
-    columns: [
-      { header: "SKU", x: 14 }, { header: "Name", x: 42 }, { header: "Item", x: 92 },
-      { header: "Metal", x: 122 }, { header: "Gross", x: 158 }, { header: "Net", x: 180 },
-      { header: "Dia ct", x: 200 }, { header: "Qty", x: 218 },
-      { header: "Price", x: 244 }, { header: "Total", x: 272 },
-    ],
-    align: ["left", "left", "left", "left", "right", "right", "right", "right", "right", "right"],
-    rows: items.map(i => [
-      (i.sku ?? "").slice(0, 12), i.name.slice(0, 24), i.jewelleryType.slice(0, 14),
-      `${i.metal}${i.productKarats ? ` ${i.productKarats}` : ""}`.slice(0, 18),
-      String(i.grossWeight ?? ""), String(i.netWeight ?? ""), String(i.diamondWeight ?? ""),
-      String(i.quantity), fmtMoney(i.price), fmtMoney(n3(i.price * i.quantity)),
-    ]),
-    filename: name,
-  });
-}
-
 /* ────────────────────────────────────────────────────────────────────────────
  * Profit — ADMIN ONLY.
  *
