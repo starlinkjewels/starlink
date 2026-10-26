@@ -14,7 +14,16 @@ export function metalLabel(m: string): string {
  * (platinum, silver, titanium by default) is that metal through and through.
  */
 export function metalHasKarats(m: string, settings?: Settings): boolean {
-  return m !== DIAMOND_ONLY_METAL && !noKaratMetals(settings).includes(m);
+  if (!m || m === DIAMOND_ONLY_METAL || isPlainlyNotGold(m)) return false;
+  const key = m.trim().toLowerCase();
+  return !noKaratMetals(settings).some(x => x.trim().toLowerCase() === key);
+}
+
+/** Silver, platinum, palladium, titanium… by name: never karats, whatever the
+ *  list in Settings says — a silver piece offered 9K–24K was a slip the list
+ *  could make (a metal renamed, or switched on by mistake). */
+export function isPlainlyNotGold(m: string): boolean {
+  return !/gold/i.test(m) && /\b(silver|platinum|palladium|titanium|steel|brass|copper)\b/i.test(m);
 }
 
 /** A metal that is not gold at all (its own weight, no karat, no gold to issue). */

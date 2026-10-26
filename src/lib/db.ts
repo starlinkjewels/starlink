@@ -476,6 +476,9 @@ export interface Order {
   jewelleryType: string;
   metal: string;
   diamondType: string;
+  /** The main stones' shape as asked for (Settings → Dropdown lists → Shapes).
+   *  Bills prefer the shape of the stones actually issued, then this. */
+  diamondShape?: string;
   quantity: number;
   diamondWeight: number; // estimated diamond weight (ct) — entered at order creation
   metalWeight: number;
@@ -926,6 +929,12 @@ export interface Settings {
    *  the end (Dispatch, Delivered) never move. Applies to orders created after
    *  it is saved; an order keeps the stages it was created with. See stages.ts. */
   timelineStages?: string[];
+  /** The business's own name for a stage, shown wherever the stage is ("Dispatch"
+   *  → "Shipped"). Display only: the stage keeps its own name underneath, which
+   *  is what approval, dispatch and delivery work by (stages.ts stageLabel). */
+  stageLabels?: Record<string, string>;
+  /** Days in production after which a piece shows as delayed (lib/production.ts). Unset = 7. */
+  productionDelayDays?: number;
   /** A loose-diamond order's own stages, between approval and dispatch (e.g. Matching, Sorting). Certification is added when it needs a certificate. */
   looseStages?: string[];
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
@@ -3774,7 +3783,8 @@ export function mainDiamondShape(d: DB, orderId: string): string | undefined {
       if (p.orderId === orderId && p.material === "diamond") take(p.diamond?.shape, p.diamond?.carat || 0);
     }
   }
-  return best?.shape;
+  // No stones issued or bought yet: the shape the order asked for.
+  return best?.shape ?? (d.orders.find(o => o.id === orderId)?.diamondShape?.trim() || undefined);
 }
 
 /* ── Admin-only figures: where they are read from, and written to ─────────── */

@@ -54,3 +54,30 @@ export function canUploadOriginal(file: File): boolean {
   // A format the browser may not re-encode faithfully is also better untouched.
   return file.size <= KEEP_ORIGINAL_UNDER_MB * 1024 * 1024;
 }
+
+/** A profile photo: the middle square of the picture, small enough to sit on
+ *  the person's own record (it travels with every screen's list of people). */
+export const AVATAR_PX = 128;
+export async function avatarFromFile(file: File): Promise<string> {
+  const src = await new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = reject;
+    reader.onload = e => resolve(e.target?.result as string);
+    reader.readAsDataURL(file);
+  });
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onerror = reject;
+    img.onload = () => {
+      const side = Math.min(img.width, img.height);
+      const canvas = document.createElement("canvas");
+      canvas.width = canvas.height = AVATAR_PX;
+      const ctx = canvas.getContext("2d")!;
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(0, 0, AVATAR_PX, AVATAR_PX);
+      ctx.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, AVATAR_PX, AVATAR_PX);
+      resolve(canvas.toDataURL("image/jpeg", 0.8));
+    };
+    img.src = src;
+  });
+}

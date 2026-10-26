@@ -1,8 +1,18 @@
 import { approveOrderTimeline } from "./pure/pipelines";
 import {
-  TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, statusFromTimeline, uid, worksOnOrder,
+  TIMELINE_STEPS, isDiamondOnlyOrder, isProductionStep, loadDb, statusFromTimeline, uid, worksOnOrder,
   type DB, type Order, type Settings, type Worker,
 } from "./db";
+
+/**
+ * A stage as the business calls it (Settings → Production Timeline → Rename).
+ * Only how it is shown: the stage keeps its own name in the order, so the work
+ * that hangs on it (approval, Final Approval, dispatch, delivery) never moves.
+ */
+export function stageLabel(step: string, settings?: Pick<Settings, "stageLabels"> | null): string {
+  const s = settings === undefined ? loadDb().settings : settings;
+  return s?.stageLabels?.[step]?.trim() || step;
+}
 
 /**
  * The production timeline: which stages an order passes through, in what
@@ -248,7 +258,7 @@ export function applyComplete(
   const clientUser = d.users.find(u => u.clientId === o.clientId);
   if (clientUser) d.notifications.unshift({
     id: uid("n_"), userId: clientUser.id, title: "Timeline updated",
-    body: `${o.orderNumber}: ${o.timeline[last].step}`, type: "info", read: false, createdAt: at,
+    body: `${o.orderNumber}: ${stageLabel(o.timeline[last].step, d.settings)}`, type: "info", read: false, createdAt: at,
   });
 }
 

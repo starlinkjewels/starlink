@@ -12,6 +12,7 @@ import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan } from "@/hooks/useCan";
 import { metalHasKarats, metalOptions } from "@/lib/metals";
+import { netFromGross } from "@/lib/weights";
 import { activeMaterials } from "@/lib/materials";
 import { hasDiamonds } from "@/lib/orderText";
 import { choicesOf, listOf } from "@/lib/optionLists";
@@ -38,7 +39,7 @@ const SPECIAL = "Special Stamp: ";
 
 type Form = {
   jewelleryType: string; metal: string; productKarats: string; productColor: string; productSize: string;
-  quantity: string; diamondType: string; diamondWeight: string; estimatedGrossWeight: string; estimatedNetWeight: string;
+  quantity: string; diamondType: string; diamondShape: string; diamondWeight: string; estimatedGrossWeight: string; estimatedNetWeight: string;
   rhodium: string; stamping: string; stampingNote: string;
   designNumber: string; priority: string; expectedDelivery: string; deliveryTime: string; contactPerson: string; instructions: string;
   // A loose order's stones — what they are, and their details.
@@ -51,7 +52,7 @@ function formOf(o: Order): Form {
   const special = (o.stamping ?? "").startsWith(SPECIAL);
   return {
     jewelleryType: o.jewelleryType, metal: o.metal, productKarats: o.productKarats ?? "", productColor: o.productColor ?? "",
-    productSize: o.productSize ?? "", quantity: String(o.quantity || 1), diamondType: o.diamondType,
+    productSize: o.productSize ?? "", quantity: String(o.quantity || 1), diamondType: o.diamondType, diamondShape: o.diamondShape ?? "",
     diamondWeight: numStr(o.diamondWeight), estimatedGrossWeight: numStr(o.estimatedGrossWeight), estimatedNetWeight: numStr(o.estimatedNetWeight),
     rhodium: o.rhodium ?? "", stamping: special ? "Special Stamp" : o.stamping ?? "", stampingNote: special ? o.stamping!.slice(SPECIAL.length) : "",
     designNumber: o.designNumber ?? "", priority: o.priority, expectedDelivery: (o.expectedDelivery ?? "").slice(0, 10),
@@ -64,7 +65,7 @@ function formOf(o: Order): Form {
 /** Field → how the activity line and the confirmation name it. */
 const LABEL: Record<string, string> = {
   jewelleryType: "type", metal: "metal", productKarats: "karats", productColor: "colour", productSize: "size", stoneSpec: "stones",
-  quantity: "quantity", diamondType: "diamond type", diamondWeight: "est. diamonds", estimatedGrossWeight: "est. gross weight",
+  quantity: "quantity", diamondType: "diamond type", diamondShape: "diamond shape", diamondWeight: "est. diamonds", estimatedGrossWeight: "est. gross weight",
   estimatedNetWeight: "est. net weight", rhodium: "rhodium", stamping: "stamping", designNumber: "design no.",
   priority: "priority", expectedDelivery: "due date", deliveryTime: "delivery time", contactPerson: "contact person", instructions: "instructions",
 };
@@ -141,6 +142,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       productSize: txt(f.productSize),
       quantity: qty,
       diamondType: (gemOnly ? "" : f.diamondType) as Order["diamondType"],
+      diamondShape: diamondOnly ? undefined : txt(f.diamondShape),
       diamondWeight: num(f.diamondWeight) ?? 0,
       estimatedGrossWeight: num(f.estimatedGrossWeight),
       estimatedNetWeight: num(f.estimatedNetWeight),
@@ -168,7 +170,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     if (!changed.length) { toast.message("Nothing changed"); onClose(); return; }
 
     // Whatever is locked now is refused, not quietly skipped.
-    const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping"];
+    const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping"];
     const MATERIAL = ["jewelleryType", "metal", "productKarats", "quantity", "diamondType"];
     const pieceNow = nowLocks.piece, matNow = nowLocks.piece ?? nowLocks.material;
     const hitPiece = pieceNow && changed.find(k => PIECE.includes(k));
@@ -212,6 +214,9 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
   );
 
   // A business list: pick, or type a new word — used and remembered (ListCombo).
+  // Net follows the gross and the diamonds, as on New Order.
+  const setGross = (v: string) => setF(p => ({ ...p, estimatedGrossWeight: v, estimatedNetWeight: Number(v) > 0 ? String(netFromGross(Number(v), Number(p.diamondWeight))) : "" }));
+  const setDiamondCt = (v: string) => setF(p => ({ ...p, diamondWeight: v, ...(Number(p.estimatedGrossWeight) > 0 ? { estimatedNetWeight: String(netFromGross(Number(p.estimatedGrossWeight), Number(v))) } : {}) }));
   const pickList = (k: keyof Form, list: ListKey, disabled: string | undefined) => (
     <div title={disabled}>
       <ListCombo list={list} value={f[k]} onChange={v => set(k, v)} disabled={!!disabled} placeholder="Select…" className="h-10 rounded-xl" />
@@ -289,15 +294,17 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
               </Field>
             )}
             <Field label="Est. diamond weight (ct)">
-              <Input type="number" min={0} step="0.01" value={f.diamondWeight} onChange={e => set("diamondWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
+              <Input type="number" min={0} step="0.01" value={f.diamondWeight} onChange={e => setDiamondCt(e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
             </Field>
             {!diamondOnly && (
               <>
+                <Field label="Diamond shape">{pickList("diamondShape", "diamondShapes", pieceLock)}</Field>
                 <Field label="Est. gross weight (g)">
-                  <Input type="number" min={0} step="0.001" value={f.estimatedGrossWeight} onChange={e => set("estimatedGrossWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
+                  <Input type="number" min={0} step="0.001" value={f.estimatedGrossWeight} onChange={e => setGross(e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
                 </Field>
-                <Field label="Est. net weight (g)">
-                  <Input type="number" min={0} step="0.001" value={f.estimatedNetWeight} onChange={e => set("estimatedNetWeight", e.target.value)} disabled={!!pieceLock} className="h-10 rounded-xl" />
+                {/* Net = gross − stones (1 ct = 0.2 g) — worked out once there is a gross. */}
+                <Field label="Est. net weight (g) — auto">
+                  <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight} placeholder="gross − diamonds" className="h-10 rounded-xl bg-secondary/60 text-muted-foreground cursor-default" aria-label="Est. net weight (worked out)" />
                 </Field>
                 <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight) || undefined} net={Number(f.estimatedNetWeight) || undefined} diamondCt={Number(f.diamondWeight) || undefined} />
                 <Field label="Rhodium">{pickList("rhodium", "rhodium", pieceLock)}</Field>

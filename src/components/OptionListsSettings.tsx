@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { confirmBox } from "@/lib/confirm";
 import { LIST_DEFS, listDef, listOf, noKaratMetals, type ListKey } from "@/lib/optionLists";
+import { isPlainlyNotGold } from "@/lib/metals";
 
 const GROUPS = ["Orders", "Diamonds", "Payments", "Team", "Reasons"] as const;
 const MAX = 60;
@@ -159,8 +160,11 @@ export function OptionListsSettings() {
                     <p className="min-w-0 flex-1 text-sm font-medium text-brand-dark truncate max-sm:basis-[calc(100%-1.75rem)]" title={item}>{item}</p>
                     {isMetals && (
                       <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground shrink-0 cursor-pointer max-sm:ml-7" title="Karats: gold of any colour. No karats: the piece is this metal (platinum, silver…)">
-                        <Switch checked={!noKarat.includes(item)} onCheckedChange={v => toggleKarat(item, v)} aria-label={`${item} has karats`} />
-                        <span className="w-14">{noKarat.includes(item) ? "No karats" : "Karats"}</span>
+                        {/* Silver, platinum… are never karat metals; their switch shows it and stays off. */}
+                        <Switch checked={!isPlainlyNotGold(item) && !noKarat.includes(item)} disabled={isPlainlyNotGold(item)}
+                          title={isPlainlyNotGold(item) ? "Not gold — never karats" : undefined}
+                          onCheckedChange={v => toggleKarat(item, v)} aria-label={`${item} has karats`} />
+                        <span className="w-14">{isPlainlyNotGold(item) || noKarat.includes(item) ? "No karats" : "Karats"}</span>
                       </label>
                     )}
                     <div className="flex items-center shrink-0 ml-auto">

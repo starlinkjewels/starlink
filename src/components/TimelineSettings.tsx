@@ -1,13 +1,14 @@
+import { DEFAULT_PRODUCTION_DELAY_DAYS, productionDelayDays } from "@/lib/production";
 import { useEffect, useState } from "react";
 import { SectionTitle } from "@/components/SectionTitle";
-import { ArrowDown, ArrowUp, ListOrdered, Lock, Plus, RotateCcw, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, Factory, ListOrdered, Lock, Pencil, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { updateDb } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
-  BUILTIN_MIDDLE, HEAD_STAGES, TAIL_STAGES, isBuiltinStage, looseStageProblem, looseStages, middleStages, stageKind, stageOrderProblem,
+  BUILTIN_MIDDLE, HEAD_STAGES, TAIL_STAGES, isBuiltinStage, looseStageProblem, looseStages, middleStages, stageKind, stageLabel, stageOrderProblem,
 } from "@/lib/stages";
 import { buildReadyStockSaleTimelineSteps, buildReadyStockTimelineSteps } from "@/lib/db";
 
@@ -33,10 +34,29 @@ export function TimelineSettings() {
   const saved = middleStages(db.settings);
   const [list, setList] = useState<string[]>(saved);
   const [name, setName] = useState("");
+  // Each stage's own name for this business — shown everywhere, the stage
+  // itself unchanged underneath (stages.ts stageLabel).
+  const savedLabels = db.settings.stageLabels ?? {};
+  const [labels, setLabels] = useState<Record<string, string>>(savedLabels);
+  const [renaming, setRenaming] = useState<string | null>(null);
   const savedKey = saved.join("|");
+  const labelsKey = JSON.stringify(savedLabels);
   useEffect(() => { setList(saved); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [savedKey]);
+  useEffect(() => { setLabels(savedLabels); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [labelsKey]);
+  /** Only real renames are kept: blank, or the stage's own name, is no rename. */
+  const cleanLabels = (l: Record<string, string>) =>
+    Object.fromEntries(Object.entries(l).map(([k, v]) => [k, v.trim().replace(/\s+/g, " ")]).filter(([k, v]) => v && v !== k));
+  const labelsDirty = JSON.stringify(cleanLabels(labels)) !== JSON.stringify(cleanLabels(savedLabels));
 
-  const dirty = list.join("|") !== savedKey;
+  // When a piece in production counts as delayed (lib/production.ts).
+  const savedDelay = productionDelayDays(db.settings);
+  const [delay, setDelay] = useState(String(savedDelay));
+  useEffect(() => { setDelay(String(savedDelay)); }, [savedDelay]);
+  const delayN = Number(delay);
+  const delayOk = Number.isInteger(delayN) && delayN >= 1 && delayN <= 365;
+  const delayDirty = delay.trim() !== "" && delayN !== savedDelay;
+
+  const dirty = list.join("|") !== savedKey || labelsDirty || delayDirty;
   const isDefault = list.join("|") === BUILTIN_MIDDLE.join("|");
 
   const moved = (i: number, dir: -1 | 1) => {
@@ -61,8 +81,15 @@ export function TimelineSettings() {
   const save = () => {
     const problem = stageOrderProblem(list);
     if (problem) { toast.error(problem); return; }
-    updateDb(d => { d.settings.timelineStages = isDefault ? undefined : list; });
-    toast.success("Production timeline saved — new orders will follow it");
+    if (delayDirty && !delayOk) { toast.error("Delayed after: a whole number of days, 1 to 365."); return; }
+    const clean = cleanLabels(labels);
+    updateDb(d => {
+      d.settings.timelineStages = isDefault ? undefined : list;
+      d.settings.stageLabels = Object.keys(clean).length ? clean : undefined;
+      if (delayDirty) d.settings.productionDelayDays = delayN === DEFAULT_PRODUCTION_DELAY_DAYS ? undefined : delayN;
+    });
+    setRenaming(null);
+    toast.success(labelsDirty ? "Timeline saved — the new names show on every order" : "Production timeline saved — new orders will follow it");
   };
 
   const row = (step: string, locked: boolean, i?: number) => {
@@ -74,14 +101,31 @@ export function TimelineSettings() {
           {locked ? <Lock className="h-3 w-3 inline" /> : (i! + 1 + HEAD_STAGES.length)}
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-sm font-medium text-brand-dark truncate">
-            {step}
-            {custom && <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary align-middle">your stage</span>}
-          </p>
+          {renaming === step ? (
+            <div className="flex items-center gap-1.5">
+              <Input autoFocus value={labels[step] ?? ""} placeholder={step} maxLength={40} aria-label={`New name for ${step}`}
+                onChange={e => setLabels(l => ({ ...l, [step]: e.target.value }))}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") setRenaming(null); }}
+                className="h-8 rounded-lg text-sm" />
+              <button type="button" onClick={() => setRenaming(null)} aria-label="Done renaming" title="Done"
+                className="h-8 w-8 shrink-0 grid place-items-center rounded-lg text-primary hover:bg-primary/10"><Check className="h-4 w-4" /></button>
+            </div>
+          ) : (
+            <p className="text-sm font-medium text-brand-dark truncate">
+              {labels[step]?.trim() || step}
+              {labels[step]?.trim() && labels[step].trim() !== step && <span className="ml-1.5 text-[11px] font-normal text-muted-foreground">({step})</span>}
+              {custom && <span className="ml-1.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-primary/10 text-primary align-middle">your stage</span>}
+            </p>
+          )}
           <p className="text-[11px] text-muted-foreground truncate">
             {NOTE[step] ?? "Ticked off when done"}{special && !locked ? " · has its own screen" : ""}
           </p>
         </div>
+        {/* Any stage can be renamed — the fixed ones too; only its name changes. */}
+        {renaming !== step && (
+          <button type="button" onClick={() => setRenaming(step)} aria-label={`Rename ${step}`} title="Rename"
+            className="h-7 w-7 shrink-0 grid place-items-center rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil className="h-3.5 w-3.5" /></button>
+        )}
         {!locked && i != null && (
           <div className="flex items-center gap-1 shrink-0">
             <button type="button" onClick={() => setList(moved(i, -1))} disabled={!canMove(i, -1)} title={why(i, -1) || "Move up"}
@@ -122,9 +166,19 @@ export function TimelineSettings() {
         <Button type="button" variant="outline" onClick={add} className="rounded-xl h-10 gap-1.5 shrink-0"><Plus className="h-4 w-4" /> Add stage</Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5 rounded-xl border border-border/70 bg-secondary/30 px-3 py-2">
+        <Factory className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="text-sm text-foreground">A piece is delayed after</span>
+        <Input type="number" inputMode="numeric" min={1} max={365} step={1} value={delay} onChange={e => setDelay(e.target.value)}
+          aria-label="Days in production before a piece is delayed" className={`h-8 w-20 rounded-lg text-sm ${delayDirty && !delayOk ? "border-destructive" : ""}`} />
+        <span className="text-sm text-foreground">days in production</span>
+        <span className="basis-full text-[11px] text-muted-foreground">Counted from the day it went into production. Past it the order turns red on the list, the cards and the board, and shows under Orders → Delayed.</span>
+      </div>
+
       <ul className="text-[11px] text-muted-foreground space-y-0.5 list-disc pl-4">
         <li>Applies to orders created after you save. An order already running keeps its own stages.</li>
         <li>The first two and last two stages stay where they are — approval, dispatch and delivery hang on them.</li>
+        <li>Rename any stage with the pencil: the new name shows on every order — running ones too — on the board and to clients. What the stage does stays the same.</li>
         <li>Final Approval stays after CAD Designing and In Production, since it records what making the piece used.</li>
         <li>Your own stages are ticked off like CAD Designing. Loose-diamond orders skip them, as nothing is made.</li>
       </ul>
@@ -135,7 +189,7 @@ export function TimelineSettings() {
             <RotateCcw className="h-4 w-4" /> Back to default
           </Button>
         )}
-        {dirty && <Button type="button" variant="outline" onClick={() => setList(saved)} className="rounded-xl">Discard</Button>}
+        {dirty && <Button type="button" variant="outline" onClick={() => { setList(saved); setLabels(savedLabels); setRenaming(null); setDelay(String(savedDelay)); }} className="rounded-xl">Discard</Button>}
         <Button type="button" onClick={save} disabled={!dirty} className="btn-hero rounded-xl">Save timeline</Button>
       </div>
 
@@ -153,12 +207,28 @@ export function TimelineSettings() {
               {steps.map((st, i) => (
                 <span key={st} className="inline-flex items-center gap-1.5">
                   {i > 0 && <span className="text-muted-foreground">→</span>}
-                  <span className="px-2 py-1 rounded-lg bg-secondary text-foreground">{st}</span>
+                  {renaming === `${title}:${st}` ? (
+                    <Input autoFocus value={labels[st] ?? ""} placeholder={st} maxLength={40} aria-label={`New name for ${st}`}
+                      onChange={e => setLabels(l => ({ ...l, [st]: e.target.value }))}
+                      onBlur={() => setRenaming(null)}
+                      onKeyDown={e => { if (e.key === "Enter" || e.key === "Escape") setRenaming(null); }}
+                      className="h-7 w-36 rounded-lg text-xs" />
+                  ) : (
+                    <button type="button" onClick={() => setRenaming(`${title}:${st}`)} title="Rename" aria-label={`Rename ${st}`}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-lg bg-secondary text-foreground hover:bg-primary/10">
+                      {labels[st]?.trim() || st}<Pencil className="h-3 w-3 text-muted-foreground" />
+                    </button>
+                  )}
                 </span>
               ))}
             </div>
           </div>
         ))}
+        {labelsDirty && (
+          <div className="flex justify-end">
+            <Button type="button" onClick={save} className="btn-hero rounded-xl">Save timeline</Button>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -194,7 +264,7 @@ function LooseStagesEditor() {
   const fixed = (st: string, note: string) => (
     <div key={st} className="flex items-center gap-2 rounded-xl border px-3 py-2 bg-secondary/40 border-border/50">
       <Lock className="h-3 w-3 text-muted-foreground shrink-0" />
-      <p className="text-sm font-medium text-foreground flex-1 truncate">{st}</p>
+      <p className="text-sm font-medium text-foreground flex-1 truncate">{stageLabel(st, db.settings)}</p>
       <p className="text-[11px] text-muted-foreground shrink-0">{note}</p>
     </div>
   );

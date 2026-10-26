@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { OrderThumb } from "@/components/OrderThumb";
 import { metalLabel } from "@/lib/metals";
 import { SectionTitle } from "@/components/SectionTitle";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -192,7 +193,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
   const salesCols: DataColumn<Order>[] = [
     { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
-      cell: o => <CellMain title={o.orderNumber} sub={o.returns?.length ? `${o.returns.reduce((s, r) => s + r.qty, 0)} came back` : undefined} /> },
+      cell: o => <div className="flex items-center gap-2.5 min-w-0"><OrderThumb o={o} size="sm" /><CellMain title={o.orderNumber} sub={o.returns?.length ? `${o.returns.reduce((s, r) => s + r.qty, 0)} came back` : undefined} /></div> },
     { key: "client", header: "Client", sortValue: o => clientName(o) ?? null,
       cell: o => clientName(o) ? <span className="whitespace-nowrap">{clientName(o)}</span> : <span className="text-muted-foreground/50">—</span> },
     { key: "qty", header: "Qty", align: "center", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },

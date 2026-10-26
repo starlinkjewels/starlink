@@ -1,3 +1,6 @@
+import { ProductionInfo } from "@/components/ProductionInfo";
+import { productionTrack } from "@/lib/production";
+import { stageLabel } from "@/lib/stages";
 import { issuePick, type StockPick } from "@/lib/orderStock";
 import { otherChargesTotal } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
@@ -685,6 +688,11 @@ function OrderDetailPageBody() {
   // ── Final Approval popup: one window for all the actual details ──
   const [faIdx, setFaIdx] = useState<number | null>(null);
   const [faGoldNet, setFaGoldNet] = useState("");
+  // The piece on the scale. Entered, the gold's net is worked out from it:
+  // gross − diamonds (1 ct = 0.2 g) − other stones − a second metal.
+  const [faGrossIn, setFaGrossIn] = useState("");
+  // Purity: "Other" picked, to type a figure no karat has.
+  const [faPurityOther, setFaPurityOther] = useState(false);
   const [faGoldPurity, setFaGoldPurity] = useState(""); // actual purity ‰ (e.g. 750), replaces the karat dropdown
   const [faDia, setFaDia] = useState<Record<string, "used" | "returned">>({}); // certified packets: whole used/returned
   const [faDiaReturnedCt, setFaDiaReturnedCt] = useState<Record<string, string>>({}); // loose diamonds: carats returned (partial allowed)
@@ -974,7 +982,7 @@ function OrderDetailPageBody() {
         }
       }
       const clientUser = d.users.find(u => u.clientId === o.clientId);
-      if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${o.timeline[idx].step}`, type: "info", read: false, createdAt: new Date().toISOString() });
+      if (clientUser) d.notifications.unshift({ id: "n" + Date.now(), userId: clientUser.id, title: "Timeline updated", body: `${o.orderNumber}: ${stageLabel(o.timeline[idx].step, d.settings)}`, type: "info", read: false, createdAt: new Date().toISOString() });
     });
     toast.success("Stage marked complete");
     return true;
@@ -1002,6 +1010,38 @@ function OrderDetailPageBody() {
     }
     return { metal: Math.round(metal * 1000) / 1000, stone: Math.round(stone * 1000) / 1000 };
   };
+  /**
+   * The piece on the scale, split into its parts — one rule for the screen and
+   * the save. Diamonds (1 ct = 0.2 g), other stones and metal issued from stock
+   * come off first. Then:
+   *  • a gold piece: the rest is its gold (a second metal's weight is entered,
+   *    else the save stops — the rest would wrongly all count as gold);
+   *  • a platinum or silver piece: the rest is ITS metal, never gold — so its
+   *    metal must be the one under Other metal (else needSelf, and the save
+   *    stops); gold is only what is typed.
+   * null = no gross entered: the weights are typed as before.
+   */
+  const faWeigh = (usedDiaCt: number, xG: { metal: number; stone: number }) => {
+    const gross = parseFloat(faGrossIn);
+    if (!(gross > 0)) return null;
+    const r3 = (n: number) => Math.round(n * 1000) / 1000;
+    const other = faOtherMetal.trim();
+    const fixed = usedDiaCt * CARAT_TO_GRAM + xG.stone + xG.metal;
+    const nonGold = isNonGoldMetal(order.metal);
+    const selfMetal = nonGold && !!other && other.toLowerCase() === order.metal.trim().toLowerCase();
+    if (selfMetal) {
+      const gold = Math.max(0, Number(faGoldNet) || 0);
+      const rest = r3(gross - fixed - gold);
+      return { gross: r3(gross), selfMetal, gold, other: Math.max(0, rest), short: rest < -0.0005, needOther: false, needSelf: false };
+    }
+    const otherW = other ? (Number(faOtherNet) || 0) : 0;
+    if (nonGold) {
+      // Nowhere to put the scale's weight but gold — refused, nothing worked out.
+      return { gross: r3(gross), selfMetal, gold: Math.max(0, Number(faGoldNet) || 0), other: otherW, short: false, needOther: false, needSelf: true };
+    }
+    const rest = r3(gross - fixed - otherW);
+    return { gross: r3(gross), selfMetal, gold: Math.max(0, rest), other: otherW, short: rest < -0.0005, needOther: !!other && otherW <= 0, needSelf: false };
+  };
 
   const openFinalApproval = (idx: number) => {
     if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
@@ -1016,6 +1056,7 @@ function OrderDetailPageBody() {
           ?? Math.round((KARAT_PURITY[parseInt(order.productKarats, 10)] ?? 0) * 1000))
       : 0;
     setFaGoldPurity(finish?.finishedPurity != null ? String(finish.finishedPurity) : (defaultPurity ? String(defaultPurity) : ""));
+    setFaPurityOther(false);
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
     setFaMinLabour(finish?.labour?.minimumLabour != null ? String(finish.labour.minimumLabour) : "");
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
@@ -1058,6 +1099,10 @@ function OrderDetailPageBody() {
     setFaXReturned(Object.fromEntries(faXIssues().map(i => [i.id, i.finishReturnedQty != null ? String(i.finishReturnedQty) : "0"])));
     setFaDiaAdjust(order.diamondWeightAdjust != null ? String(order.diamondWeightAdjust) : "");
     setFaDiaPcs(order.actualDiamondPcs != null ? String(order.actualDiamondPcs) : "");
+    // Only before anything is booked: re-opening an approved piece keeps its
+    // saved net (and the factory's gold) unless a new gross is typed.
+    const approvedBefore = finish?.finishedNetWeight != null || order.timeline.some(t => t.step === "Final Approval" && t.status === "done");
+    setFaGrossIn(!approvedBefore && order.actualGrossWeight ? String(order.actualGrossWeight) : "");
     setFaBillNo(order.factoryBillNo ?? "");
     // A platinum or silver piece IS that metal — it is not a second metal added
     // to a gold one. The field starts on the order's own metal so its weight can
@@ -1076,12 +1121,7 @@ function OrderDetailPageBody() {
     if (faIdx === null) return;
     if (order.melted) { toast.error("This piece was melted — its actual details are kept as they were."); return; }
     const needsGold = orderMaterialRequirements(order).needsGold;
-    const netW = parseFloat(faGoldNet);
-    // A weight typed here is gold that went into the piece, whatever metal the
-    // order was raised as. This was gated on needsGold, so on a platinum or
-    // silver order the figure was taken, ignored and silently thrown away — and
-    // a two-tone piece is platinum AND gold.
-    const hasNet = !isNaN(netW) && netW > 0;
+    const netTyped = parseFloat(faGoldNet);
     const purity = parseFloat(faGoldPurity) || 0; // ‰ e.g. 750
     const karat = order.productKarats || "18K"; // label only
     const dias = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "diamond");
@@ -1108,10 +1148,22 @@ function OrderDetailPageBody() {
     // Labour per gram is charged on the whole piece, not only its gold. A
     // platinum or silver piece has no gold net weight, so charging on gold
     // alone silently dropped the per-gram labour from the factory's bill.
-    const faOtherW = faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
     // Metal issued from stock as another material (platinum, silver) is in the piece too.
     const xG = faXGrams();
     const xIssues = faXIssues();
+    // Weighed: the scale less everything else in the piece (faWeigh).
+    const w = faWeigh(usedDiaCt, xG);
+    const weighed = !!w;
+    if (w?.short) { toast.error("The gross weight is less than the stones and other metal in the piece — check it."); return; }
+    if (w?.needSelf) { toast.error(`A ${order.metal} piece: choose ${order.metal} under Other metal, so the scale's weight goes to it — not to gold.`); return; }
+    if (w?.needOther) { toast.error(`Enter the ${faOtherMetal.trim()} weight under Other metal — otherwise the rest of the piece is counted as gold.`); return; }
+    const faOtherW = w ? w.other : faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
+    const netW = w ? w.gold : netTyped;
+    // A weight typed here is gold that went into the piece, whatever metal the
+    // order was raised as. This was gated on needsGold, so on a platinum or
+    // silver order the figure was taken, ignored and silently thrown away — and
+    // a two-tone piece is platinum AND gold.
+    const hasNet = !isNaN(netW) && netW > 0;
     const labourNet = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal) * 1000) / 1000;
     const labourVal = labourValue(labour, labourNet, usedDiaCt);
     const factoryId = order.assignedFactoryId;
@@ -1216,7 +1268,7 @@ function OrderDetailPageBody() {
           mi.finishedPieces = [{ id: uid("fp_"), quantityUsed: used, piecesCount: 1, recordedAt: now, recordedBy: user!.id }];
         }
         // Two-tone: the second metal used in the finished piece.
-        const otherW = parseFloat(faOtherNet);
+        const otherW = w ? w.other : parseFloat(faOtherNet);
         const otherP = parseFloat(faOtherPurity);
         o.otherMetal = faOtherMetal.trim() || undefined;
         o.otherMetalWeight = faOtherMetal.trim() && !isNaN(otherW) && otherW > 0 ? otherW : undefined;
@@ -1233,7 +1285,9 @@ function OrderDetailPageBody() {
         // instead of the estimate from the day it was ordered.
         if (hasNet) o.actualNetWeight = netW;
         const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal + xG.stone + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
-        if (hasNet || faOtherW > 0 || xG.metal > 0) o.actualGrossWeight = faGross;
+        // What the scale said, when it was weighed; else worked out from the parts.
+        if (weighed) o.actualGrossWeight = w!.gross;
+        else if (hasNet || faOtherW > 0 || xG.metal > 0) o.actualGrossWeight = faGross;
         const diaPcsN = Math.round(Number(faDiaPcs) || 0);
         o.actualDiamondPcs = diaPcsN > 0 ? diaPcsN : undefined;
 
@@ -2065,14 +2119,14 @@ function OrderDetailPageBody() {
               <HeaderFact label="Due" value={fmtDate(order.expectedDelivery)} note={due?.text} noteTone={due?.tone} />
               <HeaderFact label="Placed" value={fmtDate(order.createdAt)} />
               {order.designNumber && <HeaderFact label="Design" value={order.designNumber} />}
-              {order.diamondWeight > 0 && <HeaderFact label="Diamonds" value={`${order.diamondWeight} ct`} note={order.diamondType} />}
+              {order.diamondWeight > 0 && <HeaderFact label="Diamonds" value={`${order.diamondWeight} ct`} note={[order.diamondShape, order.diamondType].filter(Boolean).join(" · ")} />}
             </div>
 
             <div className="mt-5">
               <div className="flex items-baseline justify-between gap-3">
                 {closed
                   ? <span className="text-sm font-medium text-destructive">Order closed — {order.melted ? "melted" : "rejected"}</span>
-                  : <span className="text-sm font-medium text-foreground">{stage}</span>}
+                  : <span className="text-sm font-medium text-foreground">{stageLabel(stage)}</span>}
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {closed
                     ? <>stopped at {doneSteps} of {order.timeline.length}</>
@@ -2083,6 +2137,12 @@ function OrderDetailPageBody() {
                 <div className={`h-full rounded-full transition-all duration-500 ${closed ? "bg-destructive/50" : "bg-primary"}`} style={{ width: `${pct}%` }} />
               </div>
             </div>
+
+            {/* Staff: days in production and whether its diamonds have gone out. */}
+            {isStaffUser && (() => {
+              const t = productionTrack(order, db.materialIssuances ?? [], db.settings);
+              return t ? <div className="mt-4 max-w-sm"><ProductionInfo t={t} /></div> : null;
+            })()}
 
             {/* On a phone the main action spans the width, under the facts. */}
             <div className="sm:hidden mt-5 flex items-center gap-2">
@@ -2130,6 +2190,7 @@ function OrderDetailPageBody() {
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               <OrderSpec label={diamondOnly ? "Estimated" : "Est. diamonds"} value={`${order.diamondWeight} ct`} />
               {!diamondOnly && <OrderSpec label="Diamond type" value={order.diamondType} />}
+              {!diamondOnly && <OrderSpec label="Diamond shape" value={order.diamondShape} />}
               {!diamondOnly && <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : undefined} />}
               {!diamondOnly && <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${order.estimatedNetWeight} g` : undefined} />}
               {!diamondOnly && <OrderSpec label="Actual net weight" value={order.actualNetWeight ? `${order.actualNetWeight} g` : undefined} />}
@@ -3125,7 +3186,7 @@ function OrderDetailPageBody() {
                 </div>
                 <div className={`p-3 rounded-xl border ${isActive ? "border-primary bg-primary/5" : isDone ? "border-success/30 bg-success/5" : "border-border"}`}>
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <p className={`font-medium text-sm ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{t.step}</p>
+                    <p className={`font-medium text-sm ${isDone || isActive ? "text-foreground" : "text-muted-foreground"}`}>{stageLabel(t.step)}</p>
                     {t.date && <span className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}</span>}
                   </div>
                   {(emp || t.department || t.remarks) && (
@@ -3918,8 +3979,13 @@ function OrderDetailPageBody() {
         };
         const faX = faXIssues();
         const faXG = faXGrams();
-        const faNetW = Math.round(((Number(faGoldNet) || 0)
-          + (faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0) + faXG.metal) * 1000) / 1000;
+        const faW = faWeigh(usedDiaCt, faXG);
+        const faGrossN = faW?.gross ?? 0;
+        const faOtherG = faW ? faW.other : faOtherMetal.trim() ? (Number(faOtherNet) || 0) : 0;
+        // Gross entered on a gold piece: its gold net is worked out (shown, not typed).
+        const faAutoNet = faW && !faW.selfMetal && !faW.needSelf ? faW.gold : null;
+        const faEffNet = faW ? faW.gold : (Number(faGoldNet) || 0);
+        const faNetW = Math.round((faEffNet + faOtherG + faXG.metal) * 1000) / 1000;
         const faLive = labourValue(faLabour, faNetW, usedDiaCt);
         const faMinInUse = minimumLabourApplies(faLabour, faNetW);
         const faFactory = db.factories.find(f => f.id === order.assignedFactoryId);
@@ -3953,30 +4019,54 @@ function OrderDetailPageBody() {
                     Gold used{needsGold ? "" : " (optional)"}
                   </p>
                   <div className="grid grid-cols-2 gap-2.5">
-                    <div><Label className="text-[11px]">Net Weight (g)</Label><Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" /></div>
+                    <div className="space-y-2">
+                      <div>
+                        <Label className="text-[11px]">Gross weight (g) — the whole piece</Label>
+                        <Input type="number" min={0} step="0.001" value={faGrossIn} onChange={e => setFaGrossIn(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="from the scale" />
+                      </div>
+                      <div>
+                        <Label className="text-[11px]">Net Weight (g){faAutoNet != null ? " — auto" : ""}</Label>
+                        {faAutoNet != null ? (
+                          <Input type="number" readOnly tabIndex={-1} value={faAutoNet} className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" aria-label="Net weight (worked out)" />
+                        ) : (
+                          <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="or enter the gross above" />
+                        )}
+                        {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{faGrossN} g − diamonds {usedDiaCt} ct ({Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000} g){faXG.stone ? ` − other stones ${faXG.stone} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${faOtherG} g` : ""}{faXG.metal ? ` − other metal ${faXG.metal} g` : ""}</p>}
+                        {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below. Enter gold only if the piece has some.</p>}
+                        {faW?.needSelf && <p className="text-[10px] font-semibold text-destructive mt-1">A {order.metal} piece: choose {order.metal} under Other metal below — the scale's weight goes to it, not to gold.</p>}
+                        {faW?.needOther && <p className="text-[10px] font-semibold text-destructive mt-1">Enter the {faOtherMetal.trim()} weight below — otherwise the rest of the piece counts as gold.</p>}
+                      </div>
+                    </div>
                     <div>
                       <Label className="text-[11px]">Purity (‰)</Label>
-                      {/* One tap per karat — a factory works to a set purity and
-                          retyping 595 on every order is how a 559 gets in. Typing
-                          a different figure still wins, for a factory that
+                      {/* Picked per karat — a factory works to a set purity and
+                          retyping 595 on every order is how a 559 gets in.
+                          "Other" takes a typed figure, for a factory that
                           works to its own. */}
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {Object.entries(FACTORY_PURITY).map(([kt, pu]) => (
-                          <button key={kt} type="button" onClick={() => setFaGoldPurity(String(pu))}
-                            className={`h-7 px-2 rounded-lg text-[11px] font-medium border transition-colors ${
-                              Number(faGoldPurity) === pu
-                                ? "bg-primary text-white border-primary"
-                                : "bg-white border-border text-muted-foreground hover:border-primary/40"}`}>
-                            {kt} · {pu}
-                          </button>
-                        ))}
-                      </div>
-                      <Input type="number" min={0} step="0.1" value={faGoldPurity}
-                        onChange={e => setFaGoldPurity(e.target.value)}
-                        className="rounded-lg h-9 mt-1.5" placeholder="or type the factory’s own" />
+                      {(() => {
+                        const preset = Object.entries(FACTORY_PURITY).find(([, pu]) => Number(faGoldPurity) === pu)?.[0];
+                        const other = !preset && (faPurityOther || faGoldPurity.trim() !== "");
+                        return (
+                          <>
+                            <Select value={preset ?? (other ? "__other" : "")}
+                              onValueChange={v => { if (v === "__other") { setFaPurityOther(true); setFaGoldPurity(""); } else { setFaPurityOther(false); setFaGoldPurity(String(FACTORY_PURITY[v as keyof typeof FACTORY_PURITY])); } }}>
+                              <SelectTrigger className="h-9 rounded-lg mt-1" aria-label="Gold purity"><SelectValue placeholder="Choose karat…" /></SelectTrigger>
+                              <SelectContent>
+                                {Object.entries(FACTORY_PURITY).map(([kt, pu]) => <SelectItem key={kt} value={kt}>{kt} · {pu}</SelectItem>)}
+                                <SelectItem value="__other">Other — type the factory’s own</SelectItem>
+                              </SelectContent>
+                            </Select>
+                            {other && (
+                              <Input type="number" min={0} step="0.1" value={faGoldPurity} autoFocus={faPurityOther && !faGoldPurity}
+                                onChange={e => setFaGoldPurity(e.target.value)} aria-label="Gold purity (‰), typed"
+                                className="rounded-lg h-9 mt-1.5" placeholder="Purity ‰, e.g. 585" />
+                            )}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
-                  {Number(faGoldNet) > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(Number(faGoldNet), Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                  {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(faEffNet, Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
                 </div>
               )}
 
@@ -3997,9 +4087,17 @@ function OrderDetailPageBody() {
                     </Select>
                   </div>
                   <div>
-                    <Label className="text-[11px]">Net Weight (g)</Label>
-                    <Input type="number" min={0} step="0.001" value={faOtherNet} disabled={!faOtherMetal}
-                      onChange={e => setFaOtherNet(e.target.value)} className="rounded-lg h-9 mt-1 disabled:opacity-60" />
+                    <Label className="text-[11px]">Net Weight (g){faW?.selfMetal ? " — auto" : ""}</Label>
+                    {faW?.selfMetal ? (
+                      <>
+                        <Input type="number" readOnly tabIndex={-1} value={faW.other} aria-label={`${order.metal} net weight (worked out)`}
+                          className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" />
+                        <p className="text-[10px] text-muted-foreground mt-1">{faW.gross} g − diamonds {Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000} g{faXG.stone ? ` − stones ${faXG.stone} g` : ""}{faXG.metal ? ` − metal ${faXG.metal} g` : ""}{faW.gold ? ` − gold ${faW.gold} g` : ""}</p>
+                      </>
+                    ) : (
+                      <Input type="number" min={0} step="0.001" value={faOtherNet} disabled={!faOtherMetal}
+                        onChange={e => setFaOtherNet(e.target.value)} className="rounded-lg h-9 mt-1 disabled:opacity-60" />
+                    )}
                   </div>
                   <div>
                     <Label className="text-[11px]">Purity (‰)</Label>
@@ -4121,9 +4219,10 @@ function OrderDetailPageBody() {
               {/* Auto totals — diamond used (ct → g) and gross = gold net + diamond */}
               {(() => {
                 const diaG = Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000;
-                const netG = Number(faGoldNet) || 0;
-                const otherG = faOtherMetal ? (Number(faOtherNet) || 0) : 0;
-                const gross = Math.round((netG + otherG + faXG.metal + faXG.stone + diaG) * 1000) / 1000;
+                const netG = faEffNet;
+                const otherG = faOtherG;
+                // Weighed: the scale's figure; else the parts added up.
+                const gross = faGrossN > 0 ? Math.round(faGrossN * 1000) / 1000 : Math.round((netG + otherG + faXG.metal + faXG.stone + diaG) * 1000) / 1000;
                 return (
                   <div className="mb-4 rounded-lg bg-secondary/60 p-3 text-xs space-y-1">
                     <div className="flex justify-between"><span className="text-muted-foreground">Issued to the factory</span><span className="font-semibold text-foreground">{usedDiaCtRaw} ct</span></div>

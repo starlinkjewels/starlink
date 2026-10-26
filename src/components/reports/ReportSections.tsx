@@ -1,3 +1,4 @@
+import { stageLabel } from "@/lib/stages";
 import { isDiamondOnlyOrder } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
 import { companyOf } from "@/lib/companies";
@@ -812,9 +813,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
   const byStage = useMemo(() => {
     const stageOf = (o: Order): string => {
       const ip = o.timeline.find(t => t.status === "in_progress");
-      if (ip) return ip.step;
+      if (ip) return stageLabel(ip.step);
       const done = o.timeline.filter(t => t.status === "done");
-      return done.length ? done[done.length - 1].step : (o.timeline[0]?.step ?? "—");
+      return done.length ? stageLabel(done[done.length - 1].step) : (o.timeline[0] ? stageLabel(o.timeline[0].step) : "—");
     };
     const counts = new Map<string, number>();
     filtered.forEach(o => { const s = stageOf(o); counts.set(s, (counts.get(s) || 0) + 1); });
@@ -941,7 +942,7 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
     const total = orderTotal(o);
     return filled([
       { label: "Order", value: orderLink(o) },
-      !!st && { label: "Stage", value: [st.step, st.date && when(st.date)].filter(Boolean).join(" · ") },
+      !!st && { label: "Stage", value: [stageLabel(st.step), st.date && when(st.date)].filter(Boolean).join(" · ") },
       { label: "Placed", value: when(o.createdAt) },
       { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
       o.priority !== "Normal" && { label: "Priority", value: o.priority },

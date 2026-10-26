@@ -1,3 +1,4 @@
+import { stageLabel } from "@/lib/stages";
 import { looseLabel, pieceLine, stoneOf } from "@/lib/orderText";
 import { Facets } from "@/components/Facets";
 import { deleteHint, deleteOrderFlow, orderDeleteBlocker, restoreOrderFlow } from "@/lib/orderAdmin";
@@ -7,6 +8,8 @@ import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/
 import { PageHeader } from "@/components/PageHeader";
 import { ExportMenu, FilterChips, FiltersButton, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { OrderBoard } from "@/components/OrderBoard";
+import { ProductionInfo } from "@/components/ProductionInfo";
+import { diamondsMissing, productionDelayDays, productionTrack, type ProductionTrack } from "@/lib/production";
 import { pieceWeights } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { useMemo, useState } from "react";
@@ -17,7 +20,7 @@ import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, kept
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
+import { AlertTriangle, Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
@@ -69,10 +72,10 @@ function jobFinished(o: Order): boolean {
 
 function lastTrackingStep(o: Order): string {
   const inProgress = o.timeline.find(t => t.status === "in_progress");
-  if (inProgress) return inProgress.step;
+  if (inProgress) return stageLabel(inProgress.step);
   const done = o.timeline.filter(t => t.status === "done");
-  if (done.length) return done[done.length - 1].step;
-  return o.timeline[0]?.step ?? "";
+  if (done.length) return stageLabel(done[done.length - 1].step);
+  return o.timeline[0] ? stageLabel(o.timeline[0].step) : "";
 }
 
 /** The stage an order is at — the one in progress, else the last one done — with its date and who did it. */
@@ -113,6 +116,24 @@ export function OrdersPage() {
     try { localStorage.setItem("orders-view", v); } catch { /* ignore */ }
   };
 
+  // Each running order's production: since when, how many days, its diamonds —
+  // for the Delayed and Diamonds filters, the count at the top and the cards.
+  const tracks = useMemo(() => {
+    const m = new Map<string, ProductionTrack>();
+    if (!isStaff) return m;
+    const dia = new Map<string, MaterialIssuance[]>();
+    for (const i of db.materialIssuances ?? []) if (i.orderId && i.material === "diamond") dia.set(i.orderId, [...(dia.get(i.orderId) ?? []), i]);
+    for (const o of currentUserOrders(db, user!)) {
+      const t = productionTrack(o, dia.get(o.id) ?? [], db.settings);
+      if (t) m.set(o.id, t);
+    }
+    return m;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [db, dbVersion, user, isStaff]);
+  const delayLimit = productionDelayDays(db.settings);
+  const delayedCount = useMemo(() => [...tracks.values()].filter(t => t.delayed).length, [tracks]);
+  const noDiamondCount = useMemo(() => [...tracks.values()].filter(diamondsMissing).length, [tracks]);
+
   const orders = useMemo(() => {
     // Deleted orders are off every list; the admin's "Deleted" filter is the one place they show (to restore one).
     let list = status === "deleted" ? currentUserOrders(db, user!, { withDeleted: true }).filter(o => !!o.deletedAt) : currentUserOrders(db, user!);
@@ -123,6 +144,10 @@ export function OrdersPage() {
     else if (status === "uninvoiced") list = list.filter(o => needsInvoice(o) && !findInvoiceForOrder(db.invoices, o.id));
     // Pieces the client sent back — whole orders or some of their pieces.
     else if (status === "returned") list = list.filter(o => !!o.returns?.length);
+    // In production past the business's limit, longest first.
+    else if (status === "delayed") list = list.filter(o => tracks.get(o.id)?.delayed);
+    // Being made, its diamonds asked for and not yet sent to the factory.
+    else if (status === "nodiamonds") list = list.filter(o => diamondsMissing(tracks.get(o.id) ?? null));
     else if (status !== "all") list = list.filter(o => o.status === status);
     if (clientFilter !== "all") list = list.filter(o => o.clientId === clientFilter);
     if (companyFilter !== "all") list = list.filter(o => companyOfOrder(db, o) === companyFilter);
@@ -144,9 +169,10 @@ export function OrdersPage() {
     ));
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
+    if (status === "delayed" || status === "nodiamonds") return [...list].sort((a, b) => (tracks.get(b.id)?.days ?? 0) - (tracks.get(a.id)?.days ?? 0));
     return [...list].sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter]);
+  }, [db, dbVersion, user, q, status, clientFilter, employeeFilter, companyFilter, tracks]);
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(orders, PAGE_SIZE);
 
@@ -274,6 +300,10 @@ export function OrdersPage() {
           </div>
         );
       } },
+    ...(isStaff ? [{ key: "production", header: "Production", kind: "number" as const, sortFirst: "desc" as const,
+      // Sorted by days in production, the running pieces only — finished ones go last.
+      sortValue: (o: Order) => { const t = tracks.get(o.id); return t?.running ? t.days ?? 0 : null; },
+      cell: (o: Order) => { const t = tracks.get(o.id); return t ? <div className="min-w-[10.5rem]"><ProductionInfo t={t} compact /></div> : <span className="text-muted-foreground">—</span>; } }] : []),
     { key: "due", header: "Due", kind: "date", sortFirst: "asc", sortValue: o => o.expectedDelivery, cell: o => <CellDate>{fmtDate(o.expectedDelivery)}</CellDate> },
     { key: "weights", header: "Weights", sortValue: o => pieceWeights(o, issByOrder.get(o.id) ?? []).gross || null,
       cell: o => {
@@ -331,13 +361,13 @@ export function OrdersPage() {
     const weightProblem = isStaff ? pieceWeights(o, issByOrder.get(o.id) ?? []).problem : null;
     const company = isStaff && multiCo ? companiesOf(db.settings).find(c => c.id === companyOfOrder(db, o))?.name : undefined;
     return filled([
-      !!st && { label: "Stage", value: [st.step, st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
+      !!st && { label: "Stage", value: [stageLabel(st.step), st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
       { label: "Placed", value: when(o.createdAt) },
       o.priority !== "Normal" && { label: "Priority", value: o.priority },
       { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
       { label: "Contact person", value: o.contactPerson },
       { label: "Company", value: company },
-      (o.diamondWeight > 0 || (o.actualDiamondWeight ?? 0) > 0) && !o.noDiamond && { label: "Diamonds", value: `${o.diamondType}${o.actualDiamondPcs ? ` · ${o.actualDiamondPcs} stones` : ""}` },
+      (o.diamondWeight > 0 || (o.actualDiamondWeight ?? 0) > 0) && !o.noDiamond && { label: "Diamonds", value: `${[o.diamondShape, o.diamondType].filter(Boolean).join(" ")}${o.actualDiamondPcs ? ` · ${o.actualDiamondPcs} stones` : ""}` },
       { label: "Size", value: o.productSize },
       { label: "Colour", value: o.productColor },
       { label: "Rhodium", value: o.rhodium },
@@ -392,6 +422,10 @@ export function OrdersPage() {
         { value: "Pending", label: "Pending — waiting for approval" },
         ...(isStaff ? [{ value: "uninvoiced", label: "Not invoiced (shipped)" }] : []),
         { value: "returned", label: "Returned by client" },
+        ...(isStaff ? [
+          { value: "delayed", label: `Delayed — ${delayLimit}+ days in production` },
+          { value: "nodiamonds", label: "In production — diamonds not issued" },
+        ] : []),
         ...(user!.role === "admin" ? [{ value: "deleted", label: "Deleted (to restore)" }] : []),
         ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })),
       ] },
@@ -503,6 +537,27 @@ export function OrdersPage() {
         }
       />
 
+      {/* ── Production to chase: pieces past the limit, and pieces being made
+          without their diamonds. Each opens the list of them. ── */}
+      {isStaff && (delayedCount > 0 || noDiamondCount > 0) && (
+        <div className="flex flex-wrap gap-2">
+          {delayedCount > 0 && (
+            <button type="button" onClick={() => setStatus(status === "delayed" ? "all" : "delayed")} aria-pressed={status === "delayed"}
+              className={`inline-flex items-center gap-2 h-9 px-3 rounded-xl border text-sm transition-colors ${status === "delayed" ? "bg-destructive text-white border-destructive" : "bg-destructive/5 border-destructive/25 text-destructive hover:bg-destructive/10"}`}>
+              <AlertTriangle className="h-4 w-4" />
+              <span className="font-semibold tabular-nums">{delayedCount}</span> delayed · {delayLimit}+ days in production
+            </button>
+          )}
+          {noDiamondCount > 0 && (
+            <button type="button" onClick={() => setStatus(status === "nodiamonds" ? "all" : "nodiamonds")} aria-pressed={status === "nodiamonds"}
+              className={`inline-flex items-center gap-2 h-9 px-3 rounded-xl border text-sm transition-colors ${status === "nodiamonds" ? "bg-amber-600 text-white border-amber-600" : "bg-amber-500/10 border-amber-500/30 text-amber-800 hover:bg-amber-500/15"}`}>
+              <Gem className="h-4 w-4" />
+              <span className="font-semibold tabular-nums">{noDiamondCount}</span> in production · diamonds not issued
+            </button>
+          )}
+        </div>
+      )}
+
       {/* ── Grid and Board: the table's one toolbar row, without the table —
           search, Filters, the count and Export (the list has its own). ── */}
       {view !== "list" && (
@@ -609,6 +664,10 @@ export function OrdersPage() {
                     const wp = pieceWeights(o, db.materialIssuances).problem;
                     return wp ? <p title={wp} className="text-[10px] font-semibold text-destructive truncate mt-1">⚠ Check weights</p> : null;
                   })()}
+                  {(() => {
+                    const t = tracks.get(o.id);
+                    return t?.running ? <div className="mt-2"><ProductionInfo t={t} /></div> : null;
+                  })()}
                   <div className="mt-auto pt-3">
                     <div className="flex items-center justify-between gap-2 text-[11px] text-muted-foreground mb-1.5">
                       <span className="truncate">{o.status === "Rejected" ? (o.melted ? "Melted" : "Rejected") : lastTrackingStep(o)}</span>
@@ -661,7 +720,7 @@ export function OrdersPage() {
       )}
 
       {/* Board: every order in its stage column — all of them, not one page. */}
-      {view === "board" && total > 0 && <OrderBoard orders={orders} actions={isStaff ? orderActions : undefined} />}
+      {view === "board" && total > 0 && <OrderBoard orders={orders} actions={isStaff ? orderActions : undefined} tracks={tracks} />}
 
       {view === "grid" && <PaginationBar
         page={page}

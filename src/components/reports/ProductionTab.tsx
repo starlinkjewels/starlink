@@ -1,3 +1,4 @@
+import { stageLabel } from "@/lib/stages";
 import { useMemo } from "react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { Link } from "react-router-dom";
@@ -43,7 +44,7 @@ export function ProductionTab({ ctx }: { ctx: ReportCtx }) {
       { label: "Placed", value: fmtDate(o.createdAt) },
       o.priority !== "Normal" && { label: "Priority", value: o.priority },
       { label: "Piece", value: [o.jewelleryType, o.metal, o.productKarats, `${o.quantity} pc${o.quantity !== 1 ? "s" : ""}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },
-      !!st && { label: "Current step", value: [st.step, st.date && `since ${when(st.date)}`].filter(Boolean).join(" · ") },
+      !!st && { label: "Current step", value: [stageLabel(st.step), st.date && `since ${when(st.date)}`].filter(Boolean).join(" · ") },
       { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
       factories.length > 0 && { label: factories.length > 1 ? "Factories" : "Factory", value: factories.join(", ") },
     ]);

@@ -1,3 +1,4 @@
+import { UserAvatar } from "@/components/UserAvatar";
 import { EmployeeCreateDialog, emailTakenMessage } from "@/components/create/EmployeeCreateDialog";
 import { EmployeeCompaniesControl } from "@/components/EmployeeCompanies";
 import { useState, type MouseEvent } from "react";
@@ -319,9 +320,7 @@ export function EmployeesPage() {
             <div key={u.id} onClick={openCard(u)} className="card-luxe card-hover p-4 sm:p-5 flex flex-col min-w-0 cursor-pointer">
               {/* Who: avatar, name, how they sign in — and the one menu. */}
               <div className="flex items-start gap-3">
-                <div className={`h-11 w-11 shrink-0 rounded-xl bg-gradient-to-br from-primary to-brand-dark text-white font-semibold grid place-items-center text-sm shadow-sm ${u.status === "active" ? "" : "opacity-50 grayscale"}`}>
-                  {initials || u.name.charAt(0)}
-                </div>
+                <UserAvatar photo={u.photo} name={u.name} initials={initials ? 2 : 1} className={`h-11 w-11 rounded-xl font-semibold text-sm shadow-sm ${u.status === "active" ? "" : "opacity-50 grayscale"}`} />
                 <div className="min-w-0 flex-1">
                   <p className="font-semibold text-[15px] text-brand-dark leading-tight truncate">{u.name}</p>
                   <p className="text-xs text-muted-foreground truncate mt-1">{loginLine(u)}</p>

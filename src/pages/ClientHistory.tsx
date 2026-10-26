@@ -1,3 +1,4 @@
+import { stageLabel } from "@/lib/stages";
 import { isDiamondOnlyOrder, orderImage } from "@/lib/db";
 import { looseLabel } from "@/lib/orderText";
 import { ListCombo } from "@/components/ListCombo";
@@ -514,7 +515,7 @@ function ClientHistoryPageBody() {
       } },
     { key: "item", header: "Item", sortValue: o => o.jewelleryType, cell: o => <span className="font-medium whitespace-nowrap">{o.jewelleryType}</span> },
     { key: "metal", header: "Metal", sortValue: o => o.metal, cell: o => <span className="text-muted-foreground whitespace-nowrap">{isDiamondOnlyOrder(o) ? looseLabel(o) : metalLabel(o.metal)}</span> },
-    { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{o.diamondType}</span> },
+    { key: "diamond", header: "Diamond", sortValue: o => o.diamondType, cell: o => <span className="text-muted-foreground whitespace-nowrap">{[o.diamondShape, o.diamondType].filter(Boolean).join(" ")}</span> },
     { key: "qty", header: "Qty", align: "right", kind: "number", sortValue: o => o.quantity, cell: o => <span className="tabular-nums">{o.quantity}</span> },
     { key: "priority", header: "Priority", sortValue: o => o.priority,
       cell: o => <span className={`text-xs font-medium whitespace-nowrap ${o.priority === "Urgent" ? "text-red-500" : o.priority === "High Priority" ? "text-orange-500" : "text-muted-foreground"}`}>{o.priority}</span> },
@@ -553,7 +554,7 @@ function ClientHistoryPageBody() {
     ].filter(Boolean);
     return filled([
       !!inv && { label: "Invoice", value: <>{refLink(`/invoices?q=${encodeURIComponent(inv.number)}`, inv.number, can("invoices"))} · {fmtDate(inv.createdAt)}</> },
-      !!st && { label: "Stage", value: [st.step, st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
+      !!st && { label: "Stage", value: [stageLabel(st.step), st.date && when(st.date), by && `by ${by}`, st.remarks].filter(Boolean).join(" · ") },
       { label: "Placed", value: when(o.createdAt) },
       { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
       { label: "Piece", value: [o.productKarats, o.productColor, o.productSize && `size ${o.productSize}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },

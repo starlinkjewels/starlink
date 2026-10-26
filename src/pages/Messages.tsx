@@ -1,3 +1,4 @@
+import { UserAvatar } from "@/components/UserAvatar";
 import { useCan } from "@/hooks/useCan";
 import { useState, useEffect, useRef } from "react";
 import { useAuth } from "@/lib/auth";
@@ -114,7 +115,7 @@ export function MessagesPage() {
             return (
               <button key={c.id} onClick={() => setSelected(c.id)} aria-current={selected === c.id ? "true" : undefined}
                 className={`w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition ${selected === c.id ? "bg-primary/10" : "hover:bg-secondary"}`}>
-                <div className="h-10 w-10 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-sm grid place-items-center shrink-0">{c.name.charAt(0)}</div>
+                <UserAvatar photo={c.photo} name={c.name} className="h-10 w-10 rounded-full text-sm" />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center justify-between gap-2">
                     <p className="text-sm font-medium truncate">{c.name}</p>
@@ -135,7 +136,7 @@ export function MessagesPage() {
         <div className="card-luxe flex flex-col overflow-hidden min-h-0">
           {selectedContact && (
             <div className="px-4 py-3 border-b border-border/60 flex items-center gap-3">
-              <div className="h-8 w-8 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-xs grid place-items-center shrink-0">{selectedContact.name.charAt(0)}</div>
+              <UserAvatar photo={selectedContact.photo} name={selectedContact.name} className="h-8 w-8 rounded-full text-xs" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-semibold">{selectedContact.name}</p>
                 <p className="text-xs text-muted-foreground capitalize">{selectedContact.role}</p>
@@ -195,7 +196,7 @@ export function MessagesPage() {
               return (
                 <button key={c.id} onClick={() => handleSelectContact(c.id)} className="w-full flex items-center gap-3 p-3 rounded-xl transition hover:bg-secondary active:bg-secondary/70 text-left">
                   <div className="relative">
-                    <div className="h-12 w-12 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-base grid place-items-center shrink-0 font-semibold">{c.name.charAt(0)}</div>
+                    <UserAvatar photo={c.photo} name={c.name} className="h-12 w-12 rounded-full text-base font-semibold" />
                     {unread > 0 && (
                       <span className="absolute -top-0.5 -right-0.5 h-5 min-w-[20px] px-1 rounded-full bg-primary text-primary-foreground text-[10px] font-bold grid place-items-center">{unread}</span>
                     )}
@@ -222,7 +223,7 @@ export function MessagesPage() {
               </button>
               {selectedContact && (
                 <>
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white text-sm grid place-items-center shrink-0">{selectedContact.name.charAt(0)}</div>
+                  <UserAvatar photo={selectedContact.photo} name={selectedContact.name} className="h-9 w-9 rounded-full text-sm" />
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold truncate">{selectedContact.name}</p>
                     <p className="text-xs text-muted-foreground capitalize">{selectedContact.role}</p>

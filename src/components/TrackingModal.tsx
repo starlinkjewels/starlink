@@ -1,3 +1,4 @@
+import { stageLabel } from "@/lib/stages";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { StatusBadge } from "@/components/StatusBadge";
 import { fmtDate, type Order } from "@/lib/db";
@@ -63,7 +64,7 @@ export function TrackingModal({ order, onClose }: Props) {
                 <div className={`absolute -left-8 top-0.5 h-6 w-6 rounded-full grid place-items-center border-2 ${isDone ? "bg-success border-success text-white" : isActive ? "bg-primary border-primary text-white" : "bg-white border-border text-muted-foreground"}`}>
                   {isDone ? <CheckCircle2 className="h-3.5 w-3.5" /> : isActive ? <Loader2 className="h-3 w-3 animate-spin" /> : <Circle className="h-2 w-2" />}
                 </div>
-                <p className={`text-sm ${isDone || isActive ? "text-foreground font-medium" : "text-muted-foreground"}`}>{t.step}</p>
+                <p className={`text-sm ${isDone || isActive ? "text-foreground font-medium" : "text-muted-foreground"}`}>{stageLabel(t.step)}</p>
                 {t.date && <p className="text-xs text-muted-foreground">{new Date(t.date).toLocaleString("en-IN", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).replace(/\bSept\b/, "Sep")}</p>}
               </div>
             );

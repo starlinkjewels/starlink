@@ -1,9 +1,12 @@
+import { UserAvatar } from "@/components/UserAvatar";
+import { stageLabel } from "@/lib/stages";
 import { useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
 import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards";
 import { useState } from "react";
+import { OrderThumb } from "@/components/OrderThumb";
 import { useParams, Link, useNavigate } from "react-router-dom";
 import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, orderTotal, findInvoiceForOrder, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
 import { filled, when, userName, refLink, refNo, type Detail } from "@/components/rowDetails";
@@ -79,7 +82,7 @@ export function EmployeeDetailPage() {
   const clientName = (id: string) => clients.find(c => c.id === id)?.companyName ?? "";
   const orderColumns: DataColumn<Order>[] = [
     { key: "order", header: "Order", always: true, sortValue: o => o.orderNumber,
-      cell: o => <CellMain title={<span className="font-mono text-xs font-semibold">{o.orderNumber}</span>} sub={o.jewelleryType} /> },
+      cell: o => <div className="flex items-center gap-2.5 min-w-0"><OrderThumb o={o} size="sm" /><CellMain title={<span className="font-mono text-xs font-semibold">{o.orderNumber}</span>} sub={o.jewelleryType} /></div> },
     { key: "client", header: "Client", sortValue: o => clientName(o.clientId),
       cell: o => <span className="block max-w-[180px] truncate">{clientName(o.clientId) || "—"}</span> },
     { key: "date", header: "Date", kind: "date", sortValue: o => o.createdAt, cell: o => <CellDate>{fmtDate(o.createdAt)}</CellDate> },
@@ -111,7 +114,7 @@ export function EmployeeDetailPage() {
     const inv = findInvoiceForOrder(db.invoices, o.id);
     return filled([
       { label: "Piece", value: [o.metal, o.productKarats, `${o.quantity} pc${o.quantity !== 1 ? "s" : ""}`, o.designNumber && `design ${o.designNumber}`].filter(Boolean).join(" · ") },
-      !!st && { label: "Stage", value: [st.step, st.date && when(st.date)].filter(Boolean).join(" · ") },
+      !!st && { label: "Stage", value: [stageLabel(st.step), st.date && when(st.date)].filter(Boolean).join(" · ") },
       { label: "Placed", value: when(o.createdAt) },
       { label: "Due", value: o.expectedDelivery && fmtDate(o.expectedDelivery) },
       { label: "Assigned to", value: userName(db, o.assignedEmployeeId) },
@@ -265,8 +268,8 @@ export function EmployeeDetailPage() {
           email and username a row each; long values are cut with "…" and
           given whole on hover, never broken mid-word. */}
       <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6 flex items-start gap-4">
-        <div className="hidden sm:grid h-14 w-14 rounded-full bg-gradient-to-br from-primary to-brand-dark text-white font-semibold place-items-center shrink-0 text-xl">
-          {employee.name.charAt(0)}
+        <div className="hidden sm:block shrink-0">
+          <UserAvatar photo={employee.photo} name={employee.name} className="h-14 w-14 rounded-full font-semibold text-xl" />
         </div>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm flex-1 min-w-0">
           <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">

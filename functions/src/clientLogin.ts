@@ -5,13 +5,15 @@ import { OWNER_EMAILS } from "./summaries";
 
 /**
  * Change a CLIENT's or an EMPLOYEE's sign-in email and/or password
- * (Edit client → Login; Employees → Edit details → Login).
+ * (Edit client → Login; Employees → Edit details → Login) — or an ADMIN's
+ * (a partner's), when the main owner login asks.
  *
  * A browser can't change another person's login — only the server can, with
  * the Admin SDK. So this one narrow door:
  *   • the caller must be an owner or an active admin (the role index the app keeps);
- *   • the login changed must be a client's or an employee's — never an admin's
- *     or an owner's, and never to an owner's email (that would make them one);
+ *   • the login changed must be a client's or an employee's; an admin's only
+ *     when the caller is an owner (recognised by email); never an owner's, and
+ *     never to an owner's email (that would make them one);
  *   • a new password signs them out everywhere, so it takes effect at once.
  * The app updates the person's own record (their email) itself, after this succeeds.
  */
@@ -25,7 +27,8 @@ export const setClientLogin = onCall<Req>(
     const uid = req.auth?.uid;
     if (!uid) throw new HttpsError("unauthenticated", "Sign in first.");
     const callerEmail = String(req.auth?.token?.email ?? "").toLowerCase();
-    let admin = OWNER_EMAILS.diamondflow.includes(callerEmail);
+    const owner = OWNER_EMAILS.diamondflow.includes(callerEmail);
+    let admin = owner;
     if (!admin) {
       const idx = (await db.collection("userByAuth").doc(uid).get()).data() as { role?: string; status?: string } | undefined;
       admin = idx?.role === "admin" && idx?.status === "active";
@@ -40,9 +43,14 @@ export const setClientLogin = onCall<Req>(
     if (email && !EMAIL_RE.test(email)) throw new HttpsError("invalid-argument", "That email address doesn't look right.");
     if (password && password.length < 6) throw new HttpsError("invalid-argument", "The password needs at least 6 characters.");
 
-    // Only a client's or an employee's login — the role index says whose it is.
+    // A client's or an employee's login — or an admin's, for an owner. The role index says whose it is.
     const who = (await db.collection("userByAuth").doc(target).get()).data() as { role?: string } | undefined;
-    if (who?.role !== "client" && who?.role !== "employee") throw new HttpsError("permission-denied", "Only a client's or an employee's login can be changed here.");
+    if (who?.role === "admin") {
+      if (!owner) throw new HttpsError("permission-denied", "Only the main owner login can change an admin's login.");
+      if (target === uid) throw new HttpsError("permission-denied", "Change your own password in My Profile.");
+    } else if (who?.role !== "client" && who?.role !== "employee") {
+      throw new HttpsError("permission-denied", "Only a client's, an employee's or (for the owner) an admin's login can be changed here.");
+    }
     // An owner is recognised by email: giving anyone an owner's address would make them one.
     if (email && OWNER_EMAILS.diamondflow.includes(email)) throw new HttpsError("permission-denied", "That email belongs to an owner.");
 
