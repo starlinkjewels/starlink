@@ -6,6 +6,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRightLeft, CircleX, Gem, History, Layers, Lock, Maximize2, Minus, PackagePlus, Pencil, Play, Plus,
   RotateCcw, ShoppingBag, Split, Tag, Trash2, Undo2, type LucideIcon,
+  Share2,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -15,6 +16,7 @@ import {
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { useCan, useMayExport } from "@/hooks/useCan";
+import { ShareProductsSheet } from "@/components/ShareProductsSheet";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import type { MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar } from "@/components/PageHeader";
@@ -104,6 +106,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const [editing, setEditing] = useState(false);
   const [moving, setMoving] = useState(false);
   const [bandOpen, setBandOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [tab, setTab] = useState<"history" | "sales" | "lots">("history");
   const [shown, setShown] = useState(0);
 
@@ -159,6 +162,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
     { label: "Edit", icon: Pencil, hint: editWhy, disabled: true, onSelect: () => undefined, show: !canEdit },
     { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(office)}` : "Sold out — nothing to move"),
       disabled: !canEdit || item.quantity <= 0, onSelect: () => setMoving(true) },
+    { label: "Share / PDF", icon: Share2, hint: mayExport ? "Photos, CAD, gold, diamonds, price" : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setSharing(true) },
     { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
     { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece" : "Sold out — nothing left to sell",
       disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref) },
@@ -431,6 +435,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
 
       {editing && <ReadyStockItemDialog item={item} onClose={() => setEditing(false)} />}
       {moving && <MoveOfficeDialog items={[item]} onClose={() => setMoving(false)} />}
+      {sharing && <ShareProductsSheet items={[item]} onClose={() => setSharing(false)} />}
       <BandDialog
         open={bandOpen}
         onOpenChange={setBandOpen}

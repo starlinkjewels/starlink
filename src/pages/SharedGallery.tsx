@@ -5,6 +5,7 @@ import { db as fsdb } from "@/lib/firebase";
 import type { Share, ShareItem, ShareFolder } from "@/lib/db";
 import { SHARE_MAIN_SITE, shareIsExpired, loadShareItems } from "@/lib/share";
 import { BrandLogo } from "@/components/BrandLogo";
+import { PieceShareView } from "@/components/PieceShareView";
 import { useBrand, brandName } from "@/lib/brand";
 import { motion, AnimatePresence } from "framer-motion";
 import { Image as ImageIcon, Video, Play, Download, X, ChevronLeft, ChevronRight, Loader2, Camera, Clock, Folder, ChevronRight as Crumb } from "lucide-react";
@@ -137,6 +138,9 @@ export function SharedGalleryPage() {
     try { for (let i = 0; i < items.length; i++) await downloadOne(items[i].url, filenameFor(items[i], i)); }
     finally { setDownloading(false); }
   };
+
+  // Ready Stock pieces: their own page — photos, details, prices as chosen.
+  if (status === "ok" && share?.kind === "readyStock") return <PieceShareView share={share} />;
 
   return (
     // The app shell locks html/body/#root to height:100% overflow:hidden, so this
