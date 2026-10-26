@@ -2641,42 +2641,46 @@ function OrderDetailPageBody() {
 
       {/* ── CAD Design Card ── */}
       {showCadSection && (
-        <div className="card-luxe p-6 space-y-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <SectionTitle icon={ImagePlus} title="CAD Design" sub={order.cadImage ? "On file · the client sees it" : "Not uploaded yet"} />
-            {/* One main button and the rest under ⋯ — three side by side ran
-                onto a second line on a narrower card. */}
-            {(() => {
-              const edit = canEditStage();
-              const busy = cadUploading || model3dmUploading;
-              const uploadCad: MoreAction = { label: cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD image" : "Upload CAD image", icon: ImagePlus, disabled: busy, onSelect: () => cadRef.current?.click() };
-              const upload3dm: MoreAction = { label: model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D model" : "Upload 3D model (.3dm)", icon: Box, disabled: busy, onSelect: () => model3dmRef.current?.click() };
-              // Visible to everyone (incl. client) once a 3D model is on file; else the first thing missing.
-              const main: MoreAction | null = order.cad3dmUrl ? { label: "View 360°", icon: Box, onSelect: () => setShow360(true) }
-                : !edit ? null : !order.cadImage ? uploadCad : upload3dm;
-              const rest = edit ? [uploadCad, upload3dm].filter(a => a !== main) : [];
-              const MainIcon = main?.icon;
-              return (
-                <div className="flex items-center gap-2 shrink-0">
-                  {edit && (
+        <div className="card-luxe p-4 sm:p-6 space-y-4">
+          {/* Title on the left, its buttons pinned top right — on a phone too
+              (the line under the title gives way, never the buttons). One
+              main button; the rest under ⋯. */}
+          {(() => {
+            const edit = canEditStage();
+            const busy = cadUploading || model3dmUploading;
+            const uploadCad: MoreAction = { label: cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD image" : "Upload CAD image", icon: ImagePlus, disabled: busy, onSelect: () => cadRef.current?.click() };
+            const upload3dm: MoreAction = { label: model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D model" : "Upload 3D model (.3dm)", icon: Box, disabled: busy, onSelect: () => model3dmRef.current?.click() };
+            // Visible to everyone (incl. client) once a 3D model is on file; else the first thing missing.
+            const main: (MoreAction & { short: string }) | null = order.cad3dmUrl ? { label: "View 360°", short: "360°", icon: Box, onSelect: () => setShow360(true) }
+              : !edit ? null : !order.cadImage ? { ...uploadCad, short: cadUploading ? "…" : "Add CAD" } : { ...upload3dm, short: model3dmUploading ? "…" : "Add 3D" };
+            const rest = edit ? [uploadCad, upload3dm].filter(a => a.label !== main?.label) : [];
+            const MainIcon = main?.icon;
+            return (
+              <>
+                {edit && (
+                  <>
+                    <input ref={cadRef} type="file" accept="image/*" className="hidden"
+                      onChange={async e => { const file = e.target.files?.[0]; if (file) await saveCadImage(file); e.target.value = ""; }} />
+                    <input ref={model3dmRef} type="file" accept=".3dm" className="hidden"
+                      onChange={async e => { const file = e.target.files?.[0]; if (file) await save3dmModel(file); e.target.value = ""; }} />
+                  </>
+                )}
+                <SectionTitle icon={ImagePlus} title="CAD Design" sub={order.cadImage ? "On file · the client sees it" : "Not uploaded yet"}
+                  actions={(main || rest.length > 0) && (
                     <>
-                      <input ref={cadRef} type="file" accept="image/*" className="hidden"
-                        onChange={async e => { const file = e.target.files?.[0]; if (file) await saveCadImage(file); e.target.value = ""; }} />
-                      <input ref={model3dmRef} type="file" accept=".3dm" className="hidden"
-                        onChange={async e => { const file = e.target.files?.[0]; if (file) await save3dmModel(file); e.target.value = ""; }} />
+                      {main && (
+                        <Button onClick={() => main.onSelect()} disabled={main.disabled} aria-label={main.label}
+                          className={`h-10 px-3 sm:px-4 rounded-xl gap-1.5 whitespace-nowrap ${order.cad3dmUrl ? "btn-hero" : ""}`} variant={order.cad3dmUrl ? "default" : "outline"}>
+                          {MainIcon && <MainIcon className="h-4 w-4" />}
+                          <span className="sm:hidden">{main.short}</span><span className="max-sm:hidden">{main.label}</span>
+                        </Button>
+                      )}
+                      {rest.length > 0 && <MoreMenu title="CAD design" label="More CAD actions" actions={rest} />}
                     </>
-                  )}
-                  {main && (
-                    <Button size="sm" onClick={() => main.onSelect()} disabled={main.disabled}
-                      className={`rounded-xl gap-2 whitespace-nowrap ${order.cad3dmUrl ? "btn-hero" : ""}`} variant={order.cad3dmUrl ? "default" : "outline"}>
-                      {MainIcon && <MainIcon className="h-4 w-4" />} {main.label}
-                    </Button>
-                  )}
-                  {rest.length > 0 && <MoreMenu title="CAD design" label="More CAD actions" actions={rest} />}
-                </div>
-              );
-            })()}
-          </div>
+                  )} />
+              </>
+            );
+          })()}
 
           {order.cadImage && (
             <div className="space-y-2">
