@@ -10,6 +10,8 @@ import { getMessagingIfSupported } from "./firebase";
 import { updateDb } from "./db";
 
 const VAPID_KEY = import.meta.env.VITE_FCM_VAPID_KEY as string | undefined;
+/** The token this browser last registered. */
+const TOKEN_KEY = "sl-fcm-token";
 
 export type PushPermissionResult = "granted" | "denied" | "unsupported";
 
@@ -34,11 +36,16 @@ export async function requestPushPermission(userId: string): Promise<PushPermiss
     const registration = await navigator.serviceWorker.ready;
     const token = await getToken(messaging, { vapidKey: VAPID_KEY, serviceWorkerRegistration: registration });
     if (!token) return "unsupported";
+    // This browser's previous token goes when it gets a new one — they piled
+    // up (ten for one person), and every one of them was sent each alert.
+    let before: string | null = null;
+    try { before = localStorage.getItem(TOKEN_KEY); localStorage.setItem(TOKEN_KEY, token); } catch { /* private mode */ }
     updateDb(d => {
       const u = d.users.find(x => x.id === userId);
       if (!u) return;
-      if (!u.fcmTokens) u.fcmTokens = [];
-      if (!u.fcmTokens.includes(token)) u.fcmTokens.push(token);
+      const kept = (u.fcmTokens ?? []).filter(t => t !== before || t === token);
+      if (!kept.includes(token)) kept.push(token);
+      u.fcmTokens = kept;
     });
     return "granted";
   } catch (e) {

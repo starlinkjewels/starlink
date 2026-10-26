@@ -11,6 +11,7 @@ import "./studio.css";
 import { applyRememberedAppearance } from "@/lib/appearance";
 import { applyStudio } from "@/lib/studio";
 import { applyBrand, getBrand, loadBrand } from "@/lib/brand";
+import { watchForNewVersion } from "@/lib/appUpdate";
 
 // Open in the look this device last showed, before any data arrives — no flash of the default.
 // The new look (preview) first, so the appearance below knows whether to step aside.
@@ -19,6 +20,9 @@ applyRememberedAppearance();
 // The company's own brand: as this device remembers it at once, then as saved (readable before sign-in).
 applyBrand(getBrand());
 void loadBrand();
+
+// A tab open since before the last release is told when the new one is ready.
+watchForNewVersion();
 
 const qc = new QueryClient();
 

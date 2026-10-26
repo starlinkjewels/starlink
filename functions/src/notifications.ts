@@ -34,8 +34,11 @@ export const sendNotificationPush = onDocumentCreated(
       notification: { title: notif.title, body: notif.body },
       webpush: {
         fcmOptions: { link: "/notifications" },
-        notification: { icon: "/icon.png" },
+        // The alert's own id as the tag: a browser holding more than one of
+        // this person's tokens shows it once, not once per token.
+        notification: { icon: "/icon.png", tag: event.params.notifId },
       },
+      data: { id: event.params.notifId },
     });
 
     // Prune tokens FCM reports as unregistered (uninstalled/expired) so the

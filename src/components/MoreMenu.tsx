@@ -75,7 +75,9 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
           </Button>
         )}
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={button ? "start" : "end"} collisionPadding={12} className="w-64 max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-xl p-1.5">
+      {/* Lined up with the button's right edge: these buttons sit at the right of a
+          card or page, and opening rightwards ran the menu off the screen. */}
+      <DropdownMenuContent align="end" collisionPadding={12} className="w-64 max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-xl p-1.5">
         {title && <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">{title}</DropdownMenuLabel>}
         {safe.map(item)}
         {safe.length > 0 && danger.length > 0 && <DropdownMenuSeparator />}
