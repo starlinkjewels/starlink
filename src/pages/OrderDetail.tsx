@@ -63,7 +63,7 @@ import { ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, P
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
-import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, hasCompanies } from "@/lib/companies";
+import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
 import { isOtherMaterial, materialName, materialUnit, fmtQty, purchaseQty, diamondSpec, type MaterialKey } from "@/lib/materials";
@@ -81,7 +81,7 @@ import {
   factoryPoolBalance, estimatedPureGoldNeeded, orderMaterialRequirements, issuanceUsed, labourValue, minimumLabourApplies, factoryFineGoldBalance,
   deriveStockBalances,
 } from "@/lib/manufacturing";
-import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
+import { decreaseStockSelfHealing, increaseStock, transferStock } from "@/lib/stock";
 import { canVoidPurchase, voidPurchase as voidPurchaseCascade, purchaseLabel, voidImpact, canEditPurchase, purchaseEditScope, editPurchase, type PurchaseEdit } from "@/lib/purchaseVoid";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
@@ -311,6 +311,8 @@ function OrderDetailPageBody() {
   const [issuePurity, setIssuePurity] = useState("22K");
   // Loose diamonds: the stock LOT they come out of (its bucket — lib/diamondLots.ts), and how many stones.
   const [issueQuality, setIssueQuality] = useState("");
+  // The company a loose lot is taken from, when it is not this order's own ("" = the order's).
+  const [issueFromCo, setIssueFromCo] = useState("");
   const [issueDiaPcs, setIssueDiaPcs] = useState("");
   const [issueQuantity, setIssueQuantity] = useState("");
   const [issueChargeAmount, setIssueChargeAmount] = useState("");
@@ -550,7 +552,7 @@ function OrderDetailPageBody() {
 
   const resetIssueForm = () => {
     setIssueFactoryId("");
-    setIssuePurity("22K"); setIssueQuality(""); setIssueDiaPcs(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
+    setIssuePurity("22K"); setIssueQuality(""); setIssueFromCo(""); setIssueDiaPcs(""); setIssueQuantity(""); setIssueChargeAmount(""); setIssueNotes("");
     setIssueDiaMm(""); setIssueDiaColor(""); setIssueDiaClarity(""); setIssueDiaRate(""); setIssueDiaAmount("");
     setIssueDiaKind("loose"); setIssueCertPacketIds([]); setIssueCertSearch(""); setIssueGrade("");
   };
@@ -918,6 +920,15 @@ function OrderDetailPageBody() {
     const chargeAmount = Number(issueChargeAmount) || 0;
     setIssuing(true);
     try {
+      // A lot held by another of our companies: moved across first (at its cost), then used here.
+      if (looseDia && issueFromCo && issueFromCo !== workCo) {
+        const avg = stockAverageRate(db, "diamond", key, new Date().toISOString(), issueFromCo);
+        await transferStock({
+          material: "diamond", purityOrQuality: key, quantity: qty, fromCompany: issueFromCo, toCompany: workCo,
+          valueInr: avg ? Math.round(avg * qty) : undefined, pieces: pick.pcs, createdBy: user!.id,
+          note: `For ${order.orderNumber}: ${qty} ct moved from ${companyById(db.settings, issueFromCo).name} to ${companyById(db.settings, workCo).name}`,
+        });
+      }
       await issuePick({ order, factoryId: issueFactoryId, companyId: workCo, pick, userId: user!.id, chargeInr: chargeAmount, notes: issueNotes });
       toast.success(certified
         ? `${pick.packetIds!.length} certified packet${pick.packetIds!.length !== 1 ? "s" : ""} recorded for ${factory?.name || "factory"}`
@@ -3809,8 +3820,10 @@ function OrderDetailPageBody() {
                 </Select>
                 {issueDiaKind === "loose" && (
                   // A lot that is in stock; its size, colour and clarity fill the details below.
-                  <LotPicker value={issueQuality} companyId={workCo} onChange={(k, lot) => {
-                    setIssueQuality(k);
+                  <LotPicker value={issueQuality} companyId={workCo} fromCompany={issueFromCo}
+                    others={hasCompanies(db.settings) ? companiesOf(db.settings).filter(c => c.id !== workCo).map(c => ({ id: c.id, name: c.name })) : undefined}
+                    onChange={(k, lot, fromCo) => {
+                    setIssueQuality(k); setIssueFromCo(fromCo ?? "");
                     const spec = lot?.spec ?? lotParts(k);
                     setIssueDiaColor(spec.color ?? ""); setIssueDiaClarity(spec.clarity ?? "");
                     setIssueDiaMm(spec.size && /mm$/i.test(spec.size) ? spec.size.replace(/\s*mm$/i, "") : "");
@@ -3882,10 +3895,11 @@ function OrderDetailPageBody() {
               {issueMaterial === "diamond" && issueDiaKind === "loose" && (() => {
                 const ct = Number(issueQuantity) || 0;
                 // The lot's own average cost per carat — what the stones are valued at unless a price is typed.
-                const lotAvg = issueQuality ? stockAverageRate(db, "diamond", issueQuality, new Date().toISOString(), workCo) : null;
+                const lotCo = issueFromCo || workCo;
+                const lotAvg = issueQuality ? stockAverageRate(db, "diamond", issueQuality, new Date().toISOString(), lotCo) : null;
                 const auto = (Number(issueDiaRate) || lotAvg || 0) * ct;
                 const parts = issueQuality ? lotParts(issueQuality) : undefined;
-                const inLot = issueQuality ? lotBalances(db.stockMovements ?? [], workCo).find(l => l.key === issueQuality) : undefined;
+                const inLot = issueQuality ? lotBalances(db.stockMovements ?? [], lotCo).find(l => l.key === issueQuality) : undefined;
                 const bagNo = issueQuality ? bagNoOf(db, issueQuality) : undefined;
                 return (
                   <div className="space-y-2.5">
@@ -3898,7 +3912,7 @@ function OrderDetailPageBody() {
                           <p className={`font-semibold truncate ${k === "Bag" ? "text-primary" : "text-foreground"}`}>{v}</p>
                         </div>
                       ))}
-                      {inLot && <p className="col-span-3 sm:col-span-6 text-[11px] text-muted-foreground">In this bag now: {inLot.ct} ct{inLot.pcs != null ? ` · ${inLot.pcs} pcs` : ""}{lotAvg ? ` · average ${fmtMoneyInr(lotAvg)}/ct` : ""}</p>}
+                      {inLot && <p className="col-span-3 sm:col-span-6 text-[11px] text-muted-foreground">In this bag now: {inLot.ct} ct{inLot.pcs != null ? ` · ${inLot.pcs} pcs` : ""}{lotAvg ? ` · average ${fmtMoneyInr(lotAvg)}/ct` : ""}{issueFromCo && issueFromCo !== workCo ? ` · held by ${companyById(db.settings, issueFromCo).name} — moved to ${companyById(db.settings, workCo).name} when saved` : ""}</p>}
                     </div>
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">

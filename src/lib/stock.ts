@@ -18,7 +18,7 @@ import {
   type Firestore,
 } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
-import { uid, type StockMovement, type MaterialKey } from "./db";
+import { ensureCollections, loadDb, uid, type StockMovement, type MaterialKey } from "./db";
 import { ensureBag } from "./diamondBags";
 import { lotParts } from "./diamondLots";
 
@@ -376,19 +376,26 @@ export async function transferStock(args: {
   fromCompany: string;
   toCompany: string;
   valueInr?: number;
+  /** Loose stones: how many stones move with the carats. */
+  pieces?: number;
   createdBy: string;
   note?: string;
 }): Promise<string> {
   if (args.fromCompany === args.toCompany) throw new Error("Choose two different companies.");
   const refId = uid("tr_");
   const what = `${args.quantity} ${args.purityOrQuality}`;
-  await decreaseStock({
+  // The sender's running count can lag its history (it said "0" with stones in the bag);
+  // like every issue, it is put right from the history once before the move is refused.
+  await ensureCollections(["stockMovements"]);
+  await decreaseStockSelfHealing({
     material: args.material, companyId: args.fromCompany, purityOrQuality: args.purityOrQuality, quantity: args.quantity,
     type: "issuance_out", refType: "transfer", refId, createdBy: args.createdBy, note: args.note ?? `Moved ${what} to another company`,
-  });
+    ...(args.pieces ? { pieces: args.pieces } : {}),
+  }, loadDb().stockMovements ?? []);
   await increaseStock({
     material: args.material, companyId: args.toCompany, purityOrQuality: args.purityOrQuality, quantity: args.quantity,
     refType: "transfer", refId, valueInr: args.valueInr, createdBy: args.createdBy, note: args.note ?? `Moved in ${what} from another company`,
+    ...(args.pieces ? { pieces: args.pieces } : {}),
   });
   return refId;
 }
