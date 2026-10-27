@@ -622,6 +622,8 @@ export interface Order {
                                    // factoryId, so this alone already supports >1 factory per order
   manufacturingLog?: ManufacturingLogEntry[]; // append-only; never index-mutated like `timeline`
   readyStockItemId?: string; // set iff materialSourcing === "readyStock"
+  readyStockQty?: number; // a Ready Stock sale: pieces it took off the shelf (older orders: 1)
+  readyStockBackAt?: string; // a cancelled Ready Stock sale: when its pieces went back on the shelf
   assignedFactoryId?: string; // pure informational tag — "this factory will make
     // this order." Moves no material and never affects manufacturingReadiness;
     // only an actual MaterialIssuance for this order does that.
@@ -2761,7 +2763,8 @@ let pendingChangeContext: ChangeContext | null = null;
  */
 export function updateDbAs(ctx: ChangeContext, fn: (db: DB) => void) {
   pendingChangeContext = ctx;
-  return updateDb(fn);
+  // A mutator that throws saves nothing — its label must not go to the next save.
+  try { return updateDb(fn); } catch (e) { pendingChangeContext = null; throw e; }
 }
 
 /** Refused by the rules this session (not deployed yet): stop trying. */

@@ -2,7 +2,7 @@ import { ProductionInfo } from "@/components/ProductionInfo";
 import { productionTrack } from "@/lib/production";
 import { stageLabel } from "@/lib/stages";
 import { issuePick, type StockPick } from "@/lib/orderStock";
-import { otherChargesTotal } from "@/lib/db";
+import { otherChargesTotal, writeStockCost } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
 import { hasDiamonds, orderTitle, stoneOf } from "@/lib/orderText";
 import { ChangeClientSheet } from "@/components/ChangeClientSheet";
@@ -13,8 +13,8 @@ import { choicesOf } from "@/lib/optionLists";
 import { LotPicker, BagSelect } from "@/components/LotFields";
 import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 import { lotBalances, lotParts } from "@/lib/diamondLots";
-import { stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
-import { clientMaterialBalance, deliveryFine, fmtCt, fmtFine, orderClientSends, orderUse, recordClientUse, shortfallChargeId, undoClientSend, undoClientSendBlocker } from "@/lib/clientMaterial";
+import { orderCost, rateOn, stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
+import { clientMaterialBalance, deliveryFine, diaBack, fmtCt, fmtFine, orderClientSends, orderUse, recordClientUse, shortfallChargeId, undoClientSend, undoClientSendBlocker } from "@/lib/clientMaterial";
 import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
 import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
 import { inrPerUnit } from "@/lib/currency";
@@ -355,6 +355,8 @@ function OrderDetailPageBody() {
   const mayExport = useMayExport();
   // An in-house build going into Ready Stock: which office will keep it.
   const [rsOffice, setRsOffice] = useState<string | null>(null);
+  const [rsPrice, setRsPrice] = useState("");
+  const [rsCost, setRsCost] = useState("");
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
@@ -1354,7 +1356,7 @@ function OrderDetailPageBody() {
         o.timeline[i] = { ...o.timeline[i], status: "pending", date: undefined, employeeId: undefined, department: undefined, remarks: undefined };
       }
       o.timeline[idx].status = "in_progress";
-      o.status = statusFromTimeline(o.timeline);
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
     });
     toast.success("Stage reverted");
   };
@@ -1411,21 +1413,26 @@ function OrderDetailPageBody() {
     if (!(await confirmBox("Re-open this rejected order back to Waiting?"))) return;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
-      o.status = "Waiting";
+      if (o.status !== "Rejected") return; // re-opened already (another tab, a second click)
       o.timeline.forEach((t, i) => { if (i > 0) { t.status = "pending"; t.date = undefined; } });
       o.timeline[0].status = "done";
+      o.status = statusFromTimeline(o.timeline, o.forReadyStock, o.materialSourcing === "readyStock");
       // Re-opening a Ready-Stock sale re-reserves the piece from inventory (it was
       // returned on cancel/reject).
       if (o.materialSourcing === "readyStock" && o.readyStockItemId) {
         const item = d.readyStock?.find(x => x.id === o.readyStockItemId);
         if (item) {
           const had = item.quantity;
-          item.quantity = Math.max(0, item.quantity - 1);
+          // No more than is on the shelf now — and the order remembers what it really took.
+          const took = Math.min(had, o.readyStockQty ?? 1);
+          item.quantity = had - took;
+          o.readyStockQty = took;
+          delete o.readyStockBackAt;
           logItem(item, { ...whoOf(user), kind: "sold", text: `Order ${o.orderNumber} re-opened — sold on it again · ${had} → ${item.quantity}`, ref: { orderId: o.id } });
         }
       }
     });
-    toast.success("Order re-opened — now Waiting");
+    toast.success("Order re-opened");
   };
 
   // Cancel an order (admin) — returns any issued gold/diamond and certified
@@ -1924,8 +1931,25 @@ function OrderDetailPageBody() {
   // In-house build → create a Ready Stock item pre-filled from this order. Admin
   // sets the selling price & cost in Ready Stock (cost basis mixes INR labour with
   // material, so it's entered there, not guessed here).
-  const addToReadyStock = async (office: string) => {
-    if (order.readyStockCreatedId) { nav(`/ready-stock/${order.readyStockCreatedId}`); return; }
+  // What one piece of the build cost, in dollars at today's rate — the stock piece's cost.
+  const buildPieceCostUsd = () => {
+    try {
+      const c = orderCost(db, order);
+      const rate = rateOn(db, new Date().toISOString())?.rate ?? 0;
+      return c.totalInr > 0 && rate > 0 ? Math.round(c.totalInr / (order.quantity || 1) / rate * 100) / 100 : 0;
+    } catch { return 0; }
+  };
+  const openAddToStock = () => {
+    let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ }
+    const list = readyStockOffices(db.settings);
+    const cost = buildPieceCostUsd();
+    setRsCost(cost ? String(cost) : ""); setRsPrice("");
+    setRsOffice(list.includes(o) ? o : list[0] ?? "");
+  };
+  const addToReadyStock = async (office: string, priceUsd = 0, costUsd = 0): Promise<boolean> => {
+    if (order.readyStockCreatedId) { nav(`/ready-stock/${order.readyStockCreatedId}`); return true; }
+    // Cancelled or melted: its gold and stones went back already — the piece can't go on the shelf too.
+    if (order.status === "Rejected" || order.deletedAt || order.melted) { toast.error("This build is cancelled — it can't go into Ready Stock."); return false; }
     // The piece carries whatever weights it has. Without Final Approval those
     // are still the estimates it was ordered on, and a stock item is priced off
     // them — so say so rather than let an estimate pass as the real weight.
@@ -1936,15 +1960,16 @@ function OrderDetailPageBody() {
       "cost and price will then be worked out from.",
       "",
       "Record actual details first? Cancel to go back and do that.",
-    ].join("\n")))) return;
+    ].join("\n")))) return false;
     const itemId = uid("rs_");
     const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
     const pw = pieceWeights(order, db.materialIssuances);
-    if (pw.problem) { toast.error(`Fix the weights first — ${pw.problem}`); return; }
+    if (pw.problem) { toast.error(`Fix the weights first — ${pw.problem}`); return false; }
     const diaWt = pw.diamondCt || undefined;
+    let added = false;
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
-      if (o.readyStockCreatedId) return;
+      if (o.readyStockCreatedId || o.status === "Rejected" || o.deletedAt || o.melted) return;
       if (!d.readyStock) d.readyStock = [];
       d.readyStock.unshift({
         id: itemId,
@@ -1956,8 +1981,11 @@ function OrderDetailPageBody() {
         netWeight: pw.net || undefined,
         diamondWeight: diaWt,
         diamondType: diaWt ? o.diamondType : undefined,
-        price: 0, // admin sets the selling price in Ready Stock
-        quantity: 1,
+        // The selling price and cost per piece, when given here; else set in Ready Stock.
+        // (The cost is never written on the piece — every client can read Ready Stock.)
+        price: priceUsd > 0 ? priceUsd : 0,
+        // Every piece the build made goes onto the shelf.
+        quantity: Math.max(1, Math.round(o.quantity || 1)),
         images: imgs,
         sku: o.designNumber || undefined,
         location: office || undefined,
@@ -1972,9 +2000,14 @@ function OrderDetailPageBody() {
       const idx = o.timeline.findIndex(t => t.step === "Ready for Stock");
       if (idx >= 0) { o.timeline[idx].status = "done"; o.timeline[idx].date = new Date().toISOString(); }
       o.status = statusFromTimeline(o.timeline, o.forReadyStock);
+      // Its cost: admin-only, kept apart from the piece.
+      if (costUsd > 0) writeStockCost(d, itemId, costUsd);
+      added = true;
     });
-    toast.success("Added to Ready Stock — set its selling price & cost there.");
+    if (!added) { toast.error("Not added — this build changed meanwhile. Reload the page."); return false; }
+    toast.success(priceUsd > 0 ? "Added to Ready Stock — on sale now." : "Added to Ready Stock — set its selling price there.");
     nav("/ready-stock");
+    return true;
   };
 
   // ── Gift card redemption (a discount on this order, ≤25% of order value). ──
@@ -2084,11 +2117,16 @@ function OrderDetailPageBody() {
           : daysLeft <= 3 ? { text: daysLeft === 0 ? "due today" : `${daysLeft} day${daysLeft !== 1 ? "s" : ""} left`, tone: "text-amber-700" }
           : { text: `${daysLeft} days left`, tone: "text-muted-foreground" };
         // One main action as a button; the rest in the ⋯ menu beside it.
+        // A build goes into Ready Stock once it is made — Final Approval done (its
+        // real weights recorded); before that the timeline is the way forward.
+        const buildMade = !order.timeline.some(t => t.step === "Final Approval") || order.timeline.some(t => t.step === "Final Approval" && t.status === "done");
         const mainAction = order.forReadyStock
-          ? (user!.role === "admin" && (
+          ? (user!.role === "admin" && ((order.status !== "Rejected" && !order.deletedAt && !order.melted) || !!order.readyStockCreatedId) && (
               order.readyStockCreatedId
                 ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
-                : <Button onClick={() => { let o = ""; try { o = localStorage.getItem("rs-build-office") || ""; } catch { /* ignore */ } const list = readyStockOffices(db.settings); setRsOffice(list.includes(o) ? o : list[0] ?? ""); }} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
+                : buildMade
+                  ? <Button onClick={openAddToStock} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
+                  : null
             ))
           : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button onClick={handlePrintInvoice} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>;
         const closed = order.status === "Rejected";
@@ -2270,8 +2308,9 @@ function OrderDetailPageBody() {
 
         <div className="px-4 sm:px-6 pb-4 sm:pb-6">
 
-        {/* ── Pricing — set/edited by admin & employee only, never by the client ── */}
-        {user!.role !== "client" && (
+        {/* ── Pricing — set/edited by admin & employee only, never by the client.
+              Not on an in-house build: nothing is sold or billed on it. ── */}
+        {user!.role !== "client" && !order.forReadyStock && (
           <div className={ORDER_SECTION}>
             <div className="flex items-center justify-between gap-3 mb-3">
               <p className="text-sm font-semibold text-foreground">Price</p>
@@ -2952,7 +2991,9 @@ function OrderDetailPageBody() {
           {/* Empty state — staff, nothing uploaded yet */}
           {!hasProductMedia && canEditStage() && (
             <div className="rounded-xl border border-dashed border-border/70 p-6 text-center text-sm text-muted-foreground">
-              Add 4–5 photos and a short video. The client finds them under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.
+              {order.forReadyStock
+                ? <>Add 4–5 photos and a short video — they go with the piece into Ready Stock.</>
+                : <>Add 4–5 photos and a short video. The client finds them under design <span className="font-medium text-foreground">{order.designNumber || order.orderNumber}</span>.</>}
             </div>
           )}
         </div>
@@ -2963,7 +3004,8 @@ function OrderDetailPageBody() {
           itself, never the page. */}
       {user!.role === "admin" && <OrderProfitCard db={db} order={order} />}
 
-      {/* ── Advance Payment Card ── */}
+      {/* ── Advance Payment Card — not on an in-house build (no client, no bill) ── */}
+      {(!order.forReadyStock || advances.length > 0) && (
       <div className="card-luxe p-6 space-y-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <SectionTitle icon={Wallet} title="Payments"
@@ -3201,6 +3243,7 @@ function OrderDetailPageBody() {
           </div>
         )}
       </div>
+      )}
 
       {/* Production Timeline. A diamond-only order is not produced, so it shows
           only the stages it really has — order, dispatch, delivery. */}
@@ -3252,10 +3295,25 @@ function OrderDetailPageBody() {
                           ? <AsyncButton size="sm" variant="outline" onClick={() => openDispatchModal(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                           : t.step === "Delivered"
                             ? <AsyncButton size="sm" variant="outline" onClick={() => { setDeliverDay(order.deliveredAt ? dayOf(order.deliveredAt) : todayLocal()); setDeliverModalIdx(idx); }} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
-                            : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
+                            // A build is closed by putting its pieces on the shelf — never by a bare tick.
+                            : t.step === "Ready for Stock"
+                              ? order.readyStockCreatedId
+                                ? <Button size="sm" variant="outline" onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="mt-2 h-8 rounded-lg text-xs gap-1.5"><PackageCheck className="h-3.5 w-3.5" />In Ready Stock — open the piece</Button>
+                                : order.status === "Rejected" || order.deletedAt || order.melted
+                                  ? <p className="text-[11px] text-muted-foreground mt-1.5">Cancelled — it doesn't go into Ready Stock.</p>
+                                  : user!.role === "admin"
+                                    ? <Button size="sm" onClick={openAddToStock} className="mt-2 h-8 rounded-lg text-xs gap-1.5"><PackageCheck className="h-3.5 w-3.5" />Add to Ready Stock</Button>
+                                    : <p className="text-[11px] text-muted-foreground mt-1.5">An admin adds it to Ready Stock — with its price.</p>
+                              : <AsyncButton size="sm" variant="outline" onClick={() => advanceStep(idx)} className="mt-2 h-7 rounded-lg text-xs">Mark complete</AsyncButton>
                       : <p className="text-[10px] text-muted-foreground/60 mt-1.5 select-none">⏳ Complete previous step first</p>
                   )}
-                  {canEditStage() && isDone && (
+                  {isDone && t.step === "Ready for Stock" && order.readyStockCreatedId && (
+                    <button type="button" onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-primary hover:underline">
+                      <PackageCheck className="h-3 w-3" /> In Ready Stock — open the piece
+                    </button>
+                  )}
+                  {/* Once its pieces are on the shelf, a build's steps stay done — the piece is changed in Ready Stock. */}
+                  {canEditStage() && isDone && !order.readyStockCreatedId && (
                     <button
                       onClick={() => revertStep(idx)}
                       className="mt-2 inline-flex items-center gap-1 h-7 px-2 rounded-lg text-[11px] font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors">
@@ -3298,9 +3356,11 @@ function OrderDetailPageBody() {
             };
             // The client's own material, offered first when the piece is made of it.
             const csOk = !!order.clientId && !order.forReadyStock;
+            // Cancelled or deleted: what is there can be undone, nothing new is taken in or sent.
+            const cmLive = order.status !== "Rejected" && !order.deletedAt;
             const addActions: MoreAction[] = [
-              { label: "Client's diamonds", icon: Gem, show: csOk && (needsDia || !!order.clientSupplied?.diamonds) && !!order.clientSupplied?.diamonds, disabled: !!blockWhy, hint: blockWhy ?? "Their own stones, to the factory — no cost to us", onSelect: () => setCmSheet({ mode: "send", material: "diamond" }) },
-              { label: "Client's gold", icon: Coins, show: csOk && !!order.clientSupplied?.gold, disabled: !!blockWhy, hint: blockWhy ?? "Their own gold, to the factory", onSelect: () => setCmSheet({ mode: "send", material: "gold" }) },
+              { label: "Client's diamonds", icon: Gem, show: csOk && cmLive && (needsDia || !!order.clientSupplied?.diamonds) && !!order.clientSupplied?.diamonds, disabled: !!blockWhy, hint: blockWhy ?? "Their own stones, to the factory — no cost to us", onSelect: () => setCmSheet({ mode: "send", material: "diamond" }) },
+              { label: "Client's gold", icon: Coins, show: csOk && cmLive && !!order.clientSupplied?.gold, disabled: !!blockWhy, hint: blockWhy ?? "Their own gold, to the factory", onSelect: () => setCmSheet({ mode: "send", material: "gold" }) },
               { label: "Diamond from stock", icon: Gem, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "A lot or a certified stone we hold", onSelect: () => openDiamond("stock") },
               { label: "Buy new from a supplier", icon: ShoppingCart, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "Bought for this order, sent to the factory", onSelect: () => openDiamond("buy") },
               { label: "Other material from stock", icon: Box, show: otherMaterials.length > 0, disabled: !!blockWhy,
@@ -3311,7 +3371,7 @@ function OrderDetailPageBody() {
               { label: hasEstimate ? "Edit estimate" : "Add estimate", icon: Calculator, show: !faDone, onSelect: openEstimate },
               { label: faDone || hasActuals ? "Edit actual details" : "Record actual details", icon: PackageCheck, show: faDone || faStepIdx < 0,
                 onSelect: () => openFinalApproval(faDone ? faStepIdx : -1) },
-              { label: "Client's own material…", icon: Coins, show: csOk && editable,
+              { label: "Client's own material…", icon: Coins, show: csOk && cmLive && editable,
                 hint: faDone ? "Final Approval is done — the piece's material is settled" : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && "gold", order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}` : "If the client gives their gold or diamonds",
                 disabled: faDone, onSelect: () => setCsEdit(true) },
               { label: "No diamond in this piece", icon: XCircle, show: !faDone && needsDia, hint: "Gold only", onSelect: () => setNoDiamond(true) },
@@ -3367,41 +3427,81 @@ function OrderDetailPageBody() {
                   )}
                 </div>
 
-                {/* The client's own material on this piece: theirs with us, what went to the factory. */}
+                {/* The client's own material on this piece — one line per material:
+                    where it stands, and the one thing to do next. */}
                 {csOk && (order.clientSupplied || orderClientSends(db, order).length > 0) && (() => {
                   const cl = db.clients.find(c => c.id === order.clientId);
                   const bal = cl ? clientMaterialBalance(db, cl) : null;
                   const sends = orderClientSends(db, order);
+                  const rows = (["gold", "diamond"] as const).filter(m =>
+                    (m === "gold" ? order.clientSupplied?.gold : order.clientSupplied?.diamonds) || sends.some(i => i.material === m));
+                  const r3 = (n: number) => Math.round(n * 1000) / 1000;
                   return (
-                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2">
+                    <div className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] p-3 space-y-2.5">
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Coins className="h-4 w-4 text-amber-600" /> Client's own material</p>
-                        {editable && <Button size="sm" variant="outline" onClick={() => setCmSheet({ mode: "receive" })} className="h-8 rounded-lg">Receive from client</Button>}
+                        <p className="text-sm font-semibold text-brand-dark flex items-center gap-1.5"><Coins className="h-4 w-4 text-amber-600" /> The client's own material</p>
+                        {editable && !faDone && cmLive && <button type="button" onClick={() => setCsEdit(true)} className="text-xs font-medium text-primary hover:underline">Change who gives what</button>}
                       </div>
-                      {bal && <p className="text-xs text-muted-foreground">With us now: <b className="text-foreground">{fmtFine(bal.goldInHand)}</b> gold · <b className="text-foreground">{bal.diaInHand} ct</b> diamonds{(bal.goldAtFactory || bal.diaAtFactory) ? ` · at factories: ${fmtFine(bal.goldAtFactory)}, ${bal.diaAtFactory} ct` : ""}</p>}
-                      {sends.length > 0 ? (
-                        <ul className="divide-y divide-border/50 rounded-lg bg-white border border-border/60">
-                          {sends.map(i => {
-                            const why = undoClientSendBlocker(db, i);
-                            return (
-                              <li key={i.id} className="flex items-center gap-2 px-3 py-2 text-xs">
-                                {i.material === "gold" ? <Coins className="h-3.5 w-3.5 text-amber-600 shrink-0" /> : <Gem className="h-3.5 w-3.5 text-sky-600 shrink-0" />}
-                                <span className="flex-1 min-w-0 truncate">
-                                  {i.material === "gold" ? `Gold to the factory — ${i.quantityIssued} g ${i.purityOrQuality} (${deliveryFine(i)} g fine)` : `Diamonds to the factory — ${fmtCt(i.quantityIssued, i.piecesIssued)}${i.diamondKind === "certified" ? " · certified" : ""}${i.purityOrQuality && i.purityOrQuality !== "Client's" ? ` · ${i.purityOrQuality}` : ""}`}
-                                  <span className="text-muted-foreground"> · {fmtDate(i.issuedAt)}</span>
-                                </span>
-                                {editable && !why && (
-                                  <button type="button" onClick={async () => {
-                                    if (!(await confirmBox("Undo this send? It goes back to the client's material with us."))) return;
-                                    try { updateDbAs({ summary: `${order.orderNumber}: undid a send of the client's ${i.material === "gold" ? "gold" : "diamonds"}` }, d => undoClientSend(d, i.id)); toast.success("Undone"); }
-                                    catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't undo"); }
-                                  }} className="text-muted-foreground hover:text-destructive font-medium">Undo</button>
-                                )}
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      ) : <p className="text-xs text-muted-foreground">Nothing of theirs sent to the factory yet — Add material → {order.clientSupplied?.gold ? "Client's gold" : "Client's diamonds"}.</p>}
+                      {rows.map(m => {
+                        const gold = m === "gold";
+                        const mine = sends.filter(i => i.material === m);
+                        const received = r3((cl?.materialLedger ?? []).filter(e => e.kind === "in" && e.orderId === order.id && e.material === m).reduce((t, e) => t + ((gold ? e.fine : e.ct) ?? 0), 0));
+                        const sent = r3(mine.reduce((t, i) => t + (gold ? deliveryFine(i) : i.quantityIssued - diaBack(i)), 0));
+                        const used = orderUse(cl, order.id, m);
+                        const withUs = bal ? (gold ? bal.goldInHand : bal.diaInHand) : 0;
+                        const unit = (n: number) => (gold ? `${n} g fine` : `${n} ct`);
+                        const state = used ? { t: `Used in the piece — ${unit(gold ? used.fine ?? 0 : used.ct ?? 0)}${gold && used.shortfallFine ? ` (+ ${used.shortfallFine} g fine ours, billed)` : ""}`, tone: "text-success" }
+                          : sent > 0 ? { t: `At the factory — ${unit(sent)}`, tone: "text-sky-700" }
+                          : withUs > 0 ? { t: `With us — ${unit(withUs)} of theirs, not sent yet`, tone: "text-amber-800" }
+                          : { t: `Waiting for their ${gold ? "gold" : "diamonds"}`, tone: "text-destructive" };
+                        const open = !used && editable && !faDone && cmLive;
+                        const next = !open ? null
+                          : sent === 0 && withUs > 0 ? { label: "Send to factory", onClick: () => setCmSheet({ mode: "send", material: m }) }
+                          : sent === 0 ? { label: `Receive their ${gold ? "gold" : "diamonds"}`, onClick: () => setCmSheet({ mode: "receive", material: m }) }
+                          : null;
+                        const more = !open ? null
+                          : sent > 0 ? { label: withUs > 0 ? "Send more" : "Receive more", mode: withUs > 0 ? "send" as const : "receive" as const }
+                          : withUs > 0 ? { label: "Receive more", mode: "receive" as const } : null;
+                        return (
+                          <div key={m} className="rounded-lg bg-white border border-border/60 px-3 py-2.5 space-y-1.5">
+                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                              {gold ? <Coins className="h-4 w-4 text-amber-600 shrink-0" /> : <Gem className="h-4 w-4 text-sky-600 shrink-0" />}
+                              <p className="text-sm font-medium text-brand-dark">{gold ? "Gold" : "Diamonds"}{gold && order.clientSupplied?.goldLossPct ? <span className="text-xs font-normal text-muted-foreground"> · {order.clientSupplied.goldLossPct}% loss agreed</span> : null}</p>
+                              <span className={`text-xs font-medium ${state.tone}`}>{state.t}</span>
+                              <span className="ml-auto flex items-center gap-3">
+                                {more && <button type="button" onClick={() => setCmSheet({ mode: more.mode, material: m })} className="text-xs font-medium text-primary hover:underline">{more.label}</button>}
+                                {next && <Button size="sm" onClick={next.onClick} className="h-8 rounded-lg btn-hero">{next.label}</Button>}
+                              </span>
+                            </div>
+                            {(received > 0 || sent > 0 || withUs > 0) && (
+                              <p className="text-[11px] text-muted-foreground">
+                                {[received > 0 && `Received for this order: ${unit(received)}`, sent > 0 && `sent: ${unit(sent)}`, withUs > 0 && `theirs with us now: ${unit(withUs)}`].filter(Boolean).join(" · ")}
+                              </p>
+                            )}
+                            {mine.length > 0 && (
+                              <ul className="divide-y divide-border/50 border-t border-border/50">
+                                {mine.map(i => {
+                                  const why = undoClientSendBlocker(db, i);
+                                  return (
+                                    <li key={i.id} className="flex items-center gap-2 py-1.5 text-xs">
+                                      <span className="flex-1 min-w-0 truncate text-muted-foreground">
+                                        {gold ? `${i.quantityIssued} g ${i.purityOrQuality} (${deliveryFine(i)} g fine)` : `${fmtCt(i.quantityIssued, i.piecesIssued)}${i.diamondKind === "certified" ? " · certified" : ""}${i.purityOrQuality && i.purityOrQuality !== "Client's" ? ` · ${i.purityOrQuality}` : ""}`} → {db.factories.find(x => x.id === i.factoryId)?.name ?? "factory"} · {fmtDate(i.issuedAt)}
+                                      </span>
+                                      {editable && !why && (
+                                        <button type="button" onClick={async () => {
+                                          if (!(await confirmBox("Undo this send? It goes back to the client's material with us."))) return;
+                                          try { updateDbAs({ summary: `${order.orderNumber}: undid a send of the client's ${gold ? "gold" : "diamonds"}` }, d => undoClientSend(d, i.id)); toast.success("Undone"); }
+                                          catch (e) { toast.error(e instanceof Error ? e.message : "Couldn't undo"); }
+                                        }} className="text-muted-foreground hover:text-destructive font-medium">Undo</button>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   );
                 })()}
@@ -3429,12 +3529,13 @@ function OrderDetailPageBody() {
                       ) : diaIssues.length > 0 ? (
                         <p className="text-sm font-medium text-brand-dark">{diaIssues.length} diamond {diaIssues.length === 1 ? "entry" : "entries"} · {diaCt} ct</p>
                       ) : needsDia ? (
-                        <p className="text-sm font-medium text-destructive">Diamond still needed</p>
+                        <p className="text-sm font-medium text-destructive">{order.clientSupplied?.diamonds ? "Their diamonds to come" : "Diamond still needed"}</p>
                       ) : (
                         <p className="text-sm text-muted-foreground">Nothing to add</p>
                       )}
                       <p className="text-[11px] text-muted-foreground mt-0.5">
                         {order.noDiamond ? "No diamond in this piece"
+                          : diaMissing && needsDia && order.clientSupplied?.diamonds ? "Waiting for the client's diamonds — see above"
                           : diaMissing && needsDia ? (studio ? "Add the diamonds — from stock or bought new" : "Add material → from stock or buy new")
                           : otherIssues.length ? `+ ${otherIssues.length} other material${otherIssues.length === 1 ? "" : "s"}`
                           : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
@@ -4245,7 +4346,7 @@ function OrderDetailPageBody() {
                             <div className="inline-flex gap-0.5 p-0.5 rounded-md bg-white shrink-0">
                               {(["used", "returned"] as const).map(dd => (
                                 <button key={dd} onClick={() => setFaDia(m => ({ ...m, [i.id]: dd }))}
-                                  className={`h-7 px-2.5 rounded text-xs font-medium ${(faDia[i.id] ?? "used") === dd ? (dd === "used" ? "bg-primary text-white" : "bg-amber-500 text-white") : "text-muted-foreground"}`}>
+                                  className={`h-7 px-2.5 rounded text-xs font-medium ${(faDia[i.id] ?? "used") === dd ? (dd === "used" ? "bg-primary text-white" : "bg-foreground text-background") : "text-muted-foreground"}`}>
                                   {dd === "used" ? "Used" : "Returned"}
                                 </button>
                               ))}
@@ -4412,17 +4513,36 @@ function OrderDetailPageBody() {
         <Dialog open onOpenChange={o => { if (!o) setRsOffice(null); }}>
           <DialogContent className="max-w-md rounded-2xl">
             <DialogHeader><DialogTitle className="font-display text-2xl">Add to Ready Stock</DialogTitle></DialogHeader>
-            <p className="text-sm text-muted-foreground -mt-2">Which office will keep {order.orderNumber}? It shows there on the Ready Stock page.</p>
-            <Select value={rsOffice} onValueChange={setRsOffice}>
-              <SelectTrigger aria-label="Office" className="rounded-xl"><SelectValue placeholder="Choose the office" /></SelectTrigger>
-              <SelectContent>{readyStockOffices(db.settings).map(l => <SelectItem key={l} value={l}>{officeLabel(l)}</SelectItem>)}</SelectContent>
-            </Select>
+            <p className="text-sm text-muted-foreground -mt-2">{order.orderNumber} — {Math.max(1, order.quantity || 1)} piece{(order.quantity || 1) > 1 ? "s" : ""} onto the shelf.</p>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Office — where it is kept</Label>
+              <Select value={rsOffice} onValueChange={setRsOffice}>
+                <SelectTrigger aria-label="Office" className="rounded-xl"><SelectValue placeholder="Choose the office" /></SelectTrigger>
+                <SelectContent>{readyStockOffices(db.settings).map(l => <SelectItem key={l} value={l}>{officeLabel(l)}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label htmlFor="rs-cost" className="text-xs">Cost per piece (USD)</Label>
+                <Input id="rs-cost" type="number" min={0} step="0.01" value={rsCost} onChange={e => setRsCost(e.target.value)} className="rounded-xl" placeholder="—" />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="rs-price" className="text-xs">Selling price (USD)</Label>
+                <Input id="rs-price" type="number" min={0} step="0.01" value={rsPrice} onChange={e => setRsPrice(e.target.value)} className="rounded-xl" placeholder="Set later" />
+              </div>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1">
+              {Number(rsCost) > 0 ? "The cost is what this build cost — gold, diamonds and labour — per piece." : "No cost worked out yet — enter it, or set it in Ready Stock."}
+              {Number(rsCost) > 0 && Number(rsPrice) > 0 ? ` Margin ${Math.round((1 - Number(rsCost) / Number(rsPrice)) * 1000) / 10}%.` : ""}
+            </p>
             <DialogFooter>
               <Button variant="outline" onClick={() => setRsOffice(null)} className="rounded-xl">Cancel</Button>
               <AsyncButton disabled={!rsOffice} className="btn-hero rounded-xl px-6" onClick={async () => {
-                const office = rsOffice; setRsOffice(null);
+                const office = rsOffice;
+                const price = Number(rsPrice) || 0, cost = Number(rsCost) || 0;
+                if (price < 0 || cost < 0) { toast.error("Prices can't be negative"); return; }
                 try { localStorage.setItem("rs-build-office", office); } catch { /* ignore */ }
-                await addToReadyStock(office);
+                if (await addToReadyStock(office, price, cost)) setRsOffice(null);
               }}>Add to Ready Stock</AsyncButton>
             </DialogFooter>
           </DialogContent>

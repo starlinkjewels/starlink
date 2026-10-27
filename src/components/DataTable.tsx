@@ -745,7 +745,8 @@ export function CellTag({ children, tone = "neutral" }: { children: ReactNode; t
     neutral: "bg-secondary text-foreground/75 ring-border/70",
     green: "bg-success/10 text-success ring-success/25",
     red: "bg-destructive/10 text-destructive ring-destructive/25",
-    amber: "bg-amber-500/10 text-amber-800 ring-amber-500/25",
+    // "Look at this": solid in the theme's colour, so it stands apart from the tinted blue whatever the theme.
+    amber: "bg-primary text-primary-foreground ring-primary",
     blue: "bg-primary/10 text-primary ring-primary/25",
     violet: "bg-violet-500/10 text-violet-700 ring-violet-500/25",
   }[tone];

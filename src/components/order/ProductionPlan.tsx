@@ -46,7 +46,7 @@ const r2 = (n: number) => Math.round(n * 100) / 100;
  * Gold for a piece is normally the factory's own gold account (sent to them in
  * bulk) — shown against the estimate; it can also go from stock or be bought.
  */
-export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, planned, onPlanned, stub, isAdmin }: {
+export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, planned, onPlanned, stub, isAdmin, clientGives }: {
   order: PlanOrder;
   factoryId: string; onFactory: (id: string) => void;
   picks: StockPick[]; onPicks: (p: StockPick[]) => void;
@@ -54,6 +54,8 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   /** Stands in for the order in the purchase form (its id is the one the order will get). */
   stub: Order;
   isAdmin: boolean;
+  /** What the client gives for this piece — none of ours is planned for it. */
+  clientGives?: { gold: boolean; diamonds: boolean };
 }) {
   const db = useDb();
   const [buyOpen, setBuyOpen] = useState(false);
@@ -88,10 +90,13 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   const gemStock = stoneMats.flatMap(m => Object.entries(deriveStockBalances(db.stockMovements ?? [], m.id, co))
     .filter(([, q]) => q > 0).map(([key, q]) => ({ m, key, q: r2(q) })));
 
+  // What the client gives is theirs: ours of it is not offered (their centre stone
+  // with our small diamonds is still possible from the order afterwards).
+  const ourDia = !clientGives?.diamonds, ourGold = !clientGives?.gold;
   const addMenu = [
-    { label: "Diamonds from a bag", icon: Gem, onSelect: () => add({ material: "diamond", kind: "loose", key: "", qty: 0 }) },
-    { label: "Certified stones", icon: Sparkles, onSelect: () => add({ material: "diamond", kind: "certified", key: "", qty: 0, packetIds: [] }), disabled: !certified.length, hint: certified.length ? undefined : "None in stock" },
-    { label: "Gold from stock", icon: Boxes, onSelect: () => add({ material: "gold", kind: "bulk", key: goldBuckets[0]?.[0] ?? "", qty: 0 }), show: piece, disabled: !goldBuckets.length, hint: goldBuckets.length ? undefined : "No gold in stock" },
+    { label: "Diamonds from a bag", icon: Gem, show: ourDia, onSelect: () => add({ material: "diamond", kind: "loose", key: "", qty: 0 }) },
+    { label: "Certified stones", icon: Sparkles, show: ourDia, onSelect: () => add({ material: "diamond", kind: "certified", key: "", qty: 0, packetIds: [] }), disabled: !certified.length, hint: certified.length ? undefined : "None in stock" },
+    { label: "Gold from stock", icon: Boxes, onSelect: () => add({ material: "gold", kind: "bulk", key: goldBuckets[0]?.[0] ?? "", qty: 0 }), show: piece && ourGold, disabled: !goldBuckets.length, hint: goldBuckets.length ? undefined : "No gold in stock" },
     // The business's own materials (gems, platinum, findings…): in a piece, or sold loose with the stones.
     ...others.map(m => ({ label: `${m.name} from stock`, icon: Boxes, onSelect: () => add({ material: m.id as MaterialKey, kind: "bulk" as const, key: "", qty: 0 }) })),
   ];
@@ -117,7 +122,10 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
       )}
 
       {/* Gold: the factory's own account, against the estimate. */}
-      {piece && order.metalHasKarats && (
+      {piece && order.metalHasKarats && clientGives?.gold && (
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/[0.04] px-3.5 py-2.5 text-xs text-amber-800">Gold: the client's own — see Material above.</p>
+      )}
+      {piece && order.metalHasKarats && ourGold && (
         <div className="rounded-xl border border-border/70 px-3.5 py-3 text-sm space-y-1">
           <p className="font-medium text-foreground">Gold</p>
           <p className="text-xs text-muted-foreground">
@@ -286,8 +294,9 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
         <BuyMaterialForm open={buyOpen} onOpenChange={setBuyOpen} plan={{ stub, onPlanned }} />
       </div>
 
-      {/* Coverage */}
-      {(wantCt > 0 || plannedCt > 0) && (
+      {/* Coverage — of our diamonds; the client's own are taken in above. */}
+      {clientGives?.diamonds && piece && <p className="text-xs text-amber-800 flex items-center gap-1.5"><Gem className="h-3.5 w-3.5" />Diamonds: the client's own — see Material above.</p>}
+      {ourDia && (wantCt > 0 || plannedCt > 0) && (
         <p className={`text-xs flex items-center gap-1.5 ${plannedCt >= wantCt && wantCt > 0 ? "text-success" : "text-muted-foreground"}`}>
           <Gem className="h-3.5 w-3.5" />{piece || stone === "Diamond" ? "Diamonds" : "Stones"} planned: {plannedCt} ct{wantCt ? ` of ${wantCt} ct` : ""}{plannedCt >= wantCt && wantCt > 0 ? " — covered" : ""}
         </p>

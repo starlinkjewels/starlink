@@ -3,7 +3,7 @@
  * the status's own colour with a dot, never broken across lines.
  */
 const TONE: Record<string, { pill: string; dot: string }> = {
-  Waiting: { pill: "bg-amber-50 text-amber-800 ring-amber-600/20", dot: "bg-amber-500" },
+  Waiting: { pill: "bg-slate-100 text-slate-700 ring-slate-500/25", dot: "bg-slate-500" },
   Approved: { pill: "bg-sky-50 text-sky-800 ring-sky-600/20", dot: "bg-sky-500" },
   Rejected: { pill: "bg-rose-50 text-rose-700 ring-rose-600/20", dot: "bg-rose-500" },
   "In Production": { pill: "bg-violet-50 text-violet-800 ring-violet-600/20", dot: "bg-violet-500" },
