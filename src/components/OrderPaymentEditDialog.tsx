@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 
 const NONE = "__none";
 
@@ -23,6 +24,7 @@ const NONE = "__none";
  */
 export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Order; advance: AdvancePayment; onClose: () => void }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const { rec } = paymentReceipt(db, advance);
   const blocked = orderPaymentEditBlocker(db, order, advance);
@@ -109,11 +111,12 @@ export function OrderPaymentEditDialog({ order, advance, onClose }: { order: Ord
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Deposited to</Label>
-            <Select value={lockerId || NONE} onValueChange={pickLocker} disabled={!!blocked}>
+            <Select value={lockerId || NONE} onValueChange={addNew("locker", pickLocker)} disabled={!!blocked}>
               <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={NONE}>No account</SelectItem>
                 {db.lockers.filter(l => l.active !== false || l.id === lockerId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}
+                <AddNewItem kind="locker" />
               </SelectContent>
             </Select>
           </div>

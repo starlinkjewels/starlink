@@ -20,6 +20,7 @@ import {
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { confirmBox } from "@/lib/confirm";
 import { ProductionInfo } from "@/components/ProductionInfo";
+import { UserAvatar } from "@/components/UserAvatar";
 import type { ProductionTrack } from "@/lib/production";
 
 const PRIORITY_RANK: Record<string, number> = { Urgent: 0, "High Priority": 1, Normal: 2 };
@@ -256,7 +257,20 @@ export function OrderBoard({ orders, actions, tracks }: { orders: Order[]; actio
                             {actions && <MoreMenu size="xs" label={`Actions for ${o.orderNumber}`} title={o.orderNumber} actions={actions(o)} className="-my-1 -mr-1 shrink-0" />}
                           </div>
                           <p className="text-[11px] text-muted-foreground truncate">{pieceLine(o, false)}{o.designNumber ? ` · #${o.designNumber}` : ""}</p>
-                          <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
+                          {(() => {
+                            // Whose client it is — the person who handles them, as their initials.
+                            const mgr = client?.accountManagerId ? db.users.find(u => u.id === client.accountManagerId) : undefined;
+                            return (
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <p className="text-[11px] font-medium text-muted-foreground truncate">{o.forReadyStock ? "🏭 Ready Stock" : client?.companyName ?? "—"}</p>
+                                {mgr && (
+                                  <span title={`${client!.companyName} is handled by ${mgr.name}`} className="ml-auto shrink-0 inline-flex items-center gap-1">
+                                    <UserAvatar photo={mgr.photo} name={mgr.name} initials={2} className="h-5 w-5 rounded-full text-[8.5px] font-bold" />
+                                  </span>
+                                )}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       {(() => {

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import {
   FIELDS, fieldDef, fill, type Ctx, type EmailBlock, type FieldKey, type ListSpec, type OrderLike, type Pipeline, type Problem, type Step, type Trigger, type TriggerKind,
 } from "@/lib/pure/pipelines";
@@ -74,6 +75,7 @@ export function StepSheet({ step, trigger, problems, onChange, onDelete, onClose
   step: Step | null; trigger: Trigger; problems: Problem[];
   onChange: (s: Step) => void; onDelete: () => void; onClose: () => void;
 }) {
+  const addNew = useAddNew();
   const n = usePipelineNames();
   const sample = useSampleCtx(trigger);
   const scope = scopeOf(trigger);
@@ -245,9 +247,9 @@ export function StepSheet({ step, trigger, problems, onChange, onDelete, onClose
           </Field>
           {step.who === "person" && (
             <Field label="Person">
-              <Select value={step.userId ?? ""} onValueChange={v => set({ userId: v })}>
+              <Select value={step.userId ?? ""} onValueChange={addNew("employee", v => set({ userId: v }))}>
                 <SelectTrigger className="rounded-xl h-10"><SelectValue placeholder="Choose…" /></SelectTrigger>
-                <SelectContent>{n.staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.department ? ` · ${u.department}` : ""}</SelectItem>)}</SelectContent>
+                <SelectContent>{n.staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name}{u.department ? ` · ${u.department}` : ""}</SelectItem>)}<AddNewItem kind="employee" /></SelectContent>
               </Select>
             </Field>
           )}

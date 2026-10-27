@@ -11,6 +11,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Field, PanelActions } from "@/components/BillLayout";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
 import { writeBrokerReceipt } from "@/lib/partyPayments";
 
@@ -30,6 +31,7 @@ export function ReceiveFromBrokerSheet({ open, onOpenChange, brokerId: fixedBrok
   frame?: Frame;
 }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const [brokerPick, setBrokerId] = useState("");
   const [amount, setAmount] = useState("");
@@ -64,9 +66,9 @@ export function ReceiveFromBrokerSheet({ open, onOpenChange, brokerId: fixedBrok
       <div className="grid grid-cols-2 gap-3">
         {!fixedBroker && (
           <Field label="Broker" className="col-span-2">{id => (
-            <Select value={brokerId} onValueChange={setBrokerId}>
+            <Select value={brokerId} onValueChange={addNew("broker", setBrokerId)}>
               <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose broker" /></SelectTrigger>
-              <SelectContent>{brokers.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{brokers.map(b => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}<AddNewItem kind="broker" /></SelectContent>
             </Select>
           )}</Field>
         )}
@@ -79,9 +81,9 @@ export function ReceiveFromBrokerSheet({ open, onOpenChange, brokerId: fixedBrok
         <Field label="Date">{id => <Input id={id} type="date" value={date} onChange={e => setDate(e.target.value)} className="rounded-xl h-10" />}</Field>
         {!fixedLocker && (
           <Field label="Into account" className="col-span-2">{id => (
-            <Select value={lockerId} onValueChange={setLockerId}>
+            <Select value={lockerId} onValueChange={addNew("locker", setLockerId)}>
               <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose account" /></SelectTrigger>
-              <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
             </Select>
           )}</Field>
         )}

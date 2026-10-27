@@ -20,7 +20,7 @@ import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, kept
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
-import { AlertTriangle, Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
+import { Share2, AlertTriangle, Package, Plus, Search, Truck, ExternalLink, Rows3, LayoutGrid, Columns3, UserCog, Gem, FileText, FileSpreadsheet, Check, X, PackageCheck, TrendingUp, Eye, Pencil, XCircle, Trash2, Copy, Undo2 } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
@@ -34,6 +34,7 @@ import { exportProductsCsv, exportProductsPdf, exportProfitCsv } from "@/lib/pro
 import { BulkDispatchDialog, BulkDeliverDialog } from "@/components/BulkDispatchDialog";
 import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
 import { AssignOrdersDialog } from "@/components/AssignOrder";
+import { ShareProductsSheet } from "@/components/ShareProductsSheet";
 import { reachOf } from "@/lib/permissions";
 import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
@@ -191,6 +192,8 @@ export function OrdersPage() {
   // Several pieces leave in one parcel under one tracking number, so dispatch
   // is entered once for the whole selection rather than order by order.
   const [bulkDispatch, setBulkDispatch] = useState(false);
+  // Share the pieces with a client — a product PDF or a link (what is ticked, else what is shown).
+  const [sharing, setSharing] = useState<Order[] | null>(null);
   const [bulkDeliver, setBulkDeliver] = useState(false);
   const [bulkInvoice, setBulkInvoice] = useState(false);
   const [bulkAssign, setBulkAssign] = useState(false);
@@ -372,6 +375,7 @@ export function OrdersPage() {
       { label: "Colour", value: o.productColor },
       { label: "Rhodium", value: o.rhodium },
       { label: "Stamping", value: o.stamping },
+      { label: "Engraving", value: o.engraving?.text ? `“${o.engraving.text}” (${o.engraving.font === "script" ? "script" : "block"} letters)` : undefined },
       !!o.otherMetal && { label: "Second metal", value: `${o.otherMetal}${o.otherMetalWeight ? ` · ${o.otherMetalWeight} g` : ""}${o.otherMetalPurity ? ` · ${o.otherMetalPurity}‰` : ""}` },
       !!o.certificate && { label: "Certificate", value: o.certificateFee ? `Yes · ${fmtMoney(o.certificateFee)}` : "Yes" },
       { label: "Delivery time", value: o.deliveryTime },
@@ -443,7 +447,9 @@ export function OrdersPage() {
   // sheet says it is the admin's own — the others go to customers for a bulk
   // sale, and cost must never be one forward away from one.
   const exports: TableExport[] = isStaff && orders.length > 0 ? [
-    { label: "PDF", icon: FileText, hint: "Product sheet, for a customer", onSelect: () => exportProductsPdf(db, exportRows, exportName(), exportSubject()) },
+    { label: "Share — product PDF or link", icon: Share2, hint: "Photos, video, details, the price you set — a page a piece or a line sheet",
+      onSelect: () => { if (exportRows.length > 150) { toast.error("Tick up to 150 pieces to share at once"); return; } setSharing(exportRows); } },
+    { label: "PDF", icon: FileText, hint: "Order sheet — weights, totals, paid, due", onSelect: () => exportProductsPdf(db, exportRows, exportName(), exportSubject()) },
     { label: "Excel", icon: FileSpreadsheet, hint: "The same sheet, to edit", onSelect: () => exportProductsCsv(db, exportRows, exportName()) },
     ...(user!.role === "admin" ? [{ label: "Profit — Excel", icon: TrendingUp, hint: "Admin only — never send out", onSelect: () => exportProfitCsv(db, exportRows, exportName()) }] : []),
   ] : [];
@@ -733,6 +739,7 @@ export function OrdersPage() {
 
       {editing && <OrderEditDialog order={editing} onClose={() => setEditing(null)} />}
 
+      {sharing && <ShareProductsSheet orders={sharing} onClose={() => setSharing(null)} />}
       {bulkDispatch && chosen.length > 0 && (
         <BulkDispatchDialog
           orders={chosen}

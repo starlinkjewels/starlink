@@ -8,6 +8,7 @@ import { useAuth } from "@/lib/auth";
 import { metalHasKarats, metalOptions } from "@/lib/metals";
 import { choicesOf, listOf } from "@/lib/optionLists";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
+import { imageForUpload } from "@/lib/images";
 import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem } from "@/lib/weights";
 import { AsyncButton } from "@/components/AsyncButton";
@@ -24,31 +25,6 @@ import { describeEdit, logItem, whoOf } from "@/lib/readyStockHistory";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
-/** Compress a File to a base64 JPEG ≤800px — same convention as NewOrder.tsx/OrderDetail.tsx. */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const MAX = 800;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) {
-          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-          else       { w = Math.round(w * MAX / h); h = MAX; }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.75));
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 type ItemForm = {
   name: string;
@@ -123,7 +99,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
     if (remaining <= 0) { toast.error("Maximum 4 images allowed"); return; }
     const toProcess = Array.from(files).slice(0, remaining);
     try {
-      const compressed = await Promise.all(toProcess.map(compressImage));
+      // As picked — full size and sharpness (lib/images.ts).
+      const compressed = await Promise.all(toProcess.map(imageForUpload));
       setImages(prev => [...prev, ...compressed].slice(0, 4));
     } catch { toast.error("Failed to process image"); }
   };

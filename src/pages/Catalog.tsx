@@ -44,6 +44,7 @@ import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { findShare } from "@/lib/share";
 import { useDb } from "@/hooks/useDb";
 import { uploadDataUrl, uploadFile } from "@/lib/storage";
+import { imageForUpload, keepsOriginal } from "@/lib/images";
 import { useAuth } from "@/lib/auth";
 import { VirtualGrid } from "@/components/VirtualGrid";
 import {
@@ -73,28 +74,8 @@ const ITEM_ROW_ESTIMATE_PX = 230;
 /* ─────────────────────────────────────────────────────────────── */
 /*  Helpers                                                        */
 /* ─────────────────────────────────────────────────────────────── */
-const MAX_IMAGE_PX = 1200;
 const MAX_FILE_MB = 500; // large videos are uploaded in chunks (resumable), so a big cap is safe
 
-function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const img = new window.Image();
-    img.onload = () => {
-      const scale = Math.min(1, MAX_IMAGE_PX / Math.max(img.width, img.height));
-      const w = Math.round(img.width * scale);
-      const h = Math.round(img.height * scale);
-      const canvas = document.createElement("canvas");
-      canvas.width = w;
-      canvas.height = h;
-      canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-      URL.revokeObjectURL(url);
-      resolve(canvas.toDataURL("image/jpeg", 0.82));
-    };
-    img.onerror = reject;
-    img.src = url;
-  });
-}
 
 /* ─────────────────────────────────────────────────────────────── */
 /*  Heart button — shared by item cards & favorites section       */
@@ -1408,8 +1389,9 @@ export function CatalogPage() {
       // Anything else (PDF, Excel, Word, ZIP, CAD…) is kept as a plain file
       // attachment — uploaded as-is, listed in the folder, downloadable.
       try {
-        const data = isImage
-          ? await uploadDataUrl(await compressImage(file), `catalog/${folderId}`)
+        // A photo goes up as it was picked (full size); only a huge one or a HEIC is re-encoded.
+        const data = isImage && !keepsOriginal(file)
+          ? await uploadDataUrl(await imageForUpload(file), `catalog/${folderId}`)
           : await uploadFile(file, `catalog/${folderId}`, pct =>
               setUploadProgress({ done, total: all.length, pct }));
         const newItem: CatalogItem = {

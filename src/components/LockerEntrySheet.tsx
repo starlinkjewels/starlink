@@ -33,6 +33,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 
 type Dir = "in" | "out" | "transfer";
 /**
@@ -75,6 +76,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   open: boolean; onOpenChange: (v: boolean) => void; lockerId?: string;
 }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const can = useCan();
   const isAdmin = user?.role === "admin";
@@ -138,6 +140,9 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     return list.includes("Salary") ? list : ["Salary", ...list];
   }, [db.settings.expenseCategories]);
   const lockerCats = db.settings.lockerCategories?.length ? db.settings.lockerCategories : DEFAULT_LOCKER_CATEGORIES;
+  // A new one can be added right here — except a client to refund (a new client holds no credit).
+  const newKind: "client" | "supplier" | "factory" | "broker" | "employee" | null =
+    who === "supplier" || who === "factory" || who === "broker" || who === "employee" ? who : who === "client" && dir === "in" ? "client" : null;
   const parties: { id: string; label: string }[] = !who ? [] :
     who === "client" ? db.clients
       .filter(c => (dir === "out" ? (c.creditBalance || 0) > 0.005 : c.status === "active"))
@@ -301,9 +306,9 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
         {/* 1. The account */}
         <div>
           <Label className="text-xs">Account</Label>
-          <Select value={accountId} onValueChange={setAccountId}>
+          <Select value={accountId} onValueChange={addNew("locker", setAccountId)}>
             <SelectTrigger className={field} aria-label="Account"><SelectValue placeholder="Choose account" /></SelectTrigger>
-            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtCcy(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}</SelectContent>
+            <SelectContent>{lockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name} · {fmtCcy(lockerBalance(l, db.lockerTransactions), l.currency)}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
           </Select>
         </div>
 
@@ -320,9 +325,9 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
         {dir === "transfer" ? (
           <div>
             <Label className="text-xs">To account</Label>
-            <Select value={toAccount} onValueChange={v => { setToAccount(v); setRate(""); }}>
+            <Select value={toAccount} onValueChange={addNew("locker", v => { setToAccount(v); setRate(""); })}>
               <SelectTrigger className={field} aria-label="To account"><SelectValue placeholder="Choose account" /></SelectTrigger>
-              <SelectContent>{lockers.filter(l => l.id !== accountId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}</SelectContent>
+              <SelectContent>{lockers.filter(l => l.id !== accountId).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
             </Select>
           </div>
         ) : (
@@ -346,11 +351,14 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             {who && who !== "expense" && who !== "other" && (
               <div>
                 <Label className="text-xs">{WHO[who].name}</Label>
-                <Select value={partyId} onValueChange={v => { setPartyId(v); if (who !== "client") setAgainst(who === "broker" ? "__oldest" : who === "supplier" || who === "factory" ? "__fifo" : ""); }} disabled={!ready}>
+                <Select value={partyId} onValueChange={(() => {
+                  const pick = (v: string) => { setPartyId(v); if (who !== "client") setAgainst(who === "broker" ? "__oldest" : who === "supplier" || who === "factory" ? "__fifo" : ""); };
+                  return newKind ? addNew(newKind, pick) : pick;
+                })()} disabled={!ready}>
                   <SelectTrigger className={field} aria-label={WHO[who].name}>
                     <SelectValue placeholder={!ready ? "Loading…" : parties.length ? `Choose ${WHO[who].name.toLowerCase()}` : who === "client" && dir === "out" ? "No client holds credit" : "None yet"} />
                   </SelectTrigger>
-                  <SelectContent>{parties.map(x => <SelectItem key={x.id} value={x.id}>{x.label}</SelectItem>)}</SelectContent>
+                  <SelectContent>{parties.map(x => <SelectItem key={x.id} value={x.id}>{x.label}</SelectItem>)}{newKind && <AddNewItem kind={newKind} />}</SelectContent>
                 </Select>
                 {standing && <p className="text-[11px] text-muted-foreground mt-1">{standing}</p>}
               </div>

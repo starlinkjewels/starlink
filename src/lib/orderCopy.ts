@@ -58,5 +58,7 @@ export function copyFields(o: Order) {
     csGold: !!o.clientSupplied?.gold,
     csDiamonds: !!o.clientSupplied?.diamonds,
     csLoss: o.clientSupplied?.goldLossPct != null ? String(o.clientSupplied.goldLossPct) : "",
+    // An engraving is that client's own words — the copy starts without one.
+    engraving: { on: false, text: "", font: o.engraving?.font ?? "block" } as { on: boolean; text: string; font: "block" | "script" },
   };
 }

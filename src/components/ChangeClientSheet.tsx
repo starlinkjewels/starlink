@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { ActionSheet } from "@/components/ActionSheet";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { worksOnClient, type Order } from "@/lib/db";
@@ -10,6 +11,7 @@ import { changeOrderClient, clientChangeBlocker } from "@/lib/orderAdmin";
 /** Move an order to the right client — for a wrong pick on New Order, while nothing is billed or paid on it. */
 export function ChangeClientSheet({ order, open, onOpenChange }: { order: Order; open: boolean; onOpenChange: (o: boolean) => void }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const [clientId, setClientId] = useState(order.clientId);
   useEffect(() => { if (open) setClientId(order.clientId); }, [open, order.clientId]);
@@ -31,10 +33,11 @@ export function ChangeClientSheet({ order, open, onOpenChange }: { order: Order;
         <p className="text-sm text-amber-700">{why}</p>
       ) : (
         <div className="space-y-2">
-          <Select value={clientId} onValueChange={setClientId}>
+          <Select value={clientId} onValueChange={addNew("client", setClientId)}>
             <SelectTrigger className="h-11 rounded-xl" aria-label="Client"><SelectValue /></SelectTrigger>
             <SelectContent className="max-h-80">
               {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}{c.id === order.clientId ? " · now" : ""}</SelectItem>)}
+              <AddNewItem kind="client" />
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">Nothing is billed or paid on it yet, so only the order moves. It is billed by the new client&rsquo;s company.</p>

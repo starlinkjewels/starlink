@@ -326,8 +326,8 @@ export function ReadyStockPage() {
   };
   const exports: TableExport[] = canManage && items.length ? [
     // With a photo on every row; "Product sheets" is a page a piece, as a client gets it.
-    { label: "PDF", icon: FileText, hint: `${which} · with photos`, onSelect: () => void listPdf() },
-    { label: "Product sheets", icon: Share2, hint: "A page a piece — photos, CAD, details, price", onSelect: () => setSharing(exportItems) },
+    { label: "Share — product PDF or link", icon: Share2, hint: `${which} · photos, video, details, the price you set`, onSelect: () => setSharing(exportItems) },
+    { label: "Stock list — PDF", icon: FileText, hint: `${which} · with photos, quantities and totals`, onSelect: () => void listPdf() },
     { label: "Excel", icon: FileSpreadsheet, hint: which, onSelect: () => exportReadyStockCsv(exportItems, exportName(), isAdmin, i => stockCostOf(db, i)) },
   ] : [];
   // Lots on the shelf ("items", as the pages count them) — the pieces in them are the figures below.

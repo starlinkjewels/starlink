@@ -349,24 +349,28 @@ export function AppLayout() {
   const navGroups = studio ? studioSidebarGroups(allItems) : NAV_GROUPS
     .map(g => ({ ...g, items: g.items.filter(navFilter) }))
     .filter(g => g.items.length > 0);
-  // The app opens with one group open — the one holding the page you are on.
-  // After that each group opens and closes on its own, as many as you like;
-  // going to a page in a closed group opens it (the others stay as they are).
+  // Every group is open — nothing hides on its own. A group someone closes
+  // stays closed for them (this browser) until they open it again; going to a
+  // page in a closed group opens it.
   const groupOf = (path: string) => navGroups.find(g => g.items.some(i =>
     i.to === "/" ? path === "/" : path === i.to || path.startsWith(i.to + "/")))?.title;
-  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
-    const g = groupOf(loc.pathname) ?? navGroups[0]?.title;
-    return new Set(g ? [g] : []);
+  const CLOSED_KEY = "sl-nav-closed";
+  const [closedGroups, setClosedGroups] = useState<Set<string>>(() => {
+    try { return new Set(JSON.parse(localStorage.getItem(CLOSED_KEY) || "[]") as string[]); } catch { return new Set(); }
   });
+  const keepClosed = (next: Set<string>) => {
+    try { localStorage.setItem(CLOSED_KEY, JSON.stringify([...next])); } catch { /* private window */ }
+    return next;
+  };
   useEffect(() => {
     const g = groupOf(loc.pathname);
-    if (g) setOpenGroups(cur => (cur.has(g) ? cur : new Set([...cur, g])));
+    if (g) setClosedGroups(cur => (cur.has(g) ? keepClosed(new Set([...cur].filter(x => x !== g))) : cur));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loc.pathname]);
-  const toggleGroup = (title: string) => setOpenGroups(cur => {
+  const toggleGroup = (title: string) => setClosedGroups(cur => {
     const next = new Set(cur);
     if (next.has(title)) next.delete(title); else next.add(title);
-    return next;
+    return keepClosed(next);
   });
 
   /* Resolve page title — handle dynamic segments like /orders/:id */
@@ -393,43 +397,44 @@ export function AppLayout() {
   return (
     <div className="app-shell h-[100dvh] overflow-hidden bg-background flex">
       {/* ── Sidebar (desktop) ── */}
-      {/* A tablet or small laptop gets a rail of icons (names on hover), so the
-          page keeps its width; from 1280px the full list with its names. */}
-      <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen w-[4.5rem] xl:w-60">
-        <div className="px-3 xl:px-5 py-5 xl:py-4 flex items-center justify-center xl:justify-start">
+      {/* A phone has the bottom bar; a small tablet a rail of icons (names on
+          hover); from 1024px — an iPad held sideways, a laptop — the full list
+          with its names, always shown. */}
+      <aside className="app-sidebar hidden md:flex shrink-0 flex-col border-r bg-sidebar h-screen w-[4.5rem] lg:w-60">
+        <div className="px-3 lg:px-5 py-5 lg:py-4 flex items-center justify-center lg:justify-start">
           {/* The rail shows the square icon when there is one (the logo's left edge otherwise); the full list, the logo. */}
           {brandMark
-            ? <><img src={brandMark} alt={brandName(brand)} className="h-10 w-10 object-contain xl:hidden" /><BrandLogo wide className="h-12 w-auto max-w-full object-contain max-xl:hidden" /></>
-            : <BrandLogo wide className="h-10 w-10 object-cover object-left xl:h-12 xl:w-auto xl:object-contain" />}
+            ? <><img src={brandMark} alt={brandName(brand)} className="h-10 w-10 object-contain lg:hidden" /><BrandLogo wide className="h-12 w-auto max-w-full object-contain max-lg:hidden" /></>
+            : <BrandLogo wide className="h-10 w-10 object-cover object-left lg:h-12 lg:w-auto lg:object-contain" />}
         </div>
-        <nav className="app-sidebar-nav flex-1 px-2.5 xl:px-3 py-2 overflow-y-auto">
+        <nav className="app-sidebar-nav flex-1 px-2.5 lg:px-3 py-2 overflow-y-auto">
           {navGroups.map(group => {
-            const isCollapsed = !!group.title && !openGroups.has(group.title);
+            const isCollapsed = !!group.title && closedGroups.has(group.title);
             return (
               <div key={group.title || "top"} className="mb-1.5">
                 {group.title && <button
                   onClick={() => toggleGroup(group.title)} aria-expanded={!isCollapsed}
-                  className="app-nav-group hidden xl:flex w-full items-center justify-between px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground/60 hover:text-foreground transition-colors"
+                  className="app-nav-group hidden lg:flex w-full items-center justify-between px-3 pt-3 pb-1.5 text-[11px] font-bold uppercase tracking-[0.12em] text-brand-dark/80 hover:text-primary transition-colors"
                 >
-                  <span>{group.title}</span>
+                  <span className="flex items-center gap-2"><span className="h-3.5 w-[3px] rounded-full bg-primary/70" aria-hidden />{group.title}</span>
                   <ChevronDown className={`h-3.5 w-3.5 transition-transform ${isCollapsed ? "-rotate-90" : ""}`} />
                 </button>}
                 {/* On the rail a thin line marks where a group starts. */}
-                <div className="xl:hidden mx-2 my-2 border-t border-border/70" />
+                <div className="lg:hidden mx-2 my-2 border-t border-border/70" />
                 {/* The rail shows every item (it has no group headings to open). */}
                 {(
-                  <div className={`space-y-0.5 mt-0.5 ${isCollapsed ? "xl:hidden" : ""}`}>
+                  <div className={`space-y-0.5 mt-0.5 ${isCollapsed ? "lg:hidden" : ""}`}>
                     {group.items.map(item => (
                       <NavLink key={item.to} to={item.to} end={item.to === "/"} title={item.label} aria-label={item.label}
                         className={({ isActive }) =>
-                          `app-nav-item ${isActive ? "is-active" : ""} relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all justify-center xl:justify-start
+                          `app-nav-item ${isActive ? "is-active" : ""} relative flex items-center gap-3 px-3 py-2 rounded-xl text-sm font-medium transition-all justify-center lg:justify-start
                            ${isActive
                              ? "bg-primary text-primary-foreground shadow-soft"
                              : "text-foreground/70 hover:bg-secondary hover:text-foreground"}`}>
-                        <item.icon className="h-[18px] w-[18px] xl:h-4 xl:w-4 shrink-0" />
-                        <span className="hidden xl:inline truncate">{item.label}</span>
+                        <item.icon className="h-[18px] w-[18px] lg:h-4 lg:w-4 shrink-0" />
+                        <span className="hidden lg:inline truncate">{item.label}</span>
                         {item.to === "/notifications" && unread > 0 && (
-                          <span className="xl:ml-auto max-xl:absolute max-xl:top-1 max-xl:right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
+                          <span className="lg:ml-auto max-lg:absolute max-lg:top-1 max-lg:right-1.5 bg-destructive text-destructive-foreground text-[10px] font-bold px-1.5 py-0.5 rounded-full leading-none">
                             {unread > 99 ? "99+" : unread}
                           </span>
                         )}
@@ -443,11 +448,11 @@ export function AppLayout() {
         </nav>
 
         {/* Sidebar user card */}
-        <div className="app-signout p-2.5 xl:p-3 border-t">
+        <div className="app-signout p-2.5 lg:p-3 border-t">
           <button
             onClick={() => { logout(); navigate("/login"); }} title="Sign out" aria-label="Sign out"
-            className="w-full flex items-center justify-center xl:justify-start gap-3 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
-            <LogOut className="h-4 w-4" /><span className="hidden xl:inline">Sign out</span>
+            className="w-full flex items-center justify-center lg:justify-start gap-3 px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors">
+            <LogOut className="h-4 w-4" /><span className="hidden lg:inline">Sign out</span>
           </button>
         </div>
       </aside>

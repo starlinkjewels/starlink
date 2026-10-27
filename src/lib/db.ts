@@ -570,6 +570,8 @@ export interface Order {
   // Finishing options
   rhodium?: string; // "No Rhodium" | "Diamond Part White" | "Full White" | "Other"
   stamping?: string; // "No Stamping" | "KT Stamping" | "Diamond Weight + KT Stamp" | "Other"
+  /** Words engraved inside the piece, in "block" or "script" letters. An engraved piece is a final sale. */
+  engraving?: { text: string; font: "block" | "script" };
   // CAD design image (uploaded after CAD Approved step)
   cadImage?: string;
   // Optional 3D model file (.3dm) — when present, the order shows a "View 360°"
@@ -634,6 +636,8 @@ export interface Task {
   title: string;
   assignedTo: string; // userId (employee)
   assignedBy: string; // userId (admin)
+  /** Given by someone else: they are told when it is done (tasks from before this was kept say nothing). */
+  tellWhenDone?: boolean;
   completed: boolean;
   completedAt?: string;
   createdAt: string;
@@ -915,8 +919,14 @@ export interface SharePiece {
   diamondType?: string;
   /** Colour · clarity, e.g. "G-H · VS". */
   diamondQuality?: string;
+  /** The stones' size — "5.30 x 3.30", "1.5 mm". */
+  diamondSize?: string;
   photos: string[];
   cad?: string;
+  /** The piece's video (a link to the file), when it is shared. */
+  video?: string;
+  /** Its weights are still the order's estimates (not weighed yet). */
+  weightsEstimated?: boolean;
   /** USD; only when prices are shown. */
   price?: number;
 }

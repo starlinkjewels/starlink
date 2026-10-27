@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { MoreMenu } from "@/components/MoreMenu";
 import {
   answerAsk, deleteReminder, newReminderId, reminderDone, saveReminder, snoozeReminder, subscribeMyAsks, subscribeReminders, type Ask, type Reminder,
@@ -30,6 +31,7 @@ const stateOf = (r: Reminder, now: number): State => (r.done ? "done" : +new Dat
 
 /** A reminder set by hand: for me (an admin may set one for anyone), once or again and again. */
 export function ReminderSheet({ open, onClose, editing }: { open: boolean; onClose: () => void; editing?: Reminder | null }) {
+  const addNew = useAddNew();
   const db = useDb();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
@@ -83,9 +85,9 @@ export function ReminderSheet({ open, onClose, editing }: { open: boolean; onClo
           </div>
           {isAdmin && (
             <div className="space-y-1.5"><Label className="text-xs font-semibold">For</Label>
-              <Select value={f.userId} onValueChange={v => setF({ ...f, userId: v })}>
+              <Select value={f.userId} onValueChange={addNew("employee", v => setF(p => ({ ...p, userId: v })))}>
                 <SelectTrigger className="rounded-xl h-10"><SelectValue /></SelectTrigger>
-                <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.id === user?.id ? `Me (${u.name})` : u.name}</SelectItem>)}</SelectContent>
+                <SelectContent>{staff.map(u => <SelectItem key={u.id} value={u.id}>{u.id === user?.id ? `Me (${u.name})` : u.name}</SelectItem>)}<AddNewItem kind="employee" /></SelectContent>
               </Select>
             </div>
           )}

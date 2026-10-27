@@ -120,20 +120,14 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
         return (
           <section key={`s${i}`} className="space-y-2.5">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label}</p>
-            {f.options.length <= 6 ? (
-              <div className="flex flex-wrap gap-1.5">
-                <Pill on={!f.value} onClick={() => f.onChange("")}>{all}</Pill>
-                {f.options.map(o => <Pill key={o.value} on={f.value === o.value} onClick={() => f.onChange(o.value)}>{o.label}</Pill>)}
-              </div>
-            ) : (
-              <Select value={f.value || "__all"} onValueChange={v => f.onChange(v === "__all" ? "" : v)}>
-                <SelectTrigger className="h-9 rounded-lg text-sm"><SelectValue /></SelectTrigger>
-                <SelectContent className="max-h-72">
-                  <SelectItem value="__all">{all}</SelectItem>
-                  {f.options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            )}
+            {/* Always a dropdown — one line a filter, however many choices. */}
+            <Select value={f.value || "__all"} onValueChange={v => f.onChange(v === "__all" ? "" : v)}>
+              <SelectTrigger className={`h-10 rounded-xl text-sm ${f.value ? "border-primary/50 bg-primary/[0.04] text-primary font-medium" : ""}`} aria-label={f.label}><SelectValue /></SelectTrigger>
+              <SelectContent className="max-h-72">
+                <SelectItem value="__all">{all}</SelectItem>
+                {f.options.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </section>
         );
       })}

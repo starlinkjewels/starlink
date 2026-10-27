@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 
 /** Whether the signed-in person may edit / delete an expense — and why not.
  *  The one rule (src/lib/expenseRights.ts) for every list of expenses. */
@@ -53,6 +54,7 @@ export function ExpenseEditDialog({ expenseId, onClose }: { expenseId: string | 
 
 function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   const db = useDb();
+  const addNew = useAddNew();
   // Its account entry moves with it — wait for the account entries before saving.
   const ready = useLoaded(["lockerTransactions"]);
   const [f, setF] = useState({
@@ -173,11 +175,12 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
           {/* Kept for any category: wages and advances paid to someone sit on
               their salary ledger too. Required for Salary. */}
           <Label className="text-xs">Paid to team member{f.category === "Salary" ? " *" : ""}</Label>
-          <Select value={f.paidTo || "__none"} onValueChange={v => setF({ ...f, paidTo: v === "__none" ? "" : v })}>
+          <Select value={f.paidTo || "__none"} onValueChange={addNew("employee", v => setF(p => ({ ...p, paidTo: v === "__none" ? "" : v })))}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__none">Nobody</SelectItem>
               {staff.map(u => <SelectItem key={u.id} value={u.id}>{u.name} ({u.role})</SelectItem>)}
+              <AddNewItem kind="employee" />
             </SelectContent>
           </Select>
         </div>
@@ -189,11 +192,12 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
 
         <div className="sm:col-span-2">
           <Label className="text-xs">Related client</Label>
-          <Select value={f.clientId || "__none"} onValueChange={v => setF({ ...f, clientId: v === "__none" ? "" : v })}>
+          <Select value={f.clientId || "__none"} onValueChange={addNew("client", v => setF(p => ({ ...p, clientId: v === "__none" ? "" : v })))}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="__none">No client</SelectItem>
               {clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+              <AddNewItem kind="client" />
             </SelectContent>
           </Select>
         </div>

@@ -7,6 +7,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { fmtMoneyInr, applyDiscountPct } from "@/lib/manufacturing";
 import { useDb } from "@/hooks/useDb";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import type { Purchase } from "@/lib/db";
 import type { PurchaseEdit } from "@/lib/purchaseVoid";
 import { toast } from "sonner";
@@ -35,6 +36,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   lockNote?: string;
 }) {
   const db = useDb();
+  const addNew = useAddNew();
   const isGold = purchase?.material === "gold";
   const isCertified = purchase?.material === "diamond" && purchase?.diamond?.kind === "certified";
   const unit = materialUnit(db.settings, purchase?.material);
@@ -200,12 +202,13 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
             with it. */}
         <div>
           <Label className="text-xs">Supplier</Label>
-          <Select value={supplierId} onValueChange={setSupplierId}>
+          <Select value={supplierId} onValueChange={addNew("supplier", setSupplierId)}>
             <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose supplier" /></SelectTrigger>
             <SelectContent>
               {db.suppliers.filter(s => s.active !== false || s.id === purchase.supplierId)
                 .sort((a, b) => a.name.localeCompare(b.name))
                 .map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              <AddNewItem kind="supplier" />
             </SelectContent>
           </Select>
           {supplierId !== purchase.supplierId && (
