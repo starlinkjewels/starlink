@@ -51,11 +51,13 @@ export default async function handler(req: Request): Promise<Response> {
   const brand = share.brand?.name || "Starlink Jewels";
   const pieces = share.pieces ?? [];
   const one = pieces.find(p => p.id === url.searchParams.get("p")) ?? (pieces.length === 1 ? pieces[0] : undefined);
-  const photo = one ? (one.photos?.[0] || one.cad) : (pieces.find(p => p.photos?.[0])?.photos?.[0] ?? share.items?.find(i => i.type !== "video")?.url);
+  // A photo — never a video, a 3D model or a document from a Catalog folder.
+  const isPhoto = (u?: string) => !!u && /\.(jpe?g|png|webp|gif)(\?|$)/i.test(decodeURIComponent(u.split("?")[0]));
+  const photo = one ? (one.photos?.[0] || one.cad) : (pieces.find(p => p.photos?.[0])?.photos?.[0] ?? share.items?.find(i => i.type === "image" || isPhoto(i.url))?.url);
   const title = one ? one.name : share.title || brand;
   const line = one
     ? [one.sku && `Design ${one.sku}`, [one.karat, one.metal].filter(Boolean).join(" "), one.diamondCt && `${one.diamondCt} ct`, share.showPrice && one.price != null && money(one.price)].filter(Boolean).join(" · ")
-    : [`${pieces.length || share.count || 0} pieces`, share.note].filter(Boolean).join(" · ");
+    : [pieces.length ? `${pieces.length} pieces` : `${share.count || share.items?.length || 0} items`, share.note].filter(Boolean).join(" · ");
   const image = photo ? `${url.origin}/_vercel/image?url=${encodeURIComponent(photo)}&w=640&q=75` : "";
   const link = `${url.origin}/s/${id}${one && pieces.length > 1 ? `?p=${encodeURIComponent(one.id)}` : ""}`;
 
