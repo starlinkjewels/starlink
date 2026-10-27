@@ -3468,6 +3468,24 @@ function OrderDetailPageBody() {
                         const more = !open ? null
                           : sent > 0 ? { label: withUs > 0 ? "Send more" : "Receive more", mode: withUs > 0 ? "send" as const : "receive" as const }
                           : withUs > 0 ? { label: "Receive more", mode: "receive" as const } : null;
+                        // Theirs not coming after all (nothing of theirs at the factory for this piece): the piece takes ours.
+                        const flagged = gold ? !!order.clientSupplied?.gold : !!order.clientSupplied?.diamonds;
+                        const oursInstead = open && sent === 0 && flagged ? async () => {
+                          const what = gold ? "gold" : "diamonds";
+                          const keep = received > 0 ? `
+
+The ${unit(received)} of theirs received for this order stays on their account — hand it back from the client's page.` : "";
+                          if (!(await confirmBox(`The client is not giving the ${what} for ${order.orderNumber}?
+
+The piece then takes ours — add them from stock or buy them, as for any order.${keep}`, { title: `Our ${what} instead`, confirmText: `Use our ${what}` }))) return;
+                          updateDbAs({ summary: `${order.orderNumber}: our ${what} instead of the client's` }, d => {
+                            const o = d.orders.find(x => x.id === order.id);
+                            if (!o?.clientSupplied) return;
+                            if (gold) { delete o.clientSupplied.gold; delete o.clientSupplied.goldLossPct; } else delete o.clientSupplied.diamonds;
+                            if (!o.clientSupplied.gold && !o.clientSupplied.diamonds) delete o.clientSupplied;
+                          });
+                          toast.success(`Our ${what} now — add them with Add material`);
+                        } : null;
                         return (
                           <div key={m} className="rounded-lg bg-white border border-border/60 px-3 py-2.5 space-y-1.5">
                             <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
@@ -3475,6 +3493,7 @@ function OrderDetailPageBody() {
                               <p className="text-sm font-medium text-brand-dark">{gold ? "Gold" : "Diamonds"}{gold && order.clientSupplied?.goldLossPct ? <span className="text-xs font-normal text-muted-foreground"> · {order.clientSupplied.goldLossPct}% loss agreed</span> : null}</p>
                               <span className={`text-xs font-medium ${state.tone}`}>{state.t}</span>
                               <span className="ml-auto flex items-center gap-3">
+                                {oursInstead && <button type="button" onClick={() => void oursInstead()} className="text-xs font-medium text-muted-foreground hover:text-foreground hover:underline">Ours instead</button>}
                                 {more && <button type="button" onClick={() => setCmSheet({ mode: more.mode, material: m })} className="text-xs font-medium text-primary hover:underline">{more.label}</button>}
                                 {next && <Button size="sm" onClick={next.onClick} className="h-8 rounded-lg btn-hero">{next.label}</Button>}
                               </span>

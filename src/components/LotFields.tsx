@@ -12,8 +12,6 @@ import { Package } from "lucide-react";
 
 const NONE = "__none";
 
-/** Round (or not given yet) — the shapes measured by sieve. */
-export const isRoundShape = (shape: string | undefined) => !shape?.trim() || /^(round|rbc|brilliant)/i.test(shape.trim());
 
 /**
  * A dropdown fed by one of the business's lists (Settings → Dropdown lists) —
@@ -124,14 +122,13 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
   const lot = showBag ? lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === key && l.ct > 0) : undefined;
   const lbl = compact ? "text-[11px]" : "text-xs";
   const box = compact ? "h-9 rounded-lg mt-1" : "h-10 rounded-xl mt-1";
-  // Sieve sizes are for round stones; a fancy shape is recorded by its mm.
-  const round = isRoundShape(value.shape);
+  // Every shape takes a sieve size as well as its mm — fancy shapes are sieved too.
   return (
     <div className="space-y-2">
       <div className={`grid grid-cols-2 ${gem ? "sm:grid-cols-4" : "sm:grid-cols-5"} gap-2`}>
         <div>
           <Label htmlFor={`${idPrefix}-shape`} className={lbl}>Shape</Label>
-          <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange(isRoundShape(v || "Round") ? { shape: v || "Round" } : { shape: v, size: "" })} optional={false} className={box} />
+          <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} className={box} />
         </div>
         <div>
           <Label htmlFor={`${idPrefix}-mm`} className={lbl}>MM</Label>
@@ -139,9 +136,8 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
         </div>
         {!gem && (
           <div>
-            <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve{!round && <span className="text-muted-foreground font-normal"> · round only</span>}</Label>
-            <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={round ? value.size : ""} onChange={v => onChange({ size: v })} className={box}
-              disabled={!round} placeholder={round ? "—" : "Use MM"} />
+            <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve</Label>
+            <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={value.size} onChange={v => onChange({ size: v })} className={box} placeholder="—" />
           </div>
         )}
         <div>
