@@ -79,8 +79,13 @@ export function LotPicker({ value, onChange, companyId, id, className = "h-10 ro
     }}>
       <SelectTrigger id={id} className={className}><SelectValue placeholder={lots.length || elsewhere.length ? "Choose a lot in stock" : "No loose diamonds in stock"} /></SelectTrigger>
       <SelectContent className="max-h-80">
-        {elsewhere.length > 0 && lots.length > 0 && <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">This company</SelectLabel>}
-        {lots.map(l => <SelectItem key={l.key} value={l.key}>{row(l, companyId)}</SelectItem>)}
+        {/* A heading only inside its group — the list refuses one on its own (and the page went down). */}
+        {elsewhere.length > 0 && lots.length > 0 ? (
+          <SelectGroup>
+            <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">This company</SelectLabel>
+            {lots.map(l => <SelectItem key={l.key} value={l.key}>{row(l, companyId)}</SelectItem>)}
+          </SelectGroup>
+        ) : lots.map(l => <SelectItem key={l.key} value={l.key}>{row(l, companyId)}</SelectItem>)}
         {elsewhere.map(o => (
           <SelectGroup key={o.id}>
             <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground pt-2">From {o.name} — moved across when saved</SelectLabel>
