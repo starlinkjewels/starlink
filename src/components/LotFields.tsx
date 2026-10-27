@@ -5,7 +5,7 @@ import { ListCombo } from "@/components/ListCombo";
 import { bagNoOf } from "@/lib/diamondBags";
 import { stockAverageRate } from "@/lib/orderCost";
 import { fmtMoneyInr } from "@/lib/manufacturing";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Package } from "lucide-react";
@@ -45,27 +45,49 @@ export function lotStockText(l: LotBalance, avg: number | null): string {
  * order's Diamond from stock, Sell diamond), so they always come out of a lot
  * that holds them. Older stock with only a shape reads "size not recorded".
  */
-export function LotPicker({ value, onChange, companyId, id, className = "h-10 rounded-xl" }: {
-  value: string; onChange: (key: string, lot?: LotBalance) => void; companyId: string; id?: string; className?: string;
+export function LotPicker({ value, onChange, companyId, id, className = "h-10 rounded-xl", others, fromCompany }: {
+  value: string; onChange: (key: string, lot?: LotBalance, fromCompany?: string) => void; companyId: string; id?: string; className?: string;
+  /** Our other companies — their lots are offered too, and are moved across when used. */
+  others?: { id: string; name: string }[];
+  /** The company the chosen lot is in, when it is one of `others`. */
+  fromCompany?: string;
 }) {
   const db = useDb();
   // In the order a diamond office keeps them: shape, then size, then grade.
-  const lots = lotBalances(db.stockMovements ?? [], companyId).filter(l => l.ct > 0)
+  const lotsOf = (co: string) => lotBalances(db.stockMovements ?? [], co).filter(l => l.ct > 0)
     .sort((a, b) => a.spec.shape.localeCompare(b.spec.shape) || sizeOrder(a.spec.mm, b.spec.mm) || sizeOrder(a.spec.size, b.spec.size) || a.key.localeCompare(b.key));
+  const lots = lotsOf(companyId);
+  const elsewhere = (others ?? []).map(o => ({ ...o, lots: lotsOf(o.id) })).filter(o => o.lots.length > 0);
   const now = new Date().toISOString();
-  const avgOf = (k: string) => stockAverageRate(db, "diamond", k, now, companyId === "all" ? undefined : companyId);
+  const avgOf = (k: string, co: string) => stockAverageRate(db, "diamond", k, now, co === "all" ? undefined : co);
+  const SEP = "::";
+  const cur = fromCompany && fromCompany !== companyId ? `${fromCompany}${SEP}${value}` : value;
+  const row = (l: LotBalance, co: string) => (
+    <>
+      {bagNoOf(db, l.key) && <span className="font-semibold text-primary">{bagNoOf(db, l.key)} · </span>}
+      <span className="font-medium">{lotLabel(l.key)}</span>
+      <span className="text-muted-foreground"> — {lotStockText(l, avgOf(l.key, co))}</span>
+    </>
+  );
   return (
-    <Select value={value || ""} onValueChange={k => onChange(k, lots.find(l => l.key === k))}>
-      <SelectTrigger id={id} className={className}><SelectValue placeholder={lots.length ? "Choose a lot in stock" : "No loose diamonds in stock"} /></SelectTrigger>
+    <Select value={cur || ""} onValueChange={v => {
+      const i = v.indexOf(SEP);
+      if (i > 0 && elsewhere.some(o => o.id === v.slice(0, i))) {
+        const co = v.slice(0, i), k = v.slice(i + SEP.length);
+        onChange(k, elsewhere.find(o => o.id === co)!.lots.find(l => l.key === k), co);
+      } else onChange(v, lots.find(l => l.key === v));
+    }}>
+      <SelectTrigger id={id} className={className}><SelectValue placeholder={lots.length || elsewhere.length ? "Choose a lot in stock" : "No loose diamonds in stock"} /></SelectTrigger>
       <SelectContent className="max-h-80">
-        {lots.map(l => (
-          <SelectItem key={l.key} value={l.key}>
-            {bagNoOf(db, l.key) && <span className="font-semibold text-primary">{bagNoOf(db, l.key)} · </span>}
-            <span className="font-medium">{lotLabel(l.key)}</span>
-            <span className="text-muted-foreground"> — {lotStockText(l, avgOf(l.key))}</span>
-          </SelectItem>
+        {elsewhere.length > 0 && lots.length > 0 && <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground">This company</SelectLabel>}
+        {lots.map(l => <SelectItem key={l.key} value={l.key}>{row(l, companyId)}</SelectItem>)}
+        {elsewhere.map(o => (
+          <SelectGroup key={o.id}>
+            <SelectLabel className="text-[11px] uppercase tracking-wider text-muted-foreground pt-2">From {o.name} — moved across when saved</SelectLabel>
+            {o.lots.map(l => <SelectItem key={o.id + l.key} value={`${o.id}${SEP}${l.key}`}>{row(l, o.id)}</SelectItem>)}
+          </SelectGroup>
         ))}
-        {value && !lots.some(l => l.key === value) && <SelectItem value={value}>{lotLabel(value)} — none in stock</SelectItem>}
+        {value && !fromCompany && !lots.some(l => l.key === value) && <SelectItem value={value}>{lotLabel(value)} — none in stock</SelectItem>}
       </SelectContent>
     </Select>
   );
