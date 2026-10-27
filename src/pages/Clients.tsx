@@ -138,6 +138,8 @@ export function ClientsPage() {
   const meUser = dbNow.users.find(u => u.id === user!.id) ?? user!;
   const myCompanies = companiesForUser(dbNow.settings, meUser);
   const [coFilter, setCoFilter] = useState("all");
+  // Whose clients: the person who handles them ("__none" = nobody yet).
+  const [byFilter, setByFilter] = useState("all");
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
@@ -185,6 +187,7 @@ export function ClientsPage() {
   };
   const list = scoped
     .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
+    .filter(c => byFilter === "all" || (byFilter === "__none" ? !handlerOf(db, c) : c.accountManagerId === byFilter))
     .filter(c =>
       c.companyName.toLowerCase().includes(q.toLowerCase()) ||
       c.ownerName.toLowerCase().includes(q.toLowerCase())
@@ -196,11 +199,19 @@ export function ClientsPage() {
   // The company filter, behind one Filters button in the table's (or the
   // grid's) toolbar — only once there is more than one company. "All" is the
   // page's own "all", so it narrows exactly as it did.
-  const filters: TableFilter[] = multiCo ? [
-    { kind: "select", label: "Company", value: coFilter === "all" ? "" : coFilter, onChange: v => setCoFilter(v || "all"),
-      options: companiesOf(dbNow.settings).map(co => ({ value: co.id, label: co.name })), allLabel: "All companies" },
-  ] : [];
-  const clearFilters = () => setCoFilter("all");
+  // Who handles them — everyone who handles one of the clients this person sees.
+  const handlers = [...new Map(scoped.map(c => handlerOf(db, c)).filter((u): u is NonNullable<typeof u> => !!u).map(u => [u.id, u])).values()]
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const unhandled = scoped.some(c => !handlerOf(db, c));
+  const filters: TableFilter[] = [
+    ...(multiCo ? [{ kind: "select" as const, label: "Company", value: coFilter === "all" ? "" : coFilter, onChange: (v: string) => setCoFilter(v || "all"),
+      options: companiesOf(dbNow.settings).map(co => ({ value: co.id, label: co.name })), allLabel: "All companies" }] : []),
+    ...(user!.role === "admin" && handlers.length + (unhandled ? 1 : 0) > 1 ? [{ kind: "select" as const, label: "Handled by", value: byFilter === "all" ? "" : byFilter, onChange: (v: string) => setByFilter(v || "all"),
+      options: [...handlers.map(u => ({ value: u.id, label: `${u.name}${u.role === "admin" ? " (admin)" : ""} · ${scoped.filter(c => c.accountManagerId === u.id).length}` })),
+        ...(unhandled ? [{ value: "__none", label: `Not assigned · ${scoped.filter(c => !handlerOf(db, c)).length}` }] : [])],
+      allLabel: "Everyone" }] : []),
+  ];
+  const clearFilters = () => { setCoFilter("all"); setByFilter("all"); };
   const countText = `${total} client${total !== 1 ? "s" : ""}`;
 
   // Grand totals across all clients this user can see: outstanding = money
@@ -269,7 +280,7 @@ export function ClientsPage() {
         sub={c.ownerName || c.email || c.phone || "—"} /> },
     ...(multiCo ? [{ key: "company", header: "Company", sortValue: (c: Client) => companyById(dbNow.settings, companyIdOfClient(c)).name,
       cell: (c: Client) => <CellTag tone="blue">{companyById(dbNow.settings, companyIdOfClient(c)).name}</CellTag> }] : []),
-    ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by", hidden: true,
+    ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by",
       sortValue: (c: Client) => handlerName(db, c),
       cell: (c: Client) => <span className={`whitespace-nowrap ${c.accountManagerId ? "" : "text-muted-foreground"}`}>{handlerName(db, c)}</span> }] : []),
     { key: "orders", header: "Orders", align: "right", kind: "number", sortValue: c => statsOf(c).total,
@@ -394,7 +405,7 @@ export function ClientsPage() {
             search={{ value: q, onChange: setQ, placeholder: "Search clients..." }}
             filters={filters}
             onClearFilters={clearFilters}
-            resetKey={`${q}|${coFilter}`}
+            resetKey={`${q}|${coFilter}|${byFilter}`}
             rows={list}
             columns={columns}
             rowKey={c => c.id}

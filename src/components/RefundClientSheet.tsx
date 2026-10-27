@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { sheetFrame, type Frame } from "@/components/SheetFrame";
 
 /**
@@ -28,6 +29,7 @@ export function RefundClientSheet({ open, onOpenChange, clientId: fixedClient, l
   frame?: Frame;
 }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const [clientPick, setClientId] = useState("");
   const [lockerPick, setLockerId] = useState("");
@@ -135,9 +137,9 @@ export function RefundClientSheet({ open, onOpenChange, clientId: fixedClient, l
         {!fixedLocker && (
           <div>
             <Label className="text-xs">Paid from account *</Label>
-            <Select value={lockerId} onValueChange={v => { setLockerId(v); setRate(""); }}>
+            <Select value={lockerId} onValueChange={addNew("locker", v => { setLockerId(v); setRate(""); })}>
               <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose account" /></SelectTrigger>
-              <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}</SelectContent>
+              <SelectContent>{db.lockers.filter(l => l.active !== false).map(l => <SelectItem key={l.id} value={l.id}>{l.name} ({ccy(l.currency)})</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
             </Select>
           </div>
         )}

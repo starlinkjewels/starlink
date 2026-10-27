@@ -103,6 +103,9 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
   const save = async () => {
     if (!user) return;
     if (plan.blocked) { toast.error(plan.blocked); return; }
+    // Engraved pieces are a final sale — taken back only when someone says so (a fault, a wrong engraving).
+    const engraved = live.filter(o => (qty[o.id] ?? 0) > 0 && o.engraving?.text);
+    if (engraved.length && !(await confirmBox(`${engraved.map(o => o.orderNumber).join(", ")} ${engraved.length === 1 ? "is" : "are"} engraved — a final sale.\n\nTake ${engraved.length === 1 ? "it" : "them"} back anyway (a fault, a wrong engraving)?`, { title: "Engraved piece", confirmText: "Take it back" }))) return;
     let no = "";
     try { no = await reserveCreditNoteNumber(loadDb().orders); }
     catch { toast.error("Could not get a credit note number — check the connection and try again."); return; }

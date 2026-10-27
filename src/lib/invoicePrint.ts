@@ -109,7 +109,7 @@ function itemRowHtml(sr: number, order: Order, mainShape?: string, stones: strin
   return `<tr class="item-row">
         <td class="c">${sr}</td>
         <td class="c">${stockId}</td>
-        <td class="l">${itemDescription(order, mainShape)}${stonesHtml(stones)}${clientMaterialHtml(order)}${returnedQty(order) > 0
+        <td class="l">${itemDescription(order, mainShape)}${stonesHtml(stones)}${clientMaterialHtml(order)}${order.engraving?.text ? `<div style="font-size:9px;color:#333;margin-top:1px;">Engraved: “${esc(order.engraving.text)}” · final sale</div>` : ""}${returnedQty(order) > 0
           ? `<div style="font-size:9px;color:#b91c1c;margin-top:1px;">${returnedQty(order)} of ${order.quantity} returned — ${[...new Set((order.returns ?? []).map(r => r.creditNoteNo))].join(", ")}</div>` : ""}</td>
         <td class="c">${order.quantity}</td>
         <td class="c">${weight}</td>

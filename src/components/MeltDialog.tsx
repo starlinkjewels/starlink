@@ -14,6 +14,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 
 // Quick picks: Settings → Dropdown lists → Melt reasons.
 const INHOUSE = "__inhouse";
@@ -28,6 +29,7 @@ const INHOUSE = "__inhouse";
  */
 export function MeltDialog({ order, onClose }: { order: Order; onClose: () => void }) {
   const db = useDb();
+  const addNew = useAddNew();
   const { user } = useAuth();
   const plan = useMemo(() => meltPlan(db, order), [db, order]);
   const [to, setTo] = useState<MeltTo>("factory");
@@ -146,19 +148,20 @@ export function MeltDialog({ order, onClose }: { order: Order; onClose: () => vo
                   {to === "factory" ? (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Factory</p>
-                      <Select value={factoryId} onValueChange={setFactoryId}>
+                      <Select value={factoryId} onValueChange={addNew("factory", setFactoryId)}>
                         <SelectTrigger className="h-10 rounded-xl" aria-label="Factory"><SelectValue placeholder="Choose" /></SelectTrigger>
-                        <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}</SelectContent>
+                        <SelectContent>{factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
                       </Select>
                     </div>
                   ) : (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">Melted by</p>
-                      <Select value={meltedBy} onValueChange={setMeltedBy}>
+                      <Select value={meltedBy} onValueChange={addNew("factory", setMeltedBy)}>
                         <SelectTrigger className="h-10 rounded-xl" aria-label="Melted by"><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value={INHOUSE}>Ourselves, in-house</SelectItem>
                           {factories.map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
+                          <AddNewItem kind="factory" />
                         </SelectContent>
                       </Select>
                     </div>

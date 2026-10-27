@@ -15,6 +15,8 @@ import { bagNoOf, bagNoOfPurchase } from "@/lib/diamondBags";
 import { lotBalances, lotParts } from "@/lib/diamondLots";
 import { orderCost, rateOn, stockAverageRate, stockFineGoldRate } from "@/lib/orderCost";
 import { clientMaterialBalance, deliveryFine, diaBack, fmtCt, fmtFine, orderClientSends, orderUse, recordClientUse, shortfallChargeId, undoClientSend, undoClientSendBlocker } from "@/lib/clientMaterial";
+import { ShareProductsSheet } from "@/components/ShareProductsSheet";
+import { engravingFontCss, engravingFontLabel } from "@/components/order/EngravingField";
 import { ClientMaterialSheet } from "@/components/ClientMaterialSheet";
 import { ClientSuppliedSheet } from "@/components/ClientSuppliedSheet";
 import { inrPerUnit } from "@/lib/currency";
@@ -59,7 +61,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, type LucideIcon } from "lucide-react";
+import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, type LucideIcon } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
@@ -87,7 +89,7 @@ import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { canEditIssuance, editIssuance, deleteIssuance, issuanceVoidImpact, isStockIssuance } from "@/lib/issuanceEdit";
 import { receiptForAdvance, deleteReceipt, deleteImpact, receiptCancelBlocker } from "@/lib/receipts";
 import { ccy, ccySymbol, fmtCcy, rateText, roundCcy, tableRate } from "@/lib/currency";
-import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
+import { compressImage as compressImg, canUploadOriginal, imageForUpload, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY } from "@/lib/images";
 import { downloadAsZip } from "@/lib/zipDownload";
 import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
@@ -96,31 +98,6 @@ import { returnBlocker } from "@/lib/salesReturn";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
-/** Compress a File to a base64 JPEG ≤800px */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const MAX = 900;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) {
-          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-          else       { w = Math.round(w * MAX / h); h = MAX; }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.8));
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -358,6 +335,7 @@ function OrderDetailPageBody() {
   // An in-house build going into Ready Stock: which office will keep it.
   const [rsOffice, setRsOffice] = useState<string | null>(null);
   const [rsPrice, setRsPrice] = useState("");
+  const [sharingPiece, setSharingPiece] = useState(false);
   const [rsCost, setRsCost] = useState("");
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
@@ -1575,8 +1553,8 @@ function OrderDetailPageBody() {
   const saveCadImage = async (file: File) => {
     setCadUploading(true);
     try {
-      const compressed = await compressImage(file);
-      const cadUrl = await uploadDataUrl(compressed, `orders/${order.id}/cad`);
+      // The CAD sheet as drawn — its fine lines and measurements stay sharp.
+      const cadUrl = await uploadDataUrl(await imageForUpload(file), `orders/${order.id}/cad`);
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         o.cadImage = cadUrl;
@@ -1612,7 +1590,7 @@ function OrderDetailPageBody() {
     if (room === 0) { toast.error("Up to 3 reference images — remove one first"); return; }
     setRefUploading(true);
     try {
-      const urls = await Promise.all(incoming.slice(0, room).map(async f => uploadDataUrl(await compressImg(f), `orders/${order.id}`)));
+      const urls = await Promise.all(incoming.slice(0, room).map(async f => uploadDataUrl(await imageForUpload(f), `orders/${order.id}`)));
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
         o.images = [...(o.images ?? []), ...urls];
@@ -2058,6 +2036,8 @@ function OrderDetailPageBody() {
   const meltReason = meltWhy();
   const orderActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
+    { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
+      show: isStaffUser && !isDiamondOnlyOrder(order) },
     { label: "Duplicate", icon: Copy, hint: copyBlocker(user, can) ?? "A new order with these details filled in — change what's different, then place it",
       disabled: !!copyBlocker(user, can), onSelect: () => nav(copyHref(order)), show: isStaffUser },
     { label: "Change client", icon: Users, hint: changeClientWhy ?? "Picked the wrong client? Move it — while nothing is billed or paid", disabled: !!changeClientWhy, onSelect: () => setClientOpen(true), show: isStaffUser },
@@ -2260,6 +2240,12 @@ function OrderDetailPageBody() {
               <OrderSpec label="Rhodium" value={order.rhodium} />
               <OrderSpec label="Product size" value={order.productSize} wide />
               <OrderSpec label="Stamping" value={order.stamping} wide />
+              {order.engraving?.text && (
+                <div className="col-span-2 min-w-0">
+                  <p className="text-xs text-muted-foreground">Engraving · {engravingFontLabel(order.engraving.font)} letters · final sale</p>
+                  <p className="text-xl text-foreground mt-0.5 break-words" style={{ fontFamily: engravingFontCss(order.engraving.font) }}>“{order.engraving.text}”</p>
+                </div>
+              )}
               <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
             </div>
           </div>
@@ -4576,6 +4562,7 @@ function OrderDetailPageBody() {
       )}
 
     {meltOpen && <MeltDialog order={order} onClose={() => setMeltOpen(false)} />}
+    {sharingPiece && <ShareProductsSheet orders={[order]} onClose={() => setSharingPiece(false)} />}
     {editOpen && <OrderEditDialog order={order} onClose={() => setEditOpen(false)} />}
     {user!.role !== "client" && <ChangeClientSheet order={order} open={clientOpen} onOpenChange={setClientOpen} />}
     {editingPay && <OrderPaymentEditDialog order={order} advance={editingPay} onClose={() => setEditingPayId(null)} />}

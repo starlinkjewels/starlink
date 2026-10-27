@@ -10,6 +10,7 @@ import { ccy, ccySymbol, fmtCcyMix, sumByCcy } from "@/lib/currency";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import {
   Plus, Receipt, X, Wallet,
   TrendingUp, TrendingDown, Trash2, Pencil,
@@ -40,6 +41,7 @@ const totalsOf = (list: Expense[]) => sumByCcy(list, e => e.amount, e => e.curre
 export function ExpensesPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(() => loadDb());
+  const addNew = useAddNew();
   const [tab, setTab] = useState<"mine" | "passbook">("mine");
   const [showAdd, setShowAdd] = useState(false);
   // "My Expenses" tab employee filter (admin only) — defaults to own id
@@ -486,11 +488,12 @@ export function ExpensesPage() {
             <label className="text-sm font-medium text-foreground mb-1.5 block">
               Related Client <span className="text-muted-foreground font-normal">(optional)</span>
             </label>
-            <Select value={form.clientId || "__none"} onValueChange={v => setForm(f => ({ ...f, clientId: v === "__none" ? "" : v }))}>
+            <Select value={form.clientId || "__none"} onValueChange={addNew("client", v => setForm(f => ({ ...f, clientId: v === "__none" ? "" : v })))}>
               <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">No client</SelectItem>
                 {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                <AddNewItem kind="client" />
               </SelectContent>
             </Select>
           </div>

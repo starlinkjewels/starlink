@@ -997,3 +997,10 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
   .dlg-cols { columns: 2; column-gap: 1.75rem; }
   .dlg-cols > * { break-inside: avoid; margin-top: 0 !important; margin-bottom: 0.875rem !important; }
 }
+
+/* Number fields (amounts, weights, rates): no up/down arrows anywhere — a
+   figure is typed, never nudged. The scroll wheel can't change one either
+   (main.tsx). */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+input[type="number"] { -moz-appearance: textfield; appearance: textfield; }

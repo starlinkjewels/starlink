@@ -38,12 +38,14 @@ import { AssignPicker } from "@/components/AssignOrder";
 import { netFromGross } from "@/lib/weights";
 import { PageHeader } from "@/components/PageHeader";
 import { uploadDataUrl } from "@/lib/storage";
+import { imageForUpload } from "@/lib/images";
+import { EngravingField, emptyEngraving, ENGRAVING_MAX } from "@/components/order/EngravingField";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { ClientMaterialChoice, cmSendFromBalance, emptyCm, type CmDraft } from "@/components/order/ClientMaterialChoice";
-import { clientMaterialBalance, receiveClientMaterial, sendClientDiamonds, sendClientGold } from "@/lib/clientMaterial";
+import { ClientMaterialChoice, applyCmDraft, cmDraftProblem, emptyCm, type CmDraft } from "@/components/order/ClientMaterialChoice";
+import { clientMaterialBalance } from "@/lib/clientMaterial";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,31 +65,6 @@ function defaultDeliveryDate(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-/** Compress a File to a base64 JPEG ≤800px, quality 0.75 */
-async function compressImage(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onerror = reject;
-    reader.onload = e => {
-      const img = new Image();
-      img.onerror = reject;
-      img.onload = () => {
-        const MAX = 800;
-        let w = img.width, h = img.height;
-        if (w > MAX || h > MAX) {
-          if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
-          else       { w = Math.round(w * MAX / h); h = MAX; }
-        }
-        const canvas = document.createElement("canvas");
-        canvas.width = w; canvas.height = h;
-        canvas.getContext("2d")!.drawImage(img, 0, 0, w, h);
-        resolve(canvas.toDataURL("image/jpeg", 0.75));
-      };
-      img.src = e.target?.result as string;
-    };
-    reader.readAsDataURL(file);
-  });
-}
 
 /** The stones' details as kept on the order: only what was given. */
 function cleanStoneSpec(sp: LooseLotDraft) {
@@ -144,6 +121,7 @@ export function NewOrderPage() {
     rhodium: "",
     stamping: "",
     stampingNote: "",
+    engraving: emptyEngraving(),
     orderValue: 0,
     shippingCharge: defaultShipping,
     advanceAmount: 0,
@@ -176,7 +154,8 @@ export function NewOrderPage() {
     if (remaining <= 0) { toast.error("Maximum 3 images allowed"); return; }
     const toProcess = Array.from(files).slice(0, remaining);
     try {
-      const compressed = await Promise.all(toProcess.map(compressImage));
+      // As picked — full size and sharpness (lib/images.ts).
+      const compressed = await Promise.all(toProcess.map(imageForUpload));
       setImages(prev => [...prev, ...compressed].slice(0, 3));
     } catch { toast.error("Failed to process image"); }
   };
@@ -393,6 +372,7 @@ export function NewOrderPage() {
     if (needSpecs && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
     if (needSpecs && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
     if (needSpecs && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
+    if (needSpecs && f.engraving.on && !f.engraving.text.trim()) { toast.error("Engraving: type the words — or remove the engraving."); return; }
     if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     // Gross is the whole piece, net the metal only: an estimate that says
     // otherwise is a typing slip, and it would carry onto every card and band.
@@ -413,15 +393,11 @@ export function NewOrderPage() {
       const bal = cmClient ? clientMaterialBalance(db, cmClient) : null;
       const sendOn = cmx.sendNow && !!f.assignedFactoryId;
       if (cmGold && (picks.some(pk => pk.material === "gold") || plannedBuy?.lines.some(l => l.kind === "gold"))) { toast.error("The client gives the gold — take our gold out of the production plan."); return; }
-      if (cmGold && cmx.goldSrc === "now" && !((Number(cmx.grams) || 0) > 0 && (Number(cmx.purity) || 0) > 0 && Number(cmx.purity) <= 1000)) { toast.error("Their gold: enter the weight and its purity — or choose \"They'll bring it later\"."); return; }
-      if (cmDia && cmx.diaSrc === "now" && !((Number(cmx.ct) || 0) > 0)) { toast.error("Their diamonds: enter the carats — or choose \"They'll bring it later\"."); return; }
-      if (cmDia && cmx.diaSrc === "now" && cmx.pcs.trim() && !(Number.isInteger(Number(cmx.pcs)) && Number(cmx.pcs) >= 0)) { toast.error("Their diamonds: the number of stones is a whole number."); return; }
-      if (cmGold && cmx.goldSrc === "theirs" && !(bal && bal.goldInHand > 0)) { toast.error("None of their gold is with us — choose Receiving now or Later."); return; }
-      if (cmDia && cmx.diaSrc === "theirs" && !(bal && bal.diaInHand > 0)) { toast.error("None of their diamonds is with us — choose Receiving now or Later."); return; }
-      // Theirs with us, sent with the order: only what the piece needs — so the estimate must be there.
-      if (cmGold && cmx.goldSrc === "theirs" && sendOn && !(estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0, metalWeight: 0 }) > 0)) { toast.error("Their gold: add the estimated weight, so we know how much of theirs to send — or untick Send."); return; }
-      if (cmDia && cmx.diaSrc === "theirs" && sendOn && !((Number(f.diamondWeight) || 0) > 0)) { toast.error("Their diamonds: add the diamond weight, so we know how much of theirs to send — or untick Send."); return; }
-      if (Number(f.csLoss) < 0 || Number(f.csLoss) > 25) { toast.error("Gold loss is a percentage between 0 and 25"); return; }
+      const problem = cmDraftProblem({ ...cmx, lossPct: f.csLoss }, { gold: cmGold, diamonds: cmDia }, bal, {
+        goldNeedFine: estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0, metalWeight: 0 }),
+        wantCt: Number(f.diamondWeight) || 0, canSend: sendOn,
+      });
+      if (problem) { toast.error(problem); return; }
     }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
@@ -504,6 +480,7 @@ export function NewOrderPage() {
         deliveryTime: f.deliveryTime || undefined,
         rhodium: f.rhodium || undefined,
         stamping: f.stamping === "Special Stamp" && f.stampingNote.trim() ? `Special Stamp: ${f.stampingNote.trim()}` : (f.stamping || undefined),
+        ...(needSpecs && f.engraving.on && f.engraving.text.trim() ? { engraving: { text: f.engraving.text.trim().slice(0, ENGRAVING_MAX), font: f.engraving.font } } : {}),
         certificate: f.certificate === "yes",
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         ...(copiedFrom ? { copiedFromId: copiedFrom.id } : {}),
@@ -657,44 +634,8 @@ export function NewOrderPage() {
         let failed = false, unsent = false;
         try {
           const who = { id: user!.id, name: user!.name };
-          const loss = Number(f.csLoss) || 0;
           updateDbAs({ summary: `${placed.orderNumber}: the client's own ${[cmGold && "gold", cmDia && "diamonds"].filter(Boolean).join(" and ")}` }, d => {
-            const o = d.orders.find(x => x.id === placed.id)!;
-            const send = cmx.sendNow && !!o.assignedFactoryId;
-            unsent = cmx.sendNow && !o.assignedFactoryId && ((cmGold && cmx.goldSrc !== "later") || (cmDia && cmx.diaSrc !== "later"));
-            // All or nothing: should any step refuse, what came before it is taken back.
-            const c0 = d.clients.find(x => x.id === o.clientId);
-            const keep = { ledger: c0?.materialLedger, n: d.materialIssuances.length, ids: o.materialIssuanceIds };
-            try {
-            if (cmGold && cmx.goldSrc !== "later") {
-              if (cmx.goldSrc === "now") {
-                receiveClientMaterial(d, o.clientId, { material: "gold", grams: Number(cmx.grams), purity: Number(cmx.purity), orderId: o.id }, who);
-                if (send) sendClientGold(d, o, { grams: Number(cmx.grams), purity: Number(cmx.purity) }, who);
-              } else if (send) {
-                const c = d.clients.find(x => x.id === o.clientId)!;
-                const fineNeed = Math.round(estimatedPureGoldNeeded(o) * (1 + loss / 100) * 1000) / 1000;
-                const g = cmSendFromBalance(fineNeed, clientMaterialBalance(d, c).goldInHand);
-                if (g > 0) sendClientGold(d, o, { grams: g, purity: 1000 }, who);
-              }
-            }
-            if (cmDia && cmx.diaSrc !== "later") {
-              const spec = { shape: cmx.shape || undefined, size: cmx.size || undefined, color: cmx.color || undefined, clarity: cmx.clarity || undefined };
-              if (cmx.diaSrc === "now") {
-                receiveClientMaterial(d, o.clientId, { material: "diamond", ct: Number(cmx.ct), pcs: Number(cmx.pcs) || undefined, ...spec,
-                  certLab: cmx.certified ? cmx.certLab || undefined : undefined, certNo: cmx.certified ? cmx.certNo || undefined : undefined, orderId: o.id }, who);
-                if (send) sendClientDiamonds(d, o, { ct: Number(cmx.ct), pcs: Number(cmx.pcs) || undefined, certified: cmx.certified, ...spec, certLab: cmx.certLab, certNo: cmx.certNo }, who);
-              } else if (send) {
-                const c = d.clients.find(x => x.id === o.clientId)!;
-                const ct = cmSendFromBalance(Number(o.diamondWeight) || 0, clientMaterialBalance(d, c).diaInHand);
-                if (ct > 0) sendClientDiamonds(d, o, { ct, shape: o.diamondShape }, who);
-              }
-            }
-            } catch (err) {
-              if (c0) c0.materialLedger = keep.ledger;
-              d.materialIssuances.length = keep.n;
-              o.materialIssuanceIds = keep.ids;
-              throw err;
-            }
+            unsent = applyCmDraft(d, placed.id, { ...cmx, lossPct: f.csLoss }, { gold: cmGold, diamonds: cmDia }, who).unsent;
           });
         } catch (err) {
           failed = true;
@@ -1195,6 +1136,7 @@ export function NewOrderPage() {
                     placeholder="Describe the special stamp (e.g. custom logo, initials, text…)"
                     className="rounded-xl mt-2" autoFocus />
                 )}
+                <EngravingField value={f.engraving} onChange={v => setF(prev => ({ ...prev, engraving: v }))} />
               </div>
             </>
           )}

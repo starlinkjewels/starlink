@@ -1,6 +1,8 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { loadDb, updateDb, uid, type Task, type User } from "@/lib/db";
+import { ensureCollections, updateDb, uid, type Task, type User } from "@/lib/db";
+import { useDb } from "@/hooks/useDb";
+import { useAuth } from "@/lib/auth";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo, Pencil, Check } from "lucide-react";
@@ -19,12 +21,12 @@ interface Props {
 export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
   const [newTitle, setNewTitle] = useState("");
   const [showCompleted, setShowCompleted] = useState(true);
-  const [tick, setTick] = useState(0); // force re-render after DB writes
+  const { user: me } = useAuth();
+  // Live: a task someone assigns (or ticks) shows at once, not when the panel is opened again.
+  const db = useDb();
+  useEffect(() => { if (open) void ensureCollections(["tasks"]).catch(() => {}); }, [open]);
+  const reload = () => { /* the live data re-renders the panel */ };
 
-  const reload = () => setTick(t => t + 1);
-
-  const db = loadDb();
-  // Re-reads on every render (tick forces it)
   const allTasks = (db.tasks ?? []).filter(t => t.assignedTo === userId);
   const pending   = allTasks.filter(t => !t.completed).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   const completed = allTasks.filter(t =>  t.completed).sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
@@ -35,25 +37,27 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
 
   const addTask = () => {
     const title = newTitle.trim();
-    if (!title) return;
-    const admin = db.users.find(u => u.role === "admin");
+    if (!title || !me) return;
+    // Whoever adds it is who assigned it — not "the first admin on the list".
+    const by = me.id;
     updateDb(d => {
       if (!d.tasks) d.tasks = [];
       d.tasks.push({
         id: uid("task_"),
         title,
         assignedTo: userId,
-        assignedBy: admin?.id ?? userId,
+        assignedBy: by,
+        ...(by !== userId ? { tellWhenDone: true } : {}),
         completed: false,
         createdAt: new Date().toISOString(),
       });
-      // notify the employee
+      // Someone else's task: they are told.
       const emp = d.users.find(u => u.id === userId);
-      if (emp && asAdmin) {
+      if (emp && by !== userId) {
         d.notifications.unshift({
           id: uid("n_"), userId: emp.id,
-          title: "New Task Assigned",
-          body: title,
+          title: "New task for you",
+          body: `${title} — from ${me.name}`,
           type: "info", read: false, createdAt: new Date().toISOString(),
         });
       }
@@ -69,6 +73,16 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
       if (!t) return;
       t.completed = done;
       t.completedAt = done ? new Date().toISOString() : undefined;
+      // Done by the one it was given to: whoever gave it is told.
+      if (done && t.tellWhenDone && t.assignedBy !== me?.id && d.users.some(u => u.id === t.assignedBy)) {
+        t.tellWhenDone = false; // told once
+        d.notifications.unshift({
+          id: uid("n_"), userId: t.assignedBy,
+          title: "Task done",
+          body: `${t.title} — ${d.users.find(u => u.id === t.assignedTo)?.name ?? "done"}`,
+          type: "info", read: false, createdAt: new Date().toISOString(),
+        });
+      }
     });
     reload();
   };
@@ -118,7 +132,7 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                 <ListTodo className="h-4.5 w-4.5 h-[18px] w-[18px] text-primary" />
               </div>
               <div className="flex-1 min-w-0">
-                <p className="font-display text-lg text-brand-dark leading-tight">My Tasks</p>
+                <p className="font-display text-lg text-brand-dark leading-tight">{asAdmin && userId !== me?.id ? "Tasks" : "My Tasks"}</p>
                 {asAdmin && (
                   <p className="text-xs text-muted-foreground truncate">{empName}</p>
                 )}
@@ -169,6 +183,7 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                     key={task.id}
                     task={task}
                     assigner={assignedByUser(task)}
+                    own={task.assignedBy === task.assignedTo}
                     onToggle={done => toggleTask(task.id, done)}
                     onDelete={() => deleteTask(task)}
                     onRename={title => renameTask(task.id, title)}
@@ -202,6 +217,7 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
                             key={task.id}
                             task={task}
                             assigner={assignedByUser(task)}
+                            own={task.assignedBy === task.assignedTo}
                             onToggle={done => toggleTask(task.id, done)}
                             onDelete={() => deleteTask(task)}
                             onRename={title => renameTask(task.id, title)}
@@ -235,12 +251,15 @@ function fmtCompleted(iso?: string) {
 function TaskRow({
   task,
   assigner,
+  own,
   onToggle,
   onDelete,
   onRename,
 }: {
   task: Task;
   assigner?: User;
+  /** Added by the person it is for — no "assigned by". */
+  own?: boolean;
   onToggle: (done: boolean) => void;
   onDelete: () => void;
   /** Saves new wording; false keeps the row open (nothing to save). */
@@ -288,7 +307,7 @@ function TaskRow({
         <p className="text-[11px] text-muted-foreground mt-0.5">
           {task.completed
             ? `Completed: ${fmtCompleted(task.completedAt)}`
-            : assigner ? `Assigned by ${assigner.name}` : task.assignedBy === "autopilot" ? "From Autopilot" : ""}
+            : own ? `Added ${fmtCompleted(task.createdAt)}` : assigner ? `Assigned by ${assigner.name} · ${fmtCompleted(task.createdAt)}` : task.assignedBy === "autopilot" ? "From Autopilot" : ""}
         </p>
       </div>
 

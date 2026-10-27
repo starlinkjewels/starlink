@@ -8,8 +8,9 @@
 // the order is found from the piece (made for stock, split off, or returned).
 import { doc, setDoc } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
-import { brandFor, companyOf } from "./companies";
+import { brandFor, companyOf, companyOfOrder } from "./companies";
 import { mainDiamondShape, uid, updateDb, type DB, type Order, type ReadyStockItem, type Share, type ShareBrand, type SharePiece } from "./db";
+import { pieceWeights } from "./weights";
 
 /** The order a piece was made from (or came back from), when there is one. */
 export function sourceOrderOf(d: DB, item: ReadyStockItem): Order | undefined {
@@ -37,12 +38,25 @@ function diamondQuality(d: DB, orderId: string): string | undefined {
   return all.length ? all.slice(0, 3).join(" · ") : undefined;
 }
 
+/** The size of the stones that went into the order — "5.30 x 3.30", "1.5 mm". */
+function diamondSize(d: DB, orderId: string): string | undefined {
+  const mm = (d.materialIssuances ?? [])
+    .filter(i => i.orderId === orderId && i.material === "diamond" && i.diamondSpec?.mm?.trim())
+    .map(i => i.diamondSpec!.mm!.trim());
+  const all = [...new Set(mm)];
+  return all.length ? all.slice(0, 2).join(", ") : undefined;
+}
+
 export interface PieceShareChoice {
   /** USD per piece id — the price for this share; undefined = hidden. */
   prices?: Record<string, number>;
   gold: boolean;
   diamonds: boolean;
   cad: boolean;
+  /** The piece's video, as a link. */
+  video?: boolean;
+  /** An order's reference pictures as well (the client's own — off unless asked). */
+  refs?: boolean;
 }
 
 /** The pieces as the client will see them. */
@@ -70,9 +84,53 @@ export function buildSharePieces(d: DB, items: ReadyStockItem[], c: PieceShareCh
       piece.diamondShape = (o && (mainDiamondShape(d, o.id) || o.diamondShape)) || undefined;
       piece.diamondType = item.diamondType || o?.diamondType || undefined;
       piece.diamondQuality = o ? diamondQuality(d, o.id) : undefined;
+      piece.diamondSize = o ? diamondSize(d, o.id) : undefined;
     }
     if (c.cad && o?.cadImage) piece.cad = o.cadImage;
+    const video = item.video || o?.productVideo;
+    if (c.video && video) piece.video = video;
     const price = c.prices?.[item.id];
+    if (price != null && price > 0) piece.price = Math.round(price * 100) / 100;
+    return piece;
+  });
+}
+
+/** "18K Yellow Gold Ring" — an order's piece, named for a client. */
+export function orderPieceName(o: Order): string {
+  return [o.productKarats, o.metal, o.jewelleryType].filter(Boolean).join(" ") || o.jewelleryType || "Piece";
+}
+
+/** The pieces made on orders, as a client will see them — never the client, the cost or the payments. */
+export function buildOrderSharePieces(d: DB, orders: Order[], c: PieceShareChoice): SharePiece[] {
+  return orders.map(o => {
+    const w = pieceWeights(o, d.materialIssuances ?? []);
+    const piece: SharePiece = {
+      id: o.id,
+      name: orderPieceName(o),
+      sku: o.designNumber || undefined,
+      type: o.jewelleryType,
+      // The piece's own photos — never the client's reference pictures unless asked for.
+      photos: [...(o.productPhotos ?? []), ...(c.refs ? o.images ?? [] : [])].filter(Boolean),
+    };
+    if (c.gold) {
+      piece.metal = o.metal || undefined;
+      piece.karat = o.productKarats || undefined;
+      piece.colour = o.productColor || undefined;
+      piece.grossG = w.gross || undefined;
+      piece.netG = w.net || undefined;
+      if (w.estimated && (w.gross || w.net)) piece.weightsEstimated = true;
+    }
+    if (c.diamonds && w.diamondCt > 0) {
+      piece.diamondCt = w.diamondCt;
+      piece.diamondPcs = o.actualDiamondPcs || undefined;
+      piece.diamondShape = mainDiamondShape(d, o.id) || o.diamondShape || undefined;
+      piece.diamondType = o.diamondType || undefined;
+      piece.diamondQuality = diamondQuality(d, o.id);
+      piece.diamondSize = diamondSize(d, o.id);
+    }
+    if (c.cad && o.cadImage) piece.cad = o.cadImage;
+    if (c.video && o.productVideo) piece.video = o.productVideo;
+    const price = c.prices?.[o.id];
     if (price != null && price > 0) piece.price = Math.round(price * 100) / 100;
     return piece;
   });
@@ -80,7 +138,16 @@ export function buildSharePieces(d: DB, items: ReadyStockItem[], c: PieceShareCh
 
 /** Who the pieces are from — the company of the first piece. */
 export function shareBrand(d: DB, items: ReadyStockItem[]): ShareBrand {
-  const b = brandFor(d.settings, companyOf(items[0]));
+  return shareBrandOf(d, companyOf(items[0]));
+}
+
+/** Who the pieces made on orders are from — the company of the first order. */
+export function shareBrandForOrders(d: DB, orders: Order[]): ShareBrand {
+  return shareBrandOf(d, companyOfOrder(d, orders[0]));
+}
+
+function shareBrandOf(d: DB, companyId: string): ShareBrand {
+  const b = brandFor(d.settings, companyId);
   return {
     name: [b.companyName, b.companyLegalSuffix].filter(Boolean).join(" ") || "Ready Stock",
     logo: b.companyLogoUrl || undefined,

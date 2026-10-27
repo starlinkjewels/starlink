@@ -24,6 +24,14 @@ void loadBrand();
 // A tab open since before the last release is told when the new one is ready.
 watchForNewVersion();
 
+// Scrolling the page over a number field that has the cursor in it would
+// quietly change the amount (the browser's wheel step) — let go of the field
+// instead, so the page scrolls and the figure stays as typed.
+document.addEventListener("wheel", (e) => {
+  const el = document.activeElement;
+  if (el instanceof HTMLInputElement && el.type === "number" && e.target === el) el.blur();
+}, { passive: true });
+
 const qc = new QueryClient();
 
 // Cross-deploy safety net. Pages are lazy-loaded, so a tab still running an

@@ -22,6 +22,7 @@ import { confirmBox } from "@/lib/confirm";
 import { ActionSheet } from "@/components/ActionSheet";
 import { AsyncButton } from "@/components/AsyncButton";
 import { WeightCheck } from "@/components/WeightCheck";
+import { EngravingField, ENGRAVING_MAX } from "@/components/order/EngravingField";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +42,8 @@ type Form = {
   jewelleryType: string; metal: string; productKarats: string; productColor: string; productSize: string;
   quantity: string; diamondType: string; diamondShape: string; diamondWeight: string; estimatedGrossWeight: string; estimatedNetWeight: string;
   rhodium: string; stamping: string; stampingNote: string;
+  /** Engraving: on ("1") or off (""), its words and letters. */
+  engOn: string; engText: string; engFont: string;
   designNumber: string; priority: string; expectedDelivery: string; deliveryTime: string; contactPerson: string; instructions: string;
   // A loose order's stones — what they are, and their details.
   stoneName: string; stoneShape: string; stoneMm: string; stoneSize: string; stoneColor: string; stoneClarity: string;
@@ -55,6 +58,7 @@ function formOf(o: Order): Form {
     productSize: o.productSize ?? "", quantity: String(o.quantity || 1), diamondType: o.diamondType, diamondShape: o.diamondShape ?? "",
     diamondWeight: numStr(o.diamondWeight), estimatedGrossWeight: numStr(o.estimatedGrossWeight), estimatedNetWeight: numStr(o.estimatedNetWeight),
     rhodium: o.rhodium ?? "", stamping: special ? "Special Stamp" : o.stamping ?? "", stampingNote: special ? o.stamping!.slice(SPECIAL.length) : "",
+    engOn: o.engraving?.text ? "1" : "", engText: o.engraving?.text ?? "", engFont: o.engraving?.font ?? "block",
     designNumber: o.designNumber ?? "", priority: o.priority, expectedDelivery: (o.expectedDelivery ?? "").slice(0, 10),
     deliveryTime: o.deliveryTime ?? "", contactPerson: o.contactPerson ?? "", instructions: o.instructions ?? "",
     stoneName: o.stoneSpec?.stone ?? "Diamond", stoneShape: o.stoneSpec?.shape ?? "", stoneMm: o.stoneSpec?.mm ?? "", stoneSize: o.stoneSpec?.size ?? "",
@@ -66,7 +70,7 @@ function formOf(o: Order): Form {
 const LABEL: Record<string, string> = {
   jewelleryType: "type", metal: "metal", productKarats: "karats", productColor: "colour", productSize: "size", stoneSpec: "stones",
   quantity: "quantity", diamondType: "diamond type", diamondShape: "diamond shape", diamondWeight: "est. diamonds", estimatedGrossWeight: "est. gross weight",
-  estimatedNetWeight: "est. net weight", rhodium: "rhodium", stamping: "stamping", designNumber: "design no.",
+  estimatedNetWeight: "est. net weight", rhodium: "rhodium", stamping: "stamping", engraving: "engraving", designNumber: "design no.",
   priority: "priority", expectedDelivery: "due date", deliveryTime: "delivery time", contactPerson: "contact person", instructions: "instructions",
 };
 /** What the printed invoice shows of an order — it reads them from the order itself. */
@@ -126,6 +130,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     const touched = (...ks: (keyof Form)[]) => ks.some(k => f[k] !== start[k]);
     const qty = Number(f.quantity);
     if (touched("quantity") && (!Number.isInteger(qty) || qty < 1)) { toast.error("Quantity must be a whole number, at least 1"); return; }
+    if (touched("engOn", "engText") && f.engOn && !f.engText.trim()) { toast.error("Engraving: type the words — or remove the engraving."); return; }
     if (touched("stamping", "stampingNote") && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Describe the special stamp"); return; }
     if (touched("expectedDelivery") && !f.expectedDelivery) { toast.error("Pick the due date"); return; }
     const num = (s: string) => { const n = Number(s); return s.trim() && isFinite(n) && n > 0 ? n : undefined; };
@@ -148,6 +153,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       estimatedNetWeight: num(f.estimatedNetWeight),
       rhodium: txt(f.rhodium),
       stamping: f.stamping === "Special Stamp" ? `${SPECIAL}${f.stampingNote.trim()}` : txt(f.stamping),
+      engraving: f.engOn && f.engText.trim() ? { text: f.engText.trim().slice(0, ENGRAVING_MAX), font: f.engFont === "script" ? "script" : "block" } : undefined,
       designNumber: txt(f.designNumber),
       priority: f.priority as Order["priority"],
       expectedDelivery: f.expectedDelivery,
@@ -159,7 +165,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     };
     // Which form fields each stored field is made from.
     const FROM: Partial<Record<keyof Order, (keyof Form)[]>> = {
-      productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"],
+      productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"], engraving: ["engOn", "engText", "engFont"],
       stoneSpec: ["stoneName", "stoneShape", "stoneMm", "stoneSize", "stoneColor", "stoneClarity"],
     };
     const same = (a: unknown, b: unknown) => (a ?? "") === (b ?? "") || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9)
@@ -170,7 +176,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     if (!changed.length) { toast.message("Nothing changed"); onClose(); return; }
 
     // Whatever is locked now is refused, not quietly skipped.
-    const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping"];
+    const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping", "engraving"];
     const MATERIAL = ["jewelleryType", "metal", "productKarats", "quantity", "diamondType"];
     const pieceNow = nowLocks.piece, matNow = nowLocks.piece ?? nowLocks.material;
     const hitPiece = pieceNow && changed.find(k => PIECE.includes(k));
@@ -314,6 +320,11 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                     <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)} disabled={!!pieceLock} placeholder="Describe the stamp (logo, initials, text…)" className="h-10 rounded-xl" />
                   </Field>
                 )}
+                <div className="col-span-2">
+                  <EngravingField disabled={!!pieceLock}
+                    value={{ on: !!f.engOn, text: f.engText, font: f.engFont === "script" ? "script" : "block" }}
+                    onChange={v => setF(p => ({ ...p, engOn: v.on ? "1" : "", engText: v.text, engFont: v.font }))} />
+                </div>
               </>
             )}
             {diamondOnly && <p className="col-span-2 text-[11px] text-muted-foreground">{locks.kind}.</p>}

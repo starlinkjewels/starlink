@@ -55,6 +55,37 @@ export function canUploadOriginal(file: File): boolean {
   return file.size <= KEEP_ORIGINAL_UNDER_MB * 1024 * 1024;
 }
 
+/** Kept byte for byte: drawings and graphics (CAD sheets are PNG) — no camera data in them. */
+const SHOWN_AS_IS = /^image\/(png|webp|gif)$/;
+/** A photo (JPEG): kept at its full size and sharpness, but drawn afresh — so the phone's hidden
+ *  data (GPS location, camera) never reaches a client or a public share. Upright as it was taken. */
+const PHOTO_MAX = 4000;
+const PHOTO_QUALITY = 0.93;
+
+/** Is this picked image sent exactly as it is — never shrunk, never re-encoded? */
+export function keepsOriginal(file: File): boolean {
+  return SHOWN_AS_IS.test(file.type) && file.size <= KEEP_ORIGINAL_UNDER_MB * 1024 * 1024;
+}
+
+/**
+ * A picked image, ready to upload (as a data URL), at its own size and
+ * sharpness: a drawing (PNG — a CAD sheet) exactly as picked; a photo (JPEG)
+ * at full size (up to 4000px), high quality, without the phone's hidden data.
+ * Anything else (over 12 MB, HEIC) is re-encoded at 2400px, high quality.
+ */
+export async function imageForUpload(file: File): Promise<string> {
+  if (keepsOriginal(file)) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onerror = reject;
+      r.onload = () => resolve(r.result as string);
+      r.readAsDataURL(file);
+    });
+  }
+  if (/^image\/jpe?g$/.test(file.type)) return compressImage(file, PHOTO_MAX, PHOTO_QUALITY);
+  return compressImage(file, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY);
+}
+
 /** A profile photo: the middle square of the picture, small enough to sit on
  *  the person's own record (it travels with every screen's list of people). */
 export const AVATAR_PX = 128;
