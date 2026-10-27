@@ -205,8 +205,11 @@ SelectLabel.displayName = SelectPrimitive.Label.displayName;
 
 const SelectItem = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Item>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item>
->(({ className, children, disabled, textValue, ...props }, ref) => {
+  React.ComponentPropsWithoutRef<typeof SelectPrimitive.Item> & {
+    /** Shown whatever is searched — "+ Add new …", needed most when nothing matches. */
+    alwaysShown?: boolean;
+  }
+>(({ className, children, disabled, textValue, alwaysShown, ...props }, ref) => {
   const f = React.useContext(FilterCtx);
   const key = React.useRef(Symbol("option")).current;
   const node = React.useRef<HTMLDivElement | null>(null);
@@ -215,9 +218,10 @@ const SelectItem = React.forwardRef<
     if (typeof ref === "function") ref(el); else if (ref) ref.current = el;
   }, [ref]);
   // The words this option shows, for the search — kept current as it changes.
-  React.useLayoutEffect(() => { f?.items.set(key, textValue ?? node.current?.textContent ?? ""); });
+  // An always-shown entry is not one of the list's options: it never counts as a match.
+  React.useLayoutEffect(() => { if (!alwaysShown) f?.items.set(key, textValue ?? node.current?.textContent ?? ""); });
   React.useLayoutEffect(() => () => { f?.items.delete(key); }, [f?.items, key]);
-  const filteredOut = !!f?.query && !matches(f.items.get(key) ?? textValue ?? "", f.query);
+  const filteredOut = !alwaysShown && !!f?.query && !matches(f.items.get(key) ?? textValue ?? "", f.query);
   return (
     <SelectPrimitive.Item
       ref={setRef}
