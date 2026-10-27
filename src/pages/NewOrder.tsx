@@ -24,7 +24,7 @@ import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, updateDbAs, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { metalHasKarats as hasKarats, metalColour } from "@/lib/metals";
 import { choicesOf, listOf } from "@/lib/optionLists";
@@ -42,7 +42,8 @@ import { logItem, whoOf } from "@/lib/readyStockHistory";
 import { subscribeStockLevels, type StockLevels } from "@/lib/stock";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
+import { ClientMaterialChoice, cmSendFromBalance, emptyCm, type CmDraft } from "@/components/order/ClientMaterialChoice";
+import { clientMaterialBalance, receiveClientMaterial, sendClientDiamonds, sendClientGold } from "@/lib/clientMaterial";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -51,7 +52,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
+import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
 
 const READY_STOCK_NONE = "none";
 
@@ -196,7 +197,11 @@ export function NewOrderPage() {
   // only makes sense for a manufactured piece (size, plating, factory, etc.).
   const isDiamondOnly = f.jewelleryType === "Diamond Only";
   // What the order is: a piece to make, loose diamonds to sell, or a Ready Stock piece.
-  const [kind, setKindState] = useState<OrderKind>("piece");
+  // Opened from a Ready Stock piece's "Sell" (?readyStock=): a stock sale from the start.
+  const [kind, setKindState] = useState<OrderKind>(() => new URLSearchParams(window.location.search).get("readyStock") ? "readyStock" : "piece");
+  // The client's own material for this order: who gives it (f.csGold/csDiamonds/csLoss)
+  // and, when they do, what is received now / theirs used / later.
+  const [cmx, setCmx] = useState<CmDraft>(emptyCm());
   // The id the order will have — so a purchase planned now is recorded against it.
   const draftId = useRef(uid("o_"));
   const [picks, setPicks] = useState<StockPick[]>([]);
@@ -227,7 +232,18 @@ export function NewOrderPage() {
     : companyIdOfClient(db.clients.find(c => c.id === (isClient ? user?.clientId : f.clientId)));
   // Selling an EXISTING finished piece — specs come from the item, so the custom
   // design/production fields and the manufacturing timeline don't apply.
-  const isReadyStockSale = f.materialSourcing === "readyStock";
+  const isReadyStockSale = kind === "readyStock" && !forReadyStock && f.materialSourcing === "readyStock";
+  // The client's own material: a piece for a client (not our own stock build).
+  const cmClient = db.clients.find(c => c.id === (isClient ? user?.clientId : f.clientId));
+  const cmPossible = kind === "piece" && !isDiamondOnly && !isReadyStockSale && !!cmClient && f.clientId !== READY_STOCK_CLIENT;
+  // Gold is theirs only while the metal has karats — a switch to platinum takes it off.
+  const cmGold = cmPossible && f.csGold && metalHasKarats;
+  const cmDia = cmPossible && f.csDiamonds;
+  const cmOn = cmGold || cmDia;
+  // Staff who may plan take it in (and send it) right here; the client, or staff
+  // who may not, only say who gives it — it is received from the order.
+  const cmRecord = mayPlan && cmOn;
+  const cmDiaNow = cmRecord && cmDia && cmx.diaSrc === "now";
   const [redeemGift, setRedeemGift] = useState(true); // apply the client's gift card to this order
 
   const setMetal = (v: string) => {
@@ -309,7 +325,7 @@ export function NewOrderPage() {
       diamondWeight: item.diamondWeight || 0,
       estimatedGrossWeight: item.grossWeight || 0,
       estimatedNetWeight: item.netWeight || 0,
-      orderValue: item.price,
+      orderValue: item.price * Math.max(1, Math.round(Number(prev.quantity) || 1)),
       designNumber: item.sku || prev.designNumber,
     }));
   };
@@ -320,7 +336,7 @@ export function NewOrderPage() {
   const preStock = useRef(params.get("readyStock"));
   useEffect(() => {
     const id = preStock.current;
-    if (!id || f.readyStockItemId || !readyStockItems.some(i => i.id === id)) return;
+    if (!id || kind !== "readyStock" || forReadyStock || f.readyStockItemId || !readyStockItems.some(i => i.id === id)) return;
     preStock.current = null;
     selectReadyStock(id);
   });
@@ -351,6 +367,12 @@ export function NewOrderPage() {
       assignedFactoryId: mayPlan && k === "piece" ? src.assignedFactoryId ?? "" : "",
       materialSourcing: "later", readyStockItemId: "",
     }));
+    // Their material for the copy: theirs with us if there is some, else it comes later — never "received" twice.
+    if (src.clientSupplied && clientOk && !src.forReadyStock) {
+      const c = db.clients.find(x => x.id === src.clientId);
+      const b = c ? clientMaterialBalance(db, c) : null;
+      setCmx({ ...emptyCm(), goldSrc: b && b.goldInHand > 0 ? "theirs" : "later", diaSrc: b && b.diaInHand > 0 ? "theirs" : "later", sendNow: false });
+    }
     setCopiedFrom(src);
     if (!clientOk) toast.info(`${db.clients.find(c => c.id === src.clientId)?.companyName ?? "That client"} isn't in your client list — choose the client.`);
   }, [db.orders]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -386,9 +408,26 @@ export function NewOrderPage() {
       if (problem) { toast.error(problem); return; }
       if (kind === "piece" && (picks.length || plannedBuy) && !f.assignedFactoryId) { toast.error("Choose the factory — the material from stock and the purchase go straight to it."); return; }
     }
+    // The client's own material: what is taken in now must be complete; theirs used must be there.
+    if (cmRecord) {
+      const bal = cmClient ? clientMaterialBalance(db, cmClient) : null;
+      const sendOn = cmx.sendNow && !!f.assignedFactoryId;
+      if (cmGold && (picks.some(pk => pk.material === "gold") || plannedBuy?.lines.some(l => l.kind === "gold"))) { toast.error("The client gives the gold — take our gold out of the production plan."); return; }
+      if (cmGold && cmx.goldSrc === "now" && !((Number(cmx.grams) || 0) > 0 && (Number(cmx.purity) || 0) > 0 && Number(cmx.purity) <= 1000)) { toast.error("Their gold: enter the weight and its purity — or choose \"They'll bring it later\"."); return; }
+      if (cmDia && cmx.diaSrc === "now" && !((Number(cmx.ct) || 0) > 0)) { toast.error("Their diamonds: enter the carats — or choose \"They'll bring it later\"."); return; }
+      if (cmDia && cmx.diaSrc === "now" && cmx.pcs.trim() && !(Number.isInteger(Number(cmx.pcs)) && Number(cmx.pcs) >= 0)) { toast.error("Their diamonds: the number of stones is a whole number."); return; }
+      if (cmGold && cmx.goldSrc === "theirs" && !(bal && bal.goldInHand > 0)) { toast.error("None of their gold is with us — choose Receiving now or Later."); return; }
+      if (cmDia && cmx.diaSrc === "theirs" && !(bal && bal.diaInHand > 0)) { toast.error("None of their diamonds is with us — choose Receiving now or Later."); return; }
+      // Theirs with us, sent with the order: only what the piece needs — so the estimate must be there.
+      if (cmGold && cmx.goldSrc === "theirs" && sendOn && !(estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0, metalWeight: 0 }) > 0)) { toast.error("Their gold: add the estimated weight, so we know how much of theirs to send — or untick Send."); return; }
+      if (cmDia && cmx.diaSrc === "theirs" && sendOn && !((Number(f.diamondWeight) || 0) > 0)) { toast.error("Their diamonds: add the diamond weight, so we know how much of theirs to send — or untick Send."); return; }
+      if (Number(f.csLoss) < 0 || Number(f.csLoss) > 25) { toast.error("Gold loss is a percentage between 0 and 25"); return; }
+    }
     if (f.materialSourcing === "readyStock") {
       const item = db.readyStock.find(i => i.id === f.readyStockItemId);
       if (!item || item.quantity <= 0) { toast.error("This ready stock item is no longer available — pick another, or switch to a custom order."); return; }
+      if (!Number.isInteger(Number(f.quantity))) { toast.error("Quantity is a whole number of pieces."); return; }
+      if (Number(f.quantity) > item.quantity) { toast.error(`Only ${item.quantity} of this piece ${item.quantity === 1 ? "is" : "are"} in stock.`); return; }
     }
     if (Number(f.advanceAmount) > 0) {
       if (!f.advanceLockerId) { toast.error("Choose which locker the advance was deposited into."); return; }
@@ -447,10 +486,10 @@ export function NewOrderPage() {
         jewelleryType: f.jewelleryType as Order["jewelleryType"],
         metal: f.metal as Order["metal"],
         diamondType: (isGemSale ? "" : f.diamondType) as Order["diamondType"],
-        diamondShape: !isDiamondOnly && f.diamondShape.trim() ? f.diamondShape.trim() : undefined,
-        ...(!isClient && !forReadyStock && kind === "piece" && (f.csGold || f.csDiamonds) ? { clientSupplied: {
-          ...(f.csGold ? { gold: true, ...(Number(f.csLoss) > 0 ? { goldLossPct: Math.min(25, Number(f.csLoss)) } : {}) } : {}),
-          ...(f.csDiamonds ? { diamonds: true } : {}),
+        diamondShape: !isDiamondOnly && (cmDiaNow && cmx.shape.trim() ? cmx.shape.trim() : f.diamondShape.trim()) ? (cmDiaNow && cmx.shape.trim() ? cmx.shape.trim() : f.diamondShape.trim()) : undefined,
+        ...(cmOn ? { clientSupplied: {
+          ...(cmGold ? { gold: true, ...(Number(f.csLoss) > 0 ? { goldLossPct: Math.min(25, Number(f.csLoss)) } : {}) } : {}),
+          ...(cmDia ? { diamonds: true } : {}),
         } } : {}),
         quantity: Number(f.quantity),
         diamondWeight: Number(f.diamondWeight),
@@ -471,9 +510,11 @@ export function NewOrderPage() {
         ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
         ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? { ...f.stoneSpec, size: "" } : f.stoneSpec), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
         // What the plan said: from stock, bought, or a Ready Stock piece.
-        materialSourcing: kind === "readyStock" ? f.materialSourcing === "later" ? undefined : f.materialSourcing
+        materialSourcing: isReadyStockSale ? "readyStock" : kind === "readyStock" ? undefined
           : picks.length ? "stock" : plannedBuy ? "purchase" : undefined,
-        readyStockItemId: f.materialSourcing === "readyStock" ? f.readyStockItemId : undefined,
+        readyStockItemId: isReadyStockSale ? f.readyStockItemId : undefined,
+        // How many pieces it took off the shelf — what a cancel puts back.
+        ...(isReadyStockSale ? { readyStockQty: Math.max(1, Math.round(Number(f.quantity) || 1)) } : {}),
         assignedFactoryId: f.assignedFactoryId || undefined,
         instructions: f.instructions,
         expectedDelivery: f.expectedDelivery || defaultDeliveryDate(),
@@ -520,7 +561,9 @@ export function NewOrderPage() {
         const item = d.readyStock.find(x => x.id === order.readyStockItemId);
         if (item) {
           const had = item.quantity;
-          item.quantity = Math.max(0, item.quantity - 1);
+          const took = Math.min(had, order.readyStockQty ?? 1);
+          item.quantity = had - took;
+          order.readyStockQty = took; // what really came off the shelf — what a cancel puts back
           // On the piece's own history — the order number only, never the client.
           logItem(item, { ...whoOf(user), at: order.createdAt, kind: "sold", text: `Sold on ${order.orderNumber} · ${had} → ${item.quantity}`, ref: { orderId: order.id } });
         }
@@ -607,6 +650,63 @@ export function NewOrderPage() {
       void sendMail(MARKETING_EMAIL, m.subject, m.html);
     }
 
+    // The client's own material: received now (or theirs with us), and sent to the factory with the order.
+    if (cmRecord) {
+      const placed = loadDb().orders.find(o => o.id === orderId);
+      if (placed) {
+        let failed = false, unsent = false;
+        try {
+          const who = { id: user!.id, name: user!.name };
+          const loss = Number(f.csLoss) || 0;
+          updateDbAs({ summary: `${placed.orderNumber}: the client's own ${[cmGold && "gold", cmDia && "diamonds"].filter(Boolean).join(" and ")}` }, d => {
+            const o = d.orders.find(x => x.id === placed.id)!;
+            const send = cmx.sendNow && !!o.assignedFactoryId;
+            unsent = cmx.sendNow && !o.assignedFactoryId && ((cmGold && cmx.goldSrc !== "later") || (cmDia && cmx.diaSrc !== "later"));
+            // All or nothing: should any step refuse, what came before it is taken back.
+            const c0 = d.clients.find(x => x.id === o.clientId);
+            const keep = { ledger: c0?.materialLedger, n: d.materialIssuances.length, ids: o.materialIssuanceIds };
+            try {
+            if (cmGold && cmx.goldSrc !== "later") {
+              if (cmx.goldSrc === "now") {
+                receiveClientMaterial(d, o.clientId, { material: "gold", grams: Number(cmx.grams), purity: Number(cmx.purity), orderId: o.id }, who);
+                if (send) sendClientGold(d, o, { grams: Number(cmx.grams), purity: Number(cmx.purity) }, who);
+              } else if (send) {
+                const c = d.clients.find(x => x.id === o.clientId)!;
+                const fineNeed = Math.round(estimatedPureGoldNeeded(o) * (1 + loss / 100) * 1000) / 1000;
+                const g = cmSendFromBalance(fineNeed, clientMaterialBalance(d, c).goldInHand);
+                if (g > 0) sendClientGold(d, o, { grams: g, purity: 1000 }, who);
+              }
+            }
+            if (cmDia && cmx.diaSrc !== "later") {
+              const spec = { shape: cmx.shape || undefined, size: cmx.size || undefined, color: cmx.color || undefined, clarity: cmx.clarity || undefined };
+              if (cmx.diaSrc === "now") {
+                receiveClientMaterial(d, o.clientId, { material: "diamond", ct: Number(cmx.ct), pcs: Number(cmx.pcs) || undefined, ...spec,
+                  certLab: cmx.certified ? cmx.certLab || undefined : undefined, certNo: cmx.certified ? cmx.certNo || undefined : undefined, orderId: o.id }, who);
+                if (send) sendClientDiamonds(d, o, { ct: Number(cmx.ct), pcs: Number(cmx.pcs) || undefined, certified: cmx.certified, ...spec, certLab: cmx.certLab, certNo: cmx.certNo }, who);
+              } else if (send) {
+                const c = d.clients.find(x => x.id === o.clientId)!;
+                const ct = cmSendFromBalance(Number(o.diamondWeight) || 0, clientMaterialBalance(d, c).diaInHand);
+                if (ct > 0) sendClientDiamonds(d, o, { ct, shape: o.diamondShape }, who);
+              }
+            }
+            } catch (err) {
+              if (c0) c0.materialLedger = keep.ledger;
+              d.materialIssuances.length = keep.n;
+              o.materialIssuanceIds = keep.ids;
+              throw err;
+            }
+          });
+        } catch (err) {
+          failed = true;
+          toast.error(`Order placed — but the client's material wasn't recorded: ${err instanceof Error ? err.message : "try again"}. Receive it from the order.`);
+        }
+        if (!(mayPlan && (picks.length || plannedBuy))) {
+          if (!failed) toast.success(unsent ? "Order placed — their material is with us; not sent, no factory chosen" : "Order placed — the client's material is on it");
+          nav(`/orders/${orderId}`); return;
+        }
+      }
+    }
+
     // The production plan, recorded against the order as saved: stock first, then the bill.
     if (mayPlan && (picks.length || plannedBuy)) {
       const placed = loadDb().orders.find(o => o.id === orderId);
@@ -686,65 +786,69 @@ export function NewOrderPage() {
         <div className="grid gap-4 xl:grid-cols-[minmax(0,1.3fr)_minmax(0,1fr)] items-start">
         <div className="space-y-4 min-w-0">
 
-        {/* ══ 1. Client selector (admin / employee only) ══ */}
+        {/* ══ 1. Who it is for — a client, or our own Ready Stock (admin / employee only) ══ */}
         {(isAdmin || isEmployee) && (
-          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Client" subtitle="Or build for Ready Stock">
-            <Field label="Select Client *">
-              <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
-                <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={READY_STOCK_CLIENT}>
-                    <span className="font-medium">🏭 Ready Stock — build for inventory</span>
-                    <span className="text-muted-foreground ml-2 text-xs">no client</span>
-                  </SelectItem>
-                  {allClients.map(c => (
-                    <SelectItem key={c.id} value={c.id}>
-                      <span className="font-medium">{c.companyName}</span>
-                      <span className="text-muted-foreground ml-2 text-xs">{c.ownerName}</span>
-                    </SelectItem>
-                  ))}
-                <AddNewItem kind="client" /></SelectContent>
-              </Select>
-            </Field>
+          <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Who is it for?">
+            <div role="radiogroup" aria-label="Who is it for?" className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-secondary/40 p-1">
+              {([[false, "A client", Users], [true, "Ready Stock — in-house", PackageCheck]] as const).map(([rs, label, Icon]) => (
+                <button key={String(rs)} type="button" role="radio" aria-checked={forReadyStock === rs}
+                  onClick={() => {
+                    if (forReadyStock === rs) return;
+                    // A build is always a piece made by a factory — never loose stones or a stock sale.
+                    if (rs) { setKind("piece"); set("clientId", READY_STOCK_CLIENT); } else set("clientId", "");
+                  }}
+                  className={`h-9 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors min-w-0 ${forReadyStock === rs ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+                  <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span>
+                </button>
+              ))}
+            </div>
 
-            {forReadyStock && (
-              <div className="flex items-center gap-3 p-3 rounded-xl bg-primary/5 border border-primary/20 text-sm mt-3">
-                <PackageCheck className="h-5 w-5 text-primary shrink-0" />
-                <p className="text-xs text-muted-foreground">In-house build — no client, no billing.</p>
-              </div>
-            )}
-            {forReadyStock && (
-              <div className="mt-3"><CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company — whose stock it is made from, whose Ready Stock it joins" /></div>
-            )}
-            {!forReadyStock && f.clientId && hasCompanies(db.settings) && (
-              <p className="text-[11px] text-muted-foreground mt-2 flex items-center gap-1.5">For <CompanyBadge id={orderCompany} /> — the client&rsquo;s company: its stock and its Ready Stock.</p>
-            )}
-
-            {f.clientId && !forReadyStock && (() => {
-              const c = allClients.find(x => x.id === f.clientId);
-              return c ? (
-                <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50 text-sm mt-3">
-                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary/15 to-brand-light/15 grid place-items-center shrink-0 text-primary font-bold text-xs">
-                    {c.companyName.charAt(0)}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="font-semibold truncate">{c.companyName}</p>
-                    <p className="text-xs text-muted-foreground">{c.ownerName} · {c.country}</p>
-                  </div>
+            {forReadyStock ? (
+              <div className="space-y-3">
+                <div className="flex items-start gap-2.5 rounded-xl bg-primary/5 border border-primary/15 px-3 py-2.5">
+                  <PackageCheck className="h-4 w-4 text-primary shrink-0 mt-0.5" />
+                  <p className="text-xs text-muted-foreground">Made for our own shelf — no client, no bill. When the factory finishes it, it goes into Ready Stock with its cost and price.</p>
                 </div>
-              ) : null;
-            })()}
-            {/* Who has the order: the admin placing it, unless they give it to someone now. */}
-            {isAdmin && (
-              <div className="mt-3">
-                <p className="text-xs text-muted-foreground mb-1.5">Assigned to</p>
-                <AssignPicker value={f.assignedTo} onChange={v => set("assignedTo", v)} />
+                <CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company — whose stock it is made from, whose Ready Stock it joins" />
               </div>
+            ) : null}
+
+            <div className={`grid gap-3 items-end ${isAdmin ? "md:grid-cols-2" : ""}`}>
+              {!forReadyStock && (
+                <Field label="Client *">
+                  <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
+                    <SelectTrigger className="rounded-xl h-auto min-h-12 py-1.5" aria-label="Client"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
+                    <SelectContent>
+                      {allClients.map(c => (
+                        <SelectItem key={c.id} value={c.id}>
+                          <span className="flex items-center gap-2.5 min-w-0 text-left">
+                            <span className="h-7 w-7 rounded-full bg-primary/10 text-primary grid place-items-center text-xs font-bold shrink-0">{c.companyName.charAt(0).toUpperCase()}</span>
+                            <span className="min-w-0">
+                              <span className="block font-medium truncate">{c.companyName}</span>
+                              <span className="block text-xs text-muted-foreground truncate">{[c.ownerName, c.country].filter(Boolean).join(" · ")}</span>
+                            </span>
+                          </span>
+                        </SelectItem>
+                      ))}
+                    <AddNewItem kind="client" /></SelectContent>
+                  </Select>
+                </Field>
+              )}
+              {/* Who has the order: the admin placing it, unless they give it to someone now. */}
+              {isAdmin && (
+                <Field label="Assigned to">
+                  <AssignPicker value={f.assignedTo} onChange={v => set("assignedTo", v)} wide />
+                </Field>
+              )}
+            </div>
+            {!forReadyStock && f.clientId && hasCompanies(db.settings) && (
+              <p className="text-[11px] text-muted-foreground -mt-1 flex items-center gap-1.5">For <CompanyBadge id={orderCompany} /> — the client&rsquo;s company: its stock and its Ready Stock.</p>
             )}
           </SectionCard>
         )}
 
         {/* ══ 1a. What the order is — everything below follows it ══ */}
+        {!forReadyStock && (
         <SectionCard title="What is this order?">
           <div role="radiogroup" aria-label="What is this order?" className="grid grid-cols-1 sm:grid-cols-3 gap-2">
             {([
@@ -763,6 +867,7 @@ export function NewOrderPage() {
             ))}
           </div>
         </SectionCard>
+        )}
 
         {/* ══ 1b. Sell from Ready Stock — the "From Ready Stock" kind ══ */}
         {!forReadyStock && kind === "readyStock" && (
@@ -821,8 +926,13 @@ export function NewOrderPage() {
           {/* A ready piece needs no design/production details — just quantity + a note. */}
           {selectedStockItem && (
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label="Quantity">
-                <Input type="number" min={1} value={f.quantity} onChange={e => set("quantity", +e.target.value)} className="rounded-xl h-11" />
+              <Field label={`Quantity — ${selectedStockItem.quantity} in stock`}>
+                <Input type="number" min={1} max={selectedStockItem.quantity} value={f.quantity}
+                  onChange={e => {
+                    const q = +e.target.value;
+                    // The value is the piece's price per piece — unless it was changed by hand.
+                    setF(prev => ({ ...prev, quantity: q, ...(prev.orderValue === selectedStockItem.price * (Number(prev.quantity) || 1) && q > 0 ? { orderValue: selectedStockItem.price * q } : {}) }));
+                  }} className="rounded-xl h-11" />
               </Field>
               <Field label="Priority">
                 <Select value={f.priority} onValueChange={v => set("priority", v)}>
@@ -895,7 +1005,7 @@ export function NewOrderPage() {
                 className="rounded-xl h-11" placeholder="0.00" />
             </Field>
 
-            {!isDiamondOnly && (
+            {!isDiamondOnly && !cmDiaNow && (
               <Field label="Diamond Shape">
                 <ListCombo list="diamondShapes" value={f.diamondShape} onChange={v => set("diamondShape", v)} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Diamond Shape" />
               </Field>
@@ -1026,19 +1136,21 @@ export function NewOrderPage() {
           {/* Delivery — 2 cols always */}
           <div>
             <p className="text-sm font-semibold text-foreground mb-3 flex items-center gap-1.5">
-              <Clock className="h-3.5 w-3.5" /> Delivery Preference
+              <Clock className="h-3.5 w-3.5" /> {forReadyStock ? "Target date" : "Delivery Preference"}
             </p>
             <div className="grid grid-cols-2 gap-3">
-              <Field label="Expected Date">
+              <Field label={forReadyStock ? "Ready by" : "Expected Date"}>
                 <Input type="date" value={f.expectedDelivery} min={new Date().toISOString().slice(0, 10)}
                   onChange={e => set("expectedDelivery", e.target.value)}
                   className="rounded-xl h-11" />
               </Field>
-              <Field label="Preferred Time">
-                <Input type="time" value={f.deliveryTime}
-                  onChange={e => set("deliveryTime", e.target.value)}
-                  className="rounded-xl h-11" />
-              </Field>
+              {!forReadyStock && (
+                <Field label="Preferred Time">
+                  <Input type="time" value={f.deliveryTime}
+                    onChange={e => set("deliveryTime", e.target.value)}
+                    className="rounded-xl h-11" />
+                </Field>
+              )}
             </div>
           </div>
 
@@ -1089,24 +1201,22 @@ export function NewOrderPage() {
         <div className="space-y-4 min-w-0">
 
         {/* ══ 4b. Production plan — staff: the factory, what comes from stock, what is bought ══ */}
-        {/* Whose material: the client may give their own gold, diamonds, or both. */}
-        {!isClient && !forReadyStock && kind === "piece" && !isDiamondOnly && (
-          <SectionCard icon={<Coins className="h-4 w-4 text-amber-600" />} title="Client's own material" subtitle="Only if the client gives their gold or diamonds — the rest is ours">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {([["csGold", "The client gives the gold", "Comes off their gold balance at Final Approval"], ["csDiamonds", "The client gives the diamonds", "Their stones — we bill setting and labour"]] as const).map(([k, label, hint]) => (
-                <label key={k} className="flex items-center justify-between gap-3 rounded-xl border border-border/70 px-3 py-2.5 cursor-pointer">
-                  <span><span className="block text-sm font-medium text-brand-dark">{label}</span><span className="block text-[11px] text-muted-foreground">{hint}</span></span>
-                  <Switch checked={f[k]} onCheckedChange={v => setF(prev => ({ ...prev, [k]: v }))} aria-label={label} />
-                </label>
-              ))}
-            </div>
-            {f.csGold && (
-              <div className="mt-3 flex items-center gap-2">
-                <Label htmlFor="cs-loss" className="text-xs text-muted-foreground">Gold loss agreed</Label>
-                <Input id="cs-loss" type="number" min={0} max={25} step="0.1" value={f.csLoss} onChange={e => setF(prev => ({ ...prev, csLoss: e.target.value }))} className="h-9 w-24 rounded-lg" placeholder="%" />
-                <span className="text-xs text-muted-foreground">%</span>
-              </div>
-            )}
+        {/* Who gives the material — ours, or the client's own (taken in right here). */}
+        {cmPossible && (isClient || !forReadyStock) && (
+          <SectionCard icon={<Coins className="h-4 w-4 text-amber-600" />} title={isClient ? "Your own material?" : "Material — who gives it?"}
+            subtitle={isClient ? "Only if you'll send us your own gold or diamonds" : "Ours, or the client's own — just for this order"}>
+            <ClientMaterialChoice
+              value={{ ...cmx, gold: f.csGold, diamonds: f.csDiamonds, lossPct: f.csLoss }}
+              onChange={next => {
+                setF(prev => ({ ...prev, csGold: next.gold, csDiamonds: next.diamonds, csLoss: next.lossPct }));
+                setCmx(next);
+                // Their stones received now ARE the piece's diamonds: weight and shape follow.
+                if (next.diamonds && next.diaSrc === "now" && next.ct !== cmx.ct && Number(next.ct) > 0) setDiamondCt(Number(next.ct));
+              }}
+              clientId={cmClient!.id} clientView={isClient} declareOnly={!mayPlan} showGold={metalHasKarats}
+              factoryName={db.factories.find(x => x.id === f.assignedFactoryId)?.name}
+              goldNeedFine={estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0, metalWeight: 0 })}
+              wantCt={Number(f.diamondWeight) || 0} />
           </SectionCard>
         )}
 
@@ -1114,6 +1224,7 @@ export function NewOrderPage() {
           <SectionCard icon={<Boxes className="h-4 w-4 text-primary" />} title={kind === "loose" ? "Stones for this sale" : "Production plan"}
             subtitle="From stock or bought — recorded with the order">
             <ProductionPlan
+              clientGives={cmOn ? { gold: cmGold, diamonds: cmDia } : undefined}
               order={{ kind, companyId: orderCompany, metal: f.metal, metalHasKarats, productKarats: f.productKarats,
                 estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0,
                 diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: { ...f.stoneSpec, stone } }}
@@ -1189,7 +1300,8 @@ export function NewOrderPage() {
           const unpriced = picks.filter(pk => (pk.key || pk.kind === "certified") && pickCostInr(db, pk, orderCompany) == null).length;
           const bought = plannedBuy?.totalInr ?? 0;
           const goldPlanned = picks.some(pk => pk.material === "gold") || !!plannedBuy?.lines.some(l => l.kind === "gold");
-          const fine = kind === "piece" && metalHasKarats && !goldPlanned
+          // The client's own gold costs us nothing.
+          const fine = kind === "piece" && metalHasKarats && !goldPlanned && !(cmOn && f.csGold)
             ? estimatedPureGoldNeeded({ productKarats: f.productKarats, estimatedNetWeight: Number(f.estimatedNetWeight), estimatedGrossWeight: Number(f.estimatedGrossWeight), metalWeight: 0 }) : 0;
           const fg = fine > 0 ? stockFineGoldRate(db, now, orderCompany) : null;
           const goldEst = fg ? Math.round(fine * fg.rate) : 0;
@@ -1233,7 +1345,7 @@ export function NewOrderPage() {
           <>
             {/* Order Value */}
             <SectionCard icon={<DollarSign className="h-4 w-4 text-brand-dark" />} title="Order Value" iconBg="bg-brand-light/15">
-              <Field label="Order Value (USD) *">
+              <Field label={cmOn ? "Order Value (USD) * — labour & setting" : "Order Value (USD) *"}>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">$</span>
                   <Input type="number" min={0} step="0.01" required

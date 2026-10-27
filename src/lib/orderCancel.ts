@@ -85,9 +85,12 @@ export async function returnIssuedMaterials(orderId: string, user: Who): Promise
     // inventory (creation decremented it by one). Guarded so it restores once.
     if (order.materialSourcing === "readyStock" && order.readyStockItemId && !wasRejected) {
       const item = d.readyStock?.find(x => x.id === order.readyStockItemId);
-      if (item) {
-        item.quantity += 1;
-        logItem(item, { ...whoOf(user), kind: "unsold", text: `Order ${order.orderNumber} cancelled — back in stock · ${item.quantity - 1} → ${item.quantity}`, ref: { orderId: order.id } });
+      const live = d.orders.find(x => x.id === order.id);
+      if (item && live && live.status !== "Rejected" && !live.readyStockBackAt) {
+        const n = order.readyStockQty ?? 1;
+        item.quantity += n;
+        live.readyStockBackAt = new Date().toISOString(); // put back once — a second cancel finds it here
+        logItem(item, { ...whoOf(user), kind: "unsold", text: `Order ${order.orderNumber} cancelled — back in stock · ${item.quantity - n} → ${item.quantity}`, ref: { orderId: order.id } });
       }
     }
     // Any advance already paid on this order becomes client credit — usable on

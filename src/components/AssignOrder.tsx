@@ -69,9 +69,9 @@ function StaffOptions({ db, current }: { db: DB; current?: string }) {
 
 /** The picker's closed face: the chosen person in full. A div, not a span, so
  *  the trigger's one-line clamp (which stacked the icon over the name) leaves it alone. */
-function PersonTrigger({ label, u, placeholder }: { label: string; u?: User | null; placeholder?: string }) {
+function PersonTrigger({ label, u, placeholder, wide }: { label: string; u?: User | null; placeholder?: string; wide?: boolean }) {
   return (
-    <SelectTrigger className="h-auto min-h-12 py-2 rounded-xl w-full max-w-sm bg-card shadow-sm hover:border-primary/40 transition-colors" aria-label={label}>
+    <SelectTrigger className={`h-auto min-h-12 py-2 rounded-xl w-full ${wide ? "" : "max-w-sm"} bg-card shadow-sm hover:border-primary/40 transition-colors`} aria-label={label}>
       <div className="flex-1 min-w-0">
         <SelectValue placeholder={placeholder}>{u === null && placeholder ? undefined : <PersonLine u={u ?? undefined} />}</SelectValue>
       </div>
@@ -125,12 +125,12 @@ export function AssignOrderField({ order }: { order: Order }) {
 }
 
 /** New Order: who the order will belong to — the person placing it, unless changed. */
-export function AssignPicker({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function AssignPicker({ value, onChange, wide }: { value: string; onChange: (v: string) => void; wide?: boolean }) {
   const db = useDb();
   const current = db.users.find(u => u.id === value);
   return (
     <Select value={value && current ? value : NOBODY} onValueChange={v => onChange(v === NOBODY ? "" : v)}>
-      <PersonTrigger label="Assigned to" u={current} />
+      <PersonTrigger label="Assigned to" u={current} wide={wide} />
       <SelectContent className="max-h-80"><StaffOptions db={db} current={value} /></SelectContent>
     </Select>
   );

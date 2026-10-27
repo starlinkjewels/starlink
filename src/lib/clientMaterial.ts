@@ -41,7 +41,7 @@ export function deliveryFine(i: Pick<MaterialIssuance, "quantityIssued" | "purit
 }
 
 /** Diamonds a client issuance has come back from the factory (unused). */
-function diaBack(i: MaterialIssuance): number {
+export function diaBack(i: MaterialIssuance): number {
   return i.diamondKind === "certified" ? (i.finishDisposition === "returned" ? i.quantityIssued : 0) : (i.finishReturnedCt || 0);
 }
 

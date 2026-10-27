@@ -47,8 +47,35 @@
   --color-sidebar-ring: var(--sidebar-ring);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
-  --color-warning: var(--warning);
-  --color-warning-foreground: var(--warning-foreground);
+  /* Attention is in the business's own colour (Settings → Appearance / Brand),
+     not a stock orange: a "waiting" note, a highlight, a chosen chip — all of it
+     follows the theme. Amber and orange are re-pointed to shades of it, so every
+     page that wrote them takes the theme too. Red (problems) and green (paid,
+     done) keep their meaning. */
+  --color-warning: var(--primary);
+  --color-warning-foreground: color-mix(in oklab, var(--primary) 72%, black);
+  --color-amber-50: color-mix(in oklab, var(--primary) 6%, white);
+  --color-amber-100: color-mix(in oklab, var(--primary) 11%, white);
+  --color-amber-200: color-mix(in oklab, var(--primary) 22%, white);
+  --color-amber-300: color-mix(in oklab, var(--primary) 38%, white);
+  --color-amber-400: color-mix(in oklab, var(--primary) 64%, white);
+  --color-amber-500: var(--primary);
+  --color-amber-600: color-mix(in oklab, var(--primary) 92%, black);
+  --color-amber-700: color-mix(in oklab, var(--primary) 80%, black);
+  --color-amber-800: color-mix(in oklab, var(--primary) 66%, black);
+  --color-amber-900: color-mix(in oklab, var(--primary) 52%, black);
+  --color-amber-950: color-mix(in oklab, var(--primary) 40%, black);
+  --color-orange-50: color-mix(in oklab, var(--primary) 6%, white);
+  --color-orange-100: color-mix(in oklab, var(--primary) 11%, white);
+  --color-orange-200: color-mix(in oklab, var(--primary) 22%, white);
+  --color-orange-300: color-mix(in oklab, var(--primary) 38%, white);
+  --color-orange-400: color-mix(in oklab, var(--primary) 64%, white);
+  --color-orange-500: var(--primary);
+  --color-orange-600: color-mix(in oklab, var(--primary) 92%, black);
+  --color-orange-700: color-mix(in oklab, var(--primary) 80%, black);
+  --color-orange-800: color-mix(in oklab, var(--primary) 66%, black);
+  --color-orange-900: color-mix(in oklab, var(--primary) 52%, black);
+  --color-orange-950: color-mix(in oklab, var(--primary) 40%, black);
   --color-brand: var(--brand);
   --color-brand-dark: var(--brand-dark);
   --color-brand-light: var(--brand-light);
@@ -801,7 +828,7 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
    written straight into the pages. Rather than touch every page, those are
    re-coloured here: white becomes the card colour, a pastel becomes a soft
    tint of its hue, and dark text becomes a light shade of the same hue — so
-   a warning still reads amber and a payment still reads green.
+   a note still reads in the theme's colour and a payment still reads green.
    ══════════════════════════════════════════════════════════════════════ */
 :root.dark {
   color-scheme: dark;
@@ -855,14 +882,11 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
 /* The logo is navy on white; lift it so it reads on dark. */
 :root.dark img[src*="starlink-logo"], :root.dark img[src*="/logo.png"] { filter: brightness(1.6) saturate(0.9); }
 
-:root.dark :is(.bg-amber-50, .bg-amber-100, [class*="bg-amber-50/"], [class*="bg-amber-100/"]) { background-color: oklch(0.7 0.188 70.08 / 0.14); }
-:root.dark :is(.border-amber-100, .border-amber-200, .border-amber-300) { border-color: oklch(0.7 0.188 70.08 / 0.32); }
-:root.dark .text-amber-600 { color: oklch(0.78 0.188 70.08); }
-:root.dark :is(.text-amber-700, .text-amber-800, .text-amber-900) { color: oklch(0.84 0.170 70.08); }
-:root.dark :is(.bg-orange-50, .bg-orange-100, [class*="bg-orange-50/"], [class*="bg-orange-100/"]) { background-color: oklch(0.7 0.213 47.6 / 0.14); }
-:root.dark :is(.border-orange-100, .border-orange-200, .border-orange-300) { border-color: oklch(0.7 0.213 47.6 / 0.32); }
-:root.dark .text-orange-600 { color: oklch(0.78 0.190 47.6); }
-:root.dark :is(.text-orange-700, .text-orange-800, .text-orange-900) { color: oklch(0.84 0.170 47.6); }
+/* Amber and orange are the theme's colour (see @theme): in the dark, a soft tint of it and a light shade to read. */
+:root.dark :is(.bg-amber-50, .bg-amber-100, [class*="bg-amber-50/"], [class*="bg-amber-100/"], .bg-orange-50, .bg-orange-100, [class*="bg-orange-50/"], [class*="bg-orange-100/"]) { background-color: color-mix(in oklab, var(--primary) 16%, transparent); }
+:root.dark :is(.border-amber-100, .border-amber-200, .border-amber-300, .border-orange-100, .border-orange-200, .border-orange-300) { border-color: color-mix(in oklab, var(--primary) 36%, transparent); }
+:root.dark :is(.text-amber-600, .text-orange-600) { color: color-mix(in oklab, var(--primary) 72%, white); }
+:root.dark :is(.text-amber-700, .text-amber-800, .text-amber-900, .text-orange-700, .text-orange-800, .text-orange-900, .text-warning-foreground) { color: color-mix(in oklab, var(--primary) 52%, white); }
 :root.dark :is(.bg-yellow-50, .bg-yellow-100, [class*="bg-yellow-50/"], [class*="bg-yellow-100/"]) { background-color: oklch(0.7 0.184 86.05 / 0.14); }
 :root.dark :is(.border-yellow-100, .border-yellow-200, .border-yellow-300) { border-color: oklch(0.7 0.184 86.05 / 0.32); }
 :root.dark .text-yellow-600 { color: oklch(0.78 0.184 86.05); }
@@ -952,7 +976,7 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
 
 
 /* A soft warning tint (a "Waiting" badge) with the dark text meant for solid amber. */
-:root.dark [class*="bg-warning/"]:is(.text-warning-foreground), :root.dark [class*="bg-warning/"] .text-warning-foreground { color: oklch(0.86 0.13 80); }
+:root.dark [class*="bg-warning/"]:is(.text-warning-foreground), :root.dark [class*="bg-warning/"] .text-warning-foreground { color: color-mix(in oklab, var(--primary) 52%, white); }
 /* Chart legends write each label in its series colour — navy on navy in the dark. */
 :root.dark .recharts-legend-item-text { color: var(--color-muted-foreground) !important; }
 :root.dark .recharts-cartesian-axis-tick-value, :root.dark .recharts-text { fill: var(--color-muted-foreground); }

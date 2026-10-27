@@ -12,8 +12,8 @@ const plural = (n: number) => `${n} day${n === 1 ? "" : "s"}`;
  */
 export function ProductionInfo({ t, compact = false }: { t: ProductionTrack; compact?: boolean }) {
   const pct = t.days == null ? 0 : Math.min(100, Math.round(t.days / t.limit * 100));
-  const tone = !t.running ? "bg-success" : t.delayed ? "bg-destructive" : pct >= 70 ? "bg-amber-500" : "bg-primary";
-  const text = !t.running ? "text-muted-foreground" : t.delayed ? "text-destructive" : pct >= 70 ? "text-amber-700" : "text-foreground/80";
+  const tone = !t.running ? "bg-success" : t.delayed ? "bg-destructive" : pct >= 70 ? "bg-destructive/55" : "bg-primary";
+  const text = !t.running ? "text-muted-foreground" : t.delayed ? "text-destructive" : pct >= 70 ? "text-destructive/85" : "text-foreground/80";
   const missing = t.running && t.needsDiamonds && !t.diamondsIssuedAt;
   return (
     <div className={`min-w-0 ${compact ? "space-y-1" : "space-y-1.5"}`}>
