@@ -790,7 +790,7 @@ export function NewOrderPage() {
         {(isAdmin || isEmployee) && (
           <SectionCard icon={<Building2 className="h-4 w-4 text-primary" />} title="Who is it for?">
             <div role="radiogroup" aria-label="Who is it for?" className="grid grid-cols-2 gap-1 rounded-xl border border-border bg-secondary/40 p-1">
-              {([[false, "A client", Users], [true, "Ready Stock — in-house", PackageCheck]] as const).map(([rs, label, Icon]) => (
+              {([[false, "A client", "", Users], [true, "Ready Stock", " — in-house", PackageCheck]] as const).map(([rs, label, more, Icon]) => (
                 <button key={String(rs)} type="button" role="radio" aria-checked={forReadyStock === rs}
                   onClick={() => {
                     if (forReadyStock === rs) return;
@@ -798,7 +798,7 @@ export function NewOrderPage() {
                     if (rs) { setKind("piece"); set("clientId", READY_STOCK_CLIENT); } else set("clientId", "");
                   }}
                   className={`h-9 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors min-w-0 ${forReadyStock === rs ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
-                  <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}</span>
+                  <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}{more && <span className="hidden sm:inline">{more}</span>}</span>
                 </button>
               ))}
             </div>
@@ -809,15 +809,19 @@ export function NewOrderPage() {
                   <PackageCheck className="h-4 w-4 text-primary shrink-0 mt-0.5" />
                   <p className="text-xs text-muted-foreground">Made for our own shelf — no client, no bill. When the factory finishes it, it goes into Ready Stock with its cost and price.</p>
                 </div>
-                <CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company — whose stock it is made from, whose Ready Stock it joins" />
               </div>
             ) : null}
 
-            <div className={`grid gap-3 items-end ${isAdmin ? "md:grid-cols-2" : ""}`}>
+            {/* One row: who it is for (the client, or the build's company) and who has it. */}
+            <div className={`grid gap-3 items-start ${isAdmin ? "md:grid-cols-2" : ""}`}>
+              {forReadyStock && (
+                <CompanyPicker value={buildCompany} onChange={setBuildCompany} label="Company" labelClassName="block text-sm font-medium text-foreground"
+                  className="h-auto min-h-[52px] !mt-1.5 rounded-xl [&>span]:flex-1 [&>span]:text-left" />
+              )}
               {!forReadyStock && (
                 <Field label="Client *">
                   <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
-                    <SelectTrigger className="rounded-xl h-auto min-h-12 py-1.5" aria-label="Client"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
+                    <SelectTrigger className="rounded-xl h-auto min-h-[52px] py-1.5" aria-label="Client"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
                     <SelectContent>
                       {allClients.map(c => (
                         <SelectItem key={c.id} value={c.id}>

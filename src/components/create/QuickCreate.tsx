@@ -125,7 +125,7 @@ export function AddNewItem({ kind }: { kind: QuickKind }) {
   return (
     <>
       <SelectSeparator />
-      <SelectItem value={ADD_NEW} className="text-primary font-semibold focus:text-primary">
+      <SelectItem value={ADD_NEW} alwaysShown className="text-primary font-semibold focus:text-primary">
         <span className="inline-flex items-center gap-1.5"><Plus className="h-3.5 w-3.5" />Add new {LABEL[kind]}</span>
       </SelectItem>
     </>

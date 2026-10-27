@@ -24,8 +24,10 @@ export function useDefaultCompany(): string {
  * Which company an entry is for — shown only when there is more than one.
  * Whose stock it goes into or comes out of: each company holds its own.
  */
-export function CompanyPicker({ value, onChange, label = "Company", hint, className = "h-10 rounded-xl" }: {
+export function CompanyPicker({ value, onChange, label = "Company", hint, className = "h-10 rounded-xl", labelClassName = "text-xs" }: {
   value: string; onChange: (id: string) => void; label?: string; hint?: string; className?: string;
+  /** To match the labels of the fields beside it. */
+  labelClassName?: string;
 }) {
   const db = useDb();
   const { user } = useAuth();
@@ -36,7 +38,7 @@ export function CompanyPicker({ value, onChange, label = "Company", hint, classN
   const options = list.some(c => c.id === cur.id) ? list : [cur, ...list];
   return (
     <div>
-      <Label className="text-xs">{label}</Label>
+      <Label className={labelClassName}>{label}</Label>
       <Select value={value || MAIN_COMPANY_ID} onValueChange={addNew("company", onChange)}>
         <SelectTrigger className={`${className} mt-1`} aria-label={label}><Building2 className="h-3.5 w-3.5 mr-1.5 text-muted-foreground shrink-0" /><SelectValue /></SelectTrigger>
         <SelectContent>

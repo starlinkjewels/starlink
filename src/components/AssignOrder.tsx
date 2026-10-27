@@ -71,7 +71,7 @@ function StaffOptions({ db, current }: { db: DB; current?: string }) {
  *  the trigger's one-line clamp (which stacked the icon over the name) leaves it alone. */
 function PersonTrigger({ label, u, placeholder, wide }: { label: string; u?: User | null; placeholder?: string; wide?: boolean }) {
   return (
-    <SelectTrigger className={`h-auto min-h-12 py-2 rounded-xl w-full ${wide ? "" : "max-w-sm"} bg-card shadow-sm hover:border-primary/40 transition-colors`} aria-label={label}>
+    <SelectTrigger className={`h-auto ${wide ? "min-h-[52px]" : "min-h-12 max-w-sm"} py-2 rounded-xl w-full bg-card shadow-sm hover:border-primary/40 transition-colors`} aria-label={label}>
       <div className="flex-1 min-w-0">
         <SelectValue placeholder={placeholder}>{u === null && placeholder ? undefined : <PersonLine u={u ?? undefined} />}</SelectValue>
       </div>
