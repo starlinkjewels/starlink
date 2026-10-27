@@ -1,7 +1,49 @@
 {
-  "rewrites": [{ "source": "/((?!api/).*)", "destination": "/index.html" }],
+  "rewrites": [
+    {
+      "source": "/s/:id",
+      "destination": "/api/share?id=:id"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ],
   "headers": [
-    { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }] },
-    { "source": "/manifest.webmanifest", "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }] }
-  ]
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    },
+    {
+      "source": "/manifest.webmanifest",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public, max-age=0, must-revalidate"
+        }
+      ]
+    }
+  ],
+  "images": {
+    "sizes": [
+      320,
+      640,
+      1200
+    ],
+    "remotePatterns": [
+      {
+        "protocol": "https",
+        "hostname": "firebasestorage.googleapis.com"
+      }
+    ],
+    "minimumCacheTTL": 86400,
+    "formats": [
+      "image/webp"
+    ]
+  }
 }
