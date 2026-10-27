@@ -3336,6 +3336,14 @@ function OrderDetailPageBody() {
           {(() => {
             const editable = canEditStage();
             const needsDia = orderMaterialRequirements(order).needsDiamond;
+            // Diamonds can always be added to a piece unless someone said it has none —
+            // an order saved without an estimated weight (0 ct) still gets its stones.
+            const mayAddDia = needsDia || !order.noDiamond;
+            // "Mount Only": made to take stones later — no diamonds asked of it.
+            const mountOnly = /mount only/i.test(order.diamondType ?? "");
+            const noDiaWeight = !needsDia && !order.noDiamond && !mountOnly && !linkedIssuances.some(i => i.material === "diamond");
+            // Other materials we actually hold (for this order's company) — none, and the form would open empty.
+            const othersInStock = otherMaterials.filter(m => Object.values(deriveStockBalances(db.stockMovements, m.id, workCompanyOf(db, order))).some(q => q > 0));
             const noFactoryWhy = !order.assignedFactoryId ? "Choose the factory first" : undefined;
             const afterFaWhy = faDone ? "Final Approval is done — use Rework for changes" : undefined;
             const blockWhy = afterFaWhy ?? noFactoryWhy;
@@ -3361,10 +3369,11 @@ function OrderDetailPageBody() {
             const addActions: MoreAction[] = [
               { label: "Client's diamonds", icon: Gem, show: csOk && cmLive && (needsDia || !!order.clientSupplied?.diamonds) && !!order.clientSupplied?.diamonds, disabled: !!blockWhy, hint: blockWhy ?? "Their own stones, to the factory — no cost to us", onSelect: () => setCmSheet({ mode: "send", material: "diamond" }) },
               { label: "Client's gold", icon: Coins, show: csOk && cmLive && !!order.clientSupplied?.gold, disabled: !!blockWhy, hint: blockWhy ?? "Their own gold, to the factory", onSelect: () => setCmSheet({ mode: "send", material: "gold" }) },
-              { label: "Diamond from stock", icon: Gem, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "A lot or a certified stone we hold", onSelect: () => openDiamond("stock") },
-              { label: "Buy new from a supplier", icon: ShoppingCart, show: needsDia, disabled: !!blockWhy, hint: blockWhy ?? "Bought for this order, sent to the factory", onSelect: () => openDiamond("buy") },
-              { label: "Other material from stock", icon: Box, show: otherMaterials.length > 0, disabled: !!blockWhy,
-                hint: blockWhy ?? `${otherMaterials.map(m => m.name).slice(0, 4).join(", ")}${otherMaterials.length > 4 ? "…" : ""}`, onSelect: openOther },
+              { label: "Diamond from stock", icon: Gem, show: mayAddDia, disabled: !!blockWhy, hint: blockWhy ?? "A lot or a certified stone we hold", onSelect: () => openDiamond("stock") },
+              // Buying for the order is always open — diamonds, gold, gems, findings.
+              { label: "Buy new from a supplier", icon: ShoppingCart, disabled: !!blockWhy, hint: blockWhy ?? "Bought for this order, sent to the factory", onSelect: () => openDiamond("buy") },
+              { label: "Other material from stock", icon: Box, show: otherMaterials.length > 0, disabled: !!blockWhy || othersInStock.length === 0,
+                hint: blockWhy ?? (othersInStock.length === 0 ? `None in stock (${otherMaterials.map(m => m.name).slice(0, 3).join(", ")}) — buy new instead` : `${othersInStock.map(m => m.name).slice(0, 4).join(", ")}${othersInStock.length > 4 ? "…" : ""}`), onSelect: openOther },
             ];
             const hasEstimate = order.estimatedMakingCharges != null || order.estimatedGrossWeight != null;
             const moreActions: MoreAction[] = [
@@ -3374,7 +3383,7 @@ function OrderDetailPageBody() {
               { label: "Client's own material…", icon: Coins, show: csOk && cmLive && editable,
                 hint: faDone ? "Final Approval is done — the piece's material is settled" : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && "gold", order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}` : "If the client gives their gold or diamonds",
                 disabled: faDone, onSelect: () => setCsEdit(true) },
-              { label: "No diamond in this piece", icon: XCircle, show: !faDone && needsDia, hint: "Gold only", onSelect: () => setNoDiamond(true) },
+              { label: "No diamond in this piece", icon: XCircle, show: !faDone && !order.noDiamond && !linkedIssuances.some(i => i.material === "diamond"), hint: "Gold only", onSelect: () => setNoDiamond(true) },
               { label: "This piece has diamond", icon: Gem, show: !faDone && !!order.noDiamond, onSelect: () => setNoDiamond(false) },
               { label: "Rework / Alteration", icon: RotateCcw, show: !faDone, hint: "The piece came back for changes", onSelect: openRework },
             ];
@@ -3523,13 +3532,15 @@ function OrderDetailPageBody() {
                         </p>
                       )}
                     </MfgStep>
-                    <MfgStep n={2} title="Material" state={diaMissing ? "todo" : "done"}>
+                    <MfgStep n={2} title="Material" state={diaMissing || noDiaWeight ? "todo" : "done"}>
                       {order.noDiamond ? (
                         <p className="text-sm font-medium text-brand-dark">Gold only</p>
                       ) : diaIssues.length > 0 ? (
                         <p className="text-sm font-medium text-brand-dark">{diaIssues.length} diamond {diaIssues.length === 1 ? "entry" : "entries"} · {diaCt} ct</p>
                       ) : needsDia ? (
                         <p className="text-sm font-medium text-destructive">{order.clientSupplied?.diamonds ? "Their diamonds to come" : "Diamond still needed"}</p>
+                      ) : noDiaWeight ? (
+                        <p className="text-sm font-medium text-amber-700">No diamond weight on the order</p>
                       ) : (
                         <p className="text-sm text-muted-foreground">Nothing to add</p>
                       )}
@@ -3537,6 +3548,7 @@ function OrderDetailPageBody() {
                         {order.noDiamond ? "No diamond in this piece"
                           : diaMissing && needsDia && order.clientSupplied?.diamonds ? "Waiting for the client's diamonds — see above"
                           : diaMissing && needsDia ? (studio ? "Add the diamonds — from stock or bought new" : "Add material → from stock or buy new")
+                          : noDiaWeight ? "Add its diamonds (Add material), or ⋯ → No diamond in this piece"
                           : otherIssues.length ? `+ ${otherIssues.length} other material${otherIssues.length === 1 ? "" : "s"}`
                           : order.diamondWeight ? `Estimate ${order.diamondWeight} ct` : "\u00a0"}
                       </p>
