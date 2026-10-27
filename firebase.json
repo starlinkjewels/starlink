@@ -20,7 +20,11 @@
       "site": "ssdiam",
       "public": "dist",
       "ignore": ["firebase.json", "**/.*", "**/node_modules/**"],
-      "rewrites": [{ "source": "**", "destination": "/index.html" }],
+      "rewrites": [
+        { "source": "/s/**", "function": { "functionId": "shareMeta", "region": "asia-south1" } },
+        { "source": "/share-img", "function": { "functionId": "shareImage", "region": "asia-south1" } },
+        { "source": "**", "destination": "/index.html" }
+      ],
       "headers": [
         { "source": "/sw.js", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] },
         { "source": "/index.html", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }

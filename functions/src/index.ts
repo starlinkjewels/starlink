@@ -16,3 +16,6 @@ export const sumProd = makeSummaries("diamondflow");
 // The assistant (/ai in the app), on SS Diam's own AI provider key — the
 // functions secret SARVAM_API_KEY.
 export { starlinkAiChat } from "./ai";
+
+// A shared link's preview (WhatsApp, Telegram…): the piece's photo and name — Hosting sends /s/** here.
+export { shareMeta, shareImage } from "./shareMeta";
