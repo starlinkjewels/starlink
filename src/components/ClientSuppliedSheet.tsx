@@ -72,6 +72,9 @@ export function ClientSuppliedSheet({ order, onClose }: { order: Order; onClose(
       return;
     }
     toast.success(unsent ? "Saved — not sent: choose the factory first" : "Saved");
+    // Taken off with some of theirs received for it: that stays on their account.
+    const left = [cs.gold && !goldOn && gotGold > 0 && `${gotGold} g fine gold`, cs.diamonds && !diaOn && gotDia > 0 && `${gotDia} ct diamonds`].filter(Boolean);
+    if (left.length) toast.info(`${left.join(" and ")} of theirs stays on their account — hand it back from the client's page.`);
     onClose();
   };
 
