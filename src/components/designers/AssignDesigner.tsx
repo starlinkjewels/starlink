@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { toast } from "sonner";
-import { PenTool } from "lucide-react";
+import { PenTool, UserPlus, Plus, Clock, CheckCircle2 } from "lucide-react";
 import { updateDbAs, loadDb, type CadJob, type DB } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -8,7 +8,7 @@ import { fmtMoneyInr } from "@/lib/manufacturing";
 import { KIND_LABEL, activeDesigners, assignDesigner, briefRows, designerEmail, designerOf, isOpenJob, jobsOfOrder, type Who } from "@/lib/designers";
 import { sendMail, designAssignedEmail } from "@/lib/email";
 import { ActionSheet } from "@/components/ActionSheet";
-import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
+import { AddNewItem, ADD_NEW, useAddNew, useMayCreate } from "@/components/create/QuickCreate";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -49,8 +49,10 @@ export function mailAssigned(db: DB, job: CadJob) {
 
 /**
  * The designer, their charge (a freelancer) and the due date — one set of
- * fields, the same in New Order and on the order page. "+ Add new designer"
- * opens the Designers form and chooses the one made.
+ * fields, the same in New Order and on the order page. The designers show as
+ * cards to tap (name, ours or freelance, charge, what they have in hand); with
+ * many, a dropdown. "+ Add designer" opens the Designers form and chooses the
+ * one made — and with none yet, that is what the box offers.
  */
 export function DesignerFields({ value, onChange, optional, compact }: {
   value: DesignerChoice; onChange: (v: DesignerChoice) => void;
@@ -61,6 +63,7 @@ export function DesignerFields({ value, onChange, optional, compact }: {
 }) {
   const db = useDb();
   const addNew = useAddNew();
+  const mayAdd = useMayCreate("designer");
   const list = activeDesigners(db);
   const chosen = designerOf(db, value.designerId);
   const open = (id: string) => (db.cadJobs ?? []).filter(j => j.designerId === id && isOpenJob(j)).length;
@@ -68,10 +71,59 @@ export function DesignerFields({ value, onChange, optional, compact }: {
     const x = designerOf(loadDb(), id);
     onChange({ ...value, designerId: id === "__none" ? "" : id, rate: x?.kind === "freelance" && x.ratePerDesign != null ? String(x.ratePerDesign) : "" });
   };
+  const addDesigner = () => addNew("designer", pick)(ADD_NEW);
+  const initials = (n: string) => n.split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]!.toUpperCase()).join("");
+  const card = (on: boolean) =>
+    `relative flex items-center gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${on ? "border-primary bg-primary/[0.06] ring-1 ring-primary/30" : "border-border bg-white hover:bg-secondary/60"}`;
+
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="col-span-2 sm:col-span-1">
+      {list.length === 0 ? (
+        // Nobody to give it to yet: say so, and offer the way to add one.
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border-2 border-dashed border-border px-4 py-3.5">
+          <span className="h-10 w-10 shrink-0 rounded-full bg-primary/10 text-primary grid place-items-center"><UserPlus className="h-5 w-5" /></span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-brand-dark">No CAD designers yet</p>
+            <p className="text-xs text-muted-foreground">{mayAdd ? "Add one of your own or a freelancer — they get the design by email." : "An admin adds designers on the Designers page."}</p>
+          </div>
+          {mayAdd && <Button type="button" variant="outline" className="h-9 rounded-xl gap-1.5" onClick={addDesigner}><Plus className="h-4 w-4" /> Add designer</Button>}
+        </div>
+      ) : list.length <= 8 ? (
+        <div role="radiogroup" aria-label="Designer" className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          {optional && (
+            <button type="button" role="radio" aria-checked={!value.designerId} onClick={() => pick("__none")} className={card(!value.designerId)}>
+              <span className="h-9 w-9 shrink-0 rounded-full bg-secondary text-muted-foreground grid place-items-center"><Clock className="h-4 w-4" /></span>
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-foreground">No designer yet</span>
+                <span className="block text-[11px] text-muted-foreground">Give it later from the order</span>
+              </span>
+            </button>
+          )}
+          {list.map(x => {
+            const on = value.designerId === x.id;
+            const n = open(x.id);
+            return (
+              <button key={x.id} type="button" role="radio" aria-checked={on} onClick={() => pick(x.id)} className={card(on)} aria-label={`${x.name} · ${KIND_LABEL[x.kind]}`}>
+                <span className={`h-9 w-9 shrink-0 rounded-full grid place-items-center text-xs font-bold ${x.kind === "inhouse" ? "bg-blue-500/10 text-blue-700" : "bg-violet-500/10 text-violet-700"}`}>{initials(x.name)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-semibold text-brand-dark truncate">{x.name}</span>
+                  <span className="block text-[11px] leading-snug text-muted-foreground">
+                    {KIND_LABEL[x.kind]} · {x.kind === "freelance" ? (x.ratePerDesign != null ? `${fmtMoneyInr(x.ratePerDesign)} a design` : "charge per design") : "salary"}
+                    {n ? ` · ${n} in hand` : " · free now"}
+                  </span>
+                </span>
+                {on && <CheckCircle2 className="h-4 w-4 shrink-0 text-primary" />}
+              </button>
+            );
+          })}
+          {mayAdd && (
+            <button type="button" onClick={addDesigner} className="flex items-center justify-center gap-1.5 rounded-xl border-2 border-dashed border-border px-3 py-2.5 text-sm font-medium text-primary hover:bg-primary/[0.04]">
+              <Plus className="h-4 w-4" /> Add designer
+            </button>
+          )}
+        </div>
+      ) : (
+        <div>
           <Label className="text-xs">Designer</Label>
           <Select value={value.designerId || (optional ? "__none" : "")} onValueChange={addNew("designer", pick)}>
             <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Designer"><SelectValue placeholder="Choose the designer" /></SelectTrigger>
@@ -86,28 +138,34 @@ export function DesignerFields({ value, onChange, optional, compact }: {
             </SelectContent>
           </Select>
         </div>
-        {value.designerId && (
-          <div className="col-span-2 sm:col-span-1">
-            <Label className="text-xs">Due date</Label>
-            <Input type="date" value={value.dueDate} onChange={e => onChange({ ...value, dueDate: e.target.value })} className="h-10 rounded-xl mt-1" aria-label="Design due date" />
+      )}
+
+      {/* The chosen designer's terms, together. */}
+      {chosen && (
+        <div className="rounded-xl border border-border/70 bg-secondary/25 p-3 space-y-3">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="col-span-2 sm:col-span-1">
+              <Label className="text-xs">Due date</Label>
+              <Input type="date" value={value.dueDate} onChange={e => onChange({ ...value, dueDate: e.target.value })} className="h-10 rounded-xl mt-1 bg-white" aria-label="Design due date" />
+            </div>
+            {chosen.kind === "freelance" ? (
+              <div className="col-span-2 sm:col-span-1">
+                <Label className="text-xs">Charge for this design (₹)</Label>
+                <Input type="number" min={0} step="1" value={value.rate} onChange={e => onChange({ ...value, rate: e.target.value })} className="h-10 rounded-xl mt-1 bg-white"
+                  placeholder={chosen.ratePerDesign != null ? String(chosen.ratePerDesign) : "e.g. 1500"} aria-label="Design charge" />
+              </div>
+            ) : (
+              <p className="col-span-2 sm:col-span-1 self-end pb-2 text-[11px] text-muted-foreground">Our own designer — no charge; their salary is paid in Employees.</p>
+            )}
           </div>
-        )}
-        {chosen?.kind === "freelance" && (
-          <div className="col-span-2 sm:col-span-1">
-            <Label className="text-xs">Charge for this design (₹)</Label>
-            <Input type="number" min={0} step="1" value={value.rate} onChange={e => onChange({ ...value, rate: e.target.value })} className="h-10 rounded-xl mt-1"
-              placeholder={chosen.ratePerDesign != null ? String(chosen.ratePerDesign) : "e.g. 1500"} aria-label="Design charge" />
-            <p className="text-[11px] text-muted-foreground mt-1">Owed once the design is approved — changeable then.</p>
-          </div>
-        )}
-      </div>
-      {chosen?.kind === "inhouse" && <p className="text-[11px] text-muted-foreground">Our own designer — no charge; their salary is paid in Employees.</p>}
-      {!list.length && <p className="text-[11px] text-muted-foreground">No designers yet — add one with “Add new designer”.</p>}
-      {value.designerId && !compact && (
-        <div>
-          <Label className="text-xs">Note for the designer</Label>
-          <Textarea value={value.note} onChange={e => onChange({ ...value, note: e.target.value })} rows={2} className="rounded-xl mt-1" aria-label="Note for the designer"
-            placeholder="Optional — anything beyond the order's details" />
+          {chosen.kind === "freelance" && <p className="text-[11px] text-muted-foreground -mt-1">Owed to {chosen.name} once the design is approved — changeable then.</p>}
+          {!compact && (
+            <div>
+              <Label className="text-xs">Note for the designer</Label>
+              <Textarea value={value.note} onChange={e => onChange({ ...value, note: e.target.value })} rows={2} className="rounded-xl mt-1 bg-white" aria-label="Note for the designer"
+                placeholder="Optional — anything beyond the order's details" />
+            </div>
+          )}
         </div>
       )}
     </div>

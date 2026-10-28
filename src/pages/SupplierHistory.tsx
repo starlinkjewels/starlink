@@ -364,13 +364,12 @@ function SupplierHistoryPageBody() {
         g?.purity && KARAT_PURITY[parseInt(g.purity, 10)]
           ? `${Math.round(KARAT_PURITY[parseInt(g.purity, 10)] * 1000)}‰`
           : undefined,
-        p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
       ].filter(Boolean);
       return bits.join(" · ");
     }
     if (isOtherMaterial(p.material)) {
       return [materialName(db.settings, p.material), p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
-        p.other?.pieces ? `${p.other.pieces} pcs` : undefined, p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined].filter(Boolean).join(" · ");
+        p.other?.pieces ? `${p.other.pieces} pcs` : undefined].filter(Boolean).join(" · ");
     }
     const d = p.diamond;
     const bits = [
@@ -378,7 +377,6 @@ function SupplierHistoryPageBody() {
       // Shape · size · colour · clarity · pcs, or the stone's report.
       bagNoOfPurchase(db, p),
       diamondSpec(d, d?.kind === "certified" ? (db.diamondPackets ?? []).find(x => x.purchaseId === p.id) : undefined),
-      p.invoiceNumber ? `Bill ${p.invoiceNumber}` : undefined,
     ].filter(Boolean);
     return bits.join(" · ");
   };
@@ -475,10 +473,10 @@ function SupplierHistoryPageBody() {
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
       `Supplier-${supplier.name.replace(/\s+/g, "_")}`,
-      ["Date", "Order No", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
+      ["Date", "Bill No", "Order No", "Particulars", "Weight", "Rate (INR)", "Bill Amount (INR)", "Paid (INR)", "Balance (INR)"],
       statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
         r.id === "opening" ? "Opening" : fmtDate(r.date),
-        r.orderNo ?? "", r.particulars,
+        r.invoiceNo ?? "", r.orderNo ?? "", r.particulars,
         r.qty ? `${r.qty}${r.unit ?? ""}` : "",
         r.rate ?? "", r.debit || "", r.credit || "", r.balance,
       ]),
@@ -509,19 +507,21 @@ function SupplierHistoryPageBody() {
       landscape: true,
       columns: [
         { header: "Date", x: 14 },
-        { header: "Order No", x: 40 },
-        { header: "Particulars", x: 78 },
+        { header: "Bill No", x: 38 },
+        { header: "Order No", x: 62 },
+        { header: "Particulars", x: 92 },
         { header: "Weight", x: 158 },
         { header: "Rate", x: 184 },
         { header: "Bill Amount", x: 210 },
         { header: "Paid", x: 240 },
         { header: "Balance", x: 264 },
       ],
-      align: ["left", "left", "left", "right", "right", "right", "right", "right"],
+      align: ["left", "left", "left", "left", "right", "right", "right", "right", "right"],
       rows: statementAsc.filter(r => inDateRange(r.date, from, to)).map(r => [
         r.id === "opening" ? "Opening" : fmtDate(r.date),
-        fit(r.orderNo ?? "", 36),
-        fit(r.particulars, 78),
+        fit(r.invoiceNo ?? "", 22),
+        fit(r.orderNo ?? "", 28),
+        fit(r.particulars, 64),
         r.qty ? `${r.qty}${r.unit ?? ""}` : "",
         r.rate ? fmtInrPlain(r.rate).replace("Rs. ", "") : "",
         r.debit ? fmtInrPlain(r.debit).replace("Rs. ", "") : "",
@@ -530,7 +530,7 @@ function SupplierHistoryPageBody() {
       ]),
       // A totals line so the columns prove themselves: bills less payments is
       // the balance the last row closes on.
-      totalsRow: ["", "", "Totals", "", "",
+      totalsRow: ["", "", "", "Totals", "", "",
         fmtInrPlain(account.totalPurchased).replace("Rs. ", ""),
         fmtInrPlain(account.totalPaid + account.received).replace("Rs. ", ""),
         fmtInrPlain(account.net).replace("Rs. ", "")],

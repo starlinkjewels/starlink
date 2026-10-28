@@ -122,7 +122,7 @@ export function StatementLedger({
       if (fromD && d < fromD) return false;
       if (toD && d > toD) return false;
       if (!ql) return true;
-      return r.particulars.toLowerCase().includes(ql) || (r.ref ?? "").toLowerCase().includes(ql);
+      return r.particulars.toLowerCase().includes(ql) || (r.ref ?? "").toLowerCase().includes(ql) || (r.invoiceNo ?? "").toLowerCase().includes(ql);
     });
   }, [rows, q, from, to, kind]);
 
@@ -140,11 +140,14 @@ export function StatementLedger({
   const pinned = filtered.filter(r => r.pinned);
   const onlyPinned = entries.length === 0 && pinned.length > 0;
 
+  // The bill / invoice number in a column of its own whenever any entry has one —
+  // a supplier's statement is read by the bill.
+  const billColumn = rows.some(r => !!r.invoiceNo);
   const refsOf = (r: StatementRow) => {
     // The order / invoice / reference, each once, and not again when the
-    // particulars already name it ("Payment — 8821").
+    // particulars or the bill column already name it ("Payment — 8821").
     const refs = [...new Set([r.ref, r.orderNo, r.invoiceNo].filter((x): x is string => !!x))]
-      .filter(x => !r.particulars.includes(x));
+      .filter(x => !r.particulars.includes(x) && !(billColumn && x === r.invoiceNo));
     const qty = r.qty ? `${r.qty}${r.unit ?? ""}${r.rate ? ` @ ${fmt(r.rate)}` : ""}` : "";
     return [...refs, qty].filter(Boolean).join(" · ");
   };
@@ -152,6 +155,8 @@ export function StatementLedger({
   const columns: DataColumn<StatementRow>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: r => +new Date(r.date),
       cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
+    ...(billColumn ? [{ key: "bill", header: "Bill no.", sortValue: (r: StatementRow) => r.invoiceNo ?? "", csv: (r: StatementRow) => r.invoiceNo ?? "",
+      cell: (r: StatementRow) => (r.invoiceNo ? <span className="font-medium text-brand-dark whitespace-nowrap">{r.invoiceNo}</span> : <span className="text-muted-foreground/50">—</span>) }] : []),
     { key: "particulars", header: "Particulars", always: true, sortValue: r => r.particulars,
       cell: r => <CellMain title={r.particulars} sub={refsOf(r) || undefined} /> },
     { key: "debit", header: debitLabel, align: "right", kind: "number", sortValue: r => r.debit,
@@ -178,7 +183,7 @@ export function StatementLedger({
       <div className="px-5 py-4">
         <DataTable
           {...ledgerTable({
-            q, onQ: setQ, placeholder: "Search particulars or reference…",
+            q, onQ: setQ, placeholder: billColumn ? "Search particulars or bill no.…" : "Search particulars or reference…",
             from, to, onFrom: setFrom, onTo: setTo,
             selects: kinds.length > 1 ? [{ label: "Type", allLabel: "All types", value: kind === "all" ? "" : kind,
               onChange: v => setKind(v || "all"), options: kinds.map(k => ({ value: k, label: k })) }] : [],
