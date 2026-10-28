@@ -25,7 +25,7 @@ import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
-import { weightProblem, pieceWeights } from "@/lib/weights";
+import { weightProblem, pieceWeights, fmtG } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
@@ -699,6 +699,7 @@ function OrderDetailPageBody() {
   const [faOtherMetal, setFaOtherMetal] = useState("");
   const [faOtherNet, setFaOtherNet] = useState("");
   const [faMinLabour, setFaMinLabour] = useState("");
+  const [faMinUnder, setFaMinUnder] = useState(""); // grams: the minimum applies under this
   const [faOtherPurity, setFaOtherPurity] = useState("");
   const [faPerGram, setFaPerGram] = useState("");
   const [faCad, setFaCad] = useState("");
@@ -1059,6 +1060,7 @@ function OrderDetailPageBody() {
     setFaPurityOther(false);
     setFaPerGram(finish?.labour?.perGramRate != null ? String(finish.labour.perGramRate) : "");
     setFaMinLabour(finish?.labour?.minimumLabour != null ? String(finish.labour.minimumLabour) : "");
+    setFaMinUnder(finish?.labour?.minimumUnderGrams != null ? String(finish.labour.minimumUnderGrams) : "");
     setFaCad(finish?.labour?.cadCharge != null ? String(finish.labour.cadCharge) : "");
     setFaDiaHandling(finish?.labour?.diamondHandlingRate != null ? String(finish.labour.diamondHandlingRate) : "");
     setFaOther(finish?.labour?.otherCharges != null ? String(finish.labour.otherCharges) : "");
@@ -1073,6 +1075,7 @@ function OrderDetailPageBody() {
       const r = factoryRatesFor(fac?.labour, order.jewelleryType);
       if (r.perGram) setFaPerGram(String(r.perGram));
       if (r.minimum) setFaMinLabour(String(r.minimum));
+      if (r.minimumUnder) setFaMinUnder(String(r.minimumUnder));
       if (r.perGram || r.minimum) from.push(`Labour from ${fac!.name}'s rates${r.perGram ? ` for a ${order.jewelleryType}` : ""}`);
     }
     if (finish?.labour?.metalByFactoryRate == null) {
@@ -1141,6 +1144,7 @@ function OrderDetailPageBody() {
     const labour = {
       perGramRate: faPerGram ? Number(faPerGram) : undefined,
       minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
+      minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
       diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
       cadCharge: faCad ? Number(faCad) : undefined,
       otherCharges: faOther ? Number(faOther) : undefined,
@@ -2256,9 +2260,9 @@ function OrderDetailPageBody() {
               <OrderSpec label={diamondOnly ? "Estimated" : "Est. diamonds"} value={`${order.diamondWeight} ct`} />
               {!diamondOnly && <OrderSpec label="Diamond type" value={order.diamondType} />}
               {!diamondOnly && <OrderSpec label="Diamond shape" value={order.diamondShape} />}
-              {!diamondOnly && <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${order.estimatedGrossWeight} g` : undefined} />}
-              {!diamondOnly && <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${order.estimatedNetWeight} g` : undefined} />}
-              {!diamondOnly && <OrderSpec label="Actual net weight" value={order.actualNetWeight ? `${order.actualNetWeight} g` : undefined} />}
+              {!diamondOnly && <OrderSpec label="Est. gross weight" value={order.estimatedGrossWeight ? `${fmtG(order.estimatedGrossWeight)} g` : undefined} />}
+              {!diamondOnly && <OrderSpec label="Est. net weight" value={order.estimatedNetWeight ? `${fmtG(order.estimatedNetWeight)} g` : undefined} />}
+              {!diamondOnly && <OrderSpec label="Actual net weight" value={order.actualNetWeight ? `${fmtG(order.actualNetWeight)} g` : undefined} />}
               <OrderSpec label={diamondOnly ? "Actual" : "Actual diamonds"} value={order.actualDiamondWeight ? `${order.actualDiamondWeight} ct` : undefined} />
               {diamondOnly && <OrderSpec label="Certificate" value={order.certificate ? "Yes" : "No"} />}
             </div>
@@ -4193,6 +4197,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         const faLabour = {
           perGramRate: faPerGram ? Number(faPerGram) : undefined,
           minimumLabour: faMinLabour ? Number(faMinLabour) : undefined,
+          minimumUnderGrams: faMinLabour && Number(faMinUnder) > 0 ? Math.round(Number(faMinUnder) * 1000) / 1000 : undefined,
           diamondHandlingRate: faDiaHandling ? Number(faDiaHandling) : undefined,
           cadCharge: faCad ? Number(faCad) : undefined,
           otherCharges: faOther ? Number(faOther) : undefined,
@@ -4249,11 +4254,11 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       <div>
                         <Label className="text-[11px]">Net Weight (g){faAutoNet != null ? " — auto" : ""}</Label>
                         {faAutoNet != null ? (
-                          <Input type="number" readOnly tabIndex={-1} value={faAutoNet} className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" aria-label="Net weight (worked out)" />
+                          <Input type="number" readOnly tabIndex={-1} value={fmtG(faAutoNet)} className="rounded-lg h-9 mt-1 bg-secondary/60 text-muted-foreground cursor-default" aria-label="Net weight (worked out)" />
                         ) : (
                           <Input type="number" min={0} step="0.001" value={faGoldNet} onChange={e => setFaGoldNet(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="or enter the gross above" />
                         )}
-                        {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{faGrossN} g − diamonds {usedDiaCt} ct ({Math.round(usedDiaCt * CARAT_TO_GRAM * 1000) / 1000} g){faXG.stone ? ` − other stones ${faXG.stone} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${faOtherG} g` : ""}{faXG.metal ? ` − other metal ${faXG.metal} g` : ""}</p>}
+                        {faAutoNet != null && <p className="text-[10px] text-muted-foreground mt-1">{fmtG(faGrossN)} g − diamonds {usedDiaCt} ct ({fmtG(usedDiaCt * CARAT_TO_GRAM)} g){faXG.stone ? ` − other stones ${fmtG(faXG.stone)} g` : ""}{faOtherG ? ` − ${faOtherMetal.trim()} ${fmtG(faOtherG)} g` : ""}{faXG.metal ? ` − other metal ${fmtG(faXG.metal)} g` : ""}</p>}
                         {faW?.selfMetal && <p className="text-[10px] text-muted-foreground mt-1">A {order.metal} piece: the scale's weight goes to {order.metal} below. Enter gold only if the piece has some.</p>}
                         {faW?.needSelf && <p className="text-[10px] font-semibold text-destructive mt-1">A {order.metal} piece: choose {order.metal} under Other metal below — the scale's weight goes to it, not to gold.</p>}
                         {faW?.needOther && <p className="text-[10px] font-semibold text-destructive mt-1">Enter the {faOtherMetal.trim()} weight below — otherwise the rest of the piece counts as gold.</p>}
@@ -4288,7 +4293,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       })()}
                     </div>
                   </div>
-                  {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {pureFromPurity(faEffNet, Number(faGoldPurity))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
+                  {faEffNet > 0 && Number(faGoldPurity) > 0 && <p className="text-[11px] text-muted-foreground mt-1">= {fmtG(pureFromPurity(faEffNet, Number(faGoldPurity)))}g fine (24KT) deducted from {faFactory?.name || "the factory"}</p>}
                   {order.clientSupplied?.gold && (() => {
                     // The client gives the gold: what the piece takes from theirs.
                     const cl = db.clients.find(c => c.id === order.clientId);
@@ -4479,15 +4484,15 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     {diaAdjust !== 0 && (
                       <div className="flex justify-between"><span className="text-muted-foreground">Scale adjustment</span><span className={`font-semibold ${diaAdjust > 0 ? "text-warning" : "text-destructive"}`}>{diaAdjust > 0 ? "+" : ""}{diaAdjust} ct</span></div>
                     )}
-                    <div className="flex justify-between"><span className="text-muted-foreground">Total diamond weight</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({diaG} g)</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">Total diamond weight</span><span className="font-semibold text-foreground">{usedDiaCt} ct ({fmtG(diaG)} g)</span></div>
                     {Number(faDiaPcs) > 0 && (
                       <div className="flex justify-between"><span className="text-muted-foreground">Total diamond pcs</span><span className="font-semibold text-foreground">{Math.round(Number(faDiaPcs))}</span></div>
                     )}
-                    {netG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{netG} g</span></div>}
-                    {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{otherG} g</span></div>}
-                    {faXG.metal > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other metal from stock</span><span className="font-semibold text-foreground">{faXG.metal} g</span></div>}
-                    {faXG.stone > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other stones</span><span className="font-semibold text-foreground">{faXG.stone} g</span></div>}
-                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond{faX.length ? " + other" : ""})</span><span className="font-bold text-brand-dark">{gross} g</span></div>
+                    {netG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Gold net weight</span><span className="font-semibold text-foreground">{fmtG(netG)} g</span></div>}
+                    {otherG > 0 && <div className="flex justify-between"><span className="text-muted-foreground">{faOtherMetal} net weight</span><span className="font-semibold text-foreground">{fmtG(otherG)} g</span></div>}
+                    {faXG.metal > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other metal from stock</span><span className="font-semibold text-foreground">{fmtG(faXG.metal)} g</span></div>}
+                    {faXG.stone > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Other stones</span><span className="font-semibold text-foreground">{fmtG(faXG.stone)} g</span></div>}
+                    <div className="flex justify-between border-t border-border/50 pt-1"><span className="font-medium text-brand-dark">Gross weight (metal + diamond{faX.length ? " + other" : ""})</span><span className="font-bold text-brand-dark">{fmtG(gross)} g</span></div>
                   </div>
                 );
               })()}
@@ -4500,6 +4505,11 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     <Label className="text-[11px]">Minimum labour</Label>
                     <Input type="number" min={0} step="0.01" value={faMinLabour} onChange={e => setFaMinLabour(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ for a light piece" />
                   </div>
+                  <div>
+                    <Label className="text-[11px]">Minimum for pieces under (g)</Label>
+                    <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={!faMinLabour}
+                      className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" />
+                  </div>
                   <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
                   <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={faDiaHandling} onChange={e => setFaDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
                   <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={faOther} onChange={e => setFaOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
@@ -4511,7 +4521,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     which one is being charged rather than leave it unexplained. */}
                 {faMinInUse ? (
                   <p className="text-[11px] mt-1.5 text-warning">
-                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}, not {fmtMoneyInr((Number(faPerGram) || 0) * faNetW)} ({faNetW} g × {fmtMoneyInr(Number(faPerGram) || 0)}).
+                    Making charged at the minimum {fmtMoneyInr(Number(faMinLabour) || 0)}{Number(faMinUnder) > 0 ? ` — the piece is ${faNetW.toFixed(3)} g, under ${Number(faMinUnder).toFixed(3)} g` : ""}, not {fmtMoneyInr((Number(faPerGram) || 0) * faNetW)} ({faNetW.toFixed(3)} g × {fmtMoneyInr(Number(faPerGram) || 0)}).
                   </p>
                 ) : faNetW > 0 && faNetW < 2 && !faMinLabour ? (
                   <p className="text-[11px] mt-1.5 text-muted-foreground">

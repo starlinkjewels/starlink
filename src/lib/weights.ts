@@ -17,6 +17,9 @@ import { CARAT_TO_GRAM, type MaterialIssuance, type Order } from "./db";
 
 const n3 = (x: number) => Math.round(x * 1000) / 1000;
 
+/** Grams as the trade writes them: always three decimals — 1.250, 1.252, 0.164. */
+export const fmtG = (x: number | string | undefined | null): string => n3(Number(x) || 0).toFixed(3);
+
 /** A scale reads to 0.001 g and carats are rounded; anything inside this is the same weight. */
 const TOLERANCE_G = 0.01;
 
@@ -67,14 +70,14 @@ export function weightProblem(w: WeightInput): string | null {
  */
 export function weightSummary(w: WeightInput): string | null {
   const gross = pos(w.gross), net = pos(w.net), other = pos(w.other), ct = pos(w.diamondCt);
-  if (!gross || !net) return ct ? `Diamond ${n3(ct)} ct = ${n3(ct * CARAT_TO_GRAM)} g of the gross weight.` : null;
+  if (!gross || !net) return ct ? `Diamond ${n3(ct)} ct = ${fmtG(ct * CARAT_TO_GRAM)} g of the gross weight.` : null;
   const less = n3(gross - net - other);
   if (less < 0) return null;
   const stonesG = n3(ct * CARAT_TO_GRAM);
   const rest = n3(less - stonesG);
-  let s = `Less weight (GW − NW${other ? " − second metal" : ""}) = ${less} g ≈ ${n3(less / CARAT_TO_GRAM)} ct`;
-  if (ct) s += ` · diamond ${n3(ct)} ct = ${stonesG} g`;
-  if (rest > TOLERANCE_G) s += ` · ${rest} g not accounted for (coloured stones, pearls, findings?)`;
+  let s = `Less weight (GW − NW${other ? " − second metal" : ""}) = ${fmtG(less)} g ≈ ${n3(less / CARAT_TO_GRAM)} ct`;
+  if (ct) s += ` · diamond ${n3(ct)} ct = ${fmtG(stonesG)} g`;
+  if (rest > TOLERANCE_G) s += ` · ${fmtG(rest)} g not accounted for (coloured stones, pearls, findings?)`;
   return s + ".";
 }
 

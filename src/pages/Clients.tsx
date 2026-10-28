@@ -22,7 +22,7 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye, ChevronRight } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye, ChevronRight, Globe } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -130,6 +130,9 @@ function printLabel(c: Client) {
   showPrintPage(html, { title: `Shipping label — ${c.companyName}` });
 }
 
+
+/** The client's country as written, tidied ("" when not given). */
+const countryOf = (c: Pick<Client, "country">) => (c.country ?? "").trim();
 export function ClientsPage() {
   const { user } = useAuth();
   // Our companies — asked about only once there is more than one.
@@ -140,6 +143,7 @@ export function ClientsPage() {
   const [coFilter, setCoFilter] = useState("all");
   // Whose clients: the person who handles them ("__none" = nobody yet).
   const [byFilter, setByFilter] = useState("all");
+  const [countryFilter, setCountryFilter] = useState("all");
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
@@ -188,8 +192,10 @@ export function ClientsPage() {
   const list = scoped
     .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
     .filter(c => byFilter === "all" || (byFilter === "__none" ? !handlerOf(db, c) : c.accountManagerId === byFilter))
+    .filter(c => countryFilter === "all" || (countryFilter === "__none" ? !countryOf(c) : countryOf(c).toLowerCase() === countryFilter))
     .filter(c =>
       c.companyName.toLowerCase().includes(q.toLowerCase()) ||
+      countryOf(c).toLowerCase().includes(q.toLowerCase()) ||
       c.ownerName.toLowerCase().includes(q.toLowerCase())
     )
     .sort((a, b) => weight(b) - weight(a) || a.companyName.localeCompare(b.companyName));
@@ -203,7 +209,15 @@ export function ClientsPage() {
   const handlers = [...new Map(scoped.map(c => handlerOf(db, c)).filter((u): u is NonNullable<typeof u> => !!u).map(u => [u.id, u])).values()]
     .sort((a, b) => a.name.localeCompare(b.name));
   const unhandled = scoped.some(c => !handlerOf(db, c));
+  // Every country among the clients this person sees, however it was typed ("india", "India ").
+  const countries = [...new Map(scoped.filter(c => countryOf(c)).map(c => [countryOf(c).toLowerCase(), countryOf(c)])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const noCountry = scoped.some(c => !countryOf(c));
   const filters: TableFilter[] = [
+    ...(countries.length > 0 ? [{ kind: "select" as const, label: "Country", value: countryFilter === "all" ? "" : countryFilter, onChange: (v: string) => setCountryFilter(v || "all"),
+      options: [...countries.map(([k, name]) => ({ value: k, label: `${name} · ${scoped.filter(c => countryOf(c).toLowerCase() === k).length}` })),
+        ...(noCountry ? [{ value: "__none", label: `Not given · ${scoped.filter(c => !countryOf(c)).length}` }] : [])],
+      allLabel: "All countries" }] : []),
     ...(multiCo ? [{ kind: "select" as const, label: "Company", value: coFilter === "all" ? "" : coFilter, onChange: (v: string) => setCoFilter(v || "all"),
       options: companiesOf(dbNow.settings).map(co => ({ value: co.id, label: co.name })), allLabel: "All companies" }] : []),
     ...(user!.role === "admin" && handlers.length + (unhandled ? 1 : 0) > 1 ? [{ kind: "select" as const, label: "Handled by", value: byFilter === "all" ? "" : byFilter, onChange: (v: string) => setByFilter(v || "all"),
@@ -211,7 +225,7 @@ export function ClientsPage() {
         ...(unhandled ? [{ value: "__none", label: `Not assigned · ${scoped.filter(c => !handlerOf(db, c)).length}` }] : [])],
       allLabel: "Everyone" }] : []),
   ];
-  const clearFilters = () => { setCoFilter("all"); setByFilter("all"); };
+  const clearFilters = () => { setCoFilter("all"); setByFilter("all"); setCountryFilter("all"); };
   const countText = `${total} client${total !== 1 ? "s" : ""}`;
 
   // Grand totals across all clients this user can see: outstanding = money
@@ -278,6 +292,8 @@ export function ClientsPage() {
       cell: c => <CellMain
         title={<>{c.companyName}{c.status !== "active" && <span className="ml-2 align-middle"><CellTag>Inactive</CellTag></span>}</>}
         sub={c.ownerName || c.email || c.phone || "—"} /> },
+    { key: "country", header: "Country", sortValue: c => countryOf(c) || "~", csv: c => countryOf(c),
+      cell: c => (countryOf(c) ? <span className="whitespace-nowrap">{countryOf(c)}</span> : <span className="text-muted-foreground/50">—</span>) },
     ...(multiCo ? [{ key: "company", header: "Company", sortValue: (c: Client) => companyById(dbNow.settings, companyIdOfClient(c)).name,
       cell: (c: Client) => <CellTag tone="blue">{companyById(dbNow.settings, companyIdOfClient(c)).name}</CellTag> }] : []),
     ...(user!.role === "admin" ? [{ key: "manager", header: "Handled by",
@@ -476,6 +492,7 @@ export function ClientsPage() {
                   <p className="text-base font-semibold text-foreground leading-snug line-clamp-2 break-words" title={c.companyName}>{c.companyName}</p>
                   {multiCo && <p className="text-[11px] font-semibold text-primary truncate inline-flex items-center gap-1"><Building2 className="h-3 w-3" />{companyById(dbNow.settings, companyIdOfClient(c)).name}</p>}
                   {c.ownerName && <p className="text-sm text-muted-foreground truncate">{c.ownerName}</p>}
+                  <p className="text-xs text-muted-foreground truncate flex items-center gap-1"><Globe className="h-3 w-3 shrink-0" />{countryOf(c) || "Country not given"}</p>
                   <div className="mt-1.5 flex items-center gap-2 flex-wrap">
                     <StatusBadge status={c.status} />
                     {clientUser && (
@@ -501,10 +518,12 @@ export function ClientsPage() {
                 <p className="flex items-center gap-2 text-muted-foreground">
                   <Phone className="h-4 w-4 shrink-0" />{c.phone || "—"}
                 </p>
-                <p className="flex items-center gap-2 text-muted-foreground min-w-0">
-                  <MapPin className="h-4 w-4 shrink-0" />
-                  <span className="truncate">{[c.country, c.zip].filter(Boolean).join(" · ") || "—"}</span>
-                </p>
+                {c.zip && (
+                  <p className="flex items-center gap-2 text-muted-foreground min-w-0">
+                    <MapPin className="h-4 w-4 shrink-0" />
+                    <span className="truncate">ZIP {c.zip}</span>
+                  </p>
+                )}
               </div>
 
               {/* Figures: colour on the figure only, a zero in grey. */}

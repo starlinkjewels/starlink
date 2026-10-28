@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useAuth } from "@/lib/auth";
-import { fmtMoney, fmtDate, orderTotal } from "@/lib/db";
+import { fmtMoney, fmtDate, orderTotal, currentUserOrders, worksOnClientId } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -98,7 +98,8 @@ export function IncomePage() {
   const allRows = useMemo<PassbookRow[]>(() => {
     const rows: PassbookRow[] = [];
 
-    const orders = isClient ? db.orders.filter(o => o.clientId === user!.clientId) : db.orders;
+    // A client sees their own; an employee their own clients' and orders' — never every client's money.
+    const orders = isClient ? db.orders.filter(o => o.clientId === user!.clientId) : currentUserOrders(db, user!);
 
     orders.forEach(order => {
       const client = db.clients.find(c => c.id === order.clientId);
@@ -196,7 +197,7 @@ export function IncomePage() {
   /* Clients list for filter dropdown */
   const clients = isClient
     ? []
-    : db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
+    : db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
 
   const hasActiveFilter = dateFrom || dateTo || clientFilter !== "all";
   const clearFilters = () => { setDateFrom(""); setDateTo(""); setClientFilter("all"); };

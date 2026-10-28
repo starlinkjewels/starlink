@@ -1,4 +1,5 @@
 import { LockerCreateDialog } from "@/components/create/LockerCreateDialog";
+import { lockerEntryText, lockerLookup } from "@/lib/lockerText";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useCan } from "@/hooks/useCan";
 import { useState } from "react";
@@ -240,8 +241,11 @@ export function LockerPage() {
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
   const nIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").length, nOut = txns.length - nIn;
 
-  const txnLabel = (t: (typeof txns)[number]) =>
-    t.category || t.note || (t.type === "transfer_in" ? "Transfer in" : t.type === "transfer_out" ? "Transfer out" : t.type);
+  // A client's payment names the client (its order number underneath), not just the order.
+  const lk = lockerLookup(db);
+  const txnLabel = (t: (typeof txns)[number]) => lockerEntryText(lk, t).title;
+  // With the order number too — for search, sorting and the downloads.
+  const txnText = (t: (typeof txns)[number]) => lockerEntryText(lk, t).text;
   const txnSigned = (t: (typeof txns)[number]) => (t.type === "income" || t.type === "transfer_in" ? t.amountInr : -t.amountInr);
 
   // The rate an entry moved money at, the way people say it ("1 AUD = ₹55.2"),
@@ -294,7 +298,7 @@ export function LockerPage() {
   const ledgerColumns: DataColumn<LedgerRow>[] = [
     { key: "date", header: "Date", always: true, kind: "date", sortValue: r => r.t?.createdAt,
       cell: r => (r.t ? <CellDate>{fmtDate(r.t.createdAt)}</CellDate> : null) },
-    { key: "particulars", header: "Particulars", always: true, sortValue: r => (r.t ? txnLabel(r.t) : ""),
+    { key: "particulars", header: "Particulars", always: true, sortValue: r => (r.t ? txnText(r.t) : ""),
       cell: r => {
         const t = r.t;
         if (!t) return (
@@ -323,7 +327,7 @@ export function LockerPage() {
             </div>
             {/* The note goes underneath only when the category already titles the line. */}
             <CellMain title={`${txnLabel(t)}${rateLabel(t) ? ` (@ ${rateLabel(t)})` : ""}`}
-              sub={[t.voucherNo, t.category ? t.note : ""].filter(Boolean).join(" · ") || undefined} />
+              sub={[t.voucherNo, lockerEntryText(lk, t).order, t.category ? t.note : ""].filter(Boolean).join(" · ") || undefined} />
           </div>
         );
       } },
@@ -348,7 +352,7 @@ export function LockerPage() {
         const signed = txnSigned(t);
         // Rounded to the currency's cents: adding up dollar or euro amounts
         // leaves float noise (…0000000004) on a running total.
-        return [fmtDate(t.createdAt), txnLabel(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
+        return [fmtDate(t.createdAt), txnText(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
       }),
     );
   };
@@ -379,7 +383,7 @@ export function LockerPage() {
       rows: txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
         return [
-          fmtDate(t.createdAt), txnLabel(t).slice(0, 26),
+          fmtDate(t.createdAt), txnText(t).slice(0, 26),
           signed > 0 ? pdfNum(signed, cur) : "—",
           signed < 0 ? pdfNum(-signed, cur) : "—",
           pdfNum(txnBalances.get(t.id) ?? 0, cur),
@@ -491,7 +495,7 @@ export function LockerPage() {
             rowKey={r => r.id}
             defaultSort={{ key: "date", dir: "desc" }}
             pinnedRows={[openingRow]}
-            searchText={r => (r.t ? [txnLabel(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
+            searchText={r => (r.t ? [txnText(r.t), r.t.note, r.t.voucherNo, typeOf(r.t).label].filter(Boolean).join(" ") : "")}
             searchPlaceholder="Search this ledger"
             totals={{
               debit: rows => <span className="text-destructive">{fmtCcy(ledgerSum(rows, false), selected.currency)}</span>,

@@ -16,6 +16,8 @@ import {
   factoryPoolBalance, factoryPoolBuckets,
 } from "./pure/accounts";
 import { purchaseQty } from "./materials";
+import { KARAT_PURITY } from "./pure/basics";
+import { FACTORY_PURITY } from "./db";
 import { metalHasKarats } from "./metals";
 export {
   purchasePaid, issuancePaid, issuancePending, issuanceUsed, diamondFlow, otherFlow,
@@ -239,26 +241,33 @@ export function labourValue(labour: NonNullable<MaterialIssuance["labour"]> | un
 export function makingCharge(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): number {
   if (!labour) return 0;
   const perGram = (labour.perGramRate || 0) * (netWeight || 0);
-  return Math.round(Math.max(perGram, labour.minimumLabour || 0) * 100) / 100;
+  return Math.round((minimumLabourApplies(labour, netWeight) ? labour.minimumLabour || 0 : perGram) * 100) / 100;
 }
 
 /** True when the minimum is what is actually being charged, so the screen can
  *  say so instead of showing a total that does not match the rate times weight. */
 export function minimumLabourApplies(labour: NonNullable<MaterialIssuance["labour"]> | undefined, netWeight: number): boolean {
   if (!labour?.minimumLabour) return false;
+  // The factory's own band: at or over so many grams it is gram × rate, never the
+  // minimum (when there is a rate to charge by). Under it, as always: the minimum
+  // when gram × rate comes to less — never less than gram × rate.
+  const band = labour.minimumUnderGrams || 0;
+  if (band > 0 && (netWeight || 0) >= band && (labour.perGramRate || 0) > 0) return false;
   return labour.minimumLabour > (labour.perGramRate || 0) * (netWeight || 0);
 }
 
 
-/** Karat string ("9K".."24K") -> fraction of pure (24K) gold, e.g. "18K" -> 0.75.
- *  Jewelers' standard back-of-envelope ratio — an ESTIMATE for low-stock
- *  warnings, never authoritative alloy/wastage accounting. Falls back to 1
- *  (no discount) for any unparseable/missing value so a bad karat string never
- *  produces a scary warning. */
+/** Karat string ("9K".."24K") -> fraction of pure (24K) gold, at the purity the
+ *  factory deducts at Final Approval (18K = 760‰, 14K = 595‰ — FACTORY_PURITY),
+ *  else the karat table (22K = 0.916) — so an estimate and the gold actually
+ *  used agree but for the real weight. No karat yet: 0 — the gold can't be
+ *  worked out, and is never taken as pure (a 1.25 g 18K piece read as 1.25 g fine). */
 export function karatRatio(purity: string | undefined): number {
   const n = purity ? parseInt(purity, 10) : NaN;
-  if (!Number.isFinite(n) || n <= 0) return 1;
-  return Math.min(1, n / 24);
+  if (!Number.isFinite(n) || n <= 0) return 0;
+  const factory = FACTORY_PURITY[`${n}K`];
+  if (factory) return factory / 1000;
+  return KARAT_PURITY[n] ?? Math.min(1, n / 24);
 }
 
 /** Rough 24K-pure-gold-equivalent an order will need for its finished piece,
@@ -270,7 +279,7 @@ export function estimatedPureGoldNeeded(
   order: Pick<Order, "productKarats" | "estimatedNetWeight" | "estimatedGrossWeight" | "metalWeight">,
 ): number {
   const weight = order.estimatedNetWeight || order.estimatedGrossWeight || order.metalWeight || 0;
-  return Math.round(weight * karatRatio(order.productKarats) * 100) / 100;
+  return Math.round(weight * karatRatio(order.productKarats) * 1000) / 1000;
 }
 
 

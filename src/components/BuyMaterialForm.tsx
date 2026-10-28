@@ -11,6 +11,7 @@ import {
   updateDb, uid, nextDiamondStockNumber, todayLocal, stampFor,
   isDiamondOnlyOrder, type Order, type Purchase, type PurchaseCurrency,
   loadDb,
+  worksOnOrder,
 } from "@/lib/db";
 import { increaseStock, logOrderDirectPurchase } from "@/lib/stock";
 import { fmtMoneyInr, applyDiscountPct, discountLabel } from "@/lib/manufacturing";
@@ -220,7 +221,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
   };
 
   // For an order: open orders, newest first; the bill goes on the order's own company.
-  const openOrders = db.orders.filter(o => !["Delivered", "Rejected", "Cancelled"].includes(o.status) && !o.melted)
+  const openOrders = db.orders.filter(o => !["Delivered", "Rejected", "Cancelled"].includes(o.status) && !o.melted && !!user && worksOnOrder(db, user, o))
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const forOrder = forWhat === "order" ? (planning ? plan!.stub : db.orders.find(o => o.id === orderId)) : undefined;
 

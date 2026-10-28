@@ -1,3 +1,4 @@
+import { fmtG } from "@/lib/weights";
 import { useState } from "react";
 import { Boxes, Check, Gem, Plus, ShoppingCart, Sparkles, Trash2, AlertTriangle, Pencil, Factory as FactoryIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -37,6 +38,7 @@ export interface PlanOrder {
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
+const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
 /**
  * Production plan — decided while the order is placed, recorded with it:
@@ -131,11 +133,11 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
         <div className="rounded-xl border border-border/70 px-3.5 py-3 text-sm space-y-1">
           <p className="font-medium text-foreground">Gold</p>
           <p className="text-xs text-muted-foreground">
-            {goldNeed > 0 ? <>About <span className="font-medium text-foreground">{goldNeed} g fine</span> needed ({order.estimatedNetWeight || order.estimatedGrossWeight} g {order.productKarats}). </> : "Add the estimated weight above to see what's needed. "}
-            {goldPlanned ? "Planned below." : factory ? <>From {factory.name}&rsquo;s gold account — they hold <span className={`font-medium ${goldNeed > factoryFine ? "text-amber-700" : "text-foreground"}`}>{r2(factoryFine)} g fine</span>.</> : "Normally from the factory's own gold account."}
+            {goldNeed > 0 ? <>About <span className="font-medium text-foreground">{fmtG(goldNeed)} g fine</span> needed ({fmtG(order.estimatedNetWeight || order.estimatedGrossWeight)} g {order.productKarats}). </> : !order.productKarats && (order.estimatedNetWeight || order.estimatedGrossWeight) ? "Choose the karats to see the fine gold needed. " : "Add the estimated weight above to see what's needed. "}
+            {goldPlanned ? "Planned below." : factory ? <>From {factory.name}&rsquo;s gold account — they hold <span className={`font-medium ${goldNeed > factoryFine ? "text-amber-700" : "text-foreground"}`}>{fmtG(factoryFine)} g fine</span>.</> : "Normally from the factory's own gold account."}
           </p>
           {!goldPlanned && factory && goldNeed > factoryFine && (
-            <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />Short by {r2(goldNeed - factoryFine)} g fine — send gold from stock or buy it below.</p>
+            <p className="text-xs text-amber-700 flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" />Short by {fmtG(goldNeed - factoryFine)} g fine — send gold from stock or buy it below.</p>
           )}
         </div>
       )}

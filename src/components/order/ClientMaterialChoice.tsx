@@ -48,7 +48,7 @@ export function cmDraftProblem(v: CmDraft, on: CmOn, bal: ClientMaterialBalance 
   if (on.gold && v.goldSrc === "theirs" && !(bal && bal.goldInHand > 0)) return "None of their gold is with us — choose Receiving now or Later.";
   if (on.diamonds && v.diaSrc === "theirs" && !(bal && bal.diaInHand > 0)) return "None of their diamonds is with us — choose Receiving now or Later.";
   // Theirs with us, sent with the order: only what the piece needs — so the estimate must be there.
-  if (on.gold && v.goldSrc === "theirs" && sendOn && !(est.goldNeedFine > 0)) return "Their gold: add the estimated weight, so we know how much of theirs to send — or untick Send.";
+  if (on.gold && v.goldSrc === "theirs" && sendOn && !(est.goldNeedFine > 0)) return "Their gold: add the estimated weight and the karats, so we know how much of theirs to send — or untick Send.";
   if (on.diamonds && v.diaSrc === "theirs" && sendOn && !(est.wantCt > 0)) return "Their diamonds: add the diamond weight, so we know how much of theirs to send — or untick Send.";
   if (Number(v.lossPct) < 0 || Number(v.lossPct) > 25) return "Gold loss is a percentage between 0 and 25";
   return null;

@@ -4,7 +4,7 @@ import { useCan } from "@/hooks/useCan";
 import { ActionSheet } from "@/components/ActionSheet";
 import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue } from "@/lib/db";
+import { loadDb, updateDb, flush, uid, fmtMoney, fmtDate, fmtExpenseAmount, DEFAULT_EXPENSE_CATEGORIES, keptValue, worksOnClientId } from "@/lib/db";
 import type { DB, Expense, ExpenseCategory } from "@/lib/db";
 import { ccy, ccySymbol, fmtCcyMix, sumByCcy } from "@/lib/currency";
 import { motion } from "framer-motion";
@@ -492,7 +492,7 @@ export function ExpensesPage() {
               <SelectTrigger className="h-10 rounded-xl bg-secondary/40"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="__none">No client</SelectItem>
-                {db.clients.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                {db.clients.filter(c => worksOnClientId(db, user, c.id) || c.id === form.clientId).map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
                 <AddNewItem kind="client" />
               </SelectContent>
             </Select>

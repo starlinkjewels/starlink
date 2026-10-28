@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { lockerEntryText, lockerLookup } from "@/lib/lockerText";
 import { useDb } from "@/hooks/useDb";
 import { fmtDate, type LockerTransaction } from "@/lib/db";
 import { lockerBalance } from "@/lib/manufacturing";
@@ -113,8 +114,11 @@ export function DayBook({ lockerId: chosen }: { lockerId?: string }) {
   const totalOut = rows.filter(r => !isIn(r.t)).reduce((s, r) => s + r.t.amountInr, 0);
   const closing = withBalance.length ? withBalance[withBalance.length - 1].balance : (locker?.openingBalance || 0);
 
-  const particulars = (t: LockerTransaction) =>
-    [t.category || t.type, t.note].filter(Boolean).join(" · ");
+  const lk = lockerLookup(db);
+  const particulars = (t: LockerTransaction) => {
+    const x = lockerEntryText(lk, t);
+    return [t.category ? x.title : t.type, x.order, t.note].filter(Boolean).join(" · ");
+  };
 
   const HEAD = ["Date", "Voucher", "Particulars", `In (${code})`, `Out (${code})`, `Balance (${code})`];
   // The download keeps the book's own order — oldest first — because a printed

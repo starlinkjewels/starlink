@@ -5,7 +5,7 @@ import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { useCan } from "@/hooks/useCan";
 import { useLoaded } from "@/hooks/useLoaded";
-import { DEFAULT_EXPENSE_CATEGORIES, dayOf, ensureCollections, fmtExpenseAmount, loadDb, type Expense } from "@/lib/db";
+import { DEFAULT_EXPENSE_CATEGORIES, dayOf, ensureCollections, fmtExpenseAmount, loadDb, type Expense, worksOnClientId, worksOnOrder } from "@/lib/db";
 import { ccy, ccySymbol } from "@/lib/currency";
 import { deleteExpense, editExpense, expenseImpact, expenseMoneyLock, moveToDay } from "@/lib/moneyEntries";
 import { expenseBlock } from "@/lib/expenseRights";
@@ -54,6 +54,7 @@ export function ExpenseEditDialog({ expenseId, onClose }: { expenseId: string | 
 
 function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   const db = useDb();
+  const { user } = useAuth();
   const addNew = useAddNew();
   // Its account entry moves with it — wait for the account entries before saving.
   const ready = useLoaded(["lockerTransactions"]);
@@ -68,7 +69,7 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   // Salary is always pickable, and so is whatever the expense already says.
   const categories = [...new Set(["Salary", ...configured, e.category])];
   const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
-  const clients = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const clients = db.clients.filter(c => worksOnClientId(db, user, c.id) || c.id === e.clientId).sort((a, b) => a.companyName.localeCompare(b.companyName));
   const own = ccy(e.currency);
   const sym = ccySymbol(own).trim();
   // Only accounts in the expense's own currency — the amount would otherwise be
@@ -77,7 +78,7 @@ function ExpenseSheet({ e, onClose }: { e: Expense; onClose: () => void }) {
   const otherCcy = db.lockers.some(l => l.active !== false && ccy(l.currency) !== own);
   // Orders it could be a cost of: the client's, when one is chosen; newest first.
   const orderChoices = [...db.orders]
-    .filter(o => !f.orderIds.includes(o.id) && (!f.clientId || o.clientId === f.clientId))
+    .filter(o => !f.orderIds.includes(o.id) && (!f.clientId || o.clientId === f.clientId) && (!user || worksOnOrder(db, user, o)))
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .slice(0, 200);
 

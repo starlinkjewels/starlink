@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { loadDb, currentUserClients, currentUserOrders } from "@/lib/db";
+import { loadDb, currentUserClients, currentUserOrders, worksOnInvoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { Input } from "@/components/ui/input";
@@ -29,10 +29,10 @@ export function SearchPage() {
   const clients = q ? scopedClients.filter(c => c.companyName.toLowerCase().includes(ql) || c.ownerName.toLowerCase().includes(ql)).slice(0, 8) : [];
   const employees = q ? db.users.filter(u => u.role === "employee" && (u.name.toLowerCase().includes(ql) || (u.department || "").toLowerCase().includes(ql))).slice(0, 8) : [];
   const invoices = q
-    ? db.invoices.filter(i =>
+    ? db.invoices.filter(i => worksOnInvoice(db, user!, i) && (
         i.number.toLowerCase().includes(ql)
         // Also the number it carried before a renumber, so old paperwork finds it.
-        || (i.previousNumber ?? "").toLowerCase().includes(ql)).slice(0, 8)
+        || (i.previousNumber ?? "").toLowerCase().includes(ql))).slice(0, 8)
     : [];
 
   return (

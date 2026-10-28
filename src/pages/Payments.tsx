@@ -10,6 +10,7 @@ import {
   updateDb, fmtMoney,
   invoiceOrderIds, balanceDue, type Order, type Expense, type Locker, type LockerTransaction,
   DEFAULT_LOCKER_CATEGORIES, todayLocal, stampFor, dayOf,
+  worksOnClientId,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { createReceipt } from "@/lib/receipts";
@@ -305,7 +306,7 @@ export function ReceiveFromClient({ open, onOpenChange, lockerId: fixedLocker, f
   // rather than assumed to be today.
   const [date, setDate] = useState(todayLocal());
 
-  const clients = db.clients.filter(c => c.status === "active").sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const clients = db.clients.filter(c => c.status === "active" && worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
   const openInvoices = clientId
     ? (db.invoices ?? [])
         .filter(i => i.clientId === clientId)
