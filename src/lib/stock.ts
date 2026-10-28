@@ -108,7 +108,7 @@ function pruneUndefined<T extends Record<string, unknown>>(o: T): T {
 /** A lot's parts without the empty ones — Firestore refuses an undefined field, nested ones too. */
 function cleanLot(lot: StockMovement["lot"]): StockMovement["lot"] {
   if (!lot?.shape) return undefined;
-  return pruneUndefined({ shape: lot.shape, type: lot.type || undefined, size: lot.size || undefined, mm: lot.mm || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
+  return pruneUndefined({ shape: lot.shape, variety: lot.variety || undefined, type: lot.type || undefined, size: lot.size || undefined, mm: lot.mm || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
 }
 
 /** A loose-diamond movement's lot parts: as given, else read from its lot label — so

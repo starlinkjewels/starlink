@@ -16,7 +16,7 @@ export type ListKey =
   | "paymentMethods" | "departments" | "meltReasons" | "returnReasons"
   | "diamondShapes" | "diamondSizes" | "diamondMm" | "diamondColors" | "diamondClarities"
   | "diamondFinish" | "diamondFluorescence" | "diamondLabs" | "chargeNames"
-  | "gemColors" | "gemQualities" | "gemTypes";
+  | "gemColors" | "gemQualities" | "gemTypes" | "gemStones";
 
 export interface ListDef {
   key: ListKey;
@@ -64,6 +64,11 @@ export const LIST_DEFS: readonly ListDef[] = [
     defaults: ["AAA", "AA", "A", "Eye clean", "Commercial"] },
   { key: "gemTypes", group: "Diamonds", title: "Gem types", hint: "Gems — natural, lab-created, treated…",
     defaults: ["Natural", "Lab Created", "Treated"] },
+  // Which stone a gem lot is — one gem material (CZ Color Gems, Lab Gems…) holds many.
+  { key: "gemStones", group: "Diamonds", title: "Gem stones", hint: "Gems — which stone: ruby, emerald, tanzanite… bought, in stock",
+    defaults: ["Ruby", "Emerald", "Blue Sapphire", "Pink Sapphire", "Yellow Sapphire", "Tanzanite", "Amethyst", "Aquamarine",
+      "Garnet", "Peridot", "Topaz", "Tourmaline", "Alexandrite", "Citrine", "Morganite", "Spinel", "Opal", "Pearl",
+      "Black Diamond", "Tsavorite", "Iolite", "Moonstone", "Onyx", "Turquoise", "Coral"] },
   { key: "diamondFinish", group: "Diamonds", title: "Cut · polish · symmetry", hint: "A certified stone's finish grades",
     defaults: ["EX", "VG", "G", "F", "P", "Ideal"] },
   { key: "diamondFluorescence", group: "Diamonds", title: "Fluorescence", hint: "A certified stone's fluorescence",

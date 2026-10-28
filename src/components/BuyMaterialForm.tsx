@@ -62,6 +62,8 @@ interface Line {
   size: string;
   /** Loose (and gems): Natural, CVD, HPHT… — part of the lot. */
   type: string;
+  /** Gems: which stone — Tanzanite, Garnet… — part of the lot. */
+  variety?: string;
   mm: string;
   qty: string;      // grams (gold) or carats (diamond)
   rate: string;     // per gram / per carat
@@ -81,7 +83,7 @@ const emptyLine = (): Line => ({
 });
 
 /** A loose line's lot: shape · type · sieve · mm · colour · clarity. */
-const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", type: l.type.trim() || undefined, size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
+const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", variety: l.variety?.trim() || undefined, type: l.type.trim() || undefined, size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
 
 /** A gem — an other material that is a stone (Settings → Materials) — is asked as a
  *  diamond lot is: shape · type · mm · sieve · colour, with a grade for clarity. */
@@ -672,8 +674,8 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
           <div className="grid grid-cols-2 @md:grid-cols-3 gap-2.5">
             <Field label="Material"><OtherMaterialSelect value={l.materialId} onChange={v => onChange({ materialId: v, grade: "" })} /></Field>
           </div>
-          <LooseLotFields idPrefix={`line${n}`} compact gem showBag={false}
-            value={{ shape: l.shape, type: l.type, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
+          <LooseLotFields idPrefix={`line${n}`} compact gem showStone showBag={false}
+            value={{ shape: l.shape, variety: l.variety ?? "", type: l.type, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
             onChange={p => onChange(p)} />
           <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
             {unit !== "pcs" && !opening && <Field label="Pcs">{id => (
