@@ -132,7 +132,7 @@ export function NewOrderPage() {
     certificateFee: 0,
     materialSourcing: "later" as "later" | "stock" | "purchase" | "readyStock",
     // A loose-diamond order: what the stones are (shape · mm · sieve · colour · clarity).
-    stoneSpec: { shape: "Round", mm: "", size: "", color: "", clarity: "" } as LooseLotDraft,
+    stoneSpec: { shape: "Round", type: "", mm: "", size: "", color: "", clarity: "" } as LooseLotDraft,
     otherCharges: [] as ChargeDraft[],
     readyStockItemId: "",
     assignedFactoryId: "",
@@ -485,7 +485,7 @@ export function NewOrderPage() {
         certificateFee: f.certificate === "yes" ? (Number(f.certificateFee) || 0) : 0,
         ...(copiedFrom ? { copiedFromId: copiedFrom.id } : {}),
         ...(chargesOf(f.otherCharges).length && !forReadyStock ? { otherCharges: chargesOf(f.otherCharges) } : {}),
-        ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? { ...f.stoneSpec, size: "" } : f.stoneSpec), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
+        ...(isDiamondOnly ? { stoneSpec: { ...cleanStoneSpec(isGemSale ? f.stoneSpec : { ...f.stoneSpec, type: "" }), ...(stone !== "Diamond" ? { stone } : {}) } } : {}),
         // What the plan said: from stock, bought, or a Ready Stock piece.
         materialSourcing: isReadyStockSale ? "readyStock" : kind === "readyStock" ? undefined
           : picks.length ? "stock" : plannedBuy ? "purchase" : undefined,
@@ -959,7 +959,7 @@ export function NewOrderPage() {
             {isDiamondOnly && (
               <div className="col-span-2 space-y-1.5">
                 <p className="text-sm font-medium text-foreground">The stones <span className="text-xs font-normal text-muted-foreground">· as much as the client asked for</span></p>
-                <LooseLotFields idPrefix="no-stone" value={f.stoneSpec} showBag={false} gem={isGemSale}
+                <LooseLotFields idPrefix="no-stone" value={f.stoneSpec} showBag={false} gem={isGemSale} showType={isGemSale}
                   onChange={patch => setF(prev => ({ ...prev, stoneSpec: { ...prev.stoneSpec, ...patch } }))} />
               </div>
             )}
@@ -1173,7 +1173,7 @@ export function NewOrderPage() {
               clientGives={cmOn ? { gold: cmGold, diamonds: cmDia } : undefined}
               order={{ kind, companyId: orderCompany, metal: f.metal, metalHasKarats, productKarats: f.productKarats,
                 estimatedNetWeight: Number(f.estimatedNetWeight) || 0, estimatedGrossWeight: Number(f.estimatedGrossWeight) || 0,
-                diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: { ...f.stoneSpec, stone } }}
+                diamondWeight: Number(f.diamondWeight) || 0, quantity: Number(f.quantity) || 1, stoneSpec: { ...f.stoneSpec, stone }, diamondType: isGemSale ? undefined : f.diamondType }}
               factoryId={f.assignedFactoryId} onFactory={v => set("assignedFactoryId", v)}
               picks={picks} onPicks={onPicks} planned={plannedBuy} onPlanned={setPlannedBuy}
               stub={{ id: draftId.current, orderNumber: "this order", clientId: forReadyStock ? "" : f.clientId, forReadyStock: forReadyStock || undefined,

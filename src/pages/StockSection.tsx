@@ -338,7 +338,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · mm · sieve · colour · clarity" : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 
@@ -519,11 +519,11 @@ function CertifiedSection() {
     });
   };
   // ── The two packet tables ──
-  const gradeOf = (p: DiamondPacket) => [p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
+  const gradeOf = (p: DiamondPacket) => [p.type, p.color, p.clarity, [p.cut, p.polish, p.symmetry].filter(Boolean).join("/"), p.fluorescence]
     .filter(Boolean).join(" · ");
   const sumCarat = (list: DiamondPacket[]) => Math.round(list.reduce((s, p) => s + p.carat, 0) * 100) / 100;
   const packetSearch = (p: DiamondPacket) =>
-    [p.stockNumber, p.shape, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId)].filter(Boolean).join(" ");
+    [p.stockNumber, p.shape, p.type, p.certificateNumber, p.certificateLab, p.color, p.clarity, supplierName(p.supplierId)].filter(Boolean).join(" ");
   const dash = <span className="text-muted-foreground/50">—</span>;
   const STATUS_TONE: Record<DiamondPacket["status"], "green" | "blue" | "neutral" | "violet"> = { in_stock: "green", issued: "blue", used: "neutral", sold: "violet" };
   const packetCols = {
@@ -692,6 +692,7 @@ function CertifiedSection() {
         d.diamondPackets[idx] = {
           ...d.diamondPackets[idx],
           shape: p.shape,
+          type: clean(p.type?.trim()),
           carat: p.carat,
           ratePerCaratInr: rateInr && rateInr > 0 ? Math.round(rateInr * 100) / 100 : undefined,
           color: clean(p.color?.trim()),
@@ -926,11 +927,12 @@ function CertifiedSection() {
               {/* Its report — the same fields as when it was bought. */}
               <div className="col-span-2">
                 <CertGradeFields idPrefix="edit-pk"
-                  value={{ color: editPacket.color ?? "", clarity: editPacket.clarity ?? "", cut: editPacket.cut ?? "", polish: editPacket.polish ?? "",
+                  value={{ type: editPacket.type ?? "", color: editPacket.color ?? "", clarity: editPacket.clarity ?? "", cut: editPacket.cut ?? "", polish: editPacket.polish ?? "",
                     symmetry: editPacket.symmetry ?? "", fluorescence: editPacket.fluorescence ?? "", measurement: editPacket.measurement ?? "",
                     lab: editPacket.certificateLab ?? "", certNo: editPacket.certificateNumber }}
                   onChange={p => setEditPacket({
                     ...editPacket,
+                    ...(p.type !== undefined ? { type: p.type || undefined } : {}),
                     ...(p.color !== undefined ? { color: p.color || undefined } : {}), ...(p.clarity !== undefined ? { clarity: p.clarity || undefined } : {}),
                     ...(p.cut !== undefined ? { cut: p.cut } : {}), ...(p.polish !== undefined ? { polish: p.polish } : {}),
                     ...(p.symmetry !== undefined ? { symmetry: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { fluorescence: p.fluorescence } : {}),

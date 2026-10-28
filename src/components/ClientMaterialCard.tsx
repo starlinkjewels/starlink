@@ -48,7 +48,7 @@ export function ClientMaterialCard({ clientId }: { clientId: string }) {
 
   const what = (e: ClientMaterialEntry) => e.material === "gold"
     ? (e.kind === "use" ? `${e.note ?? "Gold in the piece"}${e.shortfallFine ? ` · ${e.shortfallFine} g fine short (ours, billed)` : ""}` : `${e.grams} g at ${e.purity}‰`)
-    : [fmtCt(e.ct ?? 0, e.pcs), e.shape, e.size, [e.color, e.clarity].filter(Boolean).join(" "), e.certNo ? `${e.certLab ?? "Report"} ${e.certNo}` : ""].filter(Boolean).join(" · ");
+    : [fmtCt(e.ct ?? 0, e.pcs), e.shape, e.type, e.mm, e.size, [e.color, e.clarity].filter(Boolean).join(" "), e.certNo ? `${e.certLab ?? "Report"} ${e.certNo}` : ""].filter(Boolean).join(" · ");
   const columns: DataColumn<ClientMaterialEntry>[] = [
     { key: "date", header: "Date", kind: "date", sortValue: e => e.at, cell: e => <CellDate>{new Date(e.at).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}</CellDate> },
     { key: "kind", header: "", sortValue: e => e.kind, cell: e => e.kind === "in" ? <CellTag tone="green">Received</CellTag> : e.kind === "out" ? <CellTag tone="amber">Handed back</CellTag> : <CellTag tone="violet">Used</CellTag> },

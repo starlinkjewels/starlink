@@ -33,7 +33,7 @@ function itemDescription(order: Order, mainShape?: string): string {
   if (isDiamondOnlyOrder(order)) {
     const sp = order.stoneSpec ?? {};
     const stone = stoneOf(order);
-    const what = stone === "Diamond" ? [order.diamondType, "loose diamonds"] : [hasDiamonds(stone) ? order.diamondType : "", "loose", stone];
+    const what = stone === "Diamond" ? [order.diamondType, "loose diamonds"] : [hasDiamonds(stone) ? order.diamondType : sp.type, "loose", stone];
     return [...what, sp.shape || mainShape, sp.mm || sp.size, sp.color, sp.clarity]
       .filter(Boolean).join(" ").toUpperCase();
   }

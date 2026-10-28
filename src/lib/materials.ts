@@ -114,7 +114,7 @@ export function purchaseBucket(p: Pick<Purchase, "material" | "gold" | "diamond"
   if (p.material === "gold") return p.gold?.purity ?? "";
   if (p.material === "diamond") return p.diamond?.kind === "certified" ? "Certified"
     : !p.diamond?.shape ? "unspecified"
-    : lotKey({ shape: p.diamond.shape, size: p.diamond.size, mm: p.diamond.mm, color: p.diamond.color, clarity: p.diamond.clarity });
+    : lotKey({ shape: p.diamond.shape, type: p.diamond.type, size: p.diamond.size, mm: p.diamond.mm, color: p.diamond.color, clarity: p.diamond.clarity });
   return p.other?.grade || "—";
 }
 
@@ -145,7 +145,7 @@ export function diamondSpec(
   const quality = !color && !clarity ? (d?.quality || pk?.quality) : undefined;
   const certNo = d?.certificateNumber || pk?.certificateNumber, lab = d?.certificateLab || pk?.certificateLab;
   return [
-    d?.shape, d?.mm, d?.size, color, clarity, quality,
+    d?.shape, d?.type, d?.mm, d?.size, color, clarity, quality,
     d?.pieces ? `${d.pieces} pcs` : undefined,
     certNo ? `${lab || "Report"} ${certNo}` : undefined,
   ].map(x => (typeof x === "string" ? x.trim() : x)).filter(Boolean).join(" · ");

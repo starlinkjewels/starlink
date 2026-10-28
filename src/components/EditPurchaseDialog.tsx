@@ -71,8 +71,8 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
     setCertNo(purchase.diamond?.certificateNumber ?? "");
     setLab(purchase.diamond?.certificateLab ?? "");
     if (purchase.material === "diamond" && purchase.diamond?.kind !== "certified") {
-      const lp = lotParts(purchaseBucket(purchase), { shape: purchase.diamond?.shape ?? "", size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity });
-      setLot({ shape: lp.shape, mm: lp.mm ?? "", size: lp.size ?? "", color: lp.color ?? "", clarity: lp.clarity ?? "" });
+      const lp = lotParts(purchaseBucket(purchase), { shape: purchase.diamond?.shape ?? "", type: purchase.diamond?.type, size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity });
+      setLot({ shape: lp.shape, type: lp.type ?? "", mm: lp.mm ?? "", size: lp.size ?? "", color: lp.color ?? "", clarity: lp.clarity ?? "" });
       setPcs(purchase.diamond?.pieces != null ? String(purchase.diamond.pieces) : "");
     }
     setBrokerage(purchase.brokerId ? {
@@ -101,7 +101,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
   const oldKey = loose ? purchaseBucket(purchase) : "";
   const newKey = loose ? lotKey(lotFromDraft(lot)) : "";
   const lotChanged = loose && !forOrder && (newKey !== oldKey || pcs !== (purchase.diamond?.pieces != null ? String(purchase.diamond.pieces) : "")
-    || JSON.stringify(lotFromDraft(lot)) !== JSON.stringify(lotParts(oldKey, { shape: purchase.diamond?.shape ?? "", size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity })));
+    || JSON.stringify(lotFromDraft(lot)) !== JSON.stringify(lotParts(oldKey, { shape: purchase.diamond?.shape ?? "", type: purchase.diamond?.type, size: purchase.diamond?.size, mm: purchase.diamond?.mm, color: purchase.diamond?.color, clarity: purchase.diamond?.clarity })));
 
   const submit = async () => {
     const brokerProblem = billBrokerageProblem(brokerage);

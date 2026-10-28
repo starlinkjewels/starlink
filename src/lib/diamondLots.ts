@@ -15,7 +15,9 @@ import type { StockMovement } from "./db";
 
 /** `size` is the sieve size ("+6.5-7"); `mm` the millimetre size ("1.3 mm"). Older
  *  lots kept a millimetre size in `size` — read through `lotParts`, it is the mm. */
-export interface LotSpec { shape: string; size?: string; mm?: string; color?: string; clarity?: string }
+export interface LotSpec { shape: string; size?: string; mm?: string; color?: string; clarity?: string;
+  /** Natural, CVD, HPHT… — a lot holds one type of stone. Older lots have none. */
+  type?: string }
 
 export const LOT_SEP = " · ";
 
@@ -44,14 +46,15 @@ export function tidySpec(s: Partial<LotSpec>): LotSpec {
   let size = s.size?.trim() || undefined;
   let mm = s.mm?.trim() || undefined;
   if (size && isMm(size) && !mm) { mm = size; size = undefined; }
-  return { shape: s.shape?.trim() || "Round", size, mm, color: s.color?.trim() || undefined, clarity: s.clarity?.trim() || undefined };
+  return { shape: s.shape?.trim() || "Round", type: s.type?.trim() || undefined, size, mm, color: s.color?.trim() || undefined, clarity: s.clarity?.trim() || undefined };
 }
 
-/** "Round · +6.5-7 · 1.3 mm · G-H · VS" — just "Round" when nothing else is known.
- *  Sieve before mm, as a lot entered with only one of them has always been written. */
+/** "Round · CVD · +6.5-7 · 1.3 mm · G-H · VS" — just "Round" when nothing else is known.
+ *  The type right after the shape; sieve before mm, as a lot entered with only one
+ *  of them has always been written. A lot without a type is written as it always was. */
 export function lotKey(s: Partial<LotSpec>): string {
   const t = tidySpec(s);
-  return [t.shape, t.size, t.mm, t.color, t.clarity].filter(Boolean).join(LOT_SEP);
+  return [t.shape, t.type, t.size, t.mm, t.color, t.clarity].filter(Boolean).join(LOT_SEP);
 }
 
 /** The shape alone — the first part of a lot. */
@@ -60,13 +63,22 @@ export function lotShape(key: string): string {
 }
 
 const SIZE_RE = /^(\+|-)|mm$|\bct\b|^\d+\/\d+|pointer/i;
+/** The stone types a lot label can carry right after its shape. */
+const TYPE_RE = /^(natural|cvd|hpht|lab[\s-]?(grown|created)|lgd|lab|moissanite|synthetic|treated|untreated|heated|unheated)$/i;
 const COLOR_RE = /^[D-Z](\s*-\s*[D-Z])?\+?$|brown|white|yellow|fancy|\b(TTLB|TLB|LB)\b/i;
+/** The business's own type words (Settings → Dropdown lists), so "Lab Grown (CVD)" reads as a type too. */
+const knownTypes = new Set<string>();
+export function knowStoneTypes(list: string[]): void {
+  for (const t of list) if (t.trim()) knownTypes.add(t.trim().toLowerCase());
+}
+const isType = (part: string) => TYPE_RE.test(part.trim()) || knownTypes.has(part.trim().toLowerCase());
 
 /** A lot's parts, read from its movement when kept there, else from its label. */
 export function lotParts(key: string, kept?: Partial<LotSpec>): LotSpec {
   if (kept?.shape) return tidySpec(kept);
   const [shape, ...rest] = String(key).split(LOT_SEP);
   const out: LotSpec = { shape };
+  if (rest.length && isType(rest[0])) out.type = rest.shift();
   for (const part of rest) {
     if (!out.mm && isMm(part)) out.mm = part;
     else if (!out.size && SIZE_RE.test(part)) out.size = part;

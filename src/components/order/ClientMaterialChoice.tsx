@@ -2,7 +2,7 @@ import { Coins, Gem } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ListCombo } from "@/components/ListCombo";
+import { LooseLotFields } from "@/components/LotFields";
 import { useDb } from "@/hooks/useDb";
 import { clientMaterialBalance, receiveClientMaterial, sendClientDiamonds, sendClientGold, type ClientMaterialBalance, type Who } from "@/lib/clientMaterial";
 import { estimatedPureGoldNeeded } from "@/lib/manufacturing";
@@ -17,7 +17,7 @@ export interface CmDraft {
   diamonds: boolean;
   lossPct: string;
   goldSrc: CmSource; grams: string; purity: string;
-  diaSrc: CmSource; ct: string; pcs: string; shape: string; size: string; color: string; clarity: string;
+  diaSrc: CmSource; ct: string; pcs: string; shape: string; type?: string; mm?: string; size: string; color: string; clarity: string;
   certified: boolean; certLab: string; certNo: string;
   /** Send what is received (or theirs with us) to the order's factory as the order is placed. */
   sendNow: boolean;
@@ -26,7 +26,7 @@ export interface CmDraft {
 export const emptyCm = (): CmDraft => ({
   gold: false, diamonds: false, lossPct: "",
   goldSrc: "now", grams: "", purity: "",
-  diaSrc: "now", ct: "", pcs: "", shape: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "",
+  diaSrc: "now", ct: "", pcs: "", shape: "", type: "", mm: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "",
   sendNow: true,
 });
 
@@ -80,7 +80,7 @@ export function applyCmDraft(d: DB, orderId: string, v: CmDraft, on: CmOn, who: 
       }
     }
     if (on.diamonds && v.diaSrc !== "later") {
-      const spec = { shape: v.shape || undefined, size: v.size || undefined, color: v.color || undefined, clarity: v.clarity || undefined };
+      const spec = { shape: v.shape || undefined, type: v.type || undefined, mm: v.mm || undefined, size: v.size || undefined, color: v.color || undefined, clarity: v.clarity || undefined };
       if (v.diaSrc === "now") {
         receiveClientMaterial(d, o.clientId, { material: "diamond", ct: Number(v.ct), pcs: Number(v.pcs) || undefined, ...spec,
           certLab: v.certified ? v.certLab || undefined : undefined, certNo: v.certified ? v.certNo || undefined : undefined, orderId: o.id }, who);
@@ -214,14 +214,14 @@ export function ClientMaterialChoice({ value: v, onChange, clientId, showGold, f
             {source(v.diaSrc, bal && bal.diaInHand > 0 ? `${bal.diaInHand} ct` : null, s => set({ diaSrc: s }))}
             {v.diaSrc === "now" && (
               <>
-                <div className="grid gap-3 grid-cols-2 sm:grid-cols-3">
+                <div className="grid gap-3 grid-cols-2">
                   <div className="space-y-1.5"><Label htmlFor="cmo-ct" className="text-xs">Carats</Label><Input id="cmo-ct" type="number" min={0} step="0.001" value={v.ct} onChange={e => set({ ct: e.target.value })} className="h-10 rounded-xl" /></div>
                   <div className="space-y-1.5"><Label htmlFor="cmo-pcs" className="text-xs">Stones</Label><Input id="cmo-pcs" type="number" min={0} step="1" value={v.pcs} onChange={e => set({ pcs: e.target.value })} className="h-10 rounded-xl" placeholder="optional" /></div>
-                  <div className="space-y-1.5"><Label className="text-xs">Shape</Label><ListCombo list="diamondShapes" value={v.shape} onChange={x => set({ shape: x })} placeholder="—" className="h-10 rounded-xl" ariaLabel="Their diamonds' shape" /></div>
-                  <div className="space-y-1.5"><Label htmlFor="cmo-size" className="text-xs">Size / MM</Label><Input id="cmo-size" value={v.size} onChange={e => set({ size: e.target.value })} className="h-10 rounded-xl" placeholder="optional" /></div>
-                  <div className="space-y-1.5"><Label className="text-xs">Colour</Label><ListCombo list="diamondColors" value={v.color} onChange={x => set({ color: x })} placeholder="—" className="h-10 rounded-xl" ariaLabel="Their diamonds' colour" /></div>
-                  <div className="space-y-1.5"><Label className="text-xs">Clarity</Label><ListCombo list="diamondClarities" value={v.clarity} onChange={x => set({ clarity: x })} placeholder="—" className="h-10 rounded-xl" ariaLabel="Their diamonds' clarity" /></div>
                 </div>
+                {/* Their stones — asked as on every other stone form. */}
+                <LooseLotFields idPrefix="cmo" showBag={false}
+                  value={{ shape: v.shape, type: v.type ?? "", mm: v.mm ?? "", size: v.size, color: v.color, clarity: v.clarity }}
+                  onChange={p => set(p)} />
                 <label className="flex items-center gap-2 text-sm cursor-pointer">
                   <input type="checkbox" checked={v.certified} onChange={e => set({ certified: e.target.checked })} className="h-4 w-4" /> Certified stone
                 </label>

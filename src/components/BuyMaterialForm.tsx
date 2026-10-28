@@ -59,6 +59,8 @@ interface Line {
   shape: string;
   /** Loose: the lot's sieve size and mm size (lib/diamondLots.ts); its colour and clarity are below. */
   size: string;
+  /** Loose (and gems): Natural, CVD, HPHT… — part of the lot. */
+  type: string;
   mm: string;
   qty: string;      // grams (gold) or carats (diamond)
   rate: string;     // per gram / per carat
@@ -72,13 +74,22 @@ interface Line {
 }
 
 const emptyLine = (): Line => ({
-  kind: "loose", purity: "22K", shape: "Round", size: "", mm: "", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
+  kind: "loose", purity: "22K", shape: "Round", type: "", size: "", mm: "", qty: "", rate: "", quality: "", pcs: "", discountPct: "",
   color: "", clarity: "", cut: "", polish: "", sym: "", fluor: "", measure: "", lab: "", certNo: "",
   materialId: "", grade: "",
 });
 
-/** A loose line's lot: shape · sieve · mm · colour · clarity. */
-const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
+/** A loose line's lot: shape · type · sieve · mm · colour · clarity. */
+const lotOfLine = (l: Line): LotSpec => ({ shape: l.shape || "Round", type: l.type.trim() || undefined, size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined });
+
+/** A gem — an other material that is a stone (Settings → Materials) — is asked as a
+ *  diamond lot is: shape · type · mm · sieve · colour, with a grade for clarity. */
+const isGemLine = (l: Line, settings: Parameters<typeof materialDef>[0]): boolean =>
+  l.kind === "other" && materialDef(settings, l.materialId)?.kind === "stone";
+
+/** Where an other material is counted in stock: a gem by its lot, anything else by its grade. */
+const otherBucket = (l: Line, settings: Parameters<typeof materialDef>[0]): string =>
+  isGemLine(l, settings) ? lotKey(lotOfLine(l)) : (l.grade.trim() || "—");
 
 /** The stock material a line buys. */
 const lineMaterial = (l: Line): MaterialKey => (l.kind === "gold" ? "gold" : l.kind === "other" ? (l.materialId as MaterialKey) : "diamond");
@@ -101,6 +112,7 @@ const lineText = (l: Line, settings: Parameters<typeof materialName>[0]): string
   l.kind === "gold" ? `${l.purity} gold`
     : l.kind === "loose" ? lotLabel(lotKey(lotOfLine(l)))
     : l.kind === "certified" ? `Certified ${l.shape}${l.certNo.trim() ? ` · ${l.certNo.trim()}` : ""}`
+    : isGemLine(l, settings) ? `${materialName(settings, l.materialId)} · ${lotKey(lotOfLine(l))}`
     : `${l.grade.trim() ? `${l.grade.trim()} ` : ""}${materialName(settings, l.materialId)}`;
 
 /**
@@ -256,10 +268,10 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       if (asFixed && target) {
         for (const [i, l] of lines.entries()) {
           if (l.kind === "certified") continue;
-          const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
+          const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
           await logOrderDirectPurchase({
             companyId: co, material: lineMaterial(l),
-            purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
+            purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? otherBucket(l, db.settings) : lotKey(lot!),
             quantity: Number(l.qty), lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
             purchaseId: ids[i], orderId: target.id, createdBy: user!.id, createdAt: now,
           });
@@ -269,10 +281,10 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
       for (const [i, l] of (target ? [] : lines).entries()) {
         if (l.kind === "certified") continue;
         // Loose stones go into their lot (its bag): shape · sieve · mm · colour · clarity (lib/diamondLots.ts).
-        const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
+        const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
         await increaseStock({
           material: lineMaterial(l), companyId: co,
-          purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
+          purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? otherBucket(l, db.settings) : lotKey(lot!),
           quantity: Number(l.qty), refType: "purchase", refId: ids[i], createdBy: user!.id,
           lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
         });
@@ -290,7 +302,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             id: ids[i], supplierId, material: lineMaterial(l), ...coField(co),
             gold: isGold ? { weightGrams: q, purity: l.purity, ratePerGram: Number(l.rate) || 0 } : undefined,
             other: isOther ? {
-              qty: q, grade: l.grade.trim() || "—", ratePerUnit: Number(l.rate) || 0,
+              qty: q, grade: otherBucket(l, db.settings), ratePerUnit: Number(l.rate) || 0,
               pieces: Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
             } : undefined,
             diamond: !isGold && !isOther ? {
@@ -298,8 +310,8 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               carat: q, quality: (l.kind === "loose" ? [l.color, l.clarity].map(x => x.trim()).filter(Boolean).join(" ") : l.quality.trim()) || undefined, ratePerCarat: Number(l.rate) || 0,
               pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
               kind: l.kind === "certified" ? "certified" : "loose", shape: l.shape,
-              ...(l.kind === "loose" ? { size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }
-                : { color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }),
+              ...(l.kind === "loose" ? { type: l.type.trim() || undefined, size: l.size || undefined, mm: l.mm || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }
+                : { type: l.type.trim() || undefined, color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined }),
               certificateNumber: l.kind === "certified" ? l.certNo.trim() : undefined,
               certificateLab: l.kind === "certified" ? (l.lab.trim() || undefined) : undefined,
             } : undefined,
@@ -320,7 +332,7 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
             if (!d.diamondPackets) d.diamondPackets = [];
             packetIds[i] = uid("dp_");
             d.diamondPackets.unshift({
-              id: packetIds[i], stockNumber: nextDiamondStockNumber(d), shape: l.shape, carat: q,
+              id: packetIds[i], stockNumber: nextDiamondStockNumber(d), shape: l.shape, type: l.type.trim() || undefined, carat: q,
               quality: l.quality.trim() || undefined,
               color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined,
               cut: l.cut.trim() || undefined, polish: l.polish.trim() || undefined,
@@ -351,9 +363,9 @@ export function BuyMaterialForm({ open, onOpenChange, supplierId: fixedSupplier,
               o.linkedPurchaseIds!.push(ids[i]);
               const q = Number(l.qty);
               const unit = lineUnit(l, db.settings);
-              const bucket = l.kind === "gold" ? l.purity : l.kind === "certified" ? "Certified" : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lotOfLine(l));
+              const bucket = l.kind === "gold" ? l.purity : l.kind === "certified" ? "Certified" : l.kind === "other" ? otherBucket(l, db.settings) : lotKey(lotOfLine(l));
               const what = l.kind === "gold" ? `${q}g ${l.purity} gold`
-                : l.kind === "other" ? `${q} ${unit} ${l.grade.trim() ? `${l.grade.trim()} ` : ""}${materialName(db.settings, l.materialId)}`
+                : l.kind === "other" ? `${q} ${unit} ${lineText(l, db.settings)}`
                 : l.kind === "certified" ? `${q}ct ${l.shape} diamond (Certified ${l.certNo.trim()})`
                 : `${q}ct ${bucket} diamond`;
               const p = d.purchases.find(x => x.id === ids[i]);
@@ -606,7 +618,7 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         // A loose lot: what it is (it names the bag), then how much at what.
         <div className="space-y-2.5">
           <LooseLotFields idPrefix={`line${n}`} compact
-            value={{ shape: l.shape, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
+            value={{ shape: l.shape, type: l.type, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
             onChange={p => onChange(p)} />
           <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
             <Field label="Pcs">{id => (
@@ -643,14 +655,40 @@ function LineCard({ line: l, n, currency, removable, onChange, onRemove, base, i
         )}</Field>}
           </div>
           <CertGradeFields idPrefix={`line${n}`} compact
-            value={{ color: l.color, clarity: l.clarity, cut: l.cut, polish: l.polish, symmetry: l.sym, fluorescence: l.fluor, measurement: l.measure, lab: l.lab, certNo: l.certNo }}
+            value={{ type: l.type, color: l.color, clarity: l.clarity, cut: l.cut, polish: l.polish, symmetry: l.sym, fluorescence: l.fluor, measurement: l.measure, lab: l.lab, certNo: l.certNo }}
             onChange={p => onChange({
+              ...(p.type !== undefined ? { type: p.type } : {}),
               ...(p.color !== undefined ? { color: p.color } : {}), ...(p.clarity !== undefined ? { clarity: p.clarity } : {}),
               ...(p.cut !== undefined ? { cut: p.cut } : {}), ...(p.polish !== undefined ? { polish: p.polish } : {}),
               ...(p.symmetry !== undefined ? { sym: p.symmetry } : {}), ...(p.fluorescence !== undefined ? { fluor: p.fluorescence } : {}),
               ...(p.measurement !== undefined ? { measure: p.measurement } : {}), ...(p.lab !== undefined ? { lab: p.lab } : {}),
               ...(p.certNo !== undefined ? { certNo: p.certNo } : {}),
             })} />
+        </div>
+      ) : isGemLine(l, db.settings) ? (
+        // A gem: which one, then its lot as a diamond's is asked (shape · type · mm · sieve · colour · grade), then how much at what.
+        <div className="space-y-2.5">
+          <div className="grid grid-cols-2 @md:grid-cols-3 gap-2.5">
+            <Field label="Material"><OtherMaterialSelect value={l.materialId} onChange={v => onChange({ materialId: v, grade: "" })} /></Field>
+          </div>
+          <LooseLotFields idPrefix={`line${n}`} compact gem showBag={false}
+            value={{ shape: l.shape, type: l.type, mm: l.mm, size: l.size, color: l.color, clarity: l.clarity }}
+            onChange={p => onChange(p)} />
+          <div className="grid grid-cols-2 @md:grid-cols-4 gap-2.5">
+            {unit !== "pcs" && !opening && <Field label="Pcs">{id => (
+              <UnitInput id={id} min={0} step="1" value={l.pcs} onChange={e => onChange({ pcs: e.target.value })} placeholder="Optional" />
+            )}</Field>}
+            <Field label={qtyLabel}>{id => (
+              <UnitInput id={id} min={0} step={qtyStep} unit={unit} value={l.qty} onChange={e => onChange({ qty: e.target.value })} />
+            )}</Field>
+            <Field label={`Rate / ${unit} (${currency})`}>{id => (
+              <UnitInput id={id} min={0} unit={`${ccySymbol(currency)}/${unit}`} value={l.rate} onChange={e => onChange({ rate: e.target.value })} placeholder={opening ? "Optional" : undefined} />
+            )}</Field>
+            {!opening && <Field label="Discount %">{id => (
+              <UnitInput id={id} min={-100} max={100} step="0.01" unit="%" value={l.discountPct} onChange={e => onChange({ discountPct: e.target.value })}
+                placeholder="0" title="A minus figure adds instead — −2 adds 2%" />
+            )}</Field>}
+          </div>
         </div>
       ) : (
       <div className={LINE_GRID}>
@@ -771,7 +809,7 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
           updateDb(d => {
             if (!d.diamondPackets) d.diamondPackets = [];
             d.diamondPackets.unshift({
-              id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape: l.shape, carat: q, ...coField(companyId),
+              id: uid("dp_"), stockNumber: nextDiamondStockNumber(d), shape: l.shape, type: l.type.trim() || undefined, carat: q, ...coField(companyId),
               color: l.color.trim() || undefined, clarity: l.clarity.trim() || undefined,
               cut: l.cut.trim() || undefined, polish: l.polish.trim() || undefined, symmetry: l.sym.trim() || undefined,
               fluorescence: l.fluor.trim() || undefined, measurement: l.measure.trim() || undefined,
@@ -783,10 +821,10 @@ export function OpeningStockForm({ open, onOpenChange }: { open: boolean; onOpen
           });
         } else {
           // Gold, a loose lot (its bag) or another material pools into Stock.
-          const lot = l.kind === "loose" ? lotOfLine(l) : undefined;
+          const lot = l.kind === "loose" || isGemLine(l, db.settings) ? lotOfLine(l) : undefined;
           await increaseStock({
             material: lineMaterial(l), companyId,
-            purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? (l.grade.trim() || "—") : lotKey(lot!),
+            purityOrQuality: l.kind === "gold" ? l.purity : l.kind === "other" ? otherBucket(l, db.settings) : lotKey(lot!),
             quantity: q, refType: "opening", valueInr: val,
             lot, pieces: l.kind === "loose" && Number(l.pcs) > 0 ? Math.round(Number(l.pcs)) : undefined,
             createdBy: user!.id, createdAt, note: note.trim() || undefined,

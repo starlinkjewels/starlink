@@ -6,9 +6,10 @@ import { companyById, hasCompanies } from "@/lib/companies";
 import { toast } from "sonner";
 import { deriveStockBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { toPureGold } from "@/lib/db";
-import { lotBalances, lotLabel, sizeOrder } from "@/lib/diamondLots";
+import { knowStoneTypes, lotBalances, lotLabel, sizeOrder } from "@/lib/diamondLots";
+import { listOf } from "@/lib/optionLists";
 import { stockAverageRate } from "@/lib/orderCost";
-import { materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
+import { materialDef, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -19,7 +20,7 @@ interface Row {
   key: string;
   /** Loose diamonds: the bag this lot is kept in ("BAG-0007"). */
   bag?: string;
-  shape?: string; size?: string; mm?: string; color?: string; clarity?: string;
+  shape?: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string;
   qty: number;
   pcs: number | null;
   /** Fine (24K) grams, for gold. */
@@ -46,7 +47,12 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const { user } = useAuth();
   const unit = materialUnit(db.settings, material);
   const diamond = material === "diamond";
+  knowStoneTypes([...listOf("diamondTypes", db.settings), ...listOf("gemTypes", db.settings)]);
+  // Gems (an other material that is a stone) are kept as diamond lots are: shape · type · mm · sieve · colour · grade.
+  const gem = materialDef(db.settings, material)?.kind === "stone";
+  const lotLike = diamond || gem;
   const [shape, setShape] = useState(ALL);
+  const [type, setType] = useState(ALL);
   const [mm, setMm] = useState(ALL);
   const [size, setSize] = useState(ALL);
   const [color, setColor] = useState(ALL);
@@ -64,15 +70,19 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         key: l.key, bag: bagNoOf(db, l.key), ...l.spec, qty: l.ct, pcs: l.pcs, ...priced(l.key, l.ct),
       }));
     }
+    // A gem's parts as its movements keep them; an older line kept only a grade.
+    const kept = new Map<string, NonNullable<(typeof db.stockMovements)[number]["lot"]>>();
+    if (gem) for (const m of db.stockMovements ?? []) if (m.material === material && m.lot?.shape) kept.set(m.purityOrQuality, m.lot);
     return Object.entries(deriveStockBalances(db.stockMovements, material, companyId))
       .filter(([, q]) => q > 0.0005)
       .map(([key, q]) => ({
         key, qty: q, pcs: null,
+        ...(gem ? (kept.get(key) ?? { clarity: key === "—" ? undefined : key }) : {}),
         fine: material === "gold" ? r2(toPureGold(q, key)) : undefined,
         ...priced(key, q),
       }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [db.stockMovements, db.purchases, db.diamondBags, companyId, material]);
+  }, [db.stockMovements, db.purchases, db.diamondBags, db.settings, companyId, material]);
 
   // Each filter offers only what is in stock now.
   const opts = (pick: (r: Row) => string | undefined, none = "Not recorded") => {
@@ -80,31 +90,33 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     return vals.map(v => ({ value: v || "__none", label: v || none }));
   };
   const match = (want: string, have?: string) => want === ALL || (want === "__none" ? !have : have === want);
-  const shown = rows.filter(r => match(shape, r.shape) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
+  const shown = rows.filter(r => match(shape, r.shape) && match(type, r.type) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
 
-  const filters: TableFilter[] = diamond ? [
+  const filters: TableFilter[] = lotLike ? [
     { kind: "select", label: "Shape", value: shape, onChange: setShape, options: opts(r => r.shape), allLabel: "All shapes" },
+    { kind: "select", label: "Type", value: type, onChange: setType, options: opts(r => r.type), allLabel: "All types" },
     { kind: "select", label: "MM", value: mm, onChange: setMm, options: opts(r => r.mm), allLabel: "All mm" },
     { kind: "select", label: "Sieve", value: size, onChange: setSize, options: opts(r => r.size), allLabel: "All sieves" },
     { kind: "select", label: "Colour", value: color, onChange: setColor, options: opts(r => r.color), allLabel: "All colours" },
-    { kind: "select", label: "Clarity", value: clarity, onChange: setClarity, options: opts(r => r.clarity), allLabel: "All clarities" },
+    { kind: "select", label: gem ? "Grade" : "Clarity", value: clarity, onChange: setClarity, options: opts(r => r.clarity), allLabel: gem ? "All grades" : "All clarities" },
   ] : [];
 
   const dash = <span className="text-muted-foreground/50">—</span>;
-  const columns: DataColumn<Row>[] = diamond ? [
-    { key: "bag", header: "Bag", always: true, sortValue: r => r.bag ?? "~", csv: r => r.bag ?? "",
-      cell: r => (r.bag ? <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{r.bag}</span> : dash) },
-    { key: "lot", header: "Shape", sortValue: r => `${r.shape ?? ""}`, csv: r => lotLabel(r.key),
-      cell: r => <CellMain title={r.shape} sub={r.key.includes(" · ") ? undefined : "size not recorded"} /> },
+  const columns: DataColumn<Row>[] = lotLike ? [
+    ...(diamond ? [{ key: "bag", header: "Bag", always: true, sortValue: (r: Row) => r.bag ?? "~", csv: (r: Row) => r.bag ?? "",
+      cell: (r: Row) => (r.bag ? <span className="font-mono text-xs font-semibold text-primary whitespace-nowrap">{r.bag}</span> : dash) }] : []),
+    { key: "lot", header: "Shape", always: gem, sortValue: r => `${r.shape ?? ""}`, csv: r => (diamond ? lotLabel(r.key) : r.key),
+      cell: r => (r.shape ? <CellMain title={r.shape} sub={diamond && !r.key.includes(" · ") ? "size not recorded" : undefined} /> : dash) },
+    { key: "type", header: "Type", sortValue: r => r.type ?? "", cell: r => (r.type ? <CellTag tone="amber">{r.type}</CellTag> : dash) },
     { key: "mm", header: "MM", sortValue: r => parseFloat(r.mm ?? "") || 0, cell: r => (r.mm ? <CellTag tone="blue">{r.mm}</CellTag> : dash) },
     { key: "size", header: "Sieve", sortValue: r => r.size ?? "", cell: r => (r.size ? <CellTag tone="violet">{r.size}</CellTag> : dash) },
     { key: "color", header: "Colour", sortValue: r => r.color ?? "", cell: r => r.color ?? dash },
-    { key: "clarity", header: "Clarity", sortValue: r => r.clarity ?? "", cell: r => r.clarity ?? dash },
-    { key: "pcs", header: "Pcs", align: "right", kind: "number", sortValue: r => r.pcs,
-      cell: r => (r.pcs != null ? <span className="tabular-nums">{r.pcs.toLocaleString()}</span> : dash) },
-    { key: "qty", header: "Carats", align: "right", kind: "number", sortValue: r => r.qty,
+    { key: "clarity", header: gem ? "Grade" : "Clarity", sortValue: r => r.clarity ?? "", cell: r => r.clarity ?? dash },
+    ...(diamond ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (r: Row) => r.pcs,
+      cell: (r: Row) => (r.pcs != null ? <span className="tabular-nums">{r.pcs.toLocaleString()}</span> : dash) }] : []),
+    { key: "qty", header: diamond ? "Carats" : `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
       cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}</span> },
-    { key: "avg", header: "Avg ₹/ct", align: "right", kind: "number", sortValue: r => r.avg,
+    { key: "avg", header: `Avg ₹/${unit}`, align: "right", kind: "number", sortValue: r => r.avg,
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
     { key: "value", header: "Value", align: "right", kind: "number", sortValue: r => r.value,
       cell: r => (r.value != null ? <CellAmount>{fmtMoneyInr(r.value)}</CellAmount> : dash) },
@@ -126,10 +138,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const totalPcs = pcsKnown.reduce((s, r) => s + (r.pcs ?? 0), 0);
   const totalValue = shown.reduce((s, r) => s + (r.value ?? 0), 0);
   const unpriced = shown.filter(r => r.value == null).length;
-  const filtered = shape !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
+  const filtered = shape !== ALL || type !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
   // In the order a diamond office keeps its bags: shape, then mm, then sieve, then grade.
-  const ordered = diamond
-    ? [...shown].sort((a, b) => (a.shape ?? "").localeCompare(b.shape ?? "") || (parseFloat(a.mm ?? "") || 0) - (parseFloat(b.mm ?? "") || 0)
+  const ordered = lotLike
+    ? [...shown].sort((a, b) => (a.shape ?? "").localeCompare(b.shape ?? "") || (a.type ?? "").localeCompare(b.type ?? "") || (parseFloat(a.mm ?? "") || 0) - (parseFloat(b.mm ?? "") || 0)
         || sizeOrder(a.size, b.size) || (a.color ?? "").localeCompare(b.color ?? "") || (a.clarity ?? "").localeCompare(b.clarity ?? ""))
     : shown;
   const noBag = diamond ? rows.filter(r => !r.bag) : [];
@@ -144,7 +156,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   return (
     <div className="card-luxe p-3 sm:p-4 space-y-3">
       <SectionTitle className="px-1" title={diamond ? "Bags in stock" : "In stock"}
-        sub={selected ? `Showing the history of ${diamond ? (bagNoOf(db, selected) ? `${bagNoOf(db, selected)} · ` : "") + lotLabel(selected) : selected} below` : diamond ? "Shape · mm · sieve · colour · clarity — open a bag for its history" : "Open a line for its history"}
+        sub={selected ? `Showing the history of ${diamond ? (bagNoOf(db, selected) ? `${bagNoOf(db, selected)} · ` : "") + lotLabel(selected) : selected} below` : diamond ? "Shape · type · mm · sieve · colour · clarity — open a bag for its history" : gem ? "Shape · type · mm · sieve · colour · grade — open a line for its history" : "Open a line for its history"}
         actions={selected
           ? <button type="button" onClick={() => onSelect(null)} className="text-xs text-primary hover:underline">Show all history</button>
           : diamond && ordered.some(r => r.bag)
@@ -179,10 +191,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         ]) : undefined}
         columns={columns}
         filters={filters}
-        onClearFilters={() => { setShape(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
-        searchText={r => [r.bag, r.key, r.mm, r.size, r.color, r.clarity].filter(Boolean).join(" ")}
+        onClearFilters={() => { setShape(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
+        searchText={r => [r.bag, r.key, r.type, r.mm, r.size, r.color, r.clarity].filter(Boolean).join(" ")}
         searchPlaceholder={diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search"}
-        defaultSort={diamond ? null : { key: "qty", dir: "desc" }}
+        defaultSort={lotLike ? null : { key: "qty", dir: "desc" }}
         onRowClick={r => onSelect(selected === r.key ? null : r.key)}
         rowClassName={r => (r.key === selected ? "dt-on bg-primary/[0.05]" : "")}
         exportName={`Stock-${diamond ? "Loose-Diamond-Bags" : material}`}

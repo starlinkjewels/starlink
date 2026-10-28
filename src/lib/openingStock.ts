@@ -350,7 +350,7 @@ export async function refilePurchaseLot(purchaseId: string, spec: LotSpec, piece
     const row = (d.purchases ?? []).find(x => x.id === p.id);
     if (!row?.diamond) return;
     row.diamond.shape = parts.shape;
-    for (const k of ["size", "mm", "color", "clarity"] as const) { if (parts[k]) row.diamond[k] = parts[k]; else delete row.diamond[k]; }
+    for (const k of ["type", "size", "mm", "color", "clarity"] as const) { if (parts[k]) row.diamond[k] = parts[k]; else delete row.diamond[k]; }
     row.diamond.quality = [parts.color, parts.clarity].filter(Boolean).join(" ") || undefined;
     if (!row.diamond.quality) delete row.diamond.quality;
     if (pcs) row.diamond.pieces = pcs; else delete row.diamond.pieces;

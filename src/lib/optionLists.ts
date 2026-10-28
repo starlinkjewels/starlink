@@ -16,7 +16,7 @@ export type ListKey =
   | "paymentMethods" | "departments" | "meltReasons" | "returnReasons"
   | "diamondShapes" | "diamondSizes" | "diamondMm" | "diamondColors" | "diamondClarities"
   | "diamondFinish" | "diamondFluorescence" | "diamondLabs" | "chargeNames"
-  | "gemColors" | "gemQualities";
+  | "gemColors" | "gemQualities" | "gemTypes";
 
 export interface ListDef {
   key: ListKey;
@@ -35,7 +35,7 @@ export const LIST_DEFS: readonly ListDef[] = [
   { key: "metals", group: "Orders", title: "Metals", hint: "Each one with karats or without",
     defaults: ["Yellow Gold", "White Gold (Palladium Alloy)", "White Gold (Silver Alloy)", "Rose Gold", "Platinum", "Silver", "Titanium"],
     builtIn: ["None (Diamond only)"] }, // = DIAMOND_ONLY_METAL (spelled out: read while modules load)
-  { key: "diamondTypes", group: "Orders", title: "Diamond types", hint: "New order, order edit and Ready Stock",
+  { key: "diamondTypes", group: "Orders", title: "Diamond types", hint: "Natural, CVD, HPHT… — orders, purchases and stock lots",
     defaults: ["Natural", "Lab Grown"] },
   { key: "colours", group: "Orders", title: "Colours", hint: "The piece's colour",
     defaults: ["Yellow", "Rose", "White"] },
@@ -47,21 +47,23 @@ export const LIST_DEFS: readonly ListDef[] = [
     defaults: ["Setting charge", "Engraving", "Rush fee", "Insurance", "Packaging", "Hallmarking", "Polishing / repair"] },
   // Loose diamond lots in stock: shape · sieve · mm · colour · clarity (lib/diamondLots.ts),
   // and a certified stone's grading.
-  { key: "diamondShapes", group: "Diamonds", title: "Shapes", hint: "Loose and certified stones",
+  { key: "diamondShapes", group: "Diamonds", title: "Shapes", hint: "Diamonds and gems — loose and certified",
     defaults: ["Round", "Oval", "Pear", "Princess", "Emerald", "Marquise", "Cushion", "Radiant", "Heart", "Asscher", "Baguette", "Mix", "Other"] },
-  { key: "diamondMm", group: "Diamonds", title: "MM sizes", hint: "Millimetre sizes, for loose lots",
+  { key: "diamondMm", group: "Diamonds", title: "MM sizes", hint: "Millimetre sizes — diamonds and gems",
     defaults: DEFAULT_DIAMOND_MM },
-  { key: "diamondSizes", group: "Diamonds", title: "Sieve sizes", hint: "Sieve sizes, for loose lots (mm ones here show under MM too)",
+  { key: "diamondSizes", group: "Diamonds", title: "Sieve sizes", hint: "Diamonds and gems (mm ones here show under MM too)",
     defaults: DEFAULT_DIAMOND_SIZES },
-  { key: "diamondColors", group: "Diamonds", title: "Colours", hint: "Single grades and ranges, for loose lots",
+  { key: "diamondColors", group: "Diamonds", title: "Colours", hint: "Diamonds — single grades and ranges",
     defaults: DEFAULT_DIAMOND_COLORS },
-  { key: "diamondClarities", group: "Diamonds", title: "Clarities", hint: "Single grades and groups, loose and certified",
+  { key: "diamondClarities", group: "Diamonds", title: "Clarities", hint: "Diamonds — single grades and groups, loose and certified",
     defaults: DEFAULT_DIAMOND_CLARITIES },
   // A loose sale of gems (emerald, ruby…): their colour and quality, in the gem trade's words.
-  { key: "gemColors", group: "Diamonds", title: "Gem colours", hint: "Loose gems sold on an order",
+  { key: "gemColors", group: "Diamonds", title: "Gem colours", hint: "Gems — bought, in stock, sold",
     defaults: ["Red", "Pink", "Blue", "Green", "Yellow", "Purple", "Orange", "White", "Black", "Multi"] },
-  { key: "gemQualities", group: "Diamonds", title: "Gem qualities", hint: "Loose gems sold on an order",
+  { key: "gemQualities", group: "Diamonds", title: "Gem grades", hint: "Gems — bought, in stock, sold",
     defaults: ["AAA", "AA", "A", "Eye clean", "Commercial"] },
+  { key: "gemTypes", group: "Diamonds", title: "Gem types", hint: "Gems — natural, lab-created, treated…",
+    defaults: ["Natural", "Lab Created", "Treated"] },
   { key: "diamondFinish", group: "Diamonds", title: "Cut · polish · symmetry", hint: "A certified stone's finish grades",
     defaults: ["EX", "VG", "G", "F", "P", "Ideal"] },
   { key: "diamondFluorescence", group: "Diamonds", title: "Fluorescence", hint: "A certified stone's fluorescence",

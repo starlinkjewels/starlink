@@ -656,12 +656,12 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
 
       // Certified diamonds aren't pooled in stock movements — export the full
       // purchase detail (with certificate grading from the linked packet).
-      const headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Shape", "Carat", "Quality", "Certificate #", "Lab", "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Measurement", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
+      const headers = ["Date", "Invoice #", "Supplier", "Purpose", "Order #", "Shape", "Type", "Carat", "Quality", "Certificate #", "Lab", "Color", "Clarity", "Cut", "Polish", "Symmetry", "Fluorescence", "Measurement", "Rate/ct", "Currency", "USD Amount", "Exchange Rate", "Amount (INR)", "Paid (INR)", "Pending (INR)", "Running Total (INR)", "Notes"];
       const data = rows.map(p => {
         const c = base(p);
         const pk = packets.find(x => x.purchaseId === p.id); // full grading lives on the packet
         return [c.date, c.inv, c.supplier, c.purpose, c.order,
-          p.diamond?.shape ?? pk?.shape ?? "", p.diamond?.carat ?? pk?.carat ?? "", p.diamond?.quality ?? pk?.quality ?? "",
+          p.diamond?.shape ?? pk?.shape ?? "", p.diamond?.type ?? pk?.type ?? "", p.diamond?.carat ?? pk?.carat ?? "", p.diamond?.quality ?? pk?.quality ?? "",
           p.diamond?.certificateNumber ?? pk?.certificateNumber ?? "", p.diamond?.certificateLab ?? pk?.certificateLab ?? "",
           pk?.color ?? "", pk?.clarity ?? "", pk?.cut ?? "", pk?.polish ?? "", pk?.symmetry ?? "", pk?.fluorescence ?? "", pk?.measurement ?? "",
           p.diamond?.ratePerCarat ?? "", c.currency, c.usd, c.fx, c.amount, c.paid, c.pending, c.running, c.notes];

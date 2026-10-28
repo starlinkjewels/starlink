@@ -46,7 +46,7 @@ type Form = {
   engOn: string; engText: string; engFont: string;
   designNumber: string; priority: string; expectedDelivery: string; deliveryTime: string; contactPerson: string; instructions: string;
   // A loose order's stones — what they are, and their details.
-  stoneName: string; stoneShape: string; stoneMm: string; stoneSize: string; stoneColor: string; stoneClarity: string;
+  stoneName: string; stoneShape: string; stoneType: string; stoneMm: string; stoneSize: string; stoneColor: string; stoneClarity: string;
 };
 
 const numStr = (n?: number) => (n ? String(n) : "");
@@ -61,7 +61,7 @@ function formOf(o: Order): Form {
     engOn: o.engraving?.text ? "1" : "", engText: o.engraving?.text ?? "", engFont: o.engraving?.font ?? "block",
     designNumber: o.designNumber ?? "", priority: o.priority, expectedDelivery: (o.expectedDelivery ?? "").slice(0, 10),
     deliveryTime: o.deliveryTime ?? "", contactPerson: o.contactPerson ?? "", instructions: o.instructions ?? "",
-    stoneName: o.stoneSpec?.stone ?? "Diamond", stoneShape: o.stoneSpec?.shape ?? "", stoneMm: o.stoneSpec?.mm ?? "", stoneSize: o.stoneSpec?.size ?? "",
+    stoneName: o.stoneSpec?.stone ?? "Diamond", stoneShape: o.stoneSpec?.shape ?? "", stoneType: o.stoneSpec?.type ?? "", stoneMm: o.stoneSpec?.mm ?? "", stoneSize: o.stoneSpec?.size ?? "",
     stoneColor: o.stoneSpec?.color ?? "", stoneClarity: o.stoneSpec?.clarity ?? "",
   };
 }
@@ -160,13 +160,13 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       deliveryTime: txt(f.deliveryTime),
       contactPerson: f.contactPerson.trim(),
       instructions: f.instructions.trim(),
-      ...(diamondOnly ? { stoneSpec: Object.fromEntries(Object.entries({ stone: f.stoneName.trim() === "Diamond" ? "" : f.stoneName, shape: f.stoneShape, mm: f.stoneMm, size: gemOnly ? "" : f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity })
+      ...(diamondOnly ? { stoneSpec: Object.fromEntries(Object.entries({ stone: f.stoneName.trim() === "Diamond" ? "" : f.stoneName, shape: f.stoneShape, type: gemOnly ? f.stoneType : "", mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity })
         .map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)) } : {}),
     };
     // Which form fields each stored field is made from.
     const FROM: Partial<Record<keyof Order, (keyof Form)[]>> = {
       productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"], engraving: ["engOn", "engText", "engFont"],
-      stoneSpec: ["stoneName", "stoneShape", "stoneMm", "stoneSize", "stoneColor", "stoneClarity"],
+      stoneSpec: ["stoneName", "stoneShape", "stoneType", "stoneMm", "stoneSize", "stoneColor", "stoneClarity"],
     };
     const same = (a: unknown, b: unknown) => (a ?? "") === (b ?? "") || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9)
       || (typeof a === "object" && typeof b === "object" && JSON.stringify(a ?? {}) === JSON.stringify(b ?? {}));
@@ -270,10 +270,10 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
             )}
             {diamondOnly && (
               <div className="col-span-2">
-                <LooseLotFields idPrefix="oe-stone" showBag={false} compact gem={gemOnly}
-                  value={{ shape: f.stoneShape, mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity }}
+                <LooseLotFields idPrefix="oe-stone" showBag={false} compact gem={gemOnly} showType={gemOnly}
+                  value={{ shape: f.stoneShape, type: f.stoneType, mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity }}
                   onChange={patch => setF(p => ({ ...p,
-                    ...(patch.shape !== undefined ? { stoneShape: patch.shape } : {}), ...(patch.mm !== undefined ? { stoneMm: patch.mm } : {}),
+                    ...(patch.shape !== undefined ? { stoneShape: patch.shape } : {}), ...(patch.type !== undefined ? { stoneType: patch.type } : {}), ...(patch.mm !== undefined ? { stoneMm: patch.mm } : {}),
                     ...(patch.size !== undefined ? { stoneSize: patch.size } : {}), ...(patch.color !== undefined ? { stoneColor: patch.color } : {}),
                     ...(patch.clarity !== undefined ? { stoneClarity: patch.clarity } : {}) }))} />
               </div>

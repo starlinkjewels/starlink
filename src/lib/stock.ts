@@ -108,13 +108,18 @@ function pruneUndefined<T extends Record<string, unknown>>(o: T): T {
 /** A lot's parts without the empty ones — Firestore refuses an undefined field, nested ones too. */
 function cleanLot(lot: StockMovement["lot"]): StockMovement["lot"] {
   if (!lot?.shape) return undefined;
-  return pruneUndefined({ shape: lot.shape, size: lot.size || undefined, mm: lot.mm || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
+  return pruneUndefined({ shape: lot.shape, type: lot.type || undefined, size: lot.size || undefined, mm: lot.mm || undefined, color: lot.color || undefined, clarity: lot.clarity || undefined }) as StockMovement["lot"];
 }
 
 /** A loose-diamond movement's lot parts: as given, else read from its lot label — so
  *  every way stones come back (a return, a melt, a cancel, a correction) files them
  *  with their shape, mm, sieve, colour and clarity, not just a label. */
 function lotOf(material: MaterialKey, key: string, lot: StockMovement["lot"]): StockMovement["lot"] {
+  // A lot given with its type is as written; otherwise the lot's own parts, as first kept.
+  if (material === "diamond" && !lot?.type && key && key !== "Certified" && key !== "unspecified") {
+    const kept = (loadDb().stockMovements ?? []).find(m => m.material === "diamond" && m.purityOrQuality === key && m.lot?.shape)?.lot;
+    if (kept) return cleanLot(kept);
+  }
   if (lot?.shape) return cleanLot(lot);
   return material === "diamond" && key && key !== "Certified" && key !== "unspecified" ? cleanLot(lotParts(key)) : undefined;
 }

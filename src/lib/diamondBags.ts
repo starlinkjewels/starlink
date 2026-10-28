@@ -106,7 +106,7 @@ export function printBagLabels(items: { no: string; key: string; ct?: number; pc
     const size = [s.mm, s.size].filter(Boolean).join(" · ");
     const grade = [s.color, s.clarity].filter(Boolean).join(" · ");
     const holds = [it.ct != null ? `${it.ct} ct` : "", it.pcs != null ? `${it.pcs} pcs` : ""].filter(Boolean).join(" · ");
-    return `<div class="lbl"><div class="no">${esc(it.no)}</div><div class="shape">${esc(s.shape)}</div>`
+    return `<div class="lbl"><div class="no">${esc(it.no)}</div><div class="shape">${esc([s.shape, s.type].filter(Boolean).join(" · "))}</div>`
       + `${size ? `<div class="ln">${esc(size)}</div>` : ""}${grade ? `<div class="ln">${esc(grade)}</div>` : ""}`
       + `${holds ? `<div class="holds">${esc(holds)}</div>` : ""}${company ? `<div class="co">${esc(company)}</div>` : ""}</div>`;
   }).join("");

@@ -13,7 +13,7 @@ import { canEditIssuance, canCancelIssuance, deleteIssuance, issuanceVoidImpact,
 import { factoryDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { needsAccess } from "@/lib/actionHints";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
-import { useOtherMaterials, GradeInput } from "@/components/MaterialFields";
+import { useOtherMaterials, StockGradeInput } from "@/components/MaterialFields";
 import { CompanyFilter, CompanyPicker, CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/CompanyFields";
 import { FactoryPoolTransferDialog } from "@/components/FactoryPoolTransfer";
 import { companyOf, coField, workCompanyOf, companyById } from "@/lib/companies";
@@ -1266,7 +1266,9 @@ function FactoryHistoryPageBody() {
           </div>
 
           {isOtherMaterial(issueMaterial) ? (
-            <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
+            <StockGradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade}
+              companyId={issueMode === "bulkDelivery" || !matchedOrder ? issueCompany : workCompanyOf(db, matchedOrder)}
+              extra={issueMode === "bulkDelivery" ? [] : [...new Set(db.materialIssuances.filter(i => i.factoryId === id && i.material === issueMaterial && !i.orderId).map(i => i.purityOrQuality))]} />
           ) : issueMaterial === "gold" ? (
             <Select value={issuePurity} onValueChange={setIssuePurity}>
               <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
