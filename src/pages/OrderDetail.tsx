@@ -1,4 +1,5 @@
 import { ProductionInfo } from "@/components/ProductionInfo";
+import { orderSectionRank } from "@/lib/orderLayout";
 import { ProductVideo } from "@/components/ProductVideo";
 import { canPlayVideo, UNPLAYABLE_VIDEO_HELP } from "@/lib/videoCheck";
 import { productionTrack } from "@/lib/production";
@@ -2094,12 +2095,14 @@ function OrderDetailPageBody() {
   };
   const editingPay = editingPayId ? advances.find(a => a.id === editingPayId) : undefined;
 
+  // Where each section sits — the admin's order (Settings → Order page); the header stays on top.
+  const secRank = orderSectionRank(db.settings);
   return (
     <>
-    <div className="max-w-7xl mx-auto space-y-4">
-      <Link to="/orders" className="ui-back inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
+    <div className="max-w-7xl mx-auto flex flex-col gap-4">
+      <Link to="/orders" style={{ order: -2 }} className="ui-back self-start inline-flex items-center gap-1 h-9 -ml-2 px-2 rounded-lg text-sm font-medium text-muted-foreground hover:text-foreground hover:bg-secondary/70 transition-colors"><ArrowLeft className="h-4 w-4" />Orders</Link>
 
-      <div className="card-luxe p-0 overflow-hidden">
+      <div style={{ order: -1 }} className="card-luxe p-0 overflow-hidden">
       {/* Order Header — the piece at a glance: its picture, where it stands,
           what it is, and who has it. */}
       {(() => {
@@ -2715,7 +2718,7 @@ function OrderDetailPageBody() {
 
       {/* ── CAD Design Card ── */}
       {showCadSection && (
-        <div className="card-luxe p-4 sm:p-6 space-y-4">
+        <div style={{ order: secRank.cad }} className="card-luxe p-4 sm:p-6 space-y-4">
           {/* Title on the left, its buttons pinned top right — on a phone too
               (the line under the title gives way, never the buttons). One
               main button; the rest under ⋯. */}
@@ -2798,7 +2801,7 @@ function OrderDetailPageBody() {
 
       {/* ── Dispatch Information Card ── */}
       {showDispSection && (
-        <div className="card-luxe p-6 space-y-4">
+        <div style={{ order: secRank.dispatch }} className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <SectionTitle icon={Truck} title="Dispatch Details" />
             {canEditStage() && (
@@ -2913,7 +2916,7 @@ function OrderDetailPageBody() {
 
       {/* ── Product Photography Card ── */}
       {showPhotographySection && (
-        <div className="card-luxe p-6 space-y-4">
+        <div style={{ order: secRank.photos }} className="card-luxe p-6 space-y-4">
           <div className="flex items-center justify-between gap-4 flex-wrap">
             <SectionTitle icon={Camera} title="Product Photography"
               sub={hasProductMedia ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""}` : "None yet"} />
@@ -3006,11 +3009,11 @@ function OrderDetailPageBody() {
       {/* ── Cost & Profit — the admin's eyes only. Employees can open this
           page, and the client portal renders it too, so the gate is the role
           itself, never the page. */}
-      {user!.role === "admin" && <OrderProfitCard db={db} order={order} />}
+      {user!.role === "admin" && <div style={{ order: secRank.profit }} className="min-w-0 empty:hidden"><OrderProfitCard db={db} order={order} /></div>}
 
       {/* ── Advance Payment Card — not on an in-house build (no client, no bill) ── */}
       {(!order.forReadyStock || advances.length > 0) && (
-      <div className="card-luxe p-6 space-y-4">
+      <div style={{ order: secRank.payments }} className="card-luxe p-6 space-y-4">
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <SectionTitle icon={Wallet} title="Payments"
             sub={<>{advances.length} payment{advances.length !== 1 ? "s" : ""}{advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}</>} />
@@ -3251,7 +3254,7 @@ function OrderDetailPageBody() {
 
       {/* Production Timeline. A diamond-only order is not produced, so it shows
           only the stages it really has — order, dispatch, delivery. */}
-      <div className="card-luxe p-6">
+      <div style={{ order: secRank.timeline }} className="card-luxe p-6">
         <SectionTitle className="mb-5" title={diamondOnly ? "Order Progress" : "Production Timeline"} />
         <div className="relative pl-8 space-y-4">
           <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
@@ -3336,7 +3339,7 @@ function OrderDetailPageBody() {
           internal sourcing cost, never shown to the client). Hidden for a
           Ready-Stock sale — the piece already exists, nothing is manufactured. */}
       {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
-        <div className="card-luxe p-6 space-y-5">
+        <div style={{ order: secRank.manufacturing }} className="card-luxe p-6 space-y-5">
           {(() => {
             const editable = canEditStage();
             const needsDia = orderMaterialRequirements(order).needsDiamond;
@@ -4042,7 +4045,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
           index-based advance/revert logic above. Shown in the same visual
           style so it reads as one continuous story. */}
       {user!.role !== "client" && !!order.manufacturingLog?.length && (
-        <div className="card-luxe p-6">
+        <div style={{ order: secRank.log }} className="card-luxe p-6">
           <SectionTitle className="mb-5" title="Manufacturing Log" />
           <div className="relative pl-8 space-y-4">
             <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />

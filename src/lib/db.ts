@@ -1027,6 +1027,8 @@ export interface Settings {
   productionDelayDays?: number;
   /** A loose-diamond order's own stages, between approval and dispatch (e.g. Matching, Sorting). Certification is added when it needs a certificate. */
   looseStages?: string[];
+  /** The order page's sections in the admin's order (lib/orderLayout.ts). Unset = the built-in order. */
+  orderPageSections?: string[];
   cashbackPercent?: number; // % of order value granted as a gift card on delivery (only to gift-card-enabled clients)
   giftMaxRedeemPercent?: number; // default max % of an order a gift card may cover (per-client overridable); blank = 25
   /** Our offices where Ready Stock is kept, in order. Unset = US, Hong Kong, India, Other. */

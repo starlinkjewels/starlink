@@ -13,7 +13,8 @@ import { CompaniesSettings } from "@/components/CompaniesSettings";
 import { MaterialsSettings } from "@/components/MaterialsSettings";
 import { OptionListsSettings } from "@/components/OptionListsSettings";
 import { TimelineSettings } from "@/components/TimelineSettings";
-import { ListOrdered } from "lucide-react";
+import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
+import { ListOrdered, LayoutList } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { loadDb, saveDb, updateDb, updateDbAs, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, collectionLoaded, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
@@ -773,6 +774,7 @@ export function SettingsPage() {
     { id: "expenses", label: "Categories", icon: SlidersHorizontal, show: isAdmin },
     { id: "lists", label: "Dropdown lists", icon: ListChecks, show: isAdmin },
     { id: "timeline", label: "Production Timeline", icon: ListOrdered, show: isAdmin },
+    { id: "orderpage", label: "Order page", icon: LayoutList, show: isAdmin },
     { id: "companies", label: "Companies", icon: Building2, show: isAdmin },
     { id: "materials", label: "Materials", icon: Layers, show: isAdmin },
     { id: "brand", label: "Brand Studio", icon: Sparkles, show: isAdmin },
@@ -1483,6 +1485,7 @@ export function SettingsPage() {
 
       {/* Production timeline — admin only */}
       {activeId === "timeline" && <TimelineSettings />}
+      {activeId === "orderpage" && <OrderLayoutSettings />}
 
       {/* The business's own dropdown choices — admin only */}
       {activeId === "lists" && <OptionListsSettings />}
