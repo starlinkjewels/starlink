@@ -18,7 +18,7 @@ export interface ShellItem { to: string; label: string; icon: LucideIcon }
 export const STUDIO_SIDEBAR: { title: string; paths: string[] }[] = [
   { title: "", paths: ["/", "/orders", "/catalog"] },
   { title: "Sales", paths: ["/clients", "/invoices", "/ready-stock", "/gift-cards", "/giftcard", "/product-photos"] },
-  { title: "Production", paths: ["/suppliers", "/factories", "/stock", "/buy-assign"] },
+  { title: "Production", paths: ["/suppliers", "/factories", "/designers", "/stock", "/buy-assign"] },
   { title: "Money", paths: ["/payments", "/income", "/locker", "/expenses", "/reports"] },
   { title: "Workspace", paths: ["/messages", "/notifications", "/reminders", "/ai", "/employees", "/activity", "/autopilot", "/settings"] },
 ];
@@ -28,6 +28,7 @@ const PARTIES: [string, string][] = [
   ["/clients", "Who buys from you"],
   ["/suppliers", "Who you buy from — and brokers"],
   ["/factories", "Who makes your pieces"],
+  ["/designers", "Who designs them — ours and freelancers"],
 ];
 const MONEY: [string, string][] = [
   ["/payments", "Money in and out"],
