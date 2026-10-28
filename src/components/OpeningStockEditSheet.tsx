@@ -82,7 +82,7 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
         date: dayOf(movement.createdAt), note: movement.note ?? "",
       });
       const p = lotParts(movement.purityOrQuality, movement.lot);
-      setLot({ shape: p.shape, mm: p.mm ?? "", size: p.size ?? "", color: p.color ?? "", clarity: p.clarity ?? "" });
+      setLot({ shape: p.shape, type: p.type ?? "", mm: p.mm ?? "", size: p.size ?? "", color: p.color ?? "", clarity: p.clarity ?? "" });
       setPcs(movement.pieces != null ? String(movement.pieces) : "");
     }
   }, [movement]);

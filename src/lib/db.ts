@@ -216,6 +216,10 @@ export interface ClientMaterialEntry {
   ct?: number;
   pcs?: number;
   shape?: string;
+  /** Natural, CVD, HPHT… */
+  type?: string;
+  mm?: string;
+  /** The sieve size (older entries: whatever size was typed). */
   size?: string;
   color?: string;
   clarity?: string;
@@ -235,7 +239,7 @@ export interface ClientMaterialEntry {
  * "Emerald + Diamond" when the sale mixes them; unset means diamonds (every
  * loose order from before gems could be sold).
  */
-export interface StoneSpec { stone?: string; shape?: string; mm?: string; size?: string; color?: string; clarity?: string }
+export interface StoneSpec { stone?: string; shape?: string; /** Gems: natural, lab-created, treated… (diamonds use the order's diamondType). */ type?: string; mm?: string; size?: string; color?: string; clarity?: string }
 
 /** The extra charges on an order, added up. */
 export function otherChargesTotal(o: { otherCharges?: OrderCharge[] }): number {
@@ -1259,6 +1263,8 @@ export interface DiamondPurchaseDetail {
   // packet (see DiamondPacket). Older records without this are treated as loose.
   kind?: "loose" | "certified";
   shape?: string; // one of DIAMOND_SHAPES — the loose-stock bucket key
+  /** Loose: Natural, CVD, HPHT… — part of the lot. */
+  type?: string;
   /** Loose: the lot it goes into with the shape (lib/diamondLots.ts) — sieve size (older
    *  entries: sieve or mm), mm size, colour, clarity. */
   size?: string;
@@ -1289,6 +1295,8 @@ export interface DiamondPacket {
   companyId?: string;
   stockNumber?: string; // short sequential label ("DP-0007") assigned at creation — how staff find one specific stone among hundreds in stock, since shape/carat/cert alone isn't quick to scan or search
   shape: string;
+  /** Natural, CVD, HPHT… */
+  type?: string;
   carat: number; // size / weight
   quality?: string;
   // Full grading details (from the certificate / report).
@@ -1677,7 +1685,7 @@ export interface MaterialIssuance {
    *  stock itself is counted by shape (purityOrQuality). A price typed here
    *  (amountInr) is what the order's cost uses for them instead of the
    *  average worked out from purchases. */
-  diamondSpec?: { mm?: string; color?: string; clarity?: string; ratePerCaratInr?: number; amountInr?: number };
+  diamondSpec?: { type?: string; mm?: string; size?: string; color?: string; clarity?: string; ratePerCaratInr?: number; amountInr?: number };
   /** Whose material this is at the factory — each company's pool and fine gold
    *  are kept apart. Unset = the first company. */
   companyId?: string;
@@ -1746,7 +1754,7 @@ export interface StockMovement {
   quantity: number; // always positive; direction implied by `type`
   /** Loose diamonds: the lot's parts (lib/diamondLots.ts), for filtering — the
    *  bucket above is already the lot's label. Absent on older movements. */
-  lot?: { shape: string; size?: string; mm?: string; color?: string; clarity?: string };
+  lot?: { shape: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string };
   /** Loose diamonds: how many stones moved, when known. */
   pieces?: number;
   /** "transfer": moved between our companies (in at the sending company's average cost). */

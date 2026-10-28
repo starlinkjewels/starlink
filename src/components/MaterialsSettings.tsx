@@ -112,6 +112,14 @@ export function MaterialEditor({ material, onClose, onSaved }: {
             </div>
             {used && <p className="text-[11px] text-muted-foreground">Fixed — it is already in use, and quantities entered in {UNIT_LABEL[unit]} must stay in {UNIT_LABEL[unit]}.</p>}
           </div>
+          {kind === "stone" ? (
+            // Gems are asked as diamonds are, from the business's own lists — not from grades kept here.
+            <p className="rounded-xl border border-primary/20 bg-primary/[0.04] px-3 py-2.5 text-xs leading-relaxed text-muted-foreground">
+              <span className="font-semibold text-foreground">A gem is entered like a diamond</span> — shape, type, MM, sieve, colour and grade —
+              on every purchase, stock and order form. Change those choices in <span className="font-medium text-foreground">Settings → Dropdown lists → Diamonds &amp; gems</span>
+              (Shapes, MM sizes, Sieve sizes, Gem types, Gem colours, Gem grades).
+            </p>
+          ) : (
           <div className="space-y-1.5">
             <Label className="text-xs" htmlFor="mat_grade">Grades <span className="font-normal text-muted-foreground">({GRADE_HINT[kind]})</span></Label>
             <div className="flex gap-2">
@@ -130,6 +138,7 @@ export function MaterialEditor({ material, onClose, onSaved }: {
               </div>
             ) : <p className="text-[11px] text-muted-foreground">Optional. Stock is kept per grade; without any, it is all one.</p>}
           </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} className="rounded-xl">Cancel</Button>

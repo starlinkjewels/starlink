@@ -64,7 +64,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, type LucideIcon } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
-import { OtherMaterialSelect, GradeInput, useOtherMaterials } from "@/components/MaterialFields";
+import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/components/MaterialFields";
 import { coField, companyOf, companyOfOrder, workCompanyOf, companyById, companiesOf, hasCompanies } from "@/lib/companies";
 import { CompanyBadge } from "@/components/CompanyFields";
 import { OrderLabels } from "@/components/autopilot/OrderLabels";
@@ -2219,12 +2219,12 @@ function OrderDetailPageBody() {
             <p className="text-sm font-semibold text-foreground mb-3">{stoneOf(order) === "Diamond" ? "The diamonds" : "The stones"}</p>
             <div className="grid grid-cols-2 gap-x-4 gap-y-3">
               {stoneOf(order) !== "Diamond" && <OrderSpec label="Stone" value={stoneOf(order)} />}
-              {hasDiamonds(stoneOf(order)) && <OrderSpec label="Diamond type" value={order.diamondType} />}
+              {hasDiamonds(stoneOf(order)) ? <OrderSpec label="Diamond type" value={order.diamondType} /> : <OrderSpec label="Type" value={order.stoneSpec?.type} />}
               <OrderSpec label="Stones" value={`${order.quantity} ${order.quantity === 1 ? "pc" : "pcs"}`} />
               <OrderSpec label="Shape" value={order.stoneSpec?.shape} />
               <OrderSpec label="Size" value={[order.stoneSpec?.mm, order.stoneSpec?.size].filter(Boolean).join(" · ") || undefined} />
               <OrderSpec label="Colour" value={order.stoneSpec?.color} />
-              <OrderSpec label={hasDiamonds(stoneOf(order)) ? "Clarity" : "Quality"} value={order.stoneSpec?.clarity} />
+              <OrderSpec label={hasDiamonds(stoneOf(order)) ? "Clarity" : "Grade"} value={order.stoneSpec?.clarity} />
               <OrderSpec label="Delivery time" value={order.deliveryTime} wide />
             </div>
           </div>
@@ -3701,7 +3701,8 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               const detail = mi.diamondKind === "certified"
                 ? packs.map(x => [x.shape, `${x.carat}ct`, x.color, x.clarity, `${x.certificateLab || "Cert"} ${x.certificateNumber}`].filter(Boolean).join(" · ")).join("; ")
                 : mi.material === "diamond"
-                ? [bagNoOf(db, lot), lot, mi.piecesIssued ? `${mi.piecesIssued} pcs` : undefined, spec?.mm && !lot.includes(`${spec.mm} mm`) ? `${spec.mm} mm` : undefined,
+                ? [bagNoOf(db, lot), lot, mi.piecesIssued ? `${mi.piecesIssued} pcs` : undefined, spec?.type && !lot.includes(spec.type) ? spec.type : undefined,
+                    spec?.mm && !lot.includes(spec.mm) ? (/mm$/i.test(spec.mm) ? spec.mm : `${spec.mm} mm`) : undefined, spec?.size && !lot.includes(spec.size) ? spec.size : undefined,
                     spec?.color && !lot.includes(spec.color) ? spec.color : undefined, spec?.clarity && !lot.includes(spec.clarity) ? spec.clarity : undefined,
                     spec?.ratePerCaratInr ? `${fmtMoneyInr(spec.ratePerCaratInr)}/ct` : undefined].filter(Boolean).join(" · ")
                 : isOtherMaterial(mi.material) ? mi.purityOrQuality : undefined;
@@ -3807,7 +3808,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               {isOtherMaterial(issueMaterial) ? (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <OtherMaterialSelect value={issueMaterial} onChange={v => { setIssueMaterial(v as MaterialKey); setIssueGrade(""); }} />
-                  <GradeInput material={issueMaterial} value={issueGrade} onChange={setIssueGrade} />
+                  <StockGradeInput material={issueMaterial} companyId={workCo} value={issueGrade} onChange={setIssueGrade} />
                   <p className="text-[11px] text-muted-foreground sm:col-span-2">
                     In stock{hasCompanies(db.settings) ? ` (${companyById(db.settings, workCo).name})` : ""}: {fmtQty(deriveStockBalances(db.stockMovements, issueMaterial, workCo)[issueGrade.trim() || "—"] ?? 0, materialUnit(db.settings, issueMaterial))} of {issueGrade.trim() || "—"}
                   </p>
@@ -3903,21 +3904,21 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 const lotCo = issueFromCo || workCo;
                 const lotAvg = issueQuality ? stockAverageRate(db, "diamond", issueQuality, new Date().toISOString(), lotCo) : null;
                 const auto = (Number(issueDiaRate) || lotAvg || 0) * ct;
-                const parts = issueQuality ? lotParts(issueQuality) : undefined;
                 const inLot = issueQuality ? lotBalances(db.stockMovements ?? [], lotCo).find(l => l.key === issueQuality) : undefined;
+                const parts = issueQuality ? (inLot?.spec ?? lotParts(issueQuality)) : undefined;
                 const bagNo = issueQuality ? bagNoOf(db, issueQuality) : undefined;
                 return (
                   <div className="space-y-2.5">
                   {/* The bag's own details — what these stones are. */}
                   {parts && (
-                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2 rounded-xl border border-primary/20 bg-primary/[0.03] p-2.5 text-xs">
-                      {([["Bag", bagNo ?? "—"], ["Shape", parts.shape], ["MM", parts.mm ?? "—"], ["Sieve", parts.size ?? "—"], ["Colour", parts.color ?? "—"], ["Clarity", parts.clarity ?? "—"]] as const).map(([k, v]) => (
+                    <div className="grid grid-cols-4 sm:grid-cols-7 gap-2 rounded-xl border border-primary/20 bg-primary/[0.03] p-2.5 text-xs">
+                      {([["Bag", bagNo ?? "—"], ["Shape", parts.shape], ["Type", parts.type ?? "—"], ["MM", parts.mm ?? "—"], ["Sieve", parts.size ?? "—"], ["Colour", parts.color ?? "—"], ["Clarity", parts.clarity ?? "—"]] as const).map(([k, v]) => (
                         <div key={k} className="min-w-0">
                           <p className="text-[10px] uppercase tracking-wider text-muted-foreground">{k}</p>
                           <p className={`font-semibold truncate ${k === "Bag" ? "text-primary" : "text-foreground"}`}>{v}</p>
                         </div>
                       ))}
-                      {inLot && <p className="col-span-3 sm:col-span-6 text-[11px] text-muted-foreground">In this bag now: {inLot.ct} ct{inLot.pcs != null ? ` · ${inLot.pcs} pcs` : ""}{lotAvg ? ` · average ${fmtMoneyInr(lotAvg)}/ct` : ""}{issueFromCo && issueFromCo !== workCo ? ` · held by ${companyById(db.settings, issueFromCo).name} — moved to ${companyById(db.settings, workCo).name} when saved` : ""}</p>}
+                      {inLot && <p className="col-span-4 sm:col-span-7 text-[11px] text-muted-foreground">In this bag now: {inLot.ct} ct{inLot.pcs != null ? ` · ${inLot.pcs} pcs` : ""}{lotAvg ? ` · average ${fmtMoneyInr(lotAvg)}/ct` : ""}{issueFromCo && issueFromCo !== workCo ? ` · held by ${companyById(db.settings, issueFromCo).name} — moved to ${companyById(db.settings, workCo).name} when saved` : ""}</p>}
                     </div>
                   )}
                   <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">

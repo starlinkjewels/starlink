@@ -53,7 +53,7 @@ export function copyFields(o: Order) {
     shippingCharge: o.shippingCharge || 0,
     certificate: (o.certificate ? "yes" : "no") as "yes" | "no",
     certificateFee: o.certificate ? o.certificateFee || 0 : 0,
-    stoneSpec: { shape: sp.shape || "Round", mm: sp.mm ?? "", size: sp.size ?? "", color: sp.color ?? "", clarity: sp.clarity ?? "" },
+    stoneSpec: { shape: sp.shape || "Round", type: sp.type ?? "", mm: sp.mm ?? "", size: sp.size ?? "", color: sp.color ?? "", clarity: sp.clarity ?? "" },
     // Whose material: a repeat of the client's piece is usually made the same way.
     csGold: !!o.clientSupplied?.gold,
     csDiamonds: !!o.clientSupplied?.diamonds,

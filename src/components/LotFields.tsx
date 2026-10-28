@@ -1,6 +1,6 @@
 import { useDb } from "@/hooks/useDb";
 import { choicesOf, listOf, type ListKey } from "@/lib/optionLists";
-import { lotBalances, lotKey, lotLabel, mmChoices, normalizeMm, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
+import { knowStoneTypes, lotBalances, lotKey, lotLabel, mmChoices, normalizeMm, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
 import { ListCombo } from "@/components/ListCombo";
 import { bagNoOf } from "@/lib/diamondBags";
 import { stockAverageRate } from "@/lib/orderCost";
@@ -99,57 +99,74 @@ export function LotPicker({ value, onChange, companyId, id, className = "h-10 ro
 /* ── The same diamond fields on every form ───────────────────────────────── */
 
 /** A loose lot's parts as a form holds them (every one a string, "" = not recorded). */
-export interface LooseLotDraft { shape: string; mm: string; size: string; color: string; clarity: string }
+export interface LooseLotDraft { shape: string; mm: string; size: string; color: string; clarity: string;
+  /** Natural, CVD, HPHT… (gems: natural, lab-created, treated…). "" = not recorded. */
+  type?: string }
+
+/** The stone types a lot can be — the business's diamond types (or gem types), without "Mount Only" and the like. */
+export function stoneTypeChoices(settings: Parameters<typeof listOf>[1], gem = false): string[] {
+  const list = listOf(gem ? "gemTypes" : "diamondTypes", settings).filter(t => !/mount|none|only/i.test(t));
+  knowStoneTypes(list);
+  return list;
+}
 
 /**
- * Shape · MM · Sieve · Colour · Clarity — what a loose lot is, asked the same
- * way on every form that brings stones into stock (a purchase, opening stock, a
- * supplier's bill, an order's purchase). Under it: the bag the stones go into,
- * and what that bag holds now.
+ * Shape · Type · MM · Sieve · Colour · Clarity — what a loose lot is, asked the
+ * same way on every form that brings stones into stock or takes them out (a
+ * purchase, opening stock, a supplier's bill, an order's purchase, a client's
+ * stones). Gems are asked the same, with their own colours and a grade in place
+ * of clarity. Under it: the bag the stones go into, and what that bag holds now.
  */
-export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false }: {
+export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false, showType = true }: {
   value: LooseLotDraft; onChange: (patch: Partial<LooseLotDraft>) => void; idPrefix: string;
   companyId?: string; showBag?: boolean; compact?: boolean;
-  /** Gems (emerald, ruby…), not diamonds: no sieve, and colour and quality in the gem trade's words. */
+  /** Gems (emerald, ruby…), not diamonds: colour, type and grade in the gem trade's words. */
   gem?: boolean;
+  /** Off where the form asks the type itself (a new order's Diamond Type). */
+  showType?: boolean;
 }) {
   const db = useDb();
   const sizes = listOf("diamondSizes", db.settings);
   const mm = mmChoices(listOf("diamondMm", db.settings), sizes);
   const sieve = sieveChoices(sizes);
-  const key = lotKey({ shape: value.shape, size: value.size, mm: value.mm, color: value.color, clarity: value.clarity });
-  const bag = bagNoOf(db, key);
-  const lot = showBag ? lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === key && l.ct > 0) : undefined;
+  const key = lotKey(lotFromDraft(value));
+  const bag = gem ? undefined : bagNoOf(db, key);
+  const lot = showBag && !gem ? lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === key && l.ct > 0) : undefined;
   const lbl = compact ? "text-[11px]" : "text-xs";
   const box = compact ? "h-9 rounded-lg mt-1" : "h-10 rounded-xl mt-1";
-  // Every shape takes a sieve size as well as its mm — fancy shapes are sieved too.
+  // Every shape takes a sieve size as well as its mm — fancy shapes and gems are sieved too.
   return (
     <div className="space-y-2">
-      <div className={`grid grid-cols-2 ${gem ? "sm:grid-cols-4" : "sm:grid-cols-5"} gap-2`}>
+      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         <div>
           <Label htmlFor={`${idPrefix}-shape`} className={lbl}>Shape</Label>
           <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} className={box} />
         </div>
+        {showType && (
+          <div>
+            <Label htmlFor={`${idPrefix}-type`} className={lbl}>Type</Label>
+            <ListSelect id={`${idPrefix}-type`} list={gem ? "gemTypes" : "diamondTypes"} choices={stoneTypeChoices(db.settings, gem)}
+              value={value.type ?? ""} onChange={v => onChange({ type: v })} className={box} />
+          </div>
+        )}
         <div>
           <Label htmlFor={`${idPrefix}-mm`} className={lbl}>MM</Label>
           <ListSelect id={`${idPrefix}-mm`} list="diamondMm" choices={mm} value={value.mm} onChange={v => onChange({ mm: v })} className={box} normalize={t => normalizeMm(t) ?? t} />
         </div>
-        {!gem && (
-          <div>
-            <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve</Label>
-            <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={value.size} onChange={v => onChange({ size: v })} className={box} placeholder="—" />
-          </div>
-        )}
+        <div>
+          <Label htmlFor={`${idPrefix}-sieve`} className={lbl}>Sieve</Label>
+          <ListSelect id={`${idPrefix}-sieve`} list="diamondSizes" choices={sieve} value={value.size} onChange={v => onChange({ size: v })} className={box} placeholder="—" />
+        </div>
         <div>
           <Label htmlFor={`${idPrefix}-color`} className={lbl}>Colour</Label>
           <ListSelect id={`${idPrefix}-color`} list={gem ? "gemColors" : "diamondColors"} value={value.color} onChange={v => onChange({ color: v })} className={box} />
         </div>
         <div>
-          <Label htmlFor={`${idPrefix}-clarity`} className={lbl}>{gem ? "Quality" : "Clarity"}</Label>
+          <Label htmlFor={`${idPrefix}-clarity`} className={lbl}>{gem ? "Grade" : "Clarity"}</Label>
           <ListSelect id={`${idPrefix}-clarity`} list={gem ? "gemQualities" : "diamondClarities"} value={value.clarity} onChange={v => onChange({ clarity: v })} className={box} />
         </div>
       </div>
-      {showBag && (
+      {showBag && !gem && (
         <p className="text-[11px] text-muted-foreground flex items-center gap-1.5 flex-wrap">
           <Package className="h-3.5 w-3.5 text-primary shrink-0" />
           {bag ? <span className="font-semibold text-primary">{bag}</span> : <span className="font-semibold text-foreground">New bag</span>}
@@ -163,12 +180,14 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
 
 /** A loose lot from a form's strings. */
 export function lotFromDraft(d: Partial<LooseLotDraft>): LotSpec {
-  return { shape: d.shape?.trim() || "Round", size: d.size?.trim() || undefined, mm: d.mm?.trim() || undefined,
+  return { shape: d.shape?.trim() || "Round", type: d.type?.trim() || undefined, size: d.size?.trim() || undefined, mm: d.mm?.trim() || undefined,
     color: d.color?.trim() || undefined, clarity: d.clarity?.trim() || undefined };
 }
 
 /** A certified stone's grading as a form holds it. */
 export interface CertGradeDraft {
+  /** Natural, CVD, HPHT… */
+  type?: string;
   color: string; clarity: string; cut: string; polish: string; symmetry: string; fluorescence: string;
   measurement: string; lab: string; certNo: string;
 }
@@ -182,12 +201,13 @@ export interface CertGradeDraft {
 export function CertGradeFields({ value, onChange, idPrefix, compact = false, requireReport = true }: {
   value: CertGradeDraft; onChange: (patch: Partial<CertGradeDraft>) => void; idPrefix: string; compact?: boolean; requireReport?: boolean;
 }) {
+  const db = useDb();
   const lbl = compact ? "text-[11px]" : "text-xs";
   const box = compact ? "h-9 rounded-lg mt-1" : "h-10 rounded-xl mt-1";
   const sel = (k: keyof CertGradeDraft, label: string, list: ListKey) => (
     <div>
       <Label htmlFor={`${idPrefix}-${k}`} className={lbl}>{label}</Label>
-      <ListSelect id={`${idPrefix}-${k}`} list={list} value={value[k]} onChange={v => onChange({ [k]: v } as Partial<CertGradeDraft>)} className={box} />
+      <ListSelect id={`${idPrefix}-${k}`} list={list} value={value[k] ?? ""} onChange={v => onChange({ [k]: v } as Partial<CertGradeDraft>)} className={box} />
     </div>
   );
   return (
@@ -197,13 +217,17 @@ export function CertGradeFields({ value, onChange, idPrefix, compact = false, re
         <Input id={`${idPrefix}-certNo`} value={value.certNo} onChange={e => onChange({ certNo: e.target.value })} className={box} placeholder="e.g. 2141438171" />
       </div>
       {sel("lab", "Lab", "diamondLabs")}
+      <div>
+        <Label htmlFor={`${idPrefix}-type`} className={lbl}>Type</Label>
+        <ListSelect id={`${idPrefix}-type`} list="diamondTypes" choices={stoneTypeChoices(db.settings)} value={value.type ?? ""} onChange={v => onChange({ type: v })} className={box} />
+      </div>
       {sel("color", "Colour", "diamondColors")}
       {sel("clarity", "Clarity", "diamondClarities")}
       {sel("cut", "Cut", "diamondFinish")}
       {sel("polish", "Polish", "diamondFinish")}
       {sel("symmetry", "Symmetry", "diamondFinish")}
       {sel("fluorescence", "Fluorescence", "diamondFluorescence")}
-      <div className="col-span-2 sm:col-span-4">
+      <div className="col-span-2 sm:col-span-3">
         <Label htmlFor={`${idPrefix}-measurement`} className={lbl}>Measurement (mm)</Label>
         <Input id={`${idPrefix}-measurement`} value={value.measurement} onChange={e => onChange({ measurement: e.target.value })} className={box} placeholder="e.g. 6.50 x 6.48 x 4.01" />
       </div>
@@ -211,8 +235,8 @@ export function CertGradeFields({ value, onChange, idPrefix, compact = false, re
   );
 }
 
-export const EMPTY_LOOSE: LooseLotDraft = { shape: "Round", mm: "", size: "", color: "", clarity: "" };
-export const EMPTY_CERT: CertGradeDraft = { color: "", clarity: "", cut: "", polish: "", symmetry: "", fluorescence: "", measurement: "", lab: "", certNo: "" };
+export const EMPTY_LOOSE: LooseLotDraft = { shape: "Round", type: "", mm: "", size: "", color: "", clarity: "" };
+export const EMPTY_CERT: CertGradeDraft = { type: "", color: "", clarity: "", cut: "", polish: "", symmetry: "", fluorescence: "", measurement: "", lab: "", certNo: "" };
 
 /**
  * Which bag stones go back into — a return from a factory or a piece. Offers the

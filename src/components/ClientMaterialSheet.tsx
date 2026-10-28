@@ -7,7 +7,7 @@ import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ListCombo } from "@/components/ListCombo";
+import { LooseLotFields } from "@/components/LotFields";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { updateDbAs, type Order } from "@/lib/db";
@@ -34,7 +34,7 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
   const client = db.clients.find(c => c.id === clientId);
   const bal = client ? clientMaterialBalance(db, client) : null;
   const [material, setMaterial] = useState<"gold" | "diamond">(start ?? "diamond");
-  const [f, setF] = useState({ grams: "", purity: "", ct: "", pcs: "", shape: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "", note: "" });
+  const [f, setF] = useState({ grams: "", purity: "", ct: "", pcs: "", shape: "", type: "", mm: "", size: "", color: "", clarity: "", certified: false, certLab: "", certNo: "", note: "" });
   const set = (k: keyof typeof f, v: string | boolean) => setF(p => ({ ...p, [k]: v }));
   const grams = Number(f.grams) || 0, purity = Number(f.purity) || 0, ct = Number(f.ct) || 0, pcs = Math.round(Number(f.pcs) || 0);
   const fine = Math.round(grams * purity / 1000 * 1000) / 1000;
@@ -53,12 +53,12 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
         if (mode === "send") {
           const o = d.orders.find(x => x.id === order!.id)!;
           if (material === "gold") sendClientGold(d, o, { grams, purity }, who);
-          else sendClientDiamonds(d, o, { ct, pcs: pcs || undefined, certified: f.certified, shape: f.shape, size: f.size, color: f.color, clarity: f.clarity, certLab: f.certLab, certNo: f.certNo }, who);
+          else sendClientDiamonds(d, o, { ct, pcs: pcs || undefined, certified: f.certified, shape: f.shape, type: f.type, mm: f.mm, size: f.size, color: f.color, clarity: f.clarity, certLab: f.certLab, certNo: f.certNo }, who);
           return;
         }
         const e = material === "gold"
           ? { material, grams, purity, note: f.note.trim() || undefined, orderId: order?.id }
-          : { material, ct, pcs: pcs || undefined, shape: f.shape || undefined, size: f.size || undefined, color: f.color || undefined, clarity: f.clarity || undefined,
+          : { material, ct, pcs: pcs || undefined, shape: f.shape || undefined, type: f.type || undefined, mm: f.mm || undefined, size: f.size || undefined, color: f.color || undefined, clarity: f.clarity || undefined,
               certLab: f.certified ? f.certLab || undefined : undefined, certNo: f.certified ? f.certNo || undefined : undefined, note: f.note.trim() || undefined, orderId: order?.id };
         if (mode === "receive") receiveClientMaterial(d, client.id, e, who);
         else returnClientMaterial(d, client.id, e, who);
@@ -115,14 +115,14 @@ export function ClientMaterialSheet({ clientId, mode, material: start, order, on
           </div>
         ) : (
           <div className="space-y-3">
-            <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
+            <div className="grid gap-3 grid-cols-2">
               <div className="space-y-1.5"><Label htmlFor="cm-ct" className="text-xs">Carats</Label><Input id="cm-ct" type="number" min={0} step="0.001" value={f.ct} onChange={e => set("ct", e.target.value)} className="h-10 rounded-xl" /></div>
               <div className="space-y-1.5"><Label htmlFor="cm-pcs" className="text-xs">Stones · optional</Label><Input id="cm-pcs" type="number" min={0} step="1" value={f.pcs} onChange={e => set("pcs", e.target.value)} className="h-10 rounded-xl" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Shape</Label><ListCombo list="diamondShapes" value={f.shape} onChange={v => set("shape", v)} placeholder="—" className="h-10 rounded-xl" ariaLabel="Shape" /></div>
-              <div className="space-y-1.5"><Label htmlFor="cm-size" className="text-xs">Size / MM</Label><Input id="cm-size" value={f.size} onChange={e => set("size", e.target.value)} className="h-10 rounded-xl" placeholder="e.g. 1.5 mm" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Colour</Label><ListCombo list="diamondColors" value={f.color} onChange={v => set("color", v)} placeholder="—" className="h-10 rounded-xl" ariaLabel="Colour" /></div>
-              <div className="space-y-1.5"><Label className="text-xs">Clarity</Label><ListCombo list="diamondClarities" value={f.clarity} onChange={v => set("clarity", v)} placeholder="—" className="h-10 rounded-xl" ariaLabel="Clarity" /></div>
             </div>
+            {/* What the stones are — asked as on every other stone form. */}
+            <LooseLotFields idPrefix="cm" showBag={false}
+              value={{ shape: f.shape, type: f.type, mm: f.mm, size: f.size, color: f.color, clarity: f.clarity }}
+              onChange={p => setF(prev => ({ ...prev, ...p }))} />
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <input type="checkbox" checked={f.certified} onChange={e => set("certified", e.target.checked)} className="h-4 w-4 accent-[var(--color-primary,#1f4ea3)]" /> Certified stone
             </label>

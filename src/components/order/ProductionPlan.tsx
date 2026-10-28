@@ -31,7 +31,9 @@ export interface PlanOrder {
   diamondWeight: number;
   quantity: number;
   /** A loose order's stones; `stone` is what they are ("Diamond", "Emerald", "Emerald + Diamond"). */
-  stoneSpec?: { stone?: string; shape?: string; mm?: string; size?: string; color?: string; clarity?: string };
+  stoneSpec?: { stone?: string; shape?: string; type?: string; mm?: string; size?: string; color?: string; clarity?: string };
+  /** Natural, CVD, HPHT… — lots of that type are suggested first. */
+  diamondType?: string;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
@@ -85,7 +87,7 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
   const goldBuckets = Object.entries(deriveStockBalances(db.stockMovements ?? [], "gold", co)).filter(([, q]) => q > 0);
   const others = materialDefs(db.settings).filter(m => m.active !== false);
   const certified = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && (!multi || companyOf(p) === co));
-  const suggestions = order.kind === "loose" && wantsDiamonds ? suggestLots(db, order.stoneSpec ?? {}, co).slice(0, 6) : [];
+  const suggestions = order.kind === "loose" && wantsDiamonds ? suggestLots(db, { ...order.stoneSpec, type: order.diamondType || undefined }, co).slice(0, 6) : [];
   // A gem sale: that gem's stock, grade by grade.
   const gemStock = stoneMats.flatMap(m => Object.entries(deriveStockBalances(db.stockMovements ?? [], m.id, co))
     .filter(([, q]) => q > 0).map(([key, q]) => ({ m, key, q: r2(q) })));

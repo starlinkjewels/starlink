@@ -27,7 +27,7 @@ export function stonesLine(o: O): string {
   const s = o.stoneSpec ?? {};
   const grade = [s.color, s.clarity].filter(Boolean).join(" ");
   const shape = [s.shape, s.mm || s.size].filter(Boolean).join(" ");
-  return [ct ? `${ct} ct` : "", hasDiamonds(stoneOf(o)) ? o.diamondType : "", shape, grade, o.quantity > 1 ? `${o.quantity} stones` : ""].filter(Boolean).join(" · ");
+  return [ct ? `${ct} ct` : "", hasDiamonds(stoneOf(o)) ? o.diamondType : s.type, shape, grade, o.quantity > 1 ? `${o.quantity} stones` : ""].filter(Boolean).join(" · ");
 }
 
 /** "Ring · Yellow Gold 14K", "Loose diamonds · 1.22 ct · HPHT · Round", or "Loose Emerald · 3.2 ct · Oval". */

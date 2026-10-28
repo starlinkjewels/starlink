@@ -21,7 +21,7 @@ import { ShoppingCart, ArrowRightLeft, Coins, Gem, BadgeCheck, Tag, Boxes, Layer
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { toast } from "sonner";
-import { OtherMaterialSelect, GradeInput } from "@/components/MaterialFields";
+import { OtherMaterialSelect, StockGradeInput } from "@/components/MaterialFields";
 import { materialDef, materialName, materialUnit, fmtQty, type MaterialKey } from "@/lib/materials";
 import { CompanyPicker, useDefaultCompany, useMultiCo } from "@/components/CompanyFields";
 import { coField, companyOf } from "@/lib/companies";
@@ -290,7 +290,7 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
             ) : (
               <>
                 <Field label="Material"><OtherMaterialSelect value={materialId} onChange={v => { setMaterialId(v); setGrade(""); }} /></Field>
-                <Field label="Grade"><GradeInput material={materialId} value={grade} onChange={setGrade} /></Field>
+                <Field label={materialDef(db.settings, materialId)?.kind === "stone" ? "Which stones" : "Grade"}><StockGradeInput material={materialId} companyId={companyId} value={grade} onChange={setGrade} /></Field>
               </>
             )}
             <Field label={what === "gold" ? "Grams to assign" : `Quantity to assign (${unit})`}

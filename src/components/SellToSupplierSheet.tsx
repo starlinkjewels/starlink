@@ -7,7 +7,7 @@ import { todayLocal, stampFor } from "@/lib/db";
 import { deriveStockBalances, fmtMoneyInr, lockerBalance } from "@/lib/manufacturing";
 import { fmtCcy } from "@/lib/currency";
 import { lotBalances, lotLabel } from "@/lib/diamondLots";
-import { materialName, materialUnit, fmtQty } from "@/lib/materials";
+import { materialName, materialUnit, fmtQty, materialDef } from "@/lib/materials";
 import { billBrokerageInr, type BillBrokerage } from "@/lib/brokers";
 import { lineCostInr, recordSupplierSale, saleProblem, type SupplierSaleInput } from "@/lib/supplierSales";
 import type { SupplierSaleKind, SupplierSaleLine } from "@/lib/db";
@@ -231,7 +231,7 @@ export function SellToSupplierSheet({ open, onOpenChange, supplierId: fixedSuppl
                     {d.kind === "material" && (
                       <>
                         <Field label="Material">{() => <OtherMaterialSelect value={d.material === "material" ? "" : d.material} onChange={v => set(d.key, { material: v, bucket: "" })} />}</Field>
-                        <Field label="Grade">{id => (
+                        <Field label={materialDef(db.settings, d.material)?.kind === "stone" ? "Stones in stock" : "Grade"}>{id => (
                           <Select value={d.bucket} onValueChange={v => set(d.key, { bucket: v })}>
                             <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue placeholder="Choose grade in stock" /></SelectTrigger>
                             <SelectContent>{Object.entries(matBal).filter(([, v]) => v > 0).map(([g, v]) => <SelectItem key={g} value={g}>{g === "—" ? "No grade" : g} — {fmtQty(v, unit)}</SelectItem>)}</SelectContent>

@@ -18,6 +18,7 @@ import { companyOfOrder } from "./companies";
 import { KARAT_PURITY } from "./pure/basics";
 import { factoryPoolBalance } from "./pure/accounts";
 import { uid, type Client, type ClientMaterialEntry, type DB, type MaterialIssuance, type Order } from "./db";
+import { isMm } from "./diamondLots";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -97,7 +98,7 @@ export function returnClientMaterial(d: DB, clientId: string, e: Omit<ClientMate
 }
 
 /** Their diamonds to the order's factory, for this order. */
-export function sendClientDiamonds(d: DB, order: Order, s: { ct: number; pcs?: number; certified?: boolean; shape?: string; size?: string; color?: string; clarity?: string; certLab?: string; certNo?: string }, who: Who, at = new Date().toISOString()): MaterialIssuance {
+export function sendClientDiamonds(d: DB, order: Order, s: { ct: number; pcs?: number; certified?: boolean; shape?: string; type?: string; mm?: string; size?: string; color?: string; clarity?: string; certLab?: string; certNo?: string }, who: Who, at = new Date().toISOString()): MaterialIssuance {
   const c = d.clients.find(x => x.id === order.clientId);
   if (!c) throw new Error("This order has no client");
   if (!order.assignedFactoryId) throw new Error("Choose the factory first");
@@ -107,7 +108,8 @@ export function sendClientDiamonds(d: DB, order: Order, s: { ct: number; pcs?: n
     id: uid("mi_"), factoryId: order.assignedFactoryId, orderId: order.id, material: "diamond",
     purityOrQuality: s.shape?.trim() || "Client's", quantityIssued: r3(s.ct), ...(s.pcs ? { piecesIssued: Math.round(s.pcs) } : {}),
     source: "client", clientId: c.id, diamondKind: s.certified ? "certified" : "loose",
-    diamondSpec: clean({ mm: s.size, color: s.color, clarity: s.clarity }),
+    // mm and sieve each in their place; an entry with one typed size keeps it as the mm, as before.
+    diamondSpec: clean({ type: s.type, mm: s.mm || (isMm(s.size) ? s.size : undefined), size: isMm(s.size) ? undefined : s.size, color: s.color, clarity: s.clarity }),
     companyId: companyOfOrder(d, order),
     issuedAt: at, issuedBy: who.id, status: "open", finishedPieces: [], makingCharges: { amountInr: 0, payments: [] },
     notes: ["Client's own diamonds", s.certLab || s.certNo ? `${s.certLab ?? "Report"} ${s.certNo ?? ""}`.trim() : ""].filter(Boolean).join(" · "),

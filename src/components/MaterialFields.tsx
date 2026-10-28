@@ -1,5 +1,6 @@
 import { ListCombo } from "@/components/ListCombo";
 import { updateDb } from "@/lib/db";
+import { deriveStockBalances } from "@/lib/manufacturing";
 import { useDb } from "@/hooks/useDb";
 import { activeMaterials, materialDef, UNIT_LABEL } from "@/lib/materials";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -45,5 +46,28 @@ export function GradeInput({ material, value, onChange, className = "h-10 rounde
         const m = (d.settings.materials ?? []).find(x => x.id === material);
         if (m && !m.grades.some(g => g.toLowerCase() === word.toLowerCase())) m.grades = [...m.grades, word];
       })} />
+  );
+}
+
+/**
+ * Which of a material to take — out of stock, or a factory's pool. A gem picks
+ * one of its lines (shape · type · mm · sieve · colour · grade, as it was
+ * bought), so stones always leave the line that holds them; anything else is
+ * its grade, as before. `extra`: lines held elsewhere that may be taken too.
+ */
+export function StockGradeInput({ material, companyId, value, onChange, extra = [], className = "h-10 rounded-xl" }: {
+  material: string; companyId?: string; value: string; onChange: (v: string) => void; extra?: string[]; className?: string;
+}) {
+  const db = useDb();
+  const def = materialDef(db.settings, material);
+  if (def?.kind !== "stone") return <GradeInput material={material} value={value} onChange={onChange} className={className} />;
+  const bal = deriveStockBalances(db.stockMovements, material, companyId);
+  const held = (k: string) => (bal[k] ?? 0) > 0.0005;
+  const choices = [...new Set([...extra, ...Object.keys(bal).filter(held)])].filter(k => k && k !== "—")
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return (
+    <ListCombo value={value === "—" ? "" : value} onChange={onChange} choices={choices} className={className}
+      placeholder={choices.length ? `Choose the ${def.name}` : `No ${def.name} in stock`} ariaLabel={`${def.name} in stock`}
+      listTitle={`${def.name} in stock`} />
   );
 }

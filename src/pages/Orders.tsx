@@ -780,7 +780,7 @@ function StoneTile({ o }: { o: Order }) {
   const ct = o.actualDiamondWeight || o.diamondWeight;
   const sp = o.stoneSpec ?? {};
   const stone = stoneOf(o);
-  const what = stone !== "Diamond" ? stone : o.diamondType ? `${o.diamondType} diamonds` : "Diamonds";
+  const what = stone !== "Diamond" ? [sp.type, stone].filter(Boolean).join(" ") : o.diamondType ? `${o.diamondType} diamonds` : "Diamonds";
   const facts = [[sp.shape, sp.mm || sp.size].filter(Boolean).join(" "), [sp.color, sp.clarity].filter(Boolean).join(" "), o.quantity > 1 ? `${o.quantity} pcs` : ""].filter(Boolean);
   return (
     <div className="relative mx-3 aspect-square rounded-xl overflow-hidden ring-1 ring-border/60 bg-gradient-to-br from-primary/[0.07] via-card to-sky-500/[0.08] grid place-items-center">

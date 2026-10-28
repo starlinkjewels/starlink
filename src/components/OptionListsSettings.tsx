@@ -115,7 +115,7 @@ export function OptionListsSettings() {
         <nav className="space-y-4" aria-label="Lists">
           {GROUPS.map(g => (
             <div key={g}>
-              <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{g}</p>
+              <p className="px-2 mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{g === "Diamonds" ? "Diamonds & gems" : g}</p>
               <div className="flex flex-wrap gap-1.5 lg:flex-col lg:gap-0.5">
                 {LIST_DEFS.filter(d => d.group === g).map(d => {
                   const on = d.key === key;

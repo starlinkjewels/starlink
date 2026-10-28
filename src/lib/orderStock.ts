@@ -103,10 +103,10 @@ export function pickName(db: DB, p: StockPick): string {
  * request (shape, mm, sieve, colour, clarity) that a bag matches scores; a bag
  * of another shape is left out when a shape was asked for. Only bags with stones in them.
  */
-export function suggestLots(db: DB, want: { shape?: string; mm?: string; size?: string; color?: string; clarity?: string }, companyId: string):
+export function suggestLots(db: DB, want: { shape?: string; type?: string; mm?: string; size?: string; color?: string; clarity?: string }, companyId: string):
   { lot: LotBalance; score: number; full: boolean; avg: number | null }[] {
   const norm = (s?: string) => (s ?? "").trim().toLowerCase();
-  const asked = (["shape", "mm", "size", "color", "clarity"] as const).filter(k => norm(want[k]));
+  const asked = (["shape", "type", "mm", "size", "color", "clarity"] as const).filter(k => norm(want[k]));
   const now = new Date().toISOString();
   return lotBalances(db.stockMovements ?? [], companyId)
     .filter(l => l.ct > 0)
@@ -116,6 +116,8 @@ export function suggestLots(db: DB, want: { shape?: string; mm?: string; size?: 
       return { lot: l, hits, score: hits.reduce((s, k) => s + (k === "shape" ? 4 : k === "mm" || k === "size" ? 3 : 2), 0) };
     })
     .filter(x => !asked.includes("shape") || x.hits.includes("shape"))
+    // Natural and lab-grown never stand in for each other; a lot with no type recorded may still be offered.
+    .filter(x => !asked.includes("type") || !norm((x.lot.spec as { type?: string }).type) || x.hits.includes("type"))
     .sort((a, b) => b.score - a.score || b.lot.ct - a.lot.ct)
     .map(x => ({ lot: x.lot, score: x.score, full: x.hits.length === asked.length, avg: stockAverageRate(db, "diamond", x.lot.key, now, companyId) }));
 }
