@@ -383,7 +383,7 @@ export function EmployeeDetailPage() {
               defaultSort={{ key: "date", dir: "desc" }}
               rowHref={o => `/orders/${o.id}`}
               details={orderDetails}
-              controls="none"
+              exportName={`Orders-${employee.name.replace(/\s+/g, "-")}`}
             />
           </div>
         </div>
