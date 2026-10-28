@@ -185,28 +185,38 @@ export async function downloadPiecesPdf(pieces: SharePiece[], brand: ShareBrand,
     if (n > 0) doc.addPage();
     let y = pageHead(doc, brand, logo, opts.title, W, M);
 
-    // ── Photos: the first large on a soft ground, the rest (and the CAD) in a row under it ──
-    const photos = await Promise.all(p.photos.slice(0, 5).map(u => loadImg(u)));
+    // ── Photos: every one of them (and the CAD). One large; two side by side; up to
+    //    five as one large with a row under it; any more on a page of their own after. ──
+    const photos = await Promise.all(p.photos.slice(0, 24).map(u => loadImg(u)));
     const cad = p.cad ? await loadImg(p.cad) : null;
     missing += photos.filter(x => !x).length + (p.cad && !cad ? 1 : 0);
     const shots: { img: Img | null; label?: string }[] = [
       ...photos.map(img => ({ img })),
       ...(p.cad ? [{ img: cad, label: "CAD" }] : []),
     ];
-    const heroH = !shots.length ? 34 : shots.length > 1 ? 112 : 128;
-    if (shots.length) fitImage(doc, shots[0].img, M, y, W - 2 * M, heroH, shots[0].label, CREAM);
-    else {
-      doc.setDrawColor(...LINE); doc.setFillColor(...CREAM); doc.roundedRect(M, y, W - 2 * M, heroH, 2, 2, "FD");
+    const gap = 3, inner = W - 2 * M;
+    if (!shots.length) {
+      const h = 34;
+      doc.setDrawColor(...LINE); doc.setFillColor(...CREAM); doc.roundedRect(M, y, inner, h, 2, 2, "FD");
       doc.setFont("helvetica", "normal"); doc.setFontSize(8); doc.setTextColor(...MUTED);
-      doc.text("No photo of this piece yet", W / 2, y + heroH / 2 + 1, { align: "center" });
-    }
-    y += heroH + 3;
-    const rest = shots.slice(1, 5);
-    if (rest.length) {
-      const gap = 3, tw = (W - 2 * M - gap * 3) / 4, th = 27;
-      rest.forEach((s, i) => fitImage(doc, s.img, M + i * (tw + gap), y, tw, th, s.label, CREAM));
+      doc.text("No photo of this piece yet", W / 2, y + h / 2 + 1, { align: "center" });
+      y += h + 3;
+    } else if (shots.length === 1) {
+      fitImage(doc, shots[0].img, M, y, inner, 128, shots[0].label, CREAM);
+      y += 128 + 3;
+    } else if (shots.length === 2) {
+      const w2 = (inner - gap) / 2, h2 = 104;
+      shots.forEach((s, i) => fitImage(doc, s.img, M + i * (w2 + gap), y, w2, h2, s.label, CREAM));
+      y += h2 + 3;
+    } else {
+      const heroH = 106;
+      fitImage(doc, shots[0].img, M, y, inner, heroH, shots[0].label, CREAM);
+      y += heroH + 3;
+      const row = shots.slice(1, 5), tw = (inner - gap * 3) / 4, th = 34;
+      row.forEach((s, i) => fitImage(doc, s.img, M + i * (tw + gap), y, tw, th, s.label, CREAM));
       y += th + 3;
     }
+    const more = shots.length > 5 ? shots.slice(5) : [];
 
     // ── Name, kind, price ──
     y += 6;
@@ -247,6 +257,21 @@ export async function downloadPiecesPdf(pieces: SharePiece[], brand: ShareBrand,
     if (opts.note && y < H - 24) {
       doc.setFont("times", "italic"); doc.setFontSize(10); doc.setTextColor(...MUTED);
       doc.text(doc.splitTextToSize(opts.note, W - 2 * M).slice(0, 2), M, y + 2);
+    }
+
+    // ── The rest of its photos: two across, three down, on pages of their own ──
+    for (let k = 0; k < more.length; k += 6) {
+      doc.addPage();
+      let my = pageHead(doc, brand, logo, opts.title, W, M);
+      doc.setFont("times", "bold"); doc.setFontSize(13); doc.setTextColor(...INK);
+      doc.text(doc.splitTextToSize(p.name, inner - 40)[0] as string, M, my + 4);
+      doc.setFont("helvetica", "normal"); doc.setFontSize(7.5); doc.setTextColor(...MUTED);
+      const shown = Math.min(5 + k + 6, shots.length);
+      doc.text(`MORE PHOTOS  ·  ${6 + k}–${shown} OF ${shots.length}`, W - M, my + 4, { align: "right", charSpace: 0.3 });
+      my += 9;
+      const cw = (inner - gap) / 2, ch = (H - my - 24 - gap * 2) / 3;
+      more.slice(k, k + 6).forEach((s2, i) =>
+        fitImage(doc, s2.img, M + (i % 2) * (cw + gap), my + Math.floor(i / 2) * (ch + gap), cw, ch, s2.label, CREAM));
     }
   }
   pageFoot(doc, brand, W, H, M);

@@ -219,7 +219,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (!p || p.status !== "active") return null;
       // A real sign-in, typed in — not the session quietly restored on every
       // page load, which would bury the log in noise.
-      logEvent("signin", `Signed in — ${p.name || p.email}`);
+      // An admin's own sign-in is not written to Activity — only the team's and clients'.
+      if (p.role !== "admin") logEvent("signin", `Signed in — ${p.name || p.email}`);
       // The team's "client is active" email goes out from handleAuth, for a
       // typed sign-in and a restored session alike — once a day.
       return p;

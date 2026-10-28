@@ -1459,7 +1459,7 @@ export function CatalogPage() {
   // this person's access doesn't reach it.
   const itemMenu = (item: CatalogItem): MoreAction[] => [
     { label: "Download", icon: Download, hint: canShare ? undefined : needsAccess("catalog", "export"), disabled: !canShare,
-      onSelect: () => downloadFile(item.data, downloadName(item)) },
+      onSelect: () => downloadFile(item.data, downloadName(item), !isAdmin) },
     { label: "Rename", icon: Edit2, hint: canEdit ? undefined : needsAccess("catalog", "edit"), disabled: !canEdit, onSelect: () => setItemSheet({ item, mode: "rename" }) },
     { label: "Move to another folder", icon: FolderInput, hint: !isAdmin ? ADMIN_MOVE : folders.length > 1 ? undefined : "There is no other folder yet",
       disabled: !isAdmin || folders.length < 2, onSelect: () => setItemSheet({ item, mode: "move" }) },
@@ -1489,7 +1489,7 @@ export function CatalogPage() {
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .map((it) => ({ url: it.data, filename: `${sub(it.folderId)}${downloadName(it)}` }));
       const { added, failed } = await downloadAsZip(files, folder.name, (done, total) =>
-        toast.loading(`Downloading ${folder.name} — ${done} of ${total}`, { id: t }));
+        toast.loading(`Downloading ${folder.name} — ${done} of ${total}`, { id: t }), !isAdmin);
       if (!added) toast.error(`Couldn't download ${folder.name}`, { id: t });
       else if (failed.length) toast.warning(`${added} of ${files.length} downloaded — ${failed.length} couldn't be fetched`, { id: t });
       else toast.success(`${folder.name} downloaded — ${added} file${added !== 1 ? "s" : ""}`, { id: t });

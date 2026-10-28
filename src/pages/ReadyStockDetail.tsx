@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { ProductVideo } from "@/components/ProductVideo";
 import { OrderThumb } from "@/components/OrderThumb";
 import { metalLabel } from "@/lib/metals";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -262,7 +263,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
             {!cur ? (
               <div className="w-full h-full grid place-items-center bg-secondary/50 text-muted-foreground/40"><Gem className="h-10 w-10" /></div>
             ) : cur.kind === "video" ? (
-              <video key={cur.src} src={cur.src} controls playsInline preload="metadata" className="w-full h-full object-contain bg-black" />
+              <ProductVideo key={cur.src} src={cur.src} poster={media.find(g => g.kind !== "video")?.src} maxH="h-full" className="w-full h-full rounded-none" />
             ) : (
               <>
                 <img src={cur.src} alt={item.name} className="w-full h-full object-contain p-2 sm:p-4" />

@@ -1,4 +1,6 @@
 import { ProductionInfo } from "@/components/ProductionInfo";
+import { ProductVideo } from "@/components/ProductVideo";
+import { canPlayVideo, UNPLAYABLE_VIDEO_HELP } from "@/lib/videoCheck";
 import { productionTrack } from "@/lib/production";
 import { stageLabel } from "@/lib/stages";
 import { issuePick, type StockPick } from "@/lib/orderStock";
@@ -1638,7 +1640,9 @@ function OrderDetailPageBody() {
   const addProductVideo = async (file: File) => {
     if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
     if (file.size > MAX_VIDEO_MB * 1024 * 1024) { toast.error(`Video is too large — keep it under ${MAX_VIDEO_MB} MB`); return; }
+    // A video the browser can't play (an iPhone "High Efficiency" one) is caught here, not by the client.
     setVideoUploading(true);
+    if (!(await canPlayVideo(file)) && !(await confirmBox(`${UNPLAYABLE_VIDEO_HELP}\n\nUpload it anyway?`, { confirmText: "Upload anyway" }))) { setVideoUploading(false); return; }
     try {
       const prev = order.productVideo;
       const url = await uploadFile(file, `orders/${order.id}/product`);
@@ -2970,9 +2974,8 @@ function OrderDetailPageBody() {
           {/* Video */}
           {order.productVideo && (
             <div className="space-y-2">
-              <div className="rounded-xl border border-border bg-black overflow-hidden">
-                <video src={order.productVideo} controls muted playsInline preload="metadata" className="w-full max-h-80 mx-auto" />
-              </div>
+              <ProductVideo src={order.productVideo} poster={order.productPhotos?.[0]} maxH="max-h-[26rem]"
+                onDownload={() => downloadOne(order.productVideo!, "product-video.mp4")} />
               <div className="flex items-center justify-between gap-2">
                 <p className="text-xs text-muted-foreground flex items-center gap-1.5"><Video className="h-3.5 w-3.5" /> Product video</p>
                 <div className="flex items-center gap-2">

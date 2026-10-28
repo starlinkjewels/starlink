@@ -1,4 +1,7 @@
 import { ListCombo } from "@/components/ListCombo";
+import { ProductVideo } from "@/components/ProductVideo";
+import { canPlayVideo, UNPLAYABLE_VIDEO_HELP } from "@/lib/videoCheck";
+import { confirmBox } from "@/lib/confirm";
 import { useRef, useState } from "react";
 import { ImagePlus, X, Film, Gem } from "lucide-react";
 import { toast } from "sonner";
@@ -106,11 +109,13 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
   };
   const removeImage = (idx: number) => setImages(prev => prev.filter((_, i) => i !== idx));
 
-  const handleVideoFile = (files: FileList | null) => {
+  const handleVideoFile = async (files: FileList | null) => {
     const file = files?.[0];
     if (!file) return;
     if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
     if (file.size > 500 * 1024 * 1024) { toast.error("Video is too large — keep it under 500 MB"); return; }
+    // A video the browser can't play (an iPhone "High Efficiency" one) is caught here, not by the client.
+    if (!(await canPlayVideo(file)) && !(await confirmBox(`${UNPLAYABLE_VIDEO_HELP}\n\nUse it anyway?`, { confirmText: "Use it anyway" }))) return;
     if (video.startsWith("blob:")) URL.revokeObjectURL(video);
     setVideoFile(file);
     setVideo(URL.createObjectURL(file));
@@ -255,7 +260,7 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
           <div>
             {video ? (
               <div className="relative rounded-xl overflow-hidden border border-border bg-black">
-                <video src={video} controls muted playsInline preload="metadata" className="w-full max-h-56 object-contain bg-black" />
+                <ProductVideo src={video} maxH="max-h-56" className="rounded-none" />
                 <button type="button" onClick={removeVideo}
                   className="absolute top-2 right-2 h-7 w-7 rounded-full bg-destructive text-white grid place-items-center shadow-md">
                   <X className="h-3.5 w-3.5" />
