@@ -56,7 +56,9 @@ export function StockSectionPage() {
 function MaterialSection({ material }: { material: MaterialKey }) {
   const navigate = useNavigate();
   const db = useDb();
-  const [selectedBucket, setSelectedBucket] = useState<string | null>(null);
+  // What the history below shows: one bag (purity), every bag of one size, or everything.
+  const [selected, setSelected] = useState<{ keys: string[]; label: string } | null>(null);
+  const selectedBucket = selected?.label ?? null;
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
 
@@ -72,7 +74,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const unit = materialUnit(db.settings, material);
   const def = materialDef(db.settings, material);
 
-  const rawRows = stockBucketHistory(db.stockMovements, material, selectedBucket, {
+  const rawRows = stockBucketHistory(db.stockMovements, material, selected?.keys ?? null, {
     purchases: db.purchases, issuances: db.materialIssuances, orders: db.orders, factories: db.factories, suppliers: db.suppliers,
     diamondSales: db.diamondSales, supplierSales: db.supplierSales ?? [], clients: db.clients,
   }, co);
@@ -279,7 +281,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 
   const exportCsv = (from: Date | null, to: Date | null) => {
     downloadCsv(
-      `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
+      `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket.replace(/[^\w.+-]+/g, "_")}` : ""}`,
       ["Date", bucketLabel, "Particulars", `In (${unit})`, `Out (${unit})`, `Balance (${unit})`, "Rate (Rs)", "Amount (Rs)"],
       rows.filter(m => inDateRange(m.createdAt, from, to)).map(m => {
         const ra = inrRateAmount(m);
@@ -300,7 +302,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
     downloadLedgerPdf({
       title: `${materialLabel} — Movement History`,
       subjectLines: [
-        selectedBucket ? `Bucket: ${selectedBucket}` : "All purities/shapes",
+        selectedBucket ? `${bucketLabel}: ${selectedBucket}` : "All purities/shapes",
         "Rate & Amount in Rs (INR)",
         `Report Generated: ${new Date().toLocaleDateString("en-IN", { month: "long", day: "numeric", year: "numeric" })}`,
       ],
@@ -329,7 +331,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
           ra ? rs(ra.amount) : "—",
         ];
       }),
-      filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket}` : ""}`,
+      filename: `Stock-${materialLabel.replace(/\s+/g, "_")}${selectedBucket ? `-${selectedBucket.replace(/[^\w.+-]+/g, "_")}` : ""}`,
     });
   };
 
@@ -338,7 +340,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By purity" : material === "diamond" ? "By bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By karat, or each purity" : material === "diamond" ? "By size, or each bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · by size, or each line — shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 
@@ -351,7 +353,8 @@ function MaterialSection({ material }: { material: MaterialKey }) {
 
       {/* What is in stock, line by line — loose diamonds by lot, with filters;
           a line opens its history below. */}
-      <StockLotsTable material={material} companyId={co} selected={selectedBucket} onSelect={setSelectedBucket} />
+      <StockLotsTable material={material} companyId={co} selected={selected?.keys ?? null}
+        onSelect={(keys, label) => setSelected(keys ? { keys, label: label ?? keys.join(", ") } : null)} />
 
       <div className="card-luxe overflow-hidden">
         <SectionTitle className="px-5 pt-4" title="Movement History" sub={selectedBucket ?? undefined} />
