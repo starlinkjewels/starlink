@@ -188,8 +188,10 @@ export function DataTable<T>({
   // piece's history) is cards on a phone too — it used to stay a wide table
   // that had to be slid sideways, with no View to change it.
   const narrow = useNarrow();
-  const canCards = narrow && !footer;
-  const cardMode = canCards && (prefs.layout ?? "cards") === "cards";
+  // Every table offers both, on every screen (View → Table / Cards): a phone opens on
+  // cards, a computer on the table, and either keeps what was chosen.
+  const canCards = true;
+  const cardMode = canCards && (prefs.layout ?? (narrow ? "cards" : "table")) === "cards";
   // The new look (preview): a phone list of slim rows, and a next step in an empty list.
   const studio = useStudio();
   useEffect(() => {
@@ -413,10 +415,11 @@ export function DataTable<T>({
         {toolbarExtra}
         <div className="ml-auto flex items-center gap-2">
           <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{!search && q ? ` of ${rows.length}` : ""}{ticking && selected!.size ? ` · ${selected!.size} ticked` : ""}</span>
-          {wide.over && (
-            <span className="max-md:hidden inline-flex rounded-xl border border-border bg-white overflow-hidden" title="Wider than the screen — drag the table, Shift + scroll, or use these">
-              <button type="button" onClick={() => wide.scrollBy(-1)} disabled={wide.start} aria-label="Scroll the table left" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 disabled:opacity-35"><ChevronLeft className="h-4 w-4" /></button>
-              <button type="button" onClick={() => wide.scrollBy(1)} disabled={wide.end} aria-label="Scroll the table right" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 border-l border-border disabled:opacity-35"><ChevronRight className="h-4 w-4" /></button>
+          {/* Always there on a table, the same on every page — greyed when the table fits. */}
+          {!cardMode && (
+            <span className="max-md:hidden inline-flex rounded-xl border border-border bg-white overflow-hidden" title={wide.over ? "Wider than the screen — drag the table, Shift + scroll, or use these" : "The whole table fits"}>
+              <button type="button" onClick={() => wide.scrollBy(-1)} disabled={!wide.over || wide.start} aria-label="Scroll the table left" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 disabled:opacity-35"><ChevronLeft className="h-4 w-4" /></button>
+              <button type="button" onClick={() => wide.scrollBy(1)} disabled={!wide.over || wide.end} aria-label="Scroll the table right" className="h-9 w-8 grid place-items-center text-brand-dark hover:bg-secondary/70 border-l border-border disabled:opacity-35"><ChevronRight className="h-4 w-4" /></button>
             </span>
           )}
           <ViewMenu density={dense} onDensity={d => save({ ...prefs, dense: d })} columns={columns}
@@ -496,7 +499,8 @@ export function DataTable<T>({
               })}
             </div>
           )}
-          {!studio && listed.map(r => {
+          {/* Cards side by side where there is room (a computer); one under the other on a phone. */}
+          {!studio && listed.length > 0 && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3 items-start">{listed.map(r => {
             const k = rowKey(r);
             const pin = !!pinnedRows?.includes(r);
             const on = !pin && ticking && selected!.has(k);
@@ -541,7 +545,7 @@ export function DataTable<T>({
                 {isOpen && <div className="border-t border-border/60 bg-secondary/20 px-3.5 py-3">{expand ? expand.render(r) : autoDetails(r)}</div>}
               </div>
             );
-          })}
+          })}</div>}
           {!visible.length && (
             loading
               ? [0, 1, 2].map(i => (

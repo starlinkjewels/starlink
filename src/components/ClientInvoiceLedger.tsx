@@ -1,21 +1,14 @@
-import { useMemo, useState } from "react";
-import { TableBox } from "@/components/TableBox";
+import { useMemo, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   fmtMoney, fmtDate, orderTotal, orderGrossTotal, totalAdvance, balanceDue, returnedCredit,
   invoiceOrderIds, type Order, type Invoice, type Client,
 } from "@/lib/db";
-import { Search, Download, ChevronDown, FileText, Package, Undo2, X, Gift } from "lucide-react";
-import { useMayExport } from "@/hooks/useCan";
-import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
-import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { Download, FileText, Package, Undo2, Gift } from "lucide-react";
+import { StatStrip, type TableFilter } from "@/components/TableToolbar";
+import { DataTable, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { type MoreAction } from "@/components/MoreMenu";
 import { SectionTitle } from "@/components/SectionTitle";
-
-// The shared DataTable's header and cell classes, so this table reads the same.
-const TH = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
-const TD = "px-3 py-2.5 tabular-nums whitespace-nowrap";
-/** A line under an opened invoice — a piece, a credit note, a payment. */
-const SUB = "px-3 py-1.5 tabular-nums whitespace-nowrap";
 
 export interface InvoiceBlock {
   id: string;
@@ -187,17 +180,7 @@ export function ClientInvoiceLedger({
   paymentActions?: (p: InvoicePayment, b: InvoiceBlock) => MoreAction[];
   creditActions?: (c: InvoiceBlock["credits"][number], b: InvoiceBlock) => MoreAction[];
 }) {
-  const acts = !!(invoiceActions || paymentActions || creditActions);
-  const cols = acts ? 10 : 9;
-  // The ⋯ cell. Clicks inside it (the menu too — React bubbles through its
-  // portal) must not open or close the invoice row.
-  const menuCell = (actions: MoreAction[] | undefined, title: string) => (acts ? (
-    <td className="w-12 px-2 py-1.5 text-right" onClick={e => e.stopPropagation()}>
-      {actions && <MoreMenu size="sm" label="Row actions" title={title} actions={actions} />}
-    </td>
-  ) : null);
   const [q, setQ] = useState("");
-  const [open, setOpen] = useState<Set<string>>(new Set());
   const [only, setOnly] = useState<"all" | "due" | "paid">("all");
 
   const filtered = useMemo(() => {
@@ -217,170 +200,127 @@ export function ClientInvoiceLedger({
   }), { gross: 0, gift: 0, returned: 0, received: 0, balance: 0 });
   const closing = openingDebit - openingCredit + T.balance;
 
-  const mayExport = useMayExport();
   const filters: TableFilter[] = [{ kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
     onChange: v => setOnly((v || "all") as "all" | "due" | "paid"),
     options: [{ value: "due", label: "Outstanding" }, { value: "paid", label: "Settled" }] }];
-  const countText = `${filtered.length} invoice${filtered.length === 1 ? "" : "s"}`;
 
-  const toggle = (id: string) =>
-    setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  // The balance brought forward: a line of its own, kept at the top.
+  const opening: InvoiceBlock | null = openingDebit > 0 || openingCredit > 0 ? {
+    id: "__opening", number: "Balance brought forward", date: "", items: [],
+    gross: openingDebit, gift: 0, returned: 0, net: openingDebit, received: openingCredit, balance: openingDebit - openingCredit,
+    payments: [], credits: [],
+  } : null;
+  const isOpening = (b: InvoiceBlock) => b.id === "__opening";
+  const minus = (n: number, cls: string) => (n ? <span className={`tabular-nums whitespace-nowrap ${cls}`}>−{fmtMoney(n)}</span> : null);
+
+  const columns: DataColumn<InvoiceBlock>[] = [
+    { key: "invoice", header: "Invoice", always: true, sortValue: b => b.number, csv: b => b.number,
+      cell: b => isOpening(b)
+        ? <span className="font-medium text-brand-dark">Balance brought forward</span>
+        : <span className="inline-flex items-center gap-1.5 font-medium text-brand-dark whitespace-nowrap"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span> },
+    { key: "date", header: "Date", kind: "date", sortValue: b => b.date || null, csv: b => (b.date ? fmtDate(b.date) : ""),
+      cell: b => (b.date ? <CellDate>{fmtDate(b.date)}</CellDate> : null) },
+    { key: "pieces", header: "Pieces", sortValue: b => b.items.length, csv: b => String(b.items.length),
+      cell: b => (isOpening(b) ? null : <span className="text-xs text-muted-foreground whitespace-nowrap">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</span>) },
+    { key: "billed", header: "Billed", align: "right", kind: "number", sortValue: b => b.gross, csv: b => b.gross,
+      cell: b => (b.gross ? <CellAmount>{fmtMoney(b.gross)}</CellAmount> : null) },
+    { key: "gift", header: "Gift card", align: "right", kind: "number", sortValue: b => b.gift, csv: b => b.gift || "", hideIfEmpty: true,
+      cell: b => minus(b.gift, "text-primary") },
+    { key: "returned", header: "Returned", align: "right", kind: "number", sortValue: b => b.returned, csv: b => b.returned || "", hideIfEmpty: true,
+      cell: b => minus(b.returned, "text-amber-800") },
+    { key: "received", header: "Received", align: "right", kind: "number", sortValue: b => b.received, csv: b => b.received || "",
+      cell: b => (b.received ? <CellAmount tone="in">{fmtMoney(b.received)}</CellAmount> : null) },
+    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: b => b.balance, csv: b => b.balance,
+      cell: b => (isOpening(b)
+        ? <CellAmount>{fmtMoney(b.balance)}</CellAmount>
+        : b.balance > 0.009 ? <CellAmount tone="out">{fmtMoney(b.balance)}</CellAmount> : <span className="text-success font-semibold whitespace-nowrap">Cleared</span>) },
+  ];
+
+  // An invoice opened: its pieces, then its credit notes and payments — each with its own ⋯.
+  type Line = { id: string; kind: "piece" | "credit" | "payment"; what: ReactNode; detail: ReactNode;
+    billed?: number; gift?: number; returned?: number; received?: number; balance?: number; actions?: MoreAction[] };
+  const linesOf = (b: InvoiceBlock): Line[] => [
+    ...b.items.map((i): Line => ({
+      id: `p-${i.orderId}`, kind: "piece",
+      what: <Link to={`/orders/${i.orderId}`} className="font-mono text-primary hover:underline whitespace-nowrap">{i.orderNo}</Link>,
+      detail: <span className="inline-flex items-center gap-1.5"><Package className="h-3 w-3 shrink-0" />{i.description || "—"}{i.qty > 1 ? ` × ${i.qty}` : ""}</span>,
+      billed: i.gross, gift: i.gift, returned: i.returned, received: i.received, balance: i.balance,
+    })),
+    ...b.credits.map((c): Line => ({
+      id: `c-${c.id}`, kind: "credit", what: <span className="text-muted-foreground whitespace-nowrap">{fmtDate(c.date)}</span>,
+      detail: <span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 shrink-0 text-amber-700" />Credit note {c.note}</span>,
+      returned: c.amount, actions: creditActions?.(c, b),
+    })),
+    ...b.payments.map((p): Line => ({
+      id: `r-${p.id}`, kind: "payment", what: <span className="text-muted-foreground whitespace-nowrap">{fmtDate(p.date)}</span>,
+      detail: <span>Payment received — {p.note}</span>,
+      received: p.amount, actions: paymentActions?.(p, b),
+    })),
+  ];
+  const lineCols: DataColumn<Line>[] = [
+    { key: "what", header: "Order / date", always: true, cell: l => l.what },
+    { key: "detail", header: "Detail", cell: l => <span className="text-xs text-muted-foreground">{l.detail}</span> },
+    { key: "billed", header: "Billed", align: "right", cell: l => (l.billed ? <span className="tabular-nums whitespace-nowrap">{fmtMoney(l.billed)}</span> : null) },
+    { key: "gift", header: "Gift card", align: "right", cell: l => (l.gift ? minus(l.gift, "text-primary") : null) },
+    { key: "returned", header: "Returned", align: "right", cell: l => (l.returned ? minus(l.returned, "text-amber-800") : null) },
+    { key: "received", header: "Received", align: "right", cell: l => (l.received ? <span className="tabular-nums whitespace-nowrap text-success font-medium">{fmtMoney(l.received)}</span> : null) },
+    { key: "balance", header: "Balance", align: "right", cell: l => (l.kind === "piece" ? <span className="tabular-nums whitespace-nowrap">{(l.balance ?? 0) > 0.009 ? fmtMoney(l.balance!) : "—"}</span> : null) },
+  ];
 
   return (
     <div className="card-luxe overflow-hidden">
       <div className="px-5 py-4 border-b border-border/60">
         <SectionTitle title="Invoice Statement" sub={client.companyName}
-          info="Tap an invoice for its pieces and payments. Only invoiced work is here — an order not billed yet isn't on the client's account." />
+          info="Open an invoice for its pieces and payments. Only invoiced work is here — an order not billed yet isn't on the client's account." />
       </div>
-
-      {/* The same one-row toolbar as every table: search, Filters, the count,
-          Export — and the statement's own totals in one quiet line under it. */}
-      <div className="px-5 pt-4 space-y-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder="Search invoice, order or item…" aria-label="Search invoice, order or item"
-              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
-            {q && <button type="button" onClick={() => setQ("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>}
-          </div>
-          <FiltersButton filters={filters} onClear={() => setOnly("all")} count={countText} />
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
-            {onExport && mayExport && <ExportMenu scope="Pick the invoices or dates, then the file"
-              exports={[{ label: "PDF or Excel", icon: Download, hint: "The statement, invoice by invoice", onSelect: onExport }]} />}
-          </div>
-        </div>
-        <FilterChips filters={filters} onClear={() => setOnly("all")} />
-        {/* The statement's own totals: invoices only. The page's figures above
-            also count orders not billed yet, so these are a different sum. */}
-        <StatStrip items={[
-          { label: "Invoiced", value: fmtMoney(T.gross), icon: FileText },
-          ...(T.gift > 0.009 ? [{ label: "Gift card used", value: fmtMoney(T.gift), icon: Gift }] : []),
-          ...(T.returned > 0 ? [{ label: "Returned", value: fmtMoney(T.returned), icon: Undo2 }] : []),
-          { label: "Received on invoices", value: fmtMoney(T.received), tone: "in" as const },
-          // Outstanding counts the balance brought forward, so no signs between them.
-          { label: "Due on invoices", value: fmtMoney(Math.max(0, closing)), tone: closing > 0.009 ? "out" as const : "in" as const,
-            sub: openingDebit > 0 || openingCredit > 0 ? "With the balance brought forward" : undefined },
-        ]} note={q || only !== "all" ? "For the invoices shown" : "Invoices only — orders not billed yet are in the figures above"} />
-      </div>
-
-      {/* Drawn like the app's shared DataTable — the same box, header and cell
-          spacing — but kept as its own table: an invoice opens into its pieces,
-          credit notes and payments, which are rows of this table, not a panel. */}
-      <div className="px-5 pb-4">
-      <TableBox>
-        <table className="w-full text-sm min-w-[900px]">
-          <thead className="bg-secondary/40">
-            <tr className="border-b border-border/60">
-              <th className="w-10 px-2 py-3"><span className="sr-only">Details</span></th>
-              <th className={`${TH} text-left`}>Invoice</th>
-              <th className={`${TH} text-left`}>Date</th>
-              <th className={`${TH} text-left`}>Pieces</th>
-              <th className={`${TH} text-right`}>Billed</th>
-              <th className={`${TH} text-right`}>Gift card</th>
-              <th className={`${TH} text-right`}>Returned</th>
-              <th className={`${TH} text-right`}>Received</th>
-              <th className={`${TH} text-right`}>Balance</th>
-              {acts && <th className="w-12 px-2 py-3"><span className="sr-only">Actions</span></th>}
-            </tr>
-          </thead>
-          <tbody>
-            {openingDebit > 0 || openingCredit > 0 ? (
-              <tr className="bg-amber-500/5">
-                <td />
-                <td className="px-3 py-2.5 font-medium" colSpan={3}>Balance brought forward</td>
-                <td className={`${TD} text-right`}>{openingDebit ? fmtMoney(openingDebit) : ""}</td>
-                <td />
-                <td />
-                <td className={`${TD} text-right text-success`}>{openingCredit ? fmtMoney(openingCredit) : ""}</td>
-                <td className={`${TD} text-right font-semibold`}>{fmtMoney(openingDebit - openingCredit)}</td>
-                {acts && <td />}
-              </tr>
-            ) : null}
-            {filtered.length === 0 ? (
-              <tr><td colSpan={cols} className="px-3 py-12 text-center text-sm text-muted-foreground">{blocks.length ? "No invoices match." : "No invoices yet."}</td></tr>
-            ) : filtered.map(b => (
-              <>
-                <tr key={b.id} onClick={() => toggle(b.id)}
-                  className={`transition-colors hover:bg-secondary/30 cursor-pointer ${open.has(b.id) ? "bg-secondary/30" : ""}`}>
-                  <td className="w-10 px-2 py-2.5 text-center text-muted-foreground">
-                    <ChevronDown className={`inline h-4 w-4 transition-transform ${open.has(b.id) ? "rotate-180" : ""}`} />
-                  </td>
-                  <td className="px-3 py-2.5 font-medium text-brand-dark whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5"><FileText className="h-3.5 w-3.5 text-primary" />{b.number}</span>
-                  </td>
-                  <td className="px-3 py-2.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(b.date)}</td>
-                  <td className="px-3 py-2.5 text-xs text-muted-foreground">{b.items.length} piece{b.items.length !== 1 ? "s" : ""}</td>
-                  <td className={`${TD} text-right font-semibold text-brand-dark`}>{fmtMoney(b.gross)}</td>
-                  <td className={`${TD} text-right text-primary`}>{b.gift ? `−${fmtMoney(b.gift)}` : ""}</td>
-                  <td className={`${TD} text-right text-amber-800`}>{b.returned ? `−${fmtMoney(b.returned)}` : ""}</td>
-                  <td className={`${TD} text-right text-success`}>{b.received ? fmtMoney(b.received) : ""}</td>
-                  <td className={`${TD} text-right font-semibold ${b.balance > 0.009 ? "text-destructive" : "text-success"}`}>
-                    {b.balance > 0.009 ? fmtMoney(b.balance) : "Cleared"}
-                  </td>
-                  {menuCell(invoiceActions?.(b), `Invoice ${b.number}`)}
-                </tr>
-
-                {open.has(b.id) && b.items.map(i => (
-                  <tr key={`${b.id}-${i.orderId}`} className="bg-secondary/20 text-xs">
-                    <td />
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      <Link to={`/orders/${i.orderId}`} onClick={e => e.stopPropagation()}
-                        className="font-mono text-primary hover:underline">{i.orderNo}</Link>
-                    </td>
-                    <td colSpan={2} className="px-3 py-1.5 text-muted-foreground">
-                      <span className="inline-flex items-center gap-1.5"><Package className="h-3 w-3" />{i.description || "—"}</span>
-                      {i.qty > 1 && <span className="ml-1.5">× {i.qty}</span>}
-                    </td>
-                    <td className={`${SUB} text-right`}>{fmtMoney(i.gross)}</td>
-                    <td className={`${SUB} text-right text-primary`}>{i.gift ? `−${fmtMoney(i.gift)}` : ""}</td>
-                    <td className={`${SUB} text-right text-amber-800`}>{i.returned ? `−${fmtMoney(i.returned)}` : ""}</td>
-                    <td className={`${SUB} text-right text-success`}>{i.received ? fmtMoney(i.received) : ""}</td>
-                    <td className={`${SUB} text-right`}>{i.balance > 0.009 ? fmtMoney(i.balance) : "—"}</td>
-                    {acts && <td />}
-                  </tr>
-                ))}
-
-                {open.has(b.id) && b.credits.map(c => (
-                  <tr key={`${b.id}-${c.id}`} className="bg-amber-500/5 text-xs">
-                    <td />
-                    <td className="px-3 py-1.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(c.date)}</td>
-                    <td colSpan={4} className="px-3 py-1.5 text-muted-foreground"><span className="inline-flex items-center gap-1.5"><Undo2 className="h-3 w-3 text-amber-700" />Credit note {c.note}</span></td>
-                    <td className={`${SUB} text-right text-amber-800 font-medium`}>−{fmtMoney(c.amount)}</td>
-                    <td colSpan={2} />
-                    {menuCell(creditActions?.(c, b), "Credit note")}
-                  </tr>
-                ))}
-
-                {open.has(b.id) && b.payments.map(p => (
-                  <tr key={`${b.id}-${p.id}`} className="bg-success/5 text-xs">
-                    <td />
-                    <td className="px-3 py-1.5 text-muted-foreground tabular-nums whitespace-nowrap">{fmtDate(p.date)}</td>
-                    <td colSpan={5} className="px-3 py-1.5 text-muted-foreground">Payment received — {p.note}</td>
-                    <td className={`${SUB} text-right text-success font-medium`}>{fmtMoney(p.amount)}</td>
-                    <td />
-                    {menuCell(paymentActions?.(p, b), "Payment")}
-                  </tr>
-                ))}
-              </>
-            ))}
-          </tbody>
-          <tfoot className="border-t-2 border-border/70 bg-secondary/30">
-            <tr className="font-bold text-brand-dark">
-              <td />
-              <td className="px-3 py-2.5 text-xs uppercase tracking-wider" colSpan={3}>Totals</td>
-              <td className={`${TD} text-right`}>{fmtMoney(T.gross + openingDebit)}</td>
-              <td className={`${TD} text-right text-primary`}>{T.gift ? `−${fmtMoney(T.gift)}` : ""}</td>
-              <td className={`${TD} text-right text-amber-800`}>{T.returned ? `−${fmtMoney(T.returned)}` : ""}</td>
-              <td className={`${TD} text-right text-success`}>{fmtMoney(T.received + openingCredit)}</td>
-              <td className={`${TD} text-right ${closing > 0.009 ? "text-destructive" : "text-success"}`}>
-                {fmtMoney(Math.max(0, closing))}
-              </td>
-              {acts && <td />}
-            </tr>
-          </tfoot>
-        </table>
-      </TableBox>
+      {/* The app's one table — the same toolbar (search, Filters, the count, the arrows,
+          View, Export), table or cards, as every other list; an invoice opens into its lines. */}
+      <div className="px-5 py-4">
+        <DataTable
+          id="client-invoice-statement"
+          noun="invoice"
+          rows={filtered}
+          columns={columns}
+          rowKey={b => b.id}
+          search={{ value: q, onChange: setQ, placeholder: "Search invoice, order or item…", ariaLabel: "Search invoice, order or item" }}
+          filters={filters}
+          onClearFilters={() => setOnly("all")}
+          exports={onExport ? [{ label: "PDF or Excel", icon: Download, hint: "The statement, invoice by invoice", onSelect: onExport }] : undefined}
+          exportScope="Pick the invoices or dates, then the file"
+          pinnedRows={opening ? [opening] : undefined}
+          pinnedAt="top"
+          rowActions={invoiceActions ? (b => (isOpening(b) ? [] : invoiceActions(b))) : undefined}
+          expand={{
+            can: b => !isOpening(b) && b.items.length + b.credits.length + b.payments.length > 0,
+            render: b => (
+              <DataTable id="client-invoice-lines" controls="none" noun="line" rows={linesOf(b)} columns={lineCols} rowKey={l => l.id}
+                details={false} rowActions={l => l.actions ?? []} />
+            ),
+          }}
+          details={false}
+          totalsLabel="Totals"
+          totals={{
+            billed: () => <span>{fmtMoney(T.gross + openingDebit)}</span>,
+            gift: () => (T.gift ? <span className="text-primary">−{fmtMoney(T.gift)}</span> : null),
+            returned: () => (T.returned ? <span className="text-amber-800">−{fmtMoney(T.returned)}</span> : null),
+            received: () => <span className="text-success">{fmtMoney(T.received + openingCredit)}</span>,
+            balance: () => <span className={closing > 0.009 ? "text-destructive" : "text-success"}>{fmtMoney(Math.max(0, closing))}</span>,
+          }}
+          emptyText={blocks.length ? "No invoices match." : "No invoices yet."}
+          summary={
+            // The statement's own totals: invoices only. The page's figures above
+            // also count orders not billed yet, so these are a different sum.
+            <StatStrip items={[
+              { label: "Invoiced", value: fmtMoney(T.gross), icon: FileText },
+              ...(T.gift > 0.009 ? [{ label: "Gift card used", value: fmtMoney(T.gift), icon: Gift }] : []),
+              ...(T.returned > 0 ? [{ label: "Returned", value: fmtMoney(T.returned), icon: Undo2 }] : []),
+              { label: "Received on invoices", value: fmtMoney(T.received), tone: "in" as const },
+              // Outstanding counts the balance brought forward, so no signs between them.
+              { label: "Due on invoices", value: fmtMoney(Math.max(0, closing)), tone: closing > 0.009 ? "out" as const : "in" as const,
+                sub: openingDebit > 0 || openingCredit > 0 ? "With the balance brought forward" : undefined },
+            ]} note={q || only !== "all" ? "For the invoices shown" : "Invoices only — orders not billed yet are in the figures above"} />
+          }
+        />
       </div>
     </div>
   );

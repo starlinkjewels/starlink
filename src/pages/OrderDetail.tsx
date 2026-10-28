@@ -3670,7 +3670,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
 
           {/* Everything bought or issued for this order, in one table. */}
           {(linkedPurchases.length > 0 || linkedIssuances.length > 0) && (() => {
-            type MatRow = { id: string; href: string; gold: boolean; title: string; detail?: string; qty: string; source: string; sourceSub?: string;
+            type MatRow = { id: string; href: string; gold: boolean; title: string; detail?: string; qty: string;
+              /** Stones (or pieces) — beside the carats, not lost in the detail line. */
+              pcs?: number; source: string; sourceSub?: string;
               costInr?: number; dueInr: number; labourDueInr: number; status: string; tone: "blue" | "green" | "amber" | "neutral"; actions: MoreAction[] };
             const rowAct = (icon: LucideIcon, label: string, hint: string, why: string | undefined, busy: boolean, onRun: () => unknown, danger = false): MoreAction =>
               ({ label, icon, danger, disabled: !!why || busy, hint: why ?? hint, onSelect: () => { void onRun(); } });
@@ -3693,9 +3695,10 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               rows.push({
                 id: p.id, href: `/suppliers/${p.supplierId}`, gold: p.material === "gold",
                 title: kindTitle(p.material, p.diamond?.kind, p.gold?.purity ?? ""),
-                detail: p.material === "diamond" ? [bagNoOfPurchase(db, p), diamondSpec(p.diamond, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id))].filter(Boolean).join(" · ") || undefined
+                detail: p.material === "diamond" ? [bagNoOfPurchase(db, p), diamondSpec(p.diamond && { ...p.diamond, pieces: undefined }, (db.diamondPackets ?? []).find(x => x.purchaseId === p.id))].filter(Boolean).join(" · ") || undefined
                   : isOtherMaterial(p.material) && p.other?.grade && p.other.grade !== "—" ? p.other.grade : undefined,
                 qty: fmtQty(purchaseQty(p), materialUnit(db.settings, p.material)),
+                pcs: p.material === "diamond" ? (p.diamond?.kind === "certified" ? 1 : p.diamond?.pieces) : materialUnit(db.settings, p.material) === "pcs" ? undefined : p.other?.pieces,
                 source: supplierText(p), sourceSub: brokerText(p),
                 costInr: p.totalInr, dueInr: purchasePending(p), labourDueInr: 0,
                 status: "Bought", tone: "neutral", actions: purchaseActs(p),
@@ -3712,7 +3715,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               const detail = mi.diamondKind === "certified"
                 ? packs.map(x => [x.shape, `${x.carat}ct`, x.color, x.clarity, `${x.certificateLab || "Cert"} ${x.certificateNumber}`].filter(Boolean).join(" · ")).join("; ")
                 : mi.material === "diamond"
-                ? [bagNoOf(db, lot), lot, mi.piecesIssued ? `${mi.piecesIssued} pcs` : undefined, spec?.type && !lot.includes(spec.type) ? spec.type : undefined,
+                ? [bagNoOf(db, lot), lot, spec?.type && !lot.includes(spec.type) ? spec.type : undefined,
                     spec?.mm && !lot.includes(spec.mm) ? (/mm$/i.test(spec.mm) ? spec.mm : `${spec.mm} mm`) : undefined, spec?.size && !lot.includes(spec.size) ? spec.size : undefined,
                     spec?.color && !lot.includes(spec.color) ? spec.color : undefined, spec?.clarity && !lot.includes(spec.clarity) ? spec.clarity : undefined,
                     spec?.ratePerCaratInr ? `${fmtMoneyInr(spec.ratePerCaratInr)}/ct` : undefined].filter(Boolean).join(" · ")
@@ -3732,6 +3735,9 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                 title: mi.diamondKind === "certified" && packs.length > 1 ? `${packs.length} certified diamonds` : kindTitle(mi.material, mi.diamondKind, mi.purityOrQuality),
                 detail: detail || undefined,
                 qty: `${used}${unit}${Math.abs(used - mi.quantityIssued) > 0.001 ? ` of ${mi.quantityIssued}${unit}` : ""}`,
+                // Loose: the stones issued, less any counted back at Final Approval; certified: the stones.
+                pcs: mi.diamondKind === "certified" ? (packs.length || undefined)
+                  : mi.piecesIssued ? Math.max(0, mi.piecesIssued - (mi.finishReturnedPcs ?? 0)) : undefined,
                 source: srcPurchase ? supplierText(srcPurchase) : mi.source === "stock" ? "Our stock" : mi.source === "factoryPool" ? "Factory's holding" : mi.source === "melt" ? "Melted piece" : mi.source === "transfer" ? "Transfer" : "—",
                 sourceSub: [srcPurchase ? brokerText(srcPurchase) : undefined, mi.factoryId ? `to ${factory?.name || "factory"}` : "sold with the order"].filter(Boolean).join(" · "),
                 costInr: srcPurchase?.totalInr ?? spec?.amountInr, dueInr: srcPurchase ? purchasePending(srcPurchase) : 0, labourDueInr: issuancePending(mi),
@@ -3750,6 +3756,8 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     <CellMain title={r.title} sub={r.detail} />
                   </div>
                 ) },
+              { key: "pcs", header: "Pcs", align: "right", kind: "number", sortValue: r => r.pcs ?? null, csv: r => (r.pcs != null ? String(r.pcs) : ""),
+                cell: r => (r.pcs != null ? <span className="tabular-nums whitespace-nowrap font-medium">{r.pcs.toLocaleString()}</span> : <span className="text-muted-foreground/50">—</span>) },
               { key: "qty", header: "Qty", align: "right", sortValue: r => r.qty, cell: r => <span className="tabular-nums whitespace-nowrap font-medium">{r.qty}</span> },
               { key: "from", header: "From", sortValue: r => r.source, csv: r => [r.source, r.sourceSub].filter(Boolean).join(" · "),
                 cell: r => <div className="max-w-[260px]"><CellMain title={<span className="text-sm font-normal text-foreground">{r.source}</span>} sub={r.sourceSub} /></div> },
@@ -3766,8 +3774,10 @@ The piece then takes ours — add them from stock or buy them, as for any order.
             return (
               <div className="space-y-2">
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Material for this order · {rows.length}</p>
-                <DataTable id="order-materials" controls="none" noun="material" rows={rows} columns={columns} rowKey={r => r.id}
-                  rowHref={r => r.href} details={false} rowActions={r => r.actions} />
+                {/* The same table as everywhere: search, count, View and Export in its one toolbar row. */}
+                <DataTable id="order-materials" noun="material" rows={rows} columns={columns} rowKey={r => r.id}
+                  searchText={r => [r.title, r.detail, r.source, r.sourceSub, r.status].filter(Boolean).join(" ")} searchPlaceholder="Search materials"
+                  exportName={`Materials-${order.orderNumber}`} rowHref={r => r.href} details={false} rowActions={r => r.actions} />
               </div>
             );
           })()}

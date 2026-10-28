@@ -1,14 +1,12 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { metalLabel } from "@/lib/metals";
-import { TableBox } from "@/components/TableBox";
 import { Link } from "react-router-dom";
 import { fmtDate, toPureGold, pureFromPurity, type MaterialIssuance, type Order, type Factory, type Settings } from "@/lib/db";
 import { fmtMoneyInr, diamondFlow, otherFlow } from "@/lib/manufacturing";
 import { isOtherMaterial, materialName, materialUnit } from "@/lib/materials";
-import { Search, Download, X, Coins, Gem, Hammer } from "lucide-react";
-import { useRecentWindow, LoadOlder } from "@/hooks/useRecentWindow";
-import { IfExport } from "@/components/IfExport";
-import { ExportMenu, FilterChips, FiltersButton, type TableFilter, StatStrip } from "@/components/TableToolbar";
+import { Download, Coins, Gem, Hammer } from "lucide-react";
+import { type TableFilter, StatStrip } from "@/components/TableToolbar";
+import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { SectionTitle } from "@/components/SectionTitle";
 
 // A zero prints as a dash, never as an empty cell. A blank reads as missing
@@ -19,6 +17,8 @@ const rs = (n: number) => (Math.abs(n) < 0.5 ? "—" : Math.round(n).toLocaleStr
 const est = (v: string) => (v ? `~${v}` : "");
 
 export interface FactoryOrderRow {
+  /** The row's own key: the order, or the bulk delivery's own issue. */
+  rowId?: string;
   orderId: string;
   orderNo: string;
   date: string;
@@ -98,6 +98,7 @@ export function buildFactoryOrderRows(
     let row = byOrder.get(key);
     if (!row) {
       row = {
+        rowId: key,
         orderId: mi.orderId || "",
         orderNo: order?.orderNumber || (mi.orderId ? "—" : "Bulk delivery"),
         date: mi.issuedAt,
@@ -284,7 +285,6 @@ export function FactoryOrderLedger({
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [only, setOnly] = useState<"all" | "open" | "done">("all");
-  const [open, setOpen] = useState<Set<string>>(new Set());
 
   const filtered = useMemo(() => {
     const ql = q.trim().toLowerCase();
@@ -319,28 +319,14 @@ export function FactoryOrderLedger({
   }), { goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0, labour: 0, paid: 0 });
   const goldAtFactory = openingFineGold + T.goldOut - T.goldIn;
 
-  // Metal and diamond are what a jewellery factory holds, so those columns are
-  // always there even at zero — a factory ledger with no metal column tells a
-  // Gold, diamond and labour show for EVERY factory, at zero if need be. Hiding
-  // a group when it happened to be empty meant one factory had a "Gold still at
-  // factory" card and the next did not — two pages that should read the same way
-  // looking like different reports.
-  const hasGold = true;
-  const hasDia = true;
+  // Gold, diamond and labour show for EVERY factory, at zero if need be — two
+  // factory pages read the same way. Silver, other metal and the USD quote only
+  // when a factory has them.
   const hasSilver = rows.some(r => r.silverIn);
   const hasOther = rows.some(r => r.otherIn);
   const hasQuote = rows.some(r => r.quotedUsd > 0);
   const active = !!q.trim() || !!from || !!to || only !== "all";
-  // The last 15 days first, older orders as the reader scrolls. The cards and
-  // the totals row below still count every row.
-  const w = useRecentWindow(filtered, r => r.date, { filtered: active, resetKey: [q, from, to, only] });
 
-
-  const toggle = (id: string) =>
-    setOpen(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-
-  // The dates and the job's state, behind one Filters button — the same
-  // toolbar row as every other table, though this one draws its own rows.
   const filters: TableFilter[] = [
     { kind: "date", from, to, onChange: (f, t) => { setFrom(f); setTo(t); } },
     { kind: "select", label: "Status", allLabel: "All", value: only === "all" ? "" : only,
@@ -348,235 +334,154 @@ export function FactoryOrderLedger({
       options: [{ value: "open", label: "Still with factory" }, { value: "done", label: "Done" }] },
   ];
   const clearFilters = () => { setFrom(""); setTo(""); setOnly("all"); };
-  const countText = `${filtered.length} ${filtered.length === 1 ? "order" : "orders"}`;
   const searchLabel = "Search order no., item, or factory bill no…";
 
-  // The shared DataTable's header and cell classes, so this table reads the
-  // same — kept as its own table for the two-level header and opening rows.
-  const th = "px-3 py-3 text-[11px] font-bold uppercase tracking-wider whitespace-nowrap text-brand-dark/70";
-  const num = "px-3 py-2.5 text-right whitespace-nowrap tabular-nums";
-  const head = `${th} text-right`;
+  const n = (s: ReactNode, cls = "") => <span className={`tabular-nums whitespace-nowrap ${cls}`}>{s}</span>;
+  const columns: DataColumn<FactoryOrderRow>[] = [
+    { key: "order", header: "Order", always: true, sortValue: r => r.orderNo, csv: r => r.orderNo,
+      cell: r => (r.orderId
+        ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline whitespace-nowrap">{r.orderNo}</Link>
+        : <span className="font-medium text-amber-700 whitespace-nowrap">{r.orderNo}</span>) },
+    { key: "bill", header: "Factory bill", sortValue: r => r.factoryBillNo ?? "", csv: r => r.factoryBillNo ?? "",
+      cell: r => (r.factoryBillNo
+        ? <button type="button" data-no-row onClick={e => { e.stopPropagation(); setQ(r.factoryBillNo!); }}
+            title="Show every piece on this bill" className="font-mono text-[11px] text-primary hover:underline">{r.factoryBillNo}</button>
+        : <span className="text-muted-foreground">—</span>) },
+    { key: "date", header: "Date", kind: "date", sortValue: r => r.date, csv: r => fmtDate(r.date),
+      cell: r => (
+        <span className="whitespace-nowrap text-muted-foreground tabular-nums">
+          {fmtDate(r.date)}
+          {r.receivedDate && <span className="block text-[10px] text-success" title="When the finished piece came back and its actual details were recorded">rcv {fmtDate(r.receivedDate)}</span>}
+        </span>
+      ) },
+    { key: "item", header: "Item", sortValue: r => r.jewellery, csv: r => [r.jewellery, r.metalNote].filter(Boolean).join(" · "),
+      cell: r => <CellMain title={<span className="font-normal">{r.jewellery || "—"}</span>} sub={r.metalNote} /> },
+    { key: "net", header: "Net wt (g)", align: "right", kind: "number", sortValue: r => r.netWeight, csv: r => (r.netWeight ? r.netWeight.toFixed(3) : ""),
+      cell: r => (
+        <span className="text-right whitespace-nowrap tabular-nums">
+          <span className={r.netEstimated ? "italic text-muted-foreground" : "font-medium"} title={r.netEstimated ? "Estimate — not yet finally approved" : undefined}>
+            {r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "—"}
+          </span>
+          {r.designNo && <span className="block text-[10px] text-muted-foreground">#{r.designNo}</span>}
+        </span>
+      ) },
+    { key: "goldOut", header: "Gold given (g fine)", align: "right", kind: "number", sortValue: r => r.goldOut, csv: r => g3(r.goldOut),
+      cell: r => n(r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut), r.goldEstimated ? "italic text-muted-foreground" : "") },
+    { key: "goldIn", header: "Gold in piece (g fine)", align: "right", kind: "number", sortValue: r => r.goldIn, csv: r => g3(r.goldIn),
+      cell: r => n(g3(r.goldIn)) },
+    { key: "goldBal", header: "Gold balance (g fine)", align: "right", kind: "number", sortValue: r => r.goldOut - r.goldIn, csv: r => g3(r.goldOut - r.goldIn),
+      cell: r => {
+        const bal = r.goldOut - r.goldIn;
+        // A piece made from gold already sitting with this factory owes nothing on
+        // its own — the draw belongs to the delivery that supplied it.
+        const pool = !!r.goldFromPool && r.goldOut < 0.0005 && r.goldIn > 0.0005;
+        return (
+          <span title={pool ? "Made from the gold already with this factory — counted against the delivery that supplied it"
+            : bal < 0 ? "The factory supplied this gold — we owe it back" : bal > 0 ? "Our gold still with the factory" : ""}>
+            {n(r.goldEstimated || pool ? "—" : g3(bal), `font-semibold ${pool ? "text-muted-foreground" : bal > 0.0005 ? "text-amber-700" : bal < -0.0005 ? "text-destructive" : "text-muted-foreground"}`)}
+          </span>
+        );
+      } },
+    { key: "diaOut", header: "Diamond given (ct)", align: "right", kind: "number", sortValue: r => r.diaOut, csv: r => (r.diaOut ? r.diaOut.toFixed(2) : ""),
+      cell: r => n(r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : "", r.diaEstimated ? "italic text-muted-foreground" : "") },
+    { key: "diaIn", header: "Diamond used (ct)", align: "right", kind: "number", sortValue: r => r.diaIn, csv: r => (r.diaIn ? r.diaIn.toFixed(2) : ""),
+      cell: r => n(r.diaIn ? r.diaIn.toFixed(2) : "") },
+    { key: "diaBal", header: "Diamond balance (ct)", align: "right", kind: "number", sortValue: r => r.diaOut - r.diaIn, csv: r => (r.diaOut - r.diaIn).toFixed(2),
+      cell: r => { const bal = r.diaOut - r.diaIn; return n(r.diaEstimated ? "—" : bal > 0.005 ? bal.toFixed(2) : "0", `font-semibold ${bal > 0.005 ? "text-blue-700" : "text-muted-foreground"}`); } },
+    ...(hasSilver ? [{ key: "silver", header: "Silver (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.silverIn, csv: (r: FactoryOrderRow) => g3(r.silverIn),
+      cell: (r: FactoryOrderRow) => n(g3(r.silverIn)) }] : []),
+    ...(hasOther ? [{ key: "other", header: "Other (g)", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.otherIn, csv: (r: FactoryOrderRow) => g3(r.otherIn),
+      cell: (r: FactoryOrderRow) => n(g3(r.otherIn)) }] : []),
+    { key: "labour", header: "Labour billed (₹)", align: "right", kind: "number", sortValue: r => r.labour, csv: r => Math.round(r.labour),
+      cell: r => n(rs(r.labour)) },
+    // Paid by us, not money received: plain. Nothing pending: grey.
+    { key: "paid", header: "Labour paid (₹)", align: "right", kind: "number", sortValue: r => r.paid, csv: r => Math.round(r.paid),
+      cell: r => n(rs(r.paid)) },
+    { key: "pending", header: "Labour pending (₹)", align: "right", kind: "number", sortValue: r => r.labour - r.paid, csv: r => Math.max(0, Math.round(r.labour - r.paid)),
+      cell: r => { const p = r.labour - r.paid; return n(p > 0.5 ? rs(p) : "—", p > 0.5 ? "font-semibold text-destructive" : "text-muted-foreground"); } },
+    ...(hasQuote ? [{ key: "quoted", header: "Quoted $", align: "right" as const, kind: "number" as const, sortValue: (r: FactoryOrderRow) => r.quotedUsd, csv: (r: FactoryOrderRow) => r.quotedUsd || "",
+      cell: (r: FactoryOrderRow) => n(r.quotedUsd ? `$${Math.round(r.quotedUsd).toLocaleString()}` : "", "text-muted-foreground") }] : []),
+    { key: "status", header: "Status", sortValue: r => r.open, csv: r => (r.open > 0 ? `${r.open} still with factory` : "Done"),
+      cell: r => <CellTag tone={r.open > 0 ? "amber" : "green"}>{r.open > 0 ? `${r.open} still with factory` : "Done"}</CellTag> },
+  ];
+
+  // The entries behind a row, when it is opened.
+  type Entry = FactoryOrderRow["entries"][number];
+  const entryCols: DataColumn<Entry>[] = [
+    { key: "date", header: "Date", always: true, cell: en => <span className="text-muted-foreground whitespace-nowrap tabular-nums">{fmtDate(en.date)}</span> },
+    { key: "text", header: "Entry", cell: en => <span className={en.kind === "pay" ? "text-success" : "text-foreground"}>{en.text}</span> },
+    { key: "qty", header: "Quantity / amount", align: "right", cell: en => n(en.qty ?? (en.amount != null ? fmtMoneyInr(en.amount) : "")) },
+  ];
+
+  // The whole factory's figures are the account card's above, so they show here
+  // only for a narrowed view — what the rows shown hold and owe — or where this
+  // ledger stands without that card.
+  const strip = (active || !account) ? (() => {
+    const whole = !active && account;
+    const pending = whole ? account.chargesPending : Math.max(0, T.labour - T.paid);
+    const credit = whole && account.chargesPending === 0 ? account.chargesOverpaid : 0;
+    return (
+      <StatStrip items={[
+        { label: goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${Math.abs(goldAtFactory).toFixed(3)} g fine`, icon: Coins },
+        { label: "Diamond not accounted", value: `${(T.diaOut - T.diaIn).toFixed(2)} ct`, icon: Gem },
+        { label: "Labour billed", value: fmtMoneyInr(T.labour), icon: Hammer },
+        { label: credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows", value: fmtMoneyInr(credit > 0 ? credit : pending), tone: pending > 0 ? "out" as const : undefined },
+      ]} note={active ? "For the rows shown" : openingFineGold > 0 ? `Gold includes ${openingFineGold.toFixed(3)} g opening` : undefined} />
+    );
+  })() : undefined;
 
   return (
     <div className="card-luxe overflow-hidden">
       {/* The reading guide that used to sit under the table lives behind the ⓘ. */}
       <div className="px-5 py-4 border-b border-border/60">
         <SectionTitle title="Factory Ledger" sub={factoryName} info={<>
-          Tap a row for every entry behind it. Gold is in fine (24K) grams; a negative gold balance means the
+          Open a row for every entry behind it. Gold is in fine (24K) grams; a negative gold balance means the
           factory supplied it and is owed that much back. <span className="italic">~Like this</span> is an estimate
           from order creation. A <span className="font-medium text-amber-700">Bulk delivery</span> is material given
           without an order. &ldquo;Quoted&rdquo; is the USD making charge agreed at assignment; the ₹ labour columns
           are what was billed. A dash means nothing moved.
         </>} />
       </div>
-
-      {/* One toolbar row: search, Filters, the count and the download; what is
-          narrowing the rows shows as chips under it. */}
-      <div className="px-5 pt-4 space-y-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
-            <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchLabel} aria-label={searchLabel}
-              className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
-            {q && (
-              <button type="button" onClick={() => setQ("")} aria-label="Clear search"
-                className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground">
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-          <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
-          <div className="ml-auto flex items-center gap-2">
-            <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
-            {onExport && (
-              <IfExport>
-                <ExportMenu scope={`${factoryName} — the factory ledger or the movement sheet`}
-                  exports={[{ label: "PDF or Excel", icon: Download, hint: "Pick dates or one order", onSelect: onExport }]} />
-              </IfExport>
-            )}
-          </div>
-        </div>
-        <FilterChips filters={filters} onClear={clearFilters} />
-      </div>
-
-      {/* The whole factory's figures are the account card's above, so they show
-          here only for a narrowed view — what the rows shown hold and owe — or
-          where this ledger stands without that card. One quiet line. */}
-      {(active || !account) && (() => {
-        const whole = !active && account;
-        const pending = whole ? account.chargesPending : Math.max(0, T.labour - T.paid);
-        const credit = whole && account.chargesPending === 0 ? account.chargesOverpaid : 0;
-        return (
-          <div className="px-5 pt-3">
-            <StatStrip items={[
-              ...(hasGold ? [{ label: goldAtFactory < 0 ? "Gold we owe the factory" : "Gold still at factory", value: `${Math.abs(goldAtFactory).toFixed(3)} g fine`, icon: Coins }] : []),
-              ...(hasDia ? [{ label: "Diamond not accounted", value: `${(T.diaOut - T.diaIn).toFixed(2)} ct`, icon: Gem }] : []),
-              { label: "Labour billed", value: fmtMoneyInr(T.labour), icon: Hammer },
-              { label: credit > 0 ? "Paid in advance" : whole ? "Labour pending" : "Pending on these rows", value: fmtMoneyInr(credit > 0 ? credit : pending), tone: pending > 0 ? "out" as const : undefined },
-            ]} note={active ? "For the rows shown" : hasGold && openingFineGold > 0 ? `Gold includes ${openingFineGold.toFixed(3)} g opening` : undefined} />
-          </div>
-        );
-      })()}
-
+      {/* The app's one table — the same toolbar (search, Filters, the count, the arrows,
+          View, Export), table or cards, as every other list; a row opens into its entries. */}
       <div className="px-5 py-4">
-      <TableBox>
-        <table className="w-full text-xs">
-          {/* The line under the header sits on the whole header, so it runs
-              under the cells that span both header rows as well. */}
-          <thead className="bg-secondary/40 border-b border-border/60">
-            <tr>
-              <th className={`${th} text-left`} rowSpan={2}>Order</th>
-              <th className={`${th} text-left`} rowSpan={2}>Factory bill</th>
-              <th className={`${th} text-left`} rowSpan={2}>Date</th>
-              <th className={`${th} text-left`} rowSpan={2}>Item</th>
-              <th className={head} rowSpan={2}>Net wt (g)</th>
-              {hasGold && <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Gold (g fine)</th>}
-              {hasDia && <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Diamond (ct)</th>}
-              {hasSilver && <th className={`${head} border-l border-border/60`} rowSpan={2}>Silver g</th>}
-              {hasOther && <th className={`${head} border-l border-border/60`} rowSpan={2}>Other g</th>}
-              <th className={`${th} text-center border-l border-border/60`} colSpan={3}>Labour (₹)</th>
-              {hasQuote && <th className={`${head} border-l border-border/60`} rowSpan={2}>Quoted $</th>}
-              <th className={`${th} text-left border-l border-border/60`} rowSpan={2}>Status</th>
-            </tr>
-            <tr>
-              {hasGold && <><th className={`${head} border-l border-border/60`}>Given by us</th><th className={head}>In the piece</th><th className={head}>Balance</th></>}
-              {hasDia && <><th className={`${head} border-l border-border/60`}>Given</th><th className={head}>Used</th><th className={head}>Balance</th></>}
-              <th className={`${head} border-l border-border/60`}>Billed</th>
-              <th className={head}>Paid</th>
-              <th className={head}>Pending</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr><td colSpan={16} className="px-3 py-12 text-center text-sm text-muted-foreground">
-                {active ? "No order matches that." : "Nothing issued to this factory yet."}
-              </td></tr>
-            ) : w.visible.map(r => {
-              const goldBal = r.goldOut - r.goldIn;
-              const drawnFromPool = !!r.goldFromPool && r.goldOut < 0.0005 && r.goldIn > 0.0005;
-              const diaBal = r.diaOut - r.diaIn;
-              const pending = r.labour - r.paid;
-              const key = r.orderId || r.orderNo;
-              const isOpen = open.has(key);
-              const cols = 5 + (hasGold ? 3 : 0) + (hasDia ? 3 : 0) + (hasSilver ? 1 : 0) + (hasOther ? 1 : 0) + 3 + (hasQuote ? 1 : 0) + 1;
-              return (
-                <>
-                <tr key={key} onClick={() => toggle(key)} className={`transition-colors hover:bg-secondary/30 cursor-pointer ${isOpen ? "bg-secondary/30" : ""}`}>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    {r.orderId
-                      ? <Link to={`/orders/${r.orderId}`} className="font-mono text-primary hover:underline">{r.orderNo}</Link>
-                      : <span className="font-medium text-amber-700">{r.orderNo}</span>}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap">
-                    {r.factoryBillNo
-                      ? <button type="button" onClick={e => { e.stopPropagation(); setQ(r.factoryBillNo!); }}
-                          title="Show every piece on this bill" className="font-mono text-[11px] text-primary hover:underline">
-                          {r.factoryBillNo}
-                        </button>
-                      : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-3 py-2.5 whitespace-nowrap text-muted-foreground tabular-nums">
-                    {fmtDate(r.date)}
-                    {r.receivedDate && (
-                      <span className="block text-[10px] text-success" title="When the finished piece came back and its actual details were recorded">
-                        rcv {fmtDate(r.receivedDate)}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-3 py-2.5 min-w-[150px]">
-                    {r.jewellery || "—"}
-                    {r.metalNote && <span className="block text-[10px] text-muted-foreground">{r.metalNote}</span>}
-                  </td>
-                  <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums">
-                    <span className={r.netEstimated ? "italic text-muted-foreground" : "font-medium"} title={r.netEstimated ? "Estimate — not yet finally approved" : undefined}>
-                      {r.netWeight ? `${r.netEstimated ? "~" : ""}${r.netWeight.toFixed(3)}` : "—"}
-                    </span>
-                    {r.designNo && <span className="block text-[10px] text-muted-foreground">#{r.designNo}</span>}
-                  </td>
-                  {hasGold && (<>
-                    <td className={`${num} border-l border-border/60${r.goldEstimated ? " italic text-muted-foreground" : ""}`}>{r.goldEstimated ? est(g3(r.goldOut)) : g3(r.goldOut)}</td>
-                    <td className={num}>{g3(r.goldIn)}</td>
-                    {/* A piece made from gold already sitting with this factory
-                        owes nothing on its own — the draw belongs to the delivery
-                        that supplied it, which is where it shows. Without this
-                        every order read as a debt of exactly its own weight. */}
-                    <td className={`${num} font-semibold ${drawnFromPool ? "text-muted-foreground" : goldBal > 0.0005 ? "text-amber-700" : goldBal < -0.0005 ? "text-destructive" : "text-muted-foreground"}`}
-                      title={drawnFromPool ? "Made from the gold already with this factory — counted against the delivery that supplied it"
-                        : goldBal < 0 ? "The factory supplied this gold — we owe it back"
-                        : goldBal > 0 ? "Our gold still with the factory" : ""}>
-                      {r.goldEstimated || drawnFromPool ? "—" : g3(goldBal)}
-                    </td>
-                  </>)}
-                  {hasDia && (<>
-                    <td className={`${num} border-l border-border/60${r.diaEstimated ? " italic text-muted-foreground" : ""}`}>{r.diaOut ? (r.diaEstimated ? est(r.diaOut.toFixed(2)) : r.diaOut.toFixed(2)) : ""}</td>
-                    <td className={num}>{r.diaIn ? r.diaIn.toFixed(2) : ""}</td>
-                    <td className={`${num} font-semibold ${diaBal > 0.005 ? "text-blue-700" : "text-muted-foreground"}`}>{r.diaEstimated ? "—" : (diaBal > 0.005 ? diaBal.toFixed(2) : "0")}</td>
-                  </>)}
-                  {hasSilver && <td className={`${num} border-l border-border/60`}>{g3(r.silverIn)}</td>}
-                  {hasOther && <td className={`${num} border-l border-border/60`}>{g3(r.otherIn)}</td>}
-                  <td className={`${num} border-l border-border/60`}>{rs(r.labour)}</td>
-                  {/* Paid by us, not money received: plain. Nothing pending: grey. */}
-                  <td className={num}>{rs(r.paid)}</td>
-                  <td className={`${num} ${pending > 0.5 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{pending > 0.5 ? rs(pending) : "—"}</td>
-                  {hasQuote && <td className={`${num} border-l border-border/60 text-muted-foreground`}>{r.quotedUsd ? `$${Math.round(r.quotedUsd).toLocaleString()}` : ""}</td>}
-                  <td className="px-3 py-2.5 whitespace-nowrap border-l border-border/60">
-                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${
-                      r.open > 0 ? "bg-warning/10 text-warning" : "bg-success/10 text-success"}`}>
-                      {r.open > 0 ? `${r.open} still with factory` : "Done"}
-                    </span>
-                  </td>
-                </tr>
-                {isOpen && r.entries.map(en => (
-                  <tr key={en.id} className={`text-[11px] ${en.kind === "pay" ? "bg-success/5" : "bg-secondary/20"}`}>
-                    <td className="px-3 py-1.5 text-muted-foreground whitespace-nowrap">{fmtDate(en.date)}</td>
-                    <td className="px-3 py-1.5 text-muted-foreground" colSpan={cols - 3}>{en.text}</td>
-                    <td className="px-3 py-1.5 text-right whitespace-nowrap tabular-nums" colSpan={2}>
-                      {en.qty ?? (en.amount != null ? fmtMoneyInr(en.amount) : "")}
-                    </td>
-                  </tr>
-                ))}
-                {isOpen && r.entries.length === 0 && (
-                  <tr className="text-[11px] bg-secondary/20">
-                    <td className="px-3 py-1.5 text-muted-foreground" colSpan={cols}>
-                      Nothing issued or paid yet — the figures are estimates.
-                    </td>
-                  </tr>
-                )}
-                </>
-              );
-            })}
-          </tbody>
-          {filtered.length > 0 && (
-            <tfoot className="border-t-2 border-border/70 bg-secondary/30">
-              <tr className="font-bold text-brand-dark">
-                <td className="px-3 py-2.5 text-xs uppercase tracking-wider" colSpan={4}>Totals{active ? " (filtered)" : ""}{w.hasMore ? ` — all ${filtered.length} orders` : ""}</td>
-                <td className="px-3 py-2.5 text-right whitespace-nowrap tabular-nums" title="Net weight of finally approved pieces; estimates are not counted">
-                  {(() => { const t = filtered.reduce((s, r) => s + (r.netEstimated ? 0 : r.netWeight), 0); return t ? t.toFixed(3) : "—"; })()}
-                </td>
-                {hasGold && (<>
-                  <td className={`${num} border-l border-border/60`}>{g3(T.goldOut)}</td>
-                  <td className={num}>{g3(T.goldIn)}</td>
-                  <td className={num}>{g3(goldAtFactory) || "0"}</td>
-                </>)}
-                {hasDia && (<>
-                  <td className={`${num} border-l border-border/60`}>{T.diaOut.toFixed(2)}</td>
-                  <td className={num}>{T.diaIn.toFixed(2)}</td>
-                  <td className={num}>{(T.diaOut - T.diaIn).toFixed(2)}</td>
-                </>)}
-                {hasSilver && <td className={`${num} border-l border-border/60`}>{g3(T.silverIn)}</td>}
-                {hasOther && <td className={`${num} border-l border-border/60`}>{g3(T.otherIn)}</td>}
-                <td className={`${num} border-l border-border/60`}>{rs(T.labour)}</td>
-                <td className={num}>{rs(T.paid)}</td>
-                <td className={num}>{rs(Math.max(0, T.labour - T.paid))}</td>
-                {hasQuote && <td className={`${num} border-l border-border/60`}>${Math.round(filtered.reduce((s, r) => s + r.quotedUsd, 0)).toLocaleString()}</td>}
-                <td className="border-l border-border/60" />
-              </tr>
-            </tfoot>
-          )}
-        </table>
-      </TableBox>
+        <DataTable
+          id="factory-order-ledger"
+          noun="order"
+          rows={filtered}
+          columns={columns}
+          rowKey={r => r.rowId ?? (r.orderId || r.orderNo)}
+          search={{ value: q, onChange: setQ, placeholder: searchLabel, ariaLabel: searchLabel }}
+          filters={filters}
+          onClearFilters={clearFilters}
+          exports={onExport ? [{ label: "PDF or Excel", icon: Download, hint: "Pick dates or one order", onSelect: onExport }] : undefined}
+          exportScope={`${factoryName} — the factory ledger or the movement sheet`}
+          details={false}
+          expand={{
+            render: r => (r.entries.length
+              ? <DataTable id="factory-ledger-entries" controls="none" noun="entry" plural="entries" rows={r.entries} columns={entryCols} rowKey={en => en.id} details={false} />
+              : <p className="text-xs text-muted-foreground">Nothing issued or paid yet — the figures are estimates.</p>),
+          }}
+          totalsLabel={`Totals${active ? " (filtered)" : ""}`}
+          totals={{
+            net: rs2 => n((() => { const t = rs2.reduce((s, r) => s + (r.netEstimated ? 0 : r.netWeight), 0); return t ? t.toFixed(3) : "—"; })()),
+            goldOut: () => n(g3(T.goldOut)),
+            goldIn: () => n(g3(T.goldIn)),
+            goldBal: () => n(g3(goldAtFactory) || "0"),
+            diaOut: () => n(T.diaOut.toFixed(2)),
+            diaIn: () => n(T.diaIn.toFixed(2)),
+            diaBal: () => n((T.diaOut - T.diaIn).toFixed(2)),
+            silver: () => n(g3(T.silverIn)),
+            other: () => n(g3(T.otherIn)),
+            labour: () => n(rs(T.labour)),
+            paid: () => n(rs(T.paid)),
+            pending: () => n(rs(Math.max(0, T.labour - T.paid))),
+            quoted: rs2 => n(`$${Math.round(rs2.reduce((s, r) => s + r.quotedUsd, 0)).toLocaleString()}`),
+          }}
+          emptyText={active ? "No order matches that." : "Nothing issued to this factory yet."}
+          summary={strip}
+        />
       </div>
-      <LoadOlder w={w} noun="orders" />
     </div>
   );
 }

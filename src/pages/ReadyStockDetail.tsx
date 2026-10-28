@@ -403,8 +403,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
             {tab === "sales" && (
               <DataTable
                 id="ready-stock-sales"
-                controls="none"
                 noun="sale"
+                exportName={`Sales-${item.sku || item.name}`.replace(/[^\w.-]+/g, "-")}
                 rows={sales}
                 columns={salesCols}
                 rowKey={o => o.id}
@@ -420,8 +420,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
                 {lots.length > 0 && <p className="text-xs text-muted-foreground px-1"><span className="font-semibold text-brand-dark">{familyPieces} piece{familyPieces !== 1 ? "s" : ""}</span> in all offices · {item.quantity} here</p>}
                 <DataTable
                   id="ready-stock-lots"
-                  controls="none"
                   noun="lot"
+                  exportName={`Lots-${item.sku || item.name}`.replace(/[^\w.-]+/g, "-")}
                   rows={lots}
                   columns={lotCols}
                   rowKey={l => l.id}
