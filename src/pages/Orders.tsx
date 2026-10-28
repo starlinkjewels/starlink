@@ -16,7 +16,7 @@ import { useMemo, useState } from "react";
 import { filled, when, userName, refLink, noteText, refNo, type Detail } from "@/components/rowDetails";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, fmtMoney, fmtDate, currentUserOrders, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
+import { loadDb, fmtMoney, fmtDate, currentUserOrders, worksOnClientId, findInvoiceForOrder, keptValue, returnedQty, orderImage, isDiamondOnlyOrder, orderTotal, totalAdvance, balanceDue } from "@/lib/db";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { StatusBadge } from "@/components/StatusBadge";
 import { TrackingModal } from "@/components/TrackingModal";
@@ -434,7 +434,7 @@ export function OrdersPage() {
         ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })),
       ] },
     ...(isStaff ? [{ kind: "select" as const, label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
-      options: [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),
+      options: db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),
     ...(isStaff && multiCo ? [{ kind: "select" as const, label: "Company", value: companyFilter === "all" ? "" : companyFilter, onChange: pick(setCompanyFilter), allLabel: "All companies",
       options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })) }] : []),
     ...(user!.role === "admin" ? [{ kind: "select" as const, label: "Employee", value: employeeFilter === "all" ? "" : employeeFilter, onChange: pick(setEmployeeFilter), allLabel: "All employees",

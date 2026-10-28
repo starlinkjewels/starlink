@@ -1,7 +1,7 @@
 import { DataTable } from "@/components/DataTable";
 import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
-import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, giftCardStatus, type GiftCard, type GiftCardStatus } from "@/lib/db";
+import { fmtMoney, fmtDate, giftCardStats, giftCardRemaining, giftCardGranted, giftCardStatus, type GiftCard, type GiftCardStatus, worksOnClientId } from "@/lib/db";
 import { ExportDialog } from "@/components/ExportDialog";
 import { downloadLedgerPdf, downloadCsv } from "@/lib/ledgerExport";
 import { Gift, Download, Eye, Pencil, Ban, Trash2, CheckCircle2, Clock } from "lucide-react";
@@ -36,7 +36,8 @@ export function GiftCardsAdminPage() {
   const sourceLabel = (s: GiftCard["source"] | string) => (s === "cashback" ? "Cashback" : "Gift");
   const ordersFor = (cardId: string) => db.orders.filter(o => o.giftCardId === cardId && (o.giftCardRedeemed || 0) > 0);
 
-  const all = (db.giftCards ?? []).slice().sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
+  // An employee sees their own clients' cards.
+  const all = (db.giftCards ?? []).filter(c => worksOnClientId(db, user, c.clientId)).sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt));
   const stats = giftCardStats(all, db.orders); // all-time, reconciles: issued = used + pending + expired
 
   const ql = q.trim().toLowerCase();

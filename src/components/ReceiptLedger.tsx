@@ -4,7 +4,7 @@ import { useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { fmtMoney, fmtDate, type ClientReceipt } from "@/lib/db";
+import { fmtMoney, fmtDate, type ClientReceipt, worksOnClientId } from "@/lib/db";
 import { ccy, fmtCcy, fmtCcyPdf, fmtRate, rateText } from "@/lib/currency";
 import { listReceipts, receiptApplied, receiptCancelBlocker } from "@/lib/receipts";
 import { ReceiptEditSheet, cancelReceiptFlow } from "@/components/ReceiptEditSheet";
@@ -40,7 +40,8 @@ export function ReceiptLedger() {
   // checks, as everywhere else a payment is corrected (ReceiptEditSheet).
   const [editId, setEditId] = useState<string | null>(null);
 
-  const allReceipts = listReceipts(db);
+  // An employee sees their own clients' receipts — never every client's money.
+  const allReceipts = listReceipts(db).filter(r => worksOnClientId(db, user, r.clientId));
   const ql = q.trim().toLowerCase();
   const rows = allReceipts.filter(r => {
     if (!inDateRange(r.date, from, to)) return false;

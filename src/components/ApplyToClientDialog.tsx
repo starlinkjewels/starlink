@@ -2,7 +2,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
-import { balanceDue, fmtDate, fmtMoney, invoiceOrderIds, type Order } from "@/lib/db";
+import { balanceDue, fmtDate, fmtMoney, invoiceOrderIds, type Order, worksOnClientId } from "@/lib/db";
 import { ccy, fmtCcy } from "@/lib/currency";
 import { applyIncomeToClient } from "@/lib/clientPayments";
 import { RateInput } from "@/components/CurrencyFields";
@@ -30,7 +30,7 @@ function ApplyDialog({ txnId, onClose }: { txnId: string; onClose: () => void })
   const [invoiceId, setInvoiceId] = useState("");
   const [rate, setRate] = useState<number | "">("");
 
-  const clientsSorted = [...db.clients].sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const clientsSorted = db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
   const invLiveBalance = (ids: string[]) =>
     ids.map(oid => db.orders.find(o => o.id === oid))
       .filter((o): o is Order => !!o && o.status !== "Rejected")

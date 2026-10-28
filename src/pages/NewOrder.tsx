@@ -35,7 +35,7 @@ import { sendMail, orderReceivedEmail, MARKETING_EMAIL } from "@/lib/email";
 import { useDb } from "@/hooks/useDb";
 import { adminIds, notifyUsers } from "@/lib/notify";
 import { AssignPicker } from "@/components/AssignOrder";
-import { netFromGross } from "@/lib/weights";
+import { netFromGross, fmtG } from "@/lib/weights";
 import { PageHeader } from "@/components/PageHeader";
 import { uploadDataUrl } from "@/lib/storage";
 import { imageForUpload } from "@/lib/images";
@@ -980,7 +980,7 @@ export function NewOrderPage() {
                 </Field>
                 {/* Net = gross − the stones' weight (1 ct = 0.2 g): worked out, not typed. */}
                 <Field label="Est. Net Weight (g)  —  auto">
-                  <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight || ""}
+                  <Input type="number" readOnly tabIndex={-1} value={f.estimatedNetWeight ? fmtG(f.estimatedNetWeight) : ""}
                     className="rounded-xl h-11 bg-secondary/60 text-muted-foreground cursor-default" placeholder="gross − diamonds" aria-label="Est. Net Weight (worked out)" />
                 </Field>
                 <WeightCheck className="col-span-2 -mt-1" gross={Number(f.estimatedGrossWeight)} net={Number(f.estimatedNetWeight)} diamondCt={Number(f.diamondWeight)} />
@@ -1266,7 +1266,9 @@ export function NewOrderPage() {
               <div className="space-y-1.5">
                 {fromStock > 0 && row("From stock", fmtMoneyInr(Math.round(fromStock)))}
                 {bought > 0 && row("Bought for it", fmtMoneyInr(bought))}
-                {goldEst > 0 && row(`Gold (estimate, ${fine} g fine)`, fmtMoneyInr(goldEst))}
+                {goldEst > 0 && row(`Gold (estimate, ${fmtG(fine)} g fine)`, fmtMoneyInr(goldEst))}
+                {kind === "piece" && metalHasKarats && !goldPlanned && !(cmOn && f.csGold) && !f.productKarats && (Number(f.estimatedNetWeight) || Number(f.estimatedGrossWeight)) > 0
+                  && row("Gold", "choose the karats")}
                 {row("Material cost", fmtMoneyInr(cost), true)}
                 {sell > 0 && row(`Selling ($${grandTotal.toLocaleString()} at ₹${fx})`, fmtMoneyInr(sell))}
                 {sell > 0 && (
@@ -1310,7 +1312,7 @@ export function NewOrderPage() {
                   <div className="flex-1 min-w-0">
                     <p className="text-xs font-medium text-foreground">Weight-based estimate</p>
                     <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
-                      {!isDiamondOnly && <p>Metal: {f.estimatedNetWeight || 0}g × ${metalRate}/g = <span className="text-foreground font-medium">${Math.round(Number(f.estimatedNetWeight) * metalRate).toLocaleString()}</span></p>}
+                      {!isDiamondOnly && <p>Metal: {fmtG(f.estimatedNetWeight)}g × ${metalRate}/g = <span className="text-foreground font-medium">${Math.round(Number(f.estimatedNetWeight) * metalRate).toLocaleString()}</span></p>}
                       <p>Diamond: {f.diamondWeight}ct × ${diamondRate.toLocaleString()}/ct = <span className="text-foreground font-medium">${Math.round(Number(f.diamondWeight) * diamondRate).toLocaleString()}</span></p>
                       <p className="font-semibold text-foreground">Est. Total = ${autoValue.toLocaleString()}</p>
                     </div>

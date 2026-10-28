@@ -7,7 +7,7 @@ import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivi
 import { LotPicker } from "@/components/LotFields";
 import { lotParts, lotShape } from "@/lib/diamondLots";
 import { BuyMaterialForm, OpeningStockForm } from "@/components/BuyMaterialForm";
-import { updateDb, uid, toPureGold, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency } from "@/lib/db";
+import { updateDb, uid, toPureGold, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency, worksOnClientId } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
@@ -333,7 +333,7 @@ function SellDiamond({ open, onOpenChange }: PanelProps) {
   const [date, setDate] = useState(todayLocal());
   const [saving, setSaving] = useState(false);
 
-  const clients = db.clients.slice().sort((a, b) => a.companyName.localeCompare(b.companyName));
+  const clients = db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName));
   // Every account in the sale's currency that isn't switched off — older ones carry no "active" flag at all.
   const lockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === currency);
   const inStockPackets = (db.diamondPackets ?? []).filter(p => p.status === "in_stock" && companyOf(p) === companyId).sort((a, b) => (a.stockNumber || "").localeCompare(b.stockNumber || ""));

@@ -1590,7 +1590,10 @@ export interface Factory {
 }
 
 /** A factory's labour: ₹ a gram for each jewellery type, and the least it charges for a light piece. */
-export interface FactoryLabour { minimum?: number; perGram?: Record<string, number> }
+export interface FactoryLabour { minimum?: number;
+  /** The minimum is charged on a piece lighter than this (g); each factory sets its own. Unset: whenever gram × rate comes to less. */
+  minimumUnder?: number;
+  perGram?: Record<string, number> }
 
 // Finished jewelry already sitting in physical inventory — separate from the
 // raw-material Stock (gold grams / diamond carats, src/lib/stock.ts). Readable
@@ -1734,6 +1737,9 @@ export interface MaterialIssuance {
      *  and every weight band is its own. Diamond handling, CAD, other charges
      *  and metal the factory supplied are added on top, unaffected. */
     minimumLabour?: number;
+    /** The minimum applies to a piece lighter than this (g) — the factory's own band.
+     *  Unset (every order before it existed): whenever gram × rate comes to less. */
+    minimumUnderGrams?: number;
     diamondHandlingRate?: number;
     cadCharge?: number;
     otherCharges?: number;
@@ -3758,6 +3764,28 @@ export function worksOnClient(db: DB, user: Worker, c: Pick<Client, "id" | "acco
 export function currentUserClients(db: DB, user: Worker): Client[] {
   if (user.role !== "client" && reachOf(user, db.roles ?? []) === "all") return db.clients;
   return db.clients.filter((c) => worksOnClient(db, user, c));
+}
+
+/** Whether this person sees every client (an admin, or a role that reaches all work). */
+export function seesAllClients(db: DB, user: Worker | null | undefined): boolean {
+  return !!user && user.role !== "client" && reachOf(user, db.roles ?? []) === "all";
+}
+
+/** Whether this client id is within this person's work — for lists of money, bills and cards. */
+export function worksOnClientId(db: DB, user: Worker | null | undefined, clientId: string | undefined): boolean {
+  if (!user) return false;
+  if (seesAllClients(db, user)) return true;
+  const c = clientId ? db.clients.find((x) => x.id === clientId) : undefined;
+  if (!c) return false;
+  if (worksOnClient(db, user, c)) return true;
+  // The client of an order assigned to them — they take its payments too.
+  return user.role !== "client" && db.orders.some((o) => o.clientId === c.id && o.assignedEmployeeId === user.id && !o.deletedAt);
+}
+
+/** Whether a bill is within this person's work: their client's, or carrying an order of theirs. */
+export function worksOnInvoice(db: DB, user: Worker, i: Pick<Invoice, "clientId"> & Parameters<typeof invoiceOrderIds>[0]): boolean {
+  if (worksOnClientId(db, user, i.clientId)) return true;
+  return invoiceOrderIds(i).some((oid) => { const o = db.orders.find((x) => x.id === oid); return !!o && worksOnOrder(db, user, o); });
 }
 
 /**

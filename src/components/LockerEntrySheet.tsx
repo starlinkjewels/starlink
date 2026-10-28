@@ -4,6 +4,7 @@ import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Landmark } from "lucide
 import {
   updateDb, fmtMoney, todayLocal, stampFor, balanceDue, invoiceOrderIds, clientAccount,
   DEFAULT_LOCKER_CATEGORIES, DEFAULT_EXPENSE_CATEGORIES, type Order,
+  worksOnClientId,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -145,7 +146,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     who === "supplier" || who === "factory" || who === "broker" || who === "employee" ? who : who === "client" && dir === "in" ? "client" : null;
   const parties: { id: string; label: string }[] = !who ? [] :
     who === "client" ? db.clients
-      .filter(c => (dir === "out" ? (c.creditBalance || 0) > 0.005 : c.status === "active"))
+      .filter(c => (dir === "out" ? (c.creditBalance || 0) > 0.005 : c.status === "active") && worksOnClientId(db, user, c.id))
       .sort((a, b) => a.companyName.localeCompare(b.companyName))
       .map(c => ({ id: c.id, label: dir === "out" ? `${c.companyName} — ${fmtMoney(c.creditBalance || 0)} credit` : c.companyName }))
     : who === "supplier" ? db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(s => ({ id: s.id, label: s.name }))

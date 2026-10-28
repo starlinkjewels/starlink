@@ -5,6 +5,7 @@ import { BarChart3, Factory, LayoutDashboard, ListOrdered, ShoppingCart, Trendin
 import { useAuth } from "@/lib/auth";
 import { useDb, useDbVersion } from "@/hooks/useDb";
 import { currentUserOrders, costDataReady } from "@/lib/db";
+import { reachOf } from "@/lib/permissions";
 import { presetPeriod, previousPeriod, periodLabel, type Period } from "@/lib/analytics";
 import { PageHeader, TabBar } from "@/components/PageHeader";
 import { FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
@@ -47,7 +48,12 @@ export function ReportsHub() {
   const coClients = useMemo(() => new Set(companyId === "all" ? [] : db.clients.filter(c => companyIdOfClient(c) === companyId).map(c => c.id)),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [companyId, version]);
-  const emp = isAdmin && employeeId !== "all" ? db.users.find(u => u.id === employeeId) : undefined;
+  // An employee who works on their own clients reports on just those: their
+  // clients, their orders and the money from them — never the whole client list.
+  const own = !!user && !isAdmin && user.role !== "client" && reachOf(user, db.roles ?? []) !== "all";
+  const emp = isAdmin
+    ? (employeeId !== "all" ? db.users.find(u => u.id === employeeId) : undefined)
+    : own ? db.users.find(u => u.id === user!.id) ?? ({ id: user!.id, name: user!.name } as (typeof db.users)[number]) : undefined;
   const [tab, setTabRaw] = useState<TabKey>(() => read("reports-tab", "overview"));
   const setPeriod = (p: Period) => { setPeriodRaw(p); write("reports-period", p); };
   const setTab = (t: TabKey) => { setTabRaw(t); write("reports-tab", t); };
@@ -96,7 +102,7 @@ export function ReportsHub() {
     version,
     fileTag: [period.from || "start", period.to || "today"].join("_to_")
       + (clientId !== "all" ? `_${(db.clients.find(c => c.id === clientId)?.companyName ?? "client").replace(/\W+/g, "-")}` : "")
-      + (emp ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
+      + (emp && isAdmin ? `_${emp.name.replace(/\W+/g, "-")}` : ""),
   };
   const combinedScope = empScope || companyId !== "all"
     ? (o: Order) => (!empScope || empScope(o)) && (companyId === "all" || companyOfOrder(db, o) === companyId)
@@ -127,7 +133,7 @@ export function ReportsHub() {
         subtitle={<>
           {periodLabel(period)}{ctx.prev ? ` · compared with ${periodLabel(ctx.prev)}` : ""}
           {clientId !== "all" ? ` · ${db.clients.find(c => c.id === clientId)?.companyName}` : ""}
-          {emp ? ` · ${emp.name}'s work` : ""}
+          {emp && isAdmin ? ` · ${emp.name}'s work` : ""}
           {companyId !== "all" ? ` · ${companyById(db.settings, companyId).name}` : ""}
         </>}
       />

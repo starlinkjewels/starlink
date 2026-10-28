@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Undo2 } from "lucide-react";
 import { toast } from "sonner";
-import { updateDb, uid, fmtMoney, todayLocal, stampFor } from "@/lib/db";
+import { updateDb, uid, fmtMoney, todayLocal, stampFor, worksOnClientId } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { refundable, refundProblem, writeClientRefund, type RefundInput } from "@/lib/clientRefunds";
@@ -46,7 +46,7 @@ export function RefundClientSheet({ open, onOpenChange, clientId: fixedClient, l
   const client = db.clients.find(c => c.id === clientId);
   const held = clientId ? refundable(db, clientId) : 0;
   // Every client holding credit; with a client fixed, that one whatever it holds.
-  const clients = db.clients.filter(c => (c.creditBalance || 0) > 0.005 || c.id === clientId)
+  const clients = db.clients.filter(c => ((c.creditBalance || 0) > 0.005 && worksOnClientId(db, user, c.id)) || c.id === clientId)
     .sort((a, b) => a.companyName.localeCompare(b.companyName));
   const locker = db.lockers.find(l => l.id === lockerId);
   const cur = ccy(locker?.currency);
