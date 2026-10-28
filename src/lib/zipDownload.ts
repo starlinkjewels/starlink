@@ -47,6 +47,8 @@ export async function downloadAsZip(
   files: { url: string; filename: string }[],
   zipName: string,
   onProgress?: (done: number, total: number) => void,
+  /** Off: not written to Activity (an admin's own Catalog downloads). */
+  log = true,
 ): Promise<{ added: number; failed: string[] }> {
   if (!exportAllowed()) return { added: 0, failed: [] };
   const zip = new JSZip();
@@ -79,7 +81,7 @@ export async function downloadAsZip(
 
   const blob = await zip.generateAsync({ type: "blob" });
   const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
-  logEvent("export", `Downloaded ${added} file${added !== 1 ? "s" : ""} as ${filename}`, { file: filename, files: added });
+  if (log) logEvent("export", `Downloaded ${added} file${added !== 1 ? "s" : ""} as ${filename}`, { file: filename, files: added });
   saveBlob(blob, filename);
   return { added, failed };
 }
@@ -89,13 +91,13 @@ export async function downloadAsZip(
  * tab instead of saving it (the browser ignores "download" on another site's
  * link), so the file is fetched and saved; if it can't be fetched, it opens.
  */
-export async function downloadFile(url: string, filename: string): Promise<void> {
+export async function downloadFile(url: string, filename: string, log = true): Promise<void> {
   if (!exportAllowed()) return;
   try {
     const res = await fetch(url);
     if (!res.ok) throw new Error(String(res.status));
     saveBlob(await res.blob(), filename);
-    logEvent("export", `Downloaded ${filename}`, { file: filename, files: 1 });
+    if (log) logEvent("export", `Downloaded ${filename}`, { file: filename, files: 1 });
   } catch {
     window.open(url, "_blank", "noopener");
   }
