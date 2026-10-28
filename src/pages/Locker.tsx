@@ -45,6 +45,12 @@ function pdfNum(n: number, currency?: string): string {
  *  the oldest entry, never sorted or searched with the rest. */
 type LedgerRow = { id: string; t: LockerTransaction | null };
 
+/** An entry's category: "Client Payment — Givara" is a Client Payment; a transfer, Transfer; none, Other. */
+function categoryOf(t: LockerTransaction): string {
+  const c = (t.category || (t.type === "transfer_in" || t.type === "transfer_out" ? "Transfer" : "")).split(" — ")[0].trim();
+  return c || "Other";
+}
+
 const TXN_TYPE: Record<LockerTxnType, { label: string; tone: "green" | "red" | "blue" }> = {
   income: { label: "Income", tone: "green" },
   expense: { label: "Expense", tone: "red" },
@@ -71,7 +77,8 @@ export function LockerPage() {
   const [showExport, setShowExport] = useState(false);
   const [filterFrom, setFilterFrom] = useState("");
   const [filterTo, setFilterTo] = useState("");
-  const [filterType, setFilterType] = useState<"all" | "income" | "expense" | "transfer_in" | "transfer_out">("all");
+  // The ledger narrows by category (in or out is the green or red mark on each line).
+  const [filterCat, setFilterCat] = useState("");
   // "Record entry" — one form for every entry (components/LockerEntrySheet).
   const [entryOpen, setEntryOpen] = useState(false);
   // Repairing an income row that was typed in as a loose entry when it was
@@ -231,11 +238,15 @@ export function LockerPage() {
 
   const filterFromDate = filterFrom ? new Date(filterFrom + "T00:00:00") : null;
   const filterToDate = filterTo ? new Date(filterTo + "T23:59:59.999") : null;
-  const filtersActive = !!filterFrom || !!filterTo || filterType !== "all";
+  const filtersActive = !!filterFrom || !!filterTo || !!filterCat;
   // Filters narrow what's SHOWN — the running balance below is always computed
   // from the full, unfiltered history, so a filtered view still shows each
   // entry's true balance-at-the-time, like a bank statement search does.
-  const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (filterType === "all" || t.type === filterType));
+  const filteredTxns = txns.filter(t => inDateRange(t.createdAt, filterFromDate, filterToDate) && (!filterCat || categoryOf(t) === filterCat));
+  // The categories this account's entries are in, for the filter — with how many each.
+  const catCounts = new Map<string, number>();
+  for (const t of txns) catCounts.set(categoryOf(t), (catCounts.get(categoryOf(t)) ?? 0) + 1);
+  const catOptions = [...catCounts.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([c, n]) => ({ value: c, label: `${c} · ${n}` }));
 
   const totalIn = txns.filter(t => t.type === "income" || t.type === "transfer_in").reduce((s, t) => s + t.amountInr, 0);
   const totalOut = txns.filter(t => t.type === "expense" || t.type === "transfer_out").reduce((s, t) => s + t.amountInr, 0);
@@ -331,8 +342,8 @@ export function LockerPage() {
           </div>
         );
       } },
-    { key: "type", header: "Type", sortValue: r => (r.t ? typeOf(r.t).label : ""),
-      cell: r => (r.t ? <CellTag tone={typeOf(r.t).tone}>{typeOf(r.t).label}</CellTag> : null) },
+    { key: "category", header: "Category", sortValue: r => (r.t ? categoryOf(r.t) : ""), csv: r => (r.t ? categoryOf(r.t) : ""),
+      cell: r => (r.t ? <CellTag>{categoryOf(r.t)}</CellTag> : null) },
     { key: "debit", header: "Debit", align: "right", kind: "number", sortValue: r => (r.t && !isIn(r.t) ? r.t.amountInr : null),
       cell: r => (r.t && !isIn(r.t) ? <CellAmount tone="out">{fmtCcy(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
     { key: "credit", header: "Credit", align: "right", kind: "number", sortValue: r => (r.t && isIn(r.t) ? r.t.amountInr : null),
@@ -347,12 +358,12 @@ export function LockerPage() {
     const cur = ccy(selected.currency);
     downloadCsv(
       `Locker-${selected.name.replace(/\s+/g, "_")}`,
-      ["Date", "Description", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
+      ["Date", "Description", "Category", `Money In (${cur})`, `Money Out (${cur})`, `Balance (${cur})`],
       txns.filter(t => inDateRange(t.createdAt, from, to)).map(t => {
         const signed = txnSigned(t);
         // Rounded to the currency's cents: adding up dollar or euro amounts
         // leaves float noise (…0000000004) on a running total.
-        return [fmtDate(t.createdAt), txnText(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
+        return [fmtDate(t.createdAt), txnText(t), categoryOf(t), signed > 0 ? signed : "", signed < 0 ? -signed : "", roundCcy(txnBalances.get(t.id) ?? 0, cur)];
       }),
     );
   };
@@ -468,16 +479,10 @@ export function LockerPage() {
           <DataTable
             filters={[
               { kind: "date", from: filterFrom, to: filterTo, onChange: (f, t) => { setFilterFrom(f); setFilterTo(t); } },
-              { kind: "select", label: "Type", allLabel: "All types", value: filterType === "all" ? "" : filterType,
-                onChange: v => setFilterType((v || "all") as typeof filterType),
-                options: [
-                  { value: "income", label: "Income" },
-                  { value: "expense", label: "Expense" },
-                  { value: "transfer_in", label: "Transfer in" },
-                  { value: "transfer_out", label: "Transfer out" },
-                ] },
+              { kind: "select", label: "Category", allLabel: "All categories", value: filterCat,
+                onChange: v => setFilterCat(v), options: catOptions },
             ]}
-            onClearFilters={() => { setFilterFrom(""); setFilterTo(""); setFilterType("all"); }}
+            onClearFilters={() => { setFilterFrom(""); setFilterTo(""); setFilterCat(""); }}
             exports={[{ label: "PDF or Excel", icon: Download, hint: "With the running balance", onSelect: () => setShowExport(true) }]}
             summary={
               <StatStrip items={[
@@ -487,7 +492,7 @@ export function LockerPage() {
                 { label: "Balance", value: fmtCcy(lockerBalance(selected, db.lockerTransactions), selected.currency), tone: "strong", op: "=", icon: Wallet },
               ]} note={filtersActive ? "Whole account — not narrowed by the filters" : undefined} />
             }
-            resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterType}`}
+            resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterCat}`}
             id="locker-ledger"
             noun="transaction"
             rows={ledgerRows}

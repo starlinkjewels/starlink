@@ -12,6 +12,8 @@ export { sendNotificationPush } from "./notifications";
 export { sendMail } from "./mail";
 // An admin changing a client's sign-in email or password (see clientLogin.ts).
 export { setClientLogin } from "./clientLogin";
+// Product videos made playable on every browser and device (see videoWeb.ts).
+export { makeWebVideo } from "./videoWeb";
 // Smart Pipelines — the business's own automations (Settings → Autopilot; see pipelines/).
 export { pipelineOnOrder, pipelineOnClient, pipelineOnInvoice, pipelineOnAnswer, pipelineTick, pipelineTest, pipelineRunNow } from "./pipelines";
 

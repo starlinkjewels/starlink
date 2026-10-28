@@ -1,4 +1,5 @@
 import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
+import { WebVideo } from "@/components/ProductVideo";
 import { metalLabel } from "@/lib/metals";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { Fragment, useState, type MouseEvent } from "react";
@@ -550,7 +551,7 @@ export function ReadyStockPage() {
       <Dialog open={!!videoView} onOpenChange={o => { if (!o) setVideoView(null); }}>
         <DialogContent className="max-w-4xl rounded-2xl p-2 sm:p-3">
           <DialogHeader className="px-2 pt-1"><DialogTitle className="font-display text-lg">Product Video</DialogTitle></DialogHeader>
-          {videoView && <video src={videoView} controls autoPlay muted playsInline preload="metadata" className="w-full max-h-[70vh] rounded-xl bg-black" />}
+          {videoView && <WebVideo src={videoView} controls autoPlay muted loop playsInline preload="auto" className="w-full max-h-[70vh] rounded-xl bg-black" />}
         </DialogContent>
       </Dialog>
     </div>

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { CategoryCombo } from "@/components/CategoryCombo";
 import { toast } from "sonner";
 import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Landmark } from "lucide-react";
 import {
@@ -136,11 +137,6 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   }, [accountId]);
 
   /* ── The people and lists for the party picked ── */
-  const expenseCats = useMemo(() => {
-    const list = db.settings.expenseCategories?.length ? db.settings.expenseCategories : DEFAULT_EXPENSE_CATEGORIES;
-    return list.includes("Salary") ? list : ["Salary", ...list];
-  }, [db.settings.expenseCategories]);
-  const lockerCats = db.settings.lockerCategories?.length ? db.settings.lockerCategories : DEFAULT_LOCKER_CATEGORIES;
   // A new one can be added right here — except a client to refund (a new client holds no credit).
   const newKind: "client" | "supplier" | "factory" | "broker" | "employee" | null =
     who === "supplier" || who === "factory" || who === "broker" || who === "employee" ? who : who === "client" && dir === "in" ? "client" : null;
@@ -469,10 +465,9 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
           <div className={who === "other" ? "" : "grid grid-cols-1 sm:grid-cols-2 gap-3"}>
             <div>
               <Label className="text-xs">Category</Label>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className={field} aria-label="Category"><SelectValue placeholder="Choose a category" /></SelectTrigger>
-                <SelectContent>{(who === "other" ? lockerCats : who === "expense" ? expenseCats.filter(c => c !== "Salary") : expenseCats).map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-              </Select>
+              {/* Pick one, or type a new one — kept for next time. */}
+              <CategoryCombo kind={who === "other" ? "locker" : "expense"} value={category} onChange={setCategory} className={field}
+                exclude={who === "expense" ? ["Salary"] : []} include={who === "employee" ? ["Salary"] : []} />
             </div>
             {who !== "other" && (
               <div>

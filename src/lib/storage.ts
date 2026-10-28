@@ -2,6 +2,7 @@
 //
 // All images/videos are stored in Firebase Storage (NOT inline in Firestore —
 // base64 blobs would blow the 1 MB/doc limit). Docs keep only the download URL.
+import { webVideoUrl } from "./webVideo";
 import { ref, uploadString, uploadBytesResumable, getDownloadURL, deleteObject } from "firebase/storage";
 import { storage } from "./firebase";
 
@@ -68,5 +69,10 @@ export async function deleteByUrl(url?: string): Promise<void> {
     await deleteObject(ref(storage, url));
   } catch {
     // ignore — object may already be gone or be an external URL
+  }
+  // A video's playable copy goes with it (lib/webVideo.ts) — never left behind downloadable.
+  const copy = webVideoUrl(url);
+  if (copy && /\.(mp4|mov|m4v|webm|3gp|avi|mkv)(\?|$)/i.test(decodeURIComponent(url.split("?")[0]))) {
+    try { await deleteObject(ref(storage, copy)); } catch { /* no copy was made */ }
   }
 }

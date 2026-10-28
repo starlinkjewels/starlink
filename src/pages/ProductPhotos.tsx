@@ -1,4 +1,6 @@
 import { useCan } from "@/hooks/useCan";
+import { WebVideo } from "@/components/ProductVideo";
+import { requestPlayable } from "@/lib/webVideo";
 import { PageHeader, TabBar } from "@/components/PageHeader";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState } from "react";
@@ -189,7 +191,7 @@ function Lightbox({ items, startIndex, onClose }: { items: GalleryItem[]; startI
             transition={{ duration: 0.22, ease: "easeOut" }} className="flex-1 flex items-center justify-center px-14 h-full min-h-0">
             {item.type === "image"
               ? <img src={item.src} alt={item.label} className="max-w-full max-h-full object-contain rounded-xl select-none" style={{ maxHeight: "calc(100vh - 140px)" }} onClick={onClose} />
-              : <video src={item.src} controls autoPlay muted playsInline preload="metadata" className="max-w-full rounded-xl" style={{ maxHeight: "calc(100vh - 140px)" }} />}
+              : <WebVideo src={item.src} controls autoPlay muted loop playsInline preload="auto" className="max-w-full rounded-xl" style={{ maxHeight: "calc(100vh - 140px)" }} />}
           </motion.div>
         </AnimatePresence>
         {hasNext && <button onClick={next} className="absolute right-2 z-10 h-11 w-11 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"><ChevronRight className="h-6 w-6" /></button>}
@@ -355,6 +357,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
     setVideoUploading(true);
     try {
       const url = await uploadFile(file, `productPhotos/${currentFolderId}`);
+      requestPlayable(url);
       updateDb(d => d.productPhotoItems.unshift({ id: uid("ppi_"), folderId: currentFolderId, name: file.name.replace(/\.[^.]+$/, "").slice(0, 60) || "Video", type: "video", url, createdBy: user!.id, createdAt: new Date().toISOString() } as ProductPhotoItem));
       toast.success("Video uploaded");
     } catch { toast.error("Failed to upload the video"); }
@@ -412,6 +415,7 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
         const url = isVideo
           ? await uploadFile(f, `productPhotos/${folderId}`)
           : await putPhoto(f, `productPhotos/${folderId}`);
+        if (isVideo) requestPlayable(url);
         made.push({
           id: uid("ppi_"), folderId,
           name: f.name.replace(/\.[^.]+$/, "").slice(0, 60) || (isVideo ? "Video" : "Image"),

@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowDownRight, ArrowUpRight, CalendarDays, Check, ChevronDown, Minus, Download, type LucideIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -102,12 +103,6 @@ export function PeriodPicker({ value, onChange, allTime = false, label = "Period
   const [open, setOpen] = useState(false);
   const key = presetOf(value);
   const text = !value.from && !value.to ? "All time" : key ? PRESETS.find(p => p.key === key)!.label : dateRangeText(value.from, value.to);
-  const pill = (on: boolean, children: ReactNode, onClick: () => void, k: string) => (
-    <button key={k} type="button" onClick={onClick} aria-pressed={on}
-      className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors inline-flex items-center gap-1.5 ${on ? "bg-primary text-primary-foreground border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary/70"}`}>
-      {on && <Check className="h-3 w-3" />}{children}
-    </button>
-  );
   const box = "w-full h-9 rounded-lg border border-border bg-white px-2.5 text-sm text-brand-dark focus:outline-none focus:ring-2 focus:ring-primary/30";
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -119,10 +114,21 @@ export function PeriodPicker({ value, onChange, allTime = false, label = "Period
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[26rem] max-w-[calc(100vw-2rem)] p-4 rounded-2xl space-y-3">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {allTime && pill(!value.from && !value.to, "All time", () => { onChange({ from: "", to: "" }); setOpen(false); }, "all")}
-          {PRESETS.map(p => pill(key === p.key, p.label, () => { onChange(presetPeriod(p.key)); setOpen(false); }, p.key))}
-        </div>
+        {/* One dropdown for the usual ranges; the two dates below for any other. */}
+        <Select value={!value.from && !value.to && allTime ? "__all" : key ?? "__custom"}
+          onValueChange={v => {
+            if (v === "__all") { onChange({ from: "", to: "" }); setOpen(false); }
+            else if (v !== "__custom") { onChange(presetPeriod(v as (typeof PRESETS)[number]["key"])); setOpen(false); }
+          }}>
+          <SelectTrigger className="h-10 rounded-xl text-sm" aria-label={label}>
+            <CalendarDays className="h-4 w-4 shrink-0 text-primary/70 mr-2" /><span className="flex-1 min-w-0 text-left truncate"><SelectValue /></span>
+          </SelectTrigger>
+          <SelectContent className="max-h-80">
+            {allTime && <SelectItem value="__all">All time</SelectItem>}
+            {PRESETS.map(p => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+            {!key && (value.from || value.to || !allTime) && <SelectItem value="__custom">{(value.from || value.to) ? dateRangeText(value.from, value.to) : "Choose dates below"}</SelectItem>}
+          </SelectContent>
+        </Select>
         <div className="grid grid-cols-2 gap-2">
           <label className="text-[11px] text-muted-foreground space-y-1">
             <span>From</span>

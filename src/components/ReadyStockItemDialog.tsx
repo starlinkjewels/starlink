@@ -1,7 +1,6 @@
 import { ListCombo } from "@/components/ListCombo";
+import { requestPlayable } from "@/lib/webVideo";
 import { ProductVideo } from "@/components/ProductVideo";
-import { canPlayVideo, UNPLAYABLE_VIDEO_HELP } from "@/lib/videoCheck";
-import { confirmBox } from "@/lib/confirm";
 import { useRef, useState } from "react";
 import { ImagePlus, X, Film, Gem } from "lucide-react";
 import { toast } from "sonner";
@@ -114,8 +113,6 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
     if (!file) return;
     if (!file.type.startsWith("video/")) { toast.error("Please choose a video file"); return; }
     if (file.size > 500 * 1024 * 1024) { toast.error("Video is too large — keep it under 500 MB"); return; }
-    // A video the browser can't play (an iPhone "High Efficiency" one) is caught here, not by the client.
-    if (!(await canPlayVideo(file)) && !(await confirmBox(`${UNPLAYABLE_VIDEO_HELP}\n\nUse it anyway?`, { confirmText: "Use it anyway" }))) return;
     if (video.startsWith("blob:")) URL.revokeObjectURL(video);
     setVideoFile(file);
     setVideo(URL.createObjectURL(file));
@@ -141,6 +138,8 @@ export function ReadyStockItemDialog({ item, defaults, onClose, onSaved }: {
       const videoUrl = videoFile
         ? await uploadFile(videoFile, `readyStock/${itemId}`)
         : (/^https?:\/\//i.test(video) ? video : undefined);
+      // A copy every browser and device plays — made on the server (lib/webVideo.ts).
+      if (videoFile && videoUrl) requestPlayable(videoUrl);
       updateDb(d => {
         if (!d.readyStock) d.readyStock = [];
         const prev = editingId ? d.readyStock.find(x => x.id === editingId) : undefined;
