@@ -28,7 +28,7 @@ import { isNonGoldMetal, metalLabel } from "@/lib/metals";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { SectionTitle } from "@/components/SectionTitle";
 import { WeightCheck } from "@/components/WeightCheck";
-import { weightProblem, pieceWeights, fmtG } from "@/lib/weights";
+import { weightProblem, pieceWeights, isSelfMetal, fmtG } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
@@ -1295,6 +1295,9 @@ function OrderDetailPageBody() {
         // order so the card, the band and every export read the same figures
         // instead of the estimate from the day it was ordered.
         if (hasNet) o.actualNetWeight = netW;
+        // Weighed as platinum or silver with no gold typed: a net on file from
+        // before is the same metal, now under "other metal" — never counted twice.
+        else if (w?.selfMetal) delete o.actualNetWeight;
         const faGross = Math.round(((hasNet ? netW : 0) + faOtherW + xG.metal + xG.stone + usedDiaCt * CARAT_TO_GRAM) * 1000) / 1000;
         // What the scale said, when it was weighed; else worked out from the parts.
         if (weighed) o.actualGrossWeight = w!.gross;
@@ -1743,6 +1746,13 @@ function OrderDetailPageBody() {
       return !isNaN(n) && n > 0 ? n : onFile;
     };
     const finishNet = db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.finishedNetWeight != null)?.finishedNetWeight;
+    // A platinum or silver piece: its metal is under "other metal" — the net
+    // here is all of the piece's metal, not a second one beside it.
+    if (isSelfMetal(order)) return {
+      gross: keep(actGrossW, order.actualGrossWeight),
+      net: keep(actNetW, pieceWeights(order, db.materialIssuances).net),
+      diamondCt: keep(actDiamW, order.actualDiamondWeight ?? (order.diamondWeight || undefined)),
+    };
     return {
       gross: keep(actGrossW, order.actualGrossWeight),
       net: keep(actNetW, order.actualNetWeight ?? finishNet),
@@ -1771,10 +1781,18 @@ function OrderDetailPageBody() {
     // stand after saving — a new net against the gross already on file too.
     const wp = weightProblem(actualWeightsAfter());
     if (wp) { toast.error(wp); return; }
+    // A platinum or silver piece: the net typed is all its metal — the gold
+    // beside it (if any) stays, the rest is the piece's own metal.
+    const self = isSelfMetal(order);
+    const goldBeside = self ? Math.max(0, pieceWeights(order, db.materialIssuances).net - (order.otherMetalWeight ?? 0)) : 0;
+    if (self && has(nw) && nw <= goldBeside) { toast.error(`The net is all the piece's metal — it can't be less than the ${fmtG(goldBeside)} g of gold in it.`); return; }
     updateDb(d => {
       const o = d.orders.find(x => x.id === order.id)!;
       if (has(gw)) o.actualGrossWeight   = gw;
-      if (has(nw)) o.actualNetWeight     = nw;
+      if (has(nw) && self) {
+        o.otherMetalWeight = Math.round((nw - goldBeside) * 1000) / 1000;
+        if (goldBeside <= 0) delete o.actualNetWeight;
+      } else if (has(nw)) o.actualNetWeight = nw;
       if (has(dw)) o.actualDiamondWeight = dw;
       if (shipEntered) o.shippingCharge = ship;
       if (makingEntered) o.actualMakingCharges = mk;

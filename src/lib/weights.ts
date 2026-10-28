@@ -93,6 +93,15 @@ export interface PieceWeights {
 }
 
 /**
+ * A platinum or silver piece whose own metal Final Approval recorded under
+ * "other metal" (the scale's weight less the stones) — not a two-tone piece.
+ */
+export function isSelfMetal(o: Pick<Order, "metal" | "otherMetal" | "otherMetalWeight">): boolean {
+  return pos(o.otherMetalWeight) > 0 && !!o.otherMetal?.trim() && !!o.metal
+    && o.otherMetal.trim().toLowerCase() === o.metal.trim().toLowerCase();
+}
+
+/**
  * The weights of an order's piece, from the best figures there are:
  * actual details first, then the finished-piece net weight recorded with the
  * factory, then the estimates taken when the order was placed. Where no gross
@@ -103,6 +112,19 @@ export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): Piec
   const finish = issuances.find(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
   const diamondCt = pos(o.actualDiamondWeight ?? o.diamondWeight);
   const actualNet = o.actualNetWeight ?? finish?.finishedNetWeight;
+  if (isSelfMetal(o)) {
+    // A platinum or silver piece weighed at Final Approval: its metal is on
+    // file under "other metal". That is the piece's metal, not a second one,
+    // and the estimate (the same metal, guessed) no longer counts. A net on
+    // file is gold beside it only when the scale has room for it — else it is
+    // the same metal written down before it was weighed.
+    const metal = pos(o.otherMetalWeight), stonesG = diamondCt * CARAT_TO_GRAM;
+    const onScale = pos(o.actualGrossWeight), typed = pos(actualNet);
+    const gold = typed && (!onScale || typed + metal + stonesG <= onScale + TOLERANCE_G) ? typed : 0;
+    const net = metal + gold;
+    const gross = onScale || net + stonesG;
+    return { gross: n3(gross), net: n3(net), other: 0, diamondCt: n3(diamondCt), estimated: false, problem: weightProblem({ gross, net, diamondCt }) };
+  }
   // metalWeight: the old single "gold weight" estimate — metal only, so net.
   const net = pos(actualNet ?? (o.estimatedNetWeight || o.metalWeight));
   const other = pos(o.otherMetalWeight);
