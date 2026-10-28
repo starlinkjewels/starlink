@@ -565,6 +565,13 @@ export function orderCost(db: DB, order: Order, depth = 0): OrderCost {
     const f = db.factories.find(x => x.id === mi.factoryId);
     out.labour.push({ label: `${f?.name ?? "Factory"} — making & labour`, amountInr: r2(charge) });
   }
+  // A freelance designer's charge for the design, booked when it was approved
+  // (lib/designers.ts). An in-house designer's work is salary, an overhead.
+  for (const j of db.cadJobs ?? []) {
+    if (j.orderId !== order.id || j.status !== "approved" || !(j.chargeInr && j.chargeInr > 0)) continue;
+    const who = (db.designers ?? []).find(x => x.id === j.designerId)?.name ?? "Designer";
+    out.labour.push({ label: `CAD — ${who}`, amountInr: r2(j.chargeInr) });
+  }
 
   const all = [...out.gold, ...out.diamond, ...out.materials, ...out.labour, ...out.other];
   // The pieces themselves — everything but the freight and other costs of sending them.

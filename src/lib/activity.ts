@@ -6,6 +6,7 @@ import { db as fsdb, auth } from "./firebase";
 import { loadDb, updateDbAs, collectionLoaded, invoiceOrderIds, type DB, type Invoice } from "./db";
 import { companyIdOfInvoice } from "./companies";
 import { stable, type ActivityEntry, type LoggedChange } from "./activityFormat";
+import { designerDeleteWhy, designerPayments } from "./designers";
 
 /**
  * Reading the activity log, and undoing what it records.
@@ -105,6 +106,22 @@ export function undoCheck(e: ActivityEntry, d: DB = loadDb()): UndoCheck {
   const clashes = invoiceClashes(e.changes, d);
   if (clashes.length) {
     return { ok: false, reason: "Can't undo safely — the invoice would clash with the book as it is now.", moved: clashes };
+  }
+  // Designers and their designs: giving work or paying never touches the
+  // designer's own record, so "unchanged since" doesn't cover these.
+  for (const c of e.changes) {
+    if (c.col === "designers" && c.op === "add") {
+      const x = (d.designers ?? []).find(y => y.id === c.id);
+      const why = x ? designerDeleteWhy(d, x) : undefined;
+      if (why) return { ok: false, reason: `Can't undo — ${why}.` };
+    }
+    if (c.col === "cadJobs") {
+      const now = (d.cadJobs ?? []).find(j => j.id === c.id);
+      const was = (c.before as { status?: string } | null | undefined)?.status;
+      if (now?.status === "approved" && was !== "approved" && designerPayments(d, now.designerId).some(t => t.cadJobId === now.id)) {
+        return { ok: false, reason: "Can't undo — a payment was made against this design. Move or cancel that payment in the Locker first." };
+      }
+    }
   }
   return { ok: true };
 }

@@ -42,6 +42,8 @@ const LockerPage = lazy(() => import("./pages/Locker").then(m => ({ default: m.L
 const SuppliersPage = lazy(() => import("./pages/Suppliers").then(m => ({ default: m.SuppliersPage })));
 const SupplierHistoryPage = lazy(() => import("./pages/SupplierHistory").then(m => ({ default: m.SupplierHistoryPage })));
 const BrokerHistoryPage = lazy(() => import("./pages/BrokerHistory").then(m => ({ default: m.BrokerHistoryPage })));
+const DesignersPage = lazy(() => import("./pages/Designers").then(m => ({ default: m.DesignersPage })));
+const DesignerHistoryPage = lazy(() => import("./pages/DesignerHistory").then(m => ({ default: m.DesignerHistoryPage })));
 const StockPage = lazy(() => import("./pages/Stock").then(m => ({ default: m.StockPage })));
 const StockSectionPage = lazy(() => import("./pages/StockSection").then(m => ({ default: m.StockSectionPage })));
 const FactoriesPage = lazy(() => import("./pages/Factories").then(m => ({ default: m.FactoriesPage })));
@@ -142,6 +144,7 @@ export function App() {
         () => import("./pages/Employees"), () => import("./pages/EmployeeDetail"),
         () => import("./pages/Suppliers"), () => import("./pages/SupplierHistory"),
         () => import("./pages/Factories"), () => import("./pages/FactoryHistory"),
+        () => import("./pages/Designers"), () => import("./pages/DesignerHistory"),
         () => import("./pages/Stock"), () => import("./pages/StockSection"),
         () => import("./pages/Locker"), () => import("./pages/Reports"),
         () => import("./pages/Profile"), () => import("./pages/Settings"),
@@ -202,6 +205,8 @@ export function App() {
           <Route path="stock/:section" element={<Protected roles={["admin","employee"]}><StockSectionPage /></Protected>} />
           <Route path="factories" element={<Protected roles={["admin","employee"]}><FactoriesPage /></Protected>} />
           <Route path="factories/:id" element={<Protected roles={["admin","employee"]}><FactoryHistoryPage /></Protected>} />
+          <Route path="designers" element={<Protected roles={["admin","employee"]}><DesignersPage /></Protected>} />
+          <Route path="designers/:id" element={<Protected roles={["admin","employee"]}><DesignerHistoryPage /></Protected>} />
           <Route path="ready-stock" element={<Protected roles={["admin","employee","client"]}><ReadyStockPage /></Protected>} />
           <Route path="ready-stock/:id" element={<Protected roles={["admin","employee","client"]}><ReadyStockDetailPage /></Protected>} />
           <Route path="giftcard" element={<Protected roles={["client"]}><GiftCardPage /></Protected>} />

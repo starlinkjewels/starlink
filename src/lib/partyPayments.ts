@@ -260,3 +260,25 @@ export function notifyClientPayment(d: DB, clientId: string, amountUsd: number, 
   });
 }
 
+
+/**
+ * Pay a freelance CAD designer from a rupee account — against one approved
+ * design, or on account (settling their oldest approved designs first). The
+ * account entry is the payment itself (refType "designerPayment", refId = the
+ * designer), as a broker's is: correcting or cancelling it there is the whole
+ * of it, and their due is read from these entries (lib/designers.ts).
+ */
+export function writeDesignerPayment(d: DB, a: MoneyArgs & { designerId: string; cadJobId?: string }): void {
+  const designer = (d.designers ?? []).find(x => x.id === a.designerId);
+  if (!designer) throw new Error("That designer is not there any more");
+  if (!(a.amount > 0)) throw new Error("Enter the amount");
+  const job = a.cadJobId ? (d.cadJobs ?? []).find(j => j.id === a.cadJobId && j.designerId === designer.id) : undefined;
+  if (!d.lockerTransactions) d.lockerTransactions = [];
+  d.lockerTransactions.push({
+    id: uid("ltx_"), lockerId: a.lockerId, type: "expense", amountInr: a.amount, currency: "INR",
+    category: `Designer Payment — ${designer.name}${job ? ` — ${job.orderNumber}` : ""}`,
+    refType: "designerPayment", refId: designer.id,
+    ...(job ? { cadJobId: job.id } : {}),
+    note: a.note?.trim() || undefined, recordedBy: a.userId, createdAt: a.at,
+  });
+}

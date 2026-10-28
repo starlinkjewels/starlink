@@ -31,6 +31,7 @@ import { WeightCheck } from "@/components/WeightCheck";
 import { weightProblem, pieceWeights, fmtG } from "@/lib/weights";
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
+import { OrderDesignBlock } from "@/components/designers/OrderDesignBlock";
 import { OrderEditDialog } from "@/components/OrderEditDialog";
 import { OrderPaymentEditDialog } from "@/components/OrderPaymentEditDialog";
 import { cancelAccess, cancelBlocker, orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
@@ -2716,14 +2717,15 @@ function OrderDetailPageBody() {
         </div>
       )}
 
-      {/* ── CAD Design Card ── */}
-      {showCadSection && (
+      {/* ── CAD Design Card ── — staff see it from the start, to give the design to a designer. */}
+      {(showCadSection || (isStaffUser && !diamondOnly && cadStepIdx >= 0)) && (
         <div style={{ order: secRank.cad }} className="card-luxe p-4 sm:p-6 space-y-4">
           {/* Title on the left, its buttons pinned top right — on a phone too
               (the line under the title gives way, never the buttons). One
               main button; the rest under ⋯. */}
           {(() => {
-            const edit = canEditStage();
+            // Before the CAD stage only the designer can be given the design — an upload here tells the client "CAD ready".
+            const edit = canEditStage() && showCadSection;
             const busy = cadUploading || model3dmUploading;
             const uploadCad: MoreAction = { label: cadUploading ? "Uploading…" : order.cadImage ? "Replace CAD image" : "Upload CAD image", icon: ImagePlus, disabled: busy, onSelect: () => cadRef.current?.click() };
             const upload3dm: MoreAction = { label: model3dmUploading ? "Uploading…" : order.cad3dmUrl ? "Replace 3D model" : "Upload 3D model (.3dm)", icon: Box, disabled: busy, onSelect: () => model3dmRef.current?.click() };
@@ -2758,6 +2760,8 @@ function OrderDetailPageBody() {
               </>
             );
           })()}
+
+          {isStaffUser && <OrderDesignBlock order={order} canAssign={canEditStage()} />}
 
           {order.cadImage && (
             <div className="space-y-2">
@@ -4527,7 +4531,11 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                     <Input type="number" min={0} step="0.001" value={faMinUnder} onChange={e => setFaMinUnder(e.target.value)} disabled={!faMinLabour}
                       className="rounded-lg h-9 mt-1" placeholder="blank = when gram × rate is less" />
                   </div>
-                  <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
+                  <div><Label className="text-[11px]">CAD charge</Label><Input type="number" min={0} step="0.01" value={faCad} onChange={e => setFaCad(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" />
+                    {/* A freelancer's approved design is already in the order's cost — not again here. */}
+                    {(() => { const c = (db.cadJobs ?? []).filter(j => j.orderId === order.id && j.status === "approved").reduce((s, j) => s + (j.chargeInr ?? 0), 0);
+                      return c > 0 ? <p className="text-[10px] text-muted-foreground mt-0.5">Designer already charged {fmtMoneyInr(c)} — only the factory's own CAD work here</p> : null; })()}
+                  </div>
                   <div><Label className="text-[11px]">Diamond handling / ct</Label><Input type="number" min={0} step="0.01" value={faDiaHandling} onChange={e => setFaDiaHandling(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹ /ct" /></div>
                   <div><Label className="text-[11px]">Other charges</Label><Input type="number" min={0} step="0.01" value={faOther} onChange={e => setFaOther(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="₹" /></div>
                   <div><Label className="text-[11px]">Metal by factory (g)</Label><Input type="number" min={0} step="0.001" value={faMetalG} onChange={e => setFaMetalG(e.target.value)} className="rounded-lg h-9 mt-1" placeholder="g" /></div>

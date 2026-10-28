@@ -76,6 +76,8 @@ export const MODULE_ACTIONS: Record<ModuleKey, PermAction[]> = {
   giftCards: ["view", "export"],
   suppliers: ["view", "export"],
   factories: ["view", "export"],
+  // CAD designers: staff see their work and what they are owed; adding one and paying them is the admin's.
+  designers: ["view", "export"],
   stock: ["view", "export"],
   buyAssign: ["view", "add", "edit", "delete"],
   payments: ["view", "add", "edit", "delete", "export"],

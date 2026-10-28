@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { designerAccount, jobPayState } from "@/lib/designers";
 import { CategoryCombo } from "@/components/CategoryCombo";
 import { toast } from "sonner";
 import { ArrowDownCircle, ArrowUpCircle, ArrowLeftRight, Landmark } from "lucide-react";
@@ -24,7 +25,7 @@ import {
 import { materialUnit } from "@/lib/materials";
 import { ccy, ccySymbol, fmtCcy, roundCcy } from "@/lib/currency";
 import {
-  notifyClientPayment, writeAccountEntry, writeBrokerPayment, writeBrokerReceipt, writeExpense,
+  notifyClientPayment, writeAccountEntry, writeBrokerPayment, writeDesignerPayment, writeBrokerReceipt, writeExpense,
   writeFactoryPayment, writeSupplierPayment, writeSupplierReceipt, writeTransfer,
 } from "@/lib/partyPayments";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -45,11 +46,12 @@ type Dir = "in" | "out" | "transfer";
  * Profit & Loss, a client's invoices (a numbered receipt) or credit (a refund),
  * a broker's account. "Other" is an entry in the account only.
  */
-type Who = "client" | "supplier" | "factory" | "broker" | "employee" | "expense" | "other";
+type Who = "client" | "supplier" | "factory" | "designer" | "broker" | "employee" | "expense" | "other";
 const WHO: Record<Who, { in?: string; out?: string; name: string; rupees?: boolean }> = {
   client: { in: "Client — their payment", out: "Client — refund their credit", name: "Client" },
   supplier: { in: "Supplier — money back from them", out: "Supplier — their bill, or an advance", name: "Supplier", rupees: true },
   factory: { out: "Factory — making charges", name: "Factory", rupees: true },
+  designer: { out: "Designer — a freelancer's designs", name: "Designer", rupees: true },
   broker: { in: "Broker — money he hands over", out: "Broker — pay through him", name: "Broker", rupees: true },
   employee: { out: "Employee — salary, advance, bonus", name: "Employee" },
   expense: { out: "Expense — rent, courier, office…", name: "Expense" },
@@ -57,7 +59,7 @@ const WHO: Record<Who, { in?: string; out?: string; name: string; rupees?: boole
 };
 const ORDER: Record<"in" | "out", Who[]> = {
   in: ["client", "supplier", "broker", "other"],
-  out: ["supplier", "factory", "employee", "expense", "broker", "client", "other"],
+  out: ["supplier", "factory", "designer", "employee", "expense", "broker", "client", "other"],
 };
 /** What each party's choices read beyond the Locker's own records. */
 const NEEDS: Partial<Record<Who, readonly LazyCol[]>> = {
@@ -126,7 +128,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   };
   const pickDir = (d: Dir) => { setDir(d); setWho(""); setPartyId(""); setAgainst(""); setCategory(""); setRate(""); };
   const pickWho = (w: Who) => {
-    setWho(w); setPartyId(""); setAgainst(w === "supplier" || w === "factory" ? "__fifo" : w === "broker" ? "__oldest" : "");
+    setWho(w); setPartyId(""); setAgainst(w === "supplier" || w === "factory" ? "__fifo" : w === "broker" || w === "designer" ? "__oldest" : "");
     setTitle(""); setRate("");
     setCategory(w === "employee" ? "Salary" : "");
     setMethod(w === "client" ? (account?.type === "cash" ? "Cash" : "Bank Transfer") : "");
@@ -148,6 +150,8 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
     : who === "supplier" ? db.suppliers.filter(s => s.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(s => ({ id: s.id, label: s.name }))
     : who === "factory" ? db.factories.filter(f => f.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(f => ({ id: f.id, label: f.name }))
     : who === "broker" ? (db.brokers ?? []).filter(b => b.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(b => ({ id: b.id, label: b.name }))
+    // A freelancer is paid per design; an in-house designer's salary is paid as an Employee.
+    : who === "designer" ? (db.designers ?? []).filter(x => x.kind === "freelance" && x.active !== false).sort((a, b) => a.name.localeCompare(b.name)).map(x => ({ id: x.id, label: x.name }))
     : who === "employee" ? db.users.filter(u => u.role === "admin" || u.role === "employee").sort((a, b) => a.name.localeCompare(b.name)).map(u => ({ id: u.id, label: u.name }))
     : [];
 
@@ -156,6 +160,11 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   const supplier = who === "supplier" ? db.suppliers.find(s => s.id === partyId) : undefined;
   const factory = who === "factory" ? db.factories.find(f => f.id === partyId) : undefined;
   const broker = who === "broker" ? (db.brokers ?? []).find(b => b.id === partyId) : undefined;
+  const designer = who === "designer" ? (db.designers ?? []).find(x => x.id === partyId) : undefined;
+  const dsgAcc = designer ? designerAccount(db, designer) : null;
+  // Their approved designs with something still to pay, oldest first.
+  const dsgDue = designer ? [...jobPayState(db, designer).entries()].filter(([, v]) => v.due > 0.005)
+    .map(([id, v]) => ({ job: (db.cadJobs ?? []).find(j => j.id === id)!, due: v.due })).filter(x => x.job) : [];
   const supAcc = supplier ? supplierAccount(
     db.purchases.filter(p => p.supplierId === supplier.id), (db.supplierReceipts ?? []).filter(r => r.supplierId === supplier.id),
     supplier, (db.supplierPayments ?? []).filter(x => x.supplierId === supplier.id), (db.supplierSales ?? []).filter(x => x.supplierId === supplier.id),
@@ -178,6 +187,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
   const standing = !partyId ? "" :
     supAcc ? (supAcc.net < 0 ? `They owe us ${fmtMoneyInr(-supAcc.net)}` : `We owe them ${fmtMoneyInr(supAcc.net)}`)
     : facAcc ? `Making charges pending ${fmtMoneyInr(facAcc.chargesPending)}`
+    : dsgAcc ? (dsgAcc.advance > 0.5 ? `Paid ahead ${fmtMoneyInr(dsgAcc.advance)}` : `To pay ${fmtMoneyInr(dsgAcc.due)} · ${dsgAcc.designs} approved design${dsgAcc.designs === 1 ? "" : "s"}`)
     : brAcc ? `Bills pending ${fmtMoneyInr(brAcc.billsPending)} · brokerage owed ${fmtMoneyInr(Math.max(0, brAcc.due))} · holds ${fmtMoneyInr(brAcc.held)}`
     : cliAcc ? (dir === "out" ? `Holds ${fmtMoney(refundable(db, partyId))} of credit` : `Owes ${fmtMoney(cliAcc.outstanding)} · holds ${fmtMoney(cliAcc.credit)} credit`)
     : "";
@@ -254,6 +264,8 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
             else writeSupplierPayment(d, { ...base, supplierId: partyId, target: against || "__fifo" });
           } else if (who === "factory") {
             writeFactoryPayment(d, { ...base, factoryId: partyId, target: against || "__fifo" });
+          } else if (who === "designer") {
+            writeDesignerPayment(d, { ...base, designerId: partyId, cadJobId: against && against !== "__oldest" ? against : undefined });
           } else if (who === "broker") {
             if (dir === "in") writeBrokerReceipt(d, { ...base, brokerId: partyId });
             else writeBrokerPayment(d, { ...base, brokerId: partyId,
@@ -349,7 +361,7 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
               <div>
                 <Label className="text-xs">{WHO[who].name}</Label>
                 <Select value={partyId} onValueChange={(() => {
-                  const pick = (v: string) => { setPartyId(v); if (who !== "client") setAgainst(who === "broker" ? "__oldest" : who === "supplier" || who === "factory" ? "__fifo" : ""); };
+                  const pick = (v: string) => { setPartyId(v); if (who !== "client") setAgainst(who === "broker" || who === "designer" ? "__oldest" : who === "supplier" || who === "factory" ? "__fifo" : ""); };
                   return newKind ? addNew(newKind, pick) : pick;
                 })()} disabled={!ready}>
                   <SelectTrigger className={field} aria-label={WHO[who].name}>
@@ -423,6 +435,21 @@ export function LockerEntrySheet({ open, onOpenChange, lockerId: startLocker }: 
                 ))}
               </SelectContent>
             </Select>
+          </div>
+        )}
+        {who === "designer" && partyId && (
+          <div>
+            <Label className="text-xs">Against</Label>
+            <Select value={against || "__oldest"} onValueChange={setAgainst}>
+              <SelectTrigger className={field} aria-label="Against"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__oldest">Oldest approved designs first</SelectItem>
+                {dsgDue.map(x => (
+                  <SelectItem key={x.job.id} value={x.job.id}>{x.job.orderNumber}{x.job.brief.piece ? ` · ${x.job.brief.piece}` : ""} — to pay {fmtMoneyInr(x.due)}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {!dsgDue.length && <p className="text-[11px] text-muted-foreground mt-1">No approved design is waiting for payment — this is paid ahead, and settles their next approved designs.</p>}
           </div>
         )}
         {who === "broker" && dir === "out" && partyId && (
