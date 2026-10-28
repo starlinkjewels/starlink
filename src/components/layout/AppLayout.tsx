@@ -7,7 +7,7 @@ import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from 
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
 import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
-import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock } from "lucide-react";
+import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock, PenTool } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
 import { loadDb, collectionsLoaded, ensureCollections, summariesSettled } from "@/lib/db";
@@ -28,7 +28,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
   { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
-  { to: "/product-photos", label: "Product Photos", icon: Camera },
+  { to: "/product-photos", label: "Design Studio", icon: Camera },
   { to: "/", label: "Dashboard", icon: LayoutDashboard },
   { to: "/orders", label: "Orders", icon: Package },
   { to: "/clients", label: "Clients", icon: Users, roles: ["admin","employee"] },
@@ -41,6 +41,7 @@ const NAV: NavItem[] = [
   { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin","employee"] },
   { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
+  { to: "/designers", label: "Designers", icon: PenTool, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/payments", label: "Payments", icon: CreditCard, roles: ["admin","employee"] },
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
@@ -63,7 +64,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   ] },
   { title: "Catalog", items: [
     { to: "/catalog", label: "Catalog", icon: FolderOpen, highlight: true },
-    { to: "/product-photos", label: "Product Photos", icon: Camera },
+    { to: "/product-photos", label: "Design Studio", icon: Camera },
     { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin", "employee", "client"] },
   ] },
   { title: "Clients & Billing", items: [
@@ -75,6 +76,7 @@ const NAV_GROUPS: { title: string; items: NavItem[] }[] = [
   { title: "Manufacturing", items: [
     { to: "/suppliers", label: "Suppliers", icon: Truck, roles: ["admin", "employee"] },
     { to: "/factories", label: "Factories", icon: Factory, roles: ["admin", "employee"] },
+    { to: "/designers", label: "Designers", icon: PenTool, roles: ["admin", "employee"] },
     { to: "/stock", label: "Stock", icon: Boxes, roles: ["admin", "employee"] },
     { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin", "employee"] },
   ] },
@@ -111,7 +113,7 @@ const MOBILE_NAV: NavItem[] = [
 const MORE_NAV: NavItem[] = [
   { to: "/invoices", label: "Invoices", icon: FileText },
   { to: "/catalog",  label: "Catalog",  icon: FolderOpen },
-  { to: "/product-photos", label: "Product Photos", icon: Camera },
+  { to: "/product-photos", label: "Design Studio", icon: Camera },
   { to: "/income",   label: "Passbook", icon: BookOpen },
   { to: "/ai",       label: "Starlink AI", icon: Sparkles },
   { to: "/expenses", label: "Expenses", icon: Wallet, roles: ["admin","employee"] },
@@ -125,6 +127,7 @@ const MORE_NAV: NavItem[] = [
   // so on a phone there was no way to buy material or assign gold at all.
   { to: "/buy-assign", label: "Buy & Assign", icon: ShoppingCart, roles: ["admin","employee"] },
   { to: "/factories", label: "Factories", icon: Factory, roles: ["admin","employee"] },
+  { to: "/designers", label: "Designers", icon: PenTool, roles: ["admin","employee"] },
   { to: "/ready-stock", label: "Ready Stock", icon: Gem, roles: ["admin","employee","client"] },
   { to: "/giftcard", label: "Gift Card", icon: Gift, roles: ["client"] },
   { to: "/gift-cards", label: "Gift Cards", icon: Gift, roles: ["admin","employee"] },
@@ -148,7 +151,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/invoices": "Invoices",
   "/income":   "Passbook",
   "/catalog":  "Catalog",
-  "/product-photos": "Product Photos",
+  "/product-photos": "Design Studio",
   "/ai":       "Starlink AI",
   "/expenses": "Expenses",
   "/messages": "Messages",
@@ -162,6 +165,7 @@ const PAGE_TITLES: Record<string, string> = {
   "/stock": "Stock",
   "/buy-assign": "Buy & Assign",
   "/factories": "Factories",
+  "/designers": "Designers",
   "/ready-stock": "Ready Stock",
   "/giftcard": "Gift Card",
   "/gift-cards": "Gift Cards",
@@ -193,6 +197,7 @@ const ICON_COLORS: Record<string, string> = {
   "/stock":      "bg-cyan-500/15 text-cyan-600",
   "/buy-assign": "bg-sky-500/15 text-sky-600",
   "/factories":  "bg-orange-500/15 text-orange-600",
+  "/designers":  "bg-violet-500/15 text-violet-600",
   "/ready-stock": "bg-pink-500/15 text-pink-600",
   "/giftcard": "bg-primary/15 text-primary",
   "/gift-cards": "bg-primary/15 text-primary",

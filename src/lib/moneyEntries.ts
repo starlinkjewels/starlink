@@ -510,7 +510,7 @@ function lockerEntries(db: DB): MoneyEntry[] {
     // A brokerage payment is the record itself — the broker's due is read from
     // it (lib/brokers.ts) — so it is corrected here like any entry of our own.
     // So is money a broker handed over to us (what they collected from a supplier for us).
-    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && ref !== "clientRefund" && !t.pairedLockerId) {
+    } else if (ref && ref !== "manual" && ref !== "transfer" && ref !== "brokerPayment" && ref !== "brokerReceipt" && ref !== "designerPayment" && ref !== "clientRefund" && !t.pairedLockerId) {
       const why = unclaimedRow(db, t);
       if ("gone" in why) {
         orphan = `${why.gone}, so it is corrected here — that changes the account only.`;

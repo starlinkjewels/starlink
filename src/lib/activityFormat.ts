@@ -64,6 +64,7 @@ const COL_MODULE: Record<string, ModuleKey> = {
   expenses: "expenses", lockers: "locker", lockerTransactions: "locker",
   suppliers: "suppliers", purchases: "suppliers", supplierReceipts: "suppliers", supplierPayments: "suppliers", brokers: "suppliers",
   factories: "factories", materialIssuances: "factories", factoryPayments: "factories",
+  designers: "designers", cadJobs: "designers",
   stockMovements: "stock", diamondPackets: "stock", diamondSales: "stock", supplierSales: "suppliers", diamondBags: "stock",
   readyStock: "readyStock", giftCards: "giftCards", clientReceipts: "payments",
   catalogFolders: "catalog", catalogItems: "catalog", shares: "catalog",
@@ -76,7 +77,7 @@ const COL_NOUN: Record<string, string> = {
   expenses: "expense", lockers: "account", lockerTransactions: "account entry",
   suppliers: "supplier", purchases: "purchase", supplierReceipts: "money from supplier",
   supplierPayments: "supplier payment", brokers: "broker", factories: "factory", materialIssuances: "material issue",
-  factoryPayments: "factory payment", stockMovements: "stock movement", diamondPackets: "certified stone",
+  factoryPayments: "factory payment", designers: "designer", cadJobs: "design job", stockMovements: "stock movement", diamondPackets: "certified stone",
   diamondSales: "diamond sale", supplierSales: "sale to a supplier", diamondBags: "diamond bag", readyStock: "ready-stock item", giftCards: "gift card",
   clientReceipts: "receipt", catalogFolders: "catalog folder", catalogItems: "catalog item",
   shares: "share link", productPhotoFolders: "photo folder", productPhotoItems: "product photo",
@@ -87,7 +88,7 @@ const COL_NOUN: Record<string, string> = {
  *  the order, the receipt and the account; the receipt is what a person did. */
 const PRIORITY = [
   "orders", "clients", "users", "invoices", "clientReceipts", "purchases", "expenses",
-  "suppliers", "brokers", "factories", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
+  "suppliers", "brokers", "factories", "designers", "cadJobs", "readyStock", "diamondPackets", "materialIssuances", "giftCards",
   "supplierPayments", "factoryPayments", "supplierReceipts", "diamondSales", "supplierSales", "lockers",
   "catalogFolders", "catalogItems", "productPhotoFolders", "productPhotoItems", "shares",
   "tasks", "meta", "adminRecords", "lockerTransactions", "diamondBags", "stockMovements",

@@ -168,6 +168,11 @@ service cloud.firestore {
     match /supplierPayments/{id}   { allow read, write: if isStaff(); }
     // Brokers (dalals) who bring purchases — Suppliers → Brokers. Staff only.
     match /brokers/{id}            { allow read, write: if isStaff(); }
+    // CAD designers and their design jobs (lib/designers.ts) — staff only for now.
+    // A design job holds no client and no price, so a designer's own login can be
+    // given its jobs later without opening an order.
+    match /designers/{id}          { allow read, write: if isStaff(); }
+    match /cadJobs/{id}            { allow read, write: if isStaff(); }
     // Bags of loose diamonds, one per lot (lib/diamondBags.ts). Staff only.
     match /diamondBags/{id}        { allow read, write: if isStaff(); }
     match /factoryPayments/{id}    { allow read, write: if isStaff(); }

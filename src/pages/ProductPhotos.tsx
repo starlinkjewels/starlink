@@ -13,7 +13,7 @@ import { compressImage as compressImg, canUploadOriginal, PRODUCT_PHOTO_MAX, PRO
 import { downloadAsZip } from "@/lib/zipDownload";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
 import { toast } from "sonner";
-import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package, FolderInput } from "lucide-react";
+import { Folder, ChevronRight, Image as ImageIcon, Video, Play, Download, X, Camera, ChevronLeft, FolderPlus, FolderUp, ImagePlus, Trash2, Pencil, Loader2, Check, Package, FolderInput, PenTool } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -24,6 +24,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { needsAccess } from "@/lib/actionHints";
 import { folderPath } from "@/lib/catalogItemEdit";
+import { CadJobsTable } from "@/components/designers/CadJobsTable";
+import { isOpenJob } from "@/lib/designers";
 
 const MAX_VIDEO_MB = 60;
 
@@ -588,11 +590,20 @@ function LibraryView({ isStaff }: { isStaff: boolean }) {
   );
 }
 
+/**
+ * Design Studio — the CAD designs given to designers (staff), and the product
+ * photos: by order, and the library (clients with access see those two).
+ */
 export function ProductPhotosPage() {
   const { user } = useAuth();
   const db = useDb();
+  const can = useCan();
   const isStaff = user!.role !== "client";
-  const [tab, setTab] = useState<"orders" | "library">("orders");
+  const seeDesigns = user!.role === "admin" || (user!.role === "employee" && can("designers"));
+  const [tab, setTab] = useState<"designs" | "orders" | "library">(seeDesigns ? "designs" : "orders");
+  // An employee sees the designs of the orders within their work, as on Orders.
+  const mine = user!.role === "employee" ? new Set(currentUserOrders(db, user!).map(o => o.id)) : null;
+  const jobs = seeDesigns ? (db.cadJobs ?? []).filter(j => !mine || mine.has(j.orderId)) : [];
 
   if (user!.role === "client") {
     const client = db.clients.find(c => c.id === user!.clientId);
@@ -601,7 +612,7 @@ export function ProductPhotosPage() {
         <div className="max-w-2xl mx-auto">
           <div className="card-luxe p-10 text-center text-muted-foreground">
             <Camera className="h-10 w-10 mx-auto mb-3 opacity-30" />
-            <p className="font-medium text-foreground">Product Photos isn't available for your account yet</p>
+            <p className="font-medium text-foreground">Design Studio isn't available for your account yet</p>
             <p className="text-sm mt-1">Contact Starlink to get access.</p>
           </div>
         </div>
@@ -611,13 +622,21 @@ export function ProductPhotosPage() {
 
   return (
     <div className="max-w-6xl mx-auto space-y-5">
-      <PageHeader title="Product Photos" />
+      <PageHeader title="Design Studio" subtitle={seeDesigns ? "CAD designs and product photos" : "Product photos"} />
 
-      {/* Tab switcher — auto order photos vs the manually-organised library */}
-      <TabBar label="Product Photos" value={tab} onChange={setTab} className="w-fit max-w-full"
-        tabs={[{ key: "orders", label: "By Order", icon: Package }, { key: "library", label: "Library", icon: Folder }]} />
+      {/* Designs given to designers (staff) · photos by order · the hand-organised library */}
+      <TabBar label="Design Studio" value={tab} onChange={setTab} className="w-fit max-w-full"
+        tabs={[
+          ...(seeDesigns ? [{ key: "designs" as const, label: "Designs", icon: PenTool, count: jobs.filter(isOpenJob).length || undefined }] : []),
+          { key: "orders", label: "By Order", icon: Package }, { key: "library", label: "Library", icon: Folder },
+        ]} />
 
-      {tab === "orders" ? <OrdersView isStaff={isStaff} /> : <LibraryView isStaff={isStaff} />}
+      {tab === "designs" && seeDesigns ? (
+        <div className="card-luxe p-3 sm:p-4">
+          <CadJobsTable id="design-studio-jobs" jobs={jobs} showDesigner exportName="Designs"
+            emptyText="No designs given yet — give an order's design to a designer from its CAD Design card." />
+        </div>
+      ) : tab === "orders" ? <OrdersView isStaff={isStaff} /> : <LibraryView isStaff={isStaff} />}
     </div>
   );
 }

@@ -81,7 +81,11 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/gift-cards": [],
   "/giftcard": [],
   "/catalog": [...PHOTOS, "catalogFavorites"],
-  "/product-photos": PHOTOS,
+  // + lockerTransactions: a freelancer's design shows what is still to pay on it.
+  "/product-photos": [...PHOTOS, "lockerTransactions"],
+  // What each freelancer was paid is in the account entries.
+  "/designers": ["lockerTransactions"],
+  "/designers/:id": ["lockerTransactions"],
   "/messages": [],
   "/notifications": [],
   "/search": [],

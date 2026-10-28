@@ -54,7 +54,8 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy } from "lucide-react";
+import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool } from "lucide-react";
+import { DesignerFields, NO_DESIGNER, assignAndTell, type DesignerChoice } from "@/components/designers/AssignDesigner";
 
 const READY_STOCK_NONE = "none";
 
@@ -203,6 +204,8 @@ export function NewOrderPage() {
   // Planning material is changing the order's manufacturing — the same right as on the order page.
   const canDo = useCan();
   const mayPlan = !isClient && (isAdmin || (isEmployee && canDo("orders", "edit")));
+  // The CAD designer, given the design as the order is placed (a piece with metal only).
+  const [designerPick, setDesignerPick] = useState<DesignerChoice>(NO_DESIGNER);
   // In-house order to build a piece for Ready Stock — no client, no billing, short timeline.
   const forReadyStock = !isClient && f.clientId === READY_STOCK_CLIENT;
   // The company the order is for: the client's; for an in-house build, the one chosen.
@@ -405,6 +408,8 @@ export function NewOrderPage() {
       if (!Number.isInteger(Number(f.quantity))) { toast.error("Quantity is a whole number of pieces."); return; }
       if (Number(f.quantity) > item.quantity) { toast.error(`Only ${item.quantity} of this piece ${item.quantity === 1 ? "is" : "are"} in stock.`); return; }
     }
+    const designOn = mayPlan && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
+    if (designOn && designerPick.rate.trim() && !(Number(designerPick.rate) >= 0)) { toast.error("CAD designer: enter a charge of 0 or more."); return; }
     if (Number(f.advanceAmount) > 0) {
       if (!f.advanceLockerId) { toast.error("Choose which locker the advance was deposited into."); return; }
       if (!f.advanceLockerAmount || Number(f.advanceLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker."); return; }
@@ -606,6 +611,16 @@ export function NewOrderPage() {
         // the money for. "Apply Credit" on their account does it deliberately.
       }
     });
+
+    // The design, given as the order was placed: the designer is told and emailed.
+    if (designOn) {
+      try {
+        const r = assignAndTell(orderId, designerPick, { id: user!.id, name: user!.name });
+        if (typeof r === "string") toast.error(`Order placed — but the design wasn't given: ${r}. Give it from the order.`);
+      } catch {
+        toast.error("Order placed — but the design wasn't given. Give it from the order.");
+      }
+    }
 
     // Every payment is a numbered receipt from the moment it is taken, so
     // nothing is left behind for a repair tool to find later.
@@ -1179,6 +1194,12 @@ export function NewOrderPage() {
               stub={{ id: draftId.current, orderNumber: "this order", clientId: forReadyStock ? "" : f.clientId, forReadyStock: forReadyStock || undefined,
                 ...coField(orderCompany), metal: f.metal, jewelleryType: f.jewelleryType, assignedFactoryId: f.assignedFactoryId || undefined } as unknown as Order}
               isAdmin={isAdmin} />
+          </SectionCard>
+        )}
+
+        {mayPlan && kind === "piece" && !isDiamondOnly && (
+          <SectionCard icon={<PenTool className="h-4 w-4 text-primary" />} title="CAD designer" subtitle="Optional — they get the design's details and your reference images, never prices or the client">
+            <DesignerFields value={designerPick} onChange={setDesignerPick} optional compact />
           </SectionCard>
         )}
 

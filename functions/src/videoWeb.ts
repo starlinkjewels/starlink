@@ -12,7 +12,7 @@ const ffmpegPath: string = require("ffmpeg-static");
 const REGION = "us-central1";
 
 /** Where the app keeps videos — nothing outside these folders is ever read or written. */
-const FOLDERS = /^(orders|readyStock|catalog|productPhotos)\//;
+const FOLDERS = /^(orders|readyStock|catalog|productPhotos|cad)\//;
 /** The copy sits next to the original under this suffix (the app reads it by the same name). */
 const WEB_SUFFIX = ".web.mp4";
 const MAX_MB = 300;

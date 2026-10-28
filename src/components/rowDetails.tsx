@@ -190,6 +190,12 @@ export function lockerTxnDetails(
     const b = (db.brokers ?? []).find(x => x.id === t.refId);
     out.push(!!b && { label: "Broker", value: refLink(`/suppliers/brokers/${b.id}`, b.name, can("suppliers")) });
   }
+  if (t.refType === "designerPayment" && t.refId) {
+    const dz = (db.designers ?? []).find(x => x.id === t.refId);
+    const job = t.cadJobId ? (db.cadJobs ?? []).find(j => j.id === t.cadJobId) : undefined;
+    out.push(!!dz && { label: "Designer", value: refLink(`/designers/${dz.id}`, dz.name, can("designers")) });
+    out.push(!!job && { label: "For design", value: refLink(`/orders/${job.orderId}`, job.orderNumber, can("orders")) });
+  }
 
   out.push(
     t.notClientPayment && { label: "Marked", value: "Not a client payment" },

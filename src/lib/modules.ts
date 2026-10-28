@@ -15,14 +15,14 @@ export interface AppModule {
 
 export type ModuleKey =
   | "dashboard" | "catalog" | "productPhotos" | "orders" | "clients" | "invoices"
-  | "readyStock" | "giftCards" | "suppliers" | "factories" | "stock" | "buyAssign"
+  | "readyStock" | "giftCards" | "suppliers" | "factories" | "designers" | "stock" | "buyAssign"
   | "payments" | "passbook" | "locker" | "expenses" | "messages" | "reports"
   | "employees" | "settings" | "activity";
 
 export const MODULES: AppModule[] = [
   { key: "dashboard", label: "Dashboard", path: "/" },
   { key: "catalog", label: "Catalog", path: "/catalog" },
-  { key: "productPhotos", label: "Product Photos", path: "/product-photos" },
+  { key: "productPhotos", label: "Design Studio", path: "/product-photos" },
   { key: "orders", label: "Orders", path: "/orders" },
   { key: "clients", label: "Clients", path: "/clients" },
   { key: "invoices", label: "Invoices", path: "/invoices" },
@@ -30,6 +30,7 @@ export const MODULES: AppModule[] = [
   { key: "giftCards", label: "Gift Cards", path: "/gift-cards" },
   { key: "suppliers", label: "Suppliers", path: "/suppliers" },
   { key: "factories", label: "Factories", path: "/factories" },
+  { key: "designers", label: "Designers", path: "/designers" },
   { key: "stock", label: "Stock", path: "/stock" },
   { key: "buyAssign", label: "Buy & Assign", path: "/buy-assign" },
   { key: "payments", label: "Payments", path: "/payments" },

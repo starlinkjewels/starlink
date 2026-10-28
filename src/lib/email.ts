@@ -231,3 +231,61 @@ export function giftCardEmail(o: GiftCardEmailInfo): { subject: string; html: st
     }),
   };
 }
+
+/* ───────────────────────── CAD designers (lib/designers.ts) ───────────────────────── */
+
+const TO_DESIGNER = `You're receiving this as a CAD designer working with ${BRAND_NAME}.`;
+
+export interface DesignEmailInfo {
+  designerName: string;
+  orderNumber: string;
+  /** What to design — the brief rows, never prices or the client. */
+  brief: [string, string | undefined][];
+  dueDate?: string;
+  note?: string;
+}
+
+/** A design was assigned → the designer, with the brief. */
+export function designAssignedEmail(o: DesignEmailInfo): { subject: string; html: string } {
+  return {
+    subject: `New design ${o.orderNumber}${o.dueDate ? ` — due ${fmtDay(o.dueDate)}` : ""}`,
+    html: shell({
+      preheader: `A new design is assigned to you: ${o.orderNumber}.`,
+      label: "New design", tone: "info",
+      heading: "A new design for you",
+      intro: `Dear ${esc(o.designerName)},<br>A new CAD design has been assigned to you. The brief is below${o.dueDate ? `; it is due by <strong>${esc(fmtDay(o.dueDate))}</strong>` : ""}.`,
+      body: detailRows([["Design", o.orderNumber], ...o.brief, ...(o.note ? [["Note", o.note] as [string, string]] : [])]),
+      footerNote: TO_DESIGNER,
+    }),
+  };
+}
+
+/** We asked for changes → the designer. */
+export function designChangesEmail(o: DesignEmailInfo): { subject: string; html: string } {
+  return {
+    subject: `Changes asked — design ${o.orderNumber}`,
+    html: shell({
+      preheader: `Changes are asked on design ${o.orderNumber}.`,
+      label: "Changes asked", tone: "neutral",
+      heading: "Changes asked on a design",
+      intro: `Dear ${esc(o.designerName)},<br>Please make these changes to design <strong>${esc(o.orderNumber)}</strong>.`,
+      body: detailRows([["Design", o.orderNumber], ["Changes", o.note], ...(o.dueDate ? [["Due", fmtDay(o.dueDate)] as [string, string | undefined]] : [])]),
+      footerNote: TO_DESIGNER,
+    }),
+  };
+}
+
+/** The design was approved → the designer. */
+export function designApprovedEmail(o: DesignEmailInfo & { chargeText?: string }): { subject: string; html: string } {
+  return {
+    subject: `Design ${o.orderNumber} approved`,
+    html: shell({
+      preheader: `Your design ${o.orderNumber} is approved.`,
+      label: "Approved", tone: "success",
+      heading: "Your design is approved",
+      intro: `Dear ${esc(o.designerName)},<br>Thank you — design <strong>${esc(o.orderNumber)}</strong> is approved.`,
+      body: detailRows([["Design", o.orderNumber], ...(o.chargeText ? [["Charge", o.chargeText] as [string, string]] : [])]),
+      footerNote: TO_DESIGNER,
+    }),
+  };
+}

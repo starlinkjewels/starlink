@@ -8,6 +8,7 @@ import { SelectItem, SelectSeparator } from "@/components/ui/select";
 import { ClientCreateDialog } from "./ClientCreateDialog";
 import { SupplierCreateDialog } from "./SupplierCreateDialog";
 import { BrokerCreateDialog } from "./BrokerCreateDialog";
+import { DesignerCreateDialog } from "./DesignerCreateDialog";
 import { FactoryCreateDialog } from "./FactoryCreateDialog";
 import { LockerCreateDialog } from "./LockerCreateDialog";
 import { EmployeeCreateDialog } from "./EmployeeCreateDialog";
@@ -25,13 +26,13 @@ import { MaterialEditor } from "@/components/MaterialsSettings";
  *
  * Offered only to people who may create one on its own page.
  */
-export type QuickKind = "client" | "supplier" | "broker" | "factory" | "locker" | "employee" | "company" | "material";
+export type QuickKind = "client" | "supplier" | "broker" | "designer" | "factory" | "locker" | "employee" | "company" | "material";
 
 /** The value of the "+ Add new" entry — never a real record's id. */
 export const ADD_NEW = "__add_new__";
 
 const LABEL: Record<QuickKind, string> = {
-  client: "client", supplier: "supplier", broker: "broker", factory: "factory",
+  client: "client", supplier: "supplier", broker: "broker", designer: "designer", factory: "factory",
   locker: "bank / cash account", employee: "employee", company: "company", material: "material",
 };
 
@@ -73,6 +74,7 @@ export function QuickCreateProvider({ children }: { children: ReactNode }) {
           case "client": return <ClientCreateDialog key={key} {...props} />;
           case "supplier": return <SupplierCreateDialog key={key} {...props} />;
           case "broker": return <BrokerCreateDialog key={key} {...props} />;
+          case "designer": return <DesignerCreateDialog key={key} {...props} />;
           case "factory": return <FactoryCreateDialog key={key} {...props} />;
           case "locker": return <LockerCreateDialog key={key} {...props} />;
           case "employee": return <EmployeeCreateDialog key={key} {...props} />;
