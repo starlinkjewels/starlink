@@ -77,14 +77,6 @@ export function useNarrow(): boolean {
   return narrow;
 }
 
-function Pill({ on, onClick, children }: { on: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button type="button" onClick={onClick} aria-pressed={on}
-      className={`h-8 px-3 rounded-lg text-xs font-medium border transition-colors inline-flex items-center gap-1.5 ${on ? "bg-primary text-primary-foreground border-primary" : "bg-white border-border text-brand-dark hover:bg-secondary/70"}`}>
-      {on && <Check className="h-3 w-3" />}{children}
-    </button>
-  );
-}
 
 function FilterFields({ filters }: { filters: TableFilter[] }) {
   return (
@@ -95,12 +87,21 @@ function FilterFields({ filters }: { filters: TableFilter[] }) {
           return (
             <section key={`d${i}`} className="space-y-2.5">
               <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{f.label ?? "Date"}</p>
-              <div className="flex flex-wrap gap-1.5">
-                <Pill on={!f.from && !f.to} onClick={() => f.onChange("", "")}>Any date</Pill>
-                {DATE_PRESETS.map(p => (
-                  <Pill key={p.key} on={preset?.key === p.key} onClick={() => { const [a, b] = p.range(); f.onChange(a, b); }}>{p.label}</Pill>
-                ))}
-              </div>
+              {/* One dropdown for the ranges people ask for; the two dates below for any other. */}
+              <Select value={!f.from && !f.to ? "__any" : preset?.key ?? "__custom"}
+                onValueChange={v => {
+                  if (v === "__any") f.onChange("", "");
+                  else { const p = DATE_PRESETS.find(x => x.key === v); if (p) { const [a, b] = p.range(); f.onChange(a, b); } }
+                }}>
+                <SelectTrigger className={`h-10 rounded-xl text-sm ${f.from || f.to ? "border-primary/50 bg-primary/[0.04] text-primary font-medium" : ""}`} aria-label={f.label ?? "Date"}>
+                  <CalendarDays className="h-4 w-4 shrink-0 opacity-70 mr-2" /><span className="flex-1 min-w-0 text-left truncate"><SelectValue /></span>
+                </SelectTrigger>
+                <SelectContent className="max-h-80">
+                  <SelectItem value="__any">Any date</SelectItem>
+                  {DATE_PRESETS.map(p => <SelectItem key={p.key} value={p.key}>{p.label}</SelectItem>)}
+                  {(f.from || f.to) && !preset && <SelectItem value="__custom">{dateRangeText(f.from, f.to)}</SelectItem>}
+                </SelectContent>
+              </Select>
               <div className="grid grid-cols-2 gap-2">
                 <label className="text-[11px] text-muted-foreground space-y-1">
                   <span>From</span>

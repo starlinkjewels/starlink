@@ -1,4 +1,5 @@
 import { ListCombo } from "@/components/ListCombo";
+import { CategoryCombo } from "@/components/CategoryCombo";
 import { materialUnit } from "@/lib/materials";
 import { choicesOf } from "@/lib/optionLists";
 import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
@@ -904,9 +905,6 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
   const [lockerId, setLockerId] = useState("");
   const [amount, setAmount] = useState("");
   const [category, setCategory] = useState("");
-  const lockerCats = db.settings.lockerCategories?.length
-    ? db.settings.lockerCategories
-    : DEFAULT_LOCKER_CATEGORIES;
   const [note, setNote] = useState("");
   const [targetLocker, setTargetLocker] = useState("");
   // "1 of the source's currency = rate of the destination's". Cleared whenever
@@ -1066,10 +1064,8 @@ function LockerActions({ open, onOpenChange, preset }: SheetProps & { preset: Lo
         ) : action !== "transfer_out" ? (
           <div>
             <Label className="text-xs">Category <span className="text-destructive">*</span></Label>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger className="h-10 rounded-xl mt-1"><SelectValue placeholder="Choose a category" /></SelectTrigger>
-              <SelectContent>{lockerCats.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent>
-            </Select>
+            {/* Pick one, or type a new one — kept for next time. */}
+            <CategoryCombo kind="locker" value={category} onChange={setCategory} className="h-10 rounded-xl mt-1" />
           </div>
         ) : <div />}
       </div>

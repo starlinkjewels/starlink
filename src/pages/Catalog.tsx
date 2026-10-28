@@ -1,4 +1,6 @@
+import { WebVideo } from "@/components/ProductVideo";
 import { useCan } from "@/hooks/useCan";
+import { requestPlayable } from "@/lib/webVideo";
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -222,12 +224,13 @@ function Lightbox({
                 </a>
               </div>
             ) : (
-              <video
+              <WebVideo
                 src={item.data}
                 controls
                 autoPlay
                 muted
-                preload="metadata"
+                loop
+                preload="auto"
                 playsInline
                 className="max-w-full rounded-xl"
                 style={{ maxHeight: "calc(100vh - 140px)" }}
@@ -1394,6 +1397,8 @@ export function CatalogPage() {
           ? await uploadDataUrl(await imageForUpload(file), `catalog/${folderId}`)
           : await uploadFile(file, `catalog/${folderId}`, pct =>
               setUploadProgress({ done, total: all.length, pct }));
+        // A copy every browser and device plays — made on the server (lib/webVideo.ts).
+        if (isVideo) requestPlayable(data);
         const newItem: CatalogItem = {
           id: uid("ci_"),
           folderId,

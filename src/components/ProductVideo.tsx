@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type VideoHTMLAttributes } from "react";
 import { Download, Maximize2, Pause, Play, Volume2, VolumeX, AlertTriangle, Loader2 } from "lucide-react";
+import { usePlayableSrc } from "@/lib/webVideo";
 
 /**
  * A product video shown the way shop pages show them now: it plays by itself
@@ -8,15 +9,19 @@ import { Download, Maximize2, Pause, Play, Volume2, VolumeX, AlertTriangle, Load
  * full screen (with the usual controls) and download in the corner; a thin bar
  * shows how far it has played.
  *
- * A file the browser can't play — usually an iPhone "High Efficiency" (HEVC)
- * video on a Windows computer — says so plainly, with the download, instead of
- * a black box stuck at 0:00.
+ * It plays the copy made to play everywhere (H.264 MP4, lib/webVideo.ts) when
+ * there is one, else the original. If neither plays here it says so plainly,
+ * with the download — and `onUnplayable` asks for the copy to be made.
  */
-export function ProductVideo({ src, poster, onDownload, className = "", maxH = "max-h-[28rem]" }: {
+export function ProductVideo({ src: original, poster, onDownload, onUnplayable, className = "", maxH = "max-h-[28rem]" }: {
   src: string; poster?: string; onDownload?: () => void; className?: string;
   /** How tall it may grow (a Tailwind max-height class). */
   maxH?: string;
+  /** Neither the copy nor the original plays in this browser. */
+  onUnplayable?: () => void;
 }) {
+  const playable = usePlayableSrc(original);
+  const src = playable.src;
   const ref = useRef<HTMLVideoElement>(null);
   const box = useRef<HTMLDivElement>(null);
   const [state, setState] = useState<"loading" | "playing" | "paused" | "error">("loading");
@@ -25,7 +30,15 @@ export function ProductVideo({ src, poster, onDownload, className = "", maxH = "
   // Paused by a tap: it stays paused, even when scrolled away and back.
   const userPaused = useRef(false);
 
-  useEffect(() => { setState("loading"); setProgress(0); userPaused.current = false; }, [src]);
+  // A new video starts afresh — not a switch from the copy to the original, and not
+  // the first showing (an error can arrive before this would run: Firefox refuses
+  // an HEVC file, and a missing copy, at once).
+  const shownFor = useRef(original);
+  useEffect(() => {
+    if (shownFor.current === original) return;
+    shownFor.current = original;
+    setState("loading"); setProgress(0); userPaused.current = false;
+  }, [original]);
   // The muted property itself — React leaves it as it first was.
   useEffect(() => { if (ref.current) ref.current.muted = muted; }, [muted]);
 
@@ -54,6 +67,19 @@ export function ProductVideo({ src, poster, onDownload, className = "", maxH = "
     if (v.paused) { userPaused.current = false; v.play().catch(() => {}); }
     else { userPaused.current = true; v.pause(); }
   };
+  // The copy isn't there (yet) or won't play: the original; nothing left: say so.
+  const fail = () => {
+    if (playable.failed()) { setState("loading"); return; }
+    setState("error");
+    onUnplayable?.();
+  };
+  // An error that came before React was listening (Firefox refuses a missing copy,
+  // or an HEVC file, at once — and React drops events that early): look for it
+  // once the video is on the page and after each switch, rather than wait on a spinner.
+  useEffect(() => {
+    if (ref.current?.error) fail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [src]);
   const btn = "h-8 w-8 rounded-full bg-black/55 hover:bg-black/75 text-white grid place-items-center backdrop-blur-sm transition-colors";
 
   return (
@@ -63,8 +89,8 @@ export function ProductVideo({ src, poster, onDownload, className = "", maxH = "
         autoPlay muted={muted} loop playsInline preload="auto"
         onPlaying={() => setState("playing")}
         onPause={() => setState(s => (s === "error" ? s : "paused"))}
-        onLoadedData={e => { if (e.currentTarget.videoWidth === 0) setState("error"); }}
-        onError={() => setState("error")}
+        onLoadedData={e => { if (e.currentTarget.videoWidth === 0) fail(); }}
+        onError={fail}
         onTimeUpdate={e => { const v = e.currentTarget; if (v.duration) setProgress(v.currentTime / v.duration); }}
         onClick={toggle}
         className={`block w-full ${maxH} mx-auto object-contain cursor-pointer ${state === "error" ? "opacity-0" : ""}`}
@@ -91,8 +117,8 @@ export function ProductVideo({ src, poster, onDownload, className = "", maxH = "
           style={poster ? { backgroundImage: `linear-gradient(rgba(0,0,0,.72), rgba(0,0,0,.72)), url("${poster}")`, backgroundSize: "cover", backgroundPosition: "center" } : undefined}>
           <div className="max-w-sm space-y-2 text-white">
             <AlertTriangle className="h-6 w-6 mx-auto text-amber-300" />
-            <p className="text-sm font-semibold">This video can&rsquo;t play in this browser</p>
-            <p className="text-xs text-white/75">It is most likely an iPhone &ldquo;High Efficiency&rdquo; (HEVC) video. Download it to watch, or upload it again in &ldquo;Most Compatible&rdquo; format.</p>
+            <p className="text-sm font-semibold">This video can&rsquo;t play in this browser yet</p>
+            <p className="text-xs text-white/75">A copy that plays on every browser and device is being made — open the page again in a minute. Or download it to watch now.</p>
             {onDownload && (
               <button type="button" onClick={onDownload} className="mt-1 inline-flex items-center gap-1.5 h-9 px-4 rounded-full bg-white text-black text-xs font-semibold">
                 <Download className="h-3.5 w-3.5" /> Download
@@ -125,4 +151,21 @@ export function ProductVideo({ src, poster, onDownload, className = "", maxH = "
       )}
     </div>
   );
+}
+
+/**
+ * A plain video (its own controls) that plays the copy made to play everywhere
+ * when there is one, else the original — for the viewers that keep their own
+ * look (Catalog, Product Photos, shared pages).
+ */
+export function WebVideo({ src, onUnplayable, onError, ...rest }: Omit<VideoHTMLAttributes<HTMLVideoElement>, "src"> & { src: string; onUnplayable?: () => void }) {
+  const playable = usePlayableSrc(src);
+  const ref = useRef<HTMLVideoElement>(null);
+  const fail = () => { if (!playable.failed()) onUnplayable?.(); };
+  // An error that came before React was listening (see ProductVideo).
+  useEffect(() => {
+    if (ref.current?.error) fail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playable.src]);
+  return <video ref={ref} {...rest} src={playable.src} onError={e => { onError?.(e); fail(); }} />;
 }

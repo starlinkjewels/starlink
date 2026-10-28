@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { WebVideo } from "@/components/ProductVideo";
 import { ArrowLeft, ChevronDown, Download, Gem, Link2, Loader2, Mail, MessageCircle, Play, Rows3, LayoutList, X } from "lucide-react";
 import { toast } from "sonner";
 import { fmtMoney, type Share, type ShareBrand, type SharePiece } from "@/lib/db";
@@ -171,7 +172,7 @@ function PieceView({ p, brand, link, note }: { p: SharePiece; brand: ShareBrand;
           <div className={`relative aspect-square ${shown ? "bg-black" : "bg-[#f1ede4]"} lg:rounded-3xl overflow-hidden grid place-items-center`}>
             {!shown ? <Gem className="h-14 w-14 text-stone-300" />
               : shown.kind === "video"
-                ? <video key={shown.url} src={shown.url} autoPlay muted loop playsInline controls className="h-full w-full object-contain" />
+                ? <WebVideo key={shown.url} src={shown.url} autoPlay muted loop playsInline controls className="h-full w-full object-contain" />
                 : <button type="button" onClick={() => setZoom(shown.url)} className="h-full w-full grid place-items-center bg-white" aria-label="Enlarge">
                     <img src={shown.url} alt={p.name} className="h-full w-full object-contain p-4" />
                   </button>}
