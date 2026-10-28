@@ -22,6 +22,8 @@ interface Row {
   /** Loose diamonds: the bag this lot is kept in ("BAG-0007"). */
   bag?: string;
   shape?: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string;
+  /** Gems: which stone — Tanzanite, Garnet… */
+  variety?: string;
   qty: number;
   pcs: number | null;
   /** Fine (24K) grams, for gold. */
@@ -98,6 +100,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     onSelect(null);
   };
   const [shape, setShape] = useState(ALL);
+  const [variety, setVariety] = useState(ALL);
   const [type, setType] = useState(ALL);
   const [mm, setMm] = useState(ALL);
   const [size, setSize] = useState(ALL);
@@ -136,9 +139,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     return vals.map(v => ({ value: v || "__none", label: v || none }));
   };
   const match = (want: string, have?: string) => want === ALL || (want === "__none" ? !have : have === want);
-  const shown = rows.filter(r => match(shape, r.shape) && match(type, r.type) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
+  const shown = rows.filter(r => match(shape, r.shape) && match(variety, r.variety) && match(type, r.type) && match(mm, r.mm) && match(size, r.size) && match(color, r.color) && match(clarity, r.clarity));
 
   const filters: TableFilter[] = lotLike ? [
+    ...(gem ? [{ kind: "select" as const, label: "Stone", value: variety, onChange: setVariety, options: opts(r => r.variety), allLabel: "All stones" }] : []),
     { kind: "select", label: "Shape", value: shape, onChange: setShape, options: opts(r => r.shape), allLabel: "All shapes" },
     { kind: "select", label: "Type", value: type, onChange: setType, options: opts(r => r.type), allLabel: "All types" },
     { kind: "select", label: "MM", value: mm, onChange: setMm, options: opts(r => r.mm), allLabel: "All mm" },
@@ -148,7 +152,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   ] : [];
 
   // In the order a diamond office keeps its bags: shape, then mm, then sieve, then grade.
-  const byBag = (a: Row, b: Row) => (a.shape ?? "").localeCompare(b.shape ?? "") || (parseFloat(a.mm ?? "") || 0) - (parseFloat(b.mm ?? "") || 0)
+  const byBag = (a: Row, b: Row) => (a.variety ?? "").localeCompare(b.variety ?? "") || (a.shape ?? "").localeCompare(b.shape ?? "") || (parseFloat(a.mm ?? "") || 0) - (parseFloat(b.mm ?? "") || 0)
     || sizeOrder(a.size, b.size) || (a.type ?? "").localeCompare(b.type ?? "") || (a.color ?? "").localeCompare(b.color ?? "") || (a.clarity ?? "").localeCompare(b.clarity ?? "");
   const ordered = lotLike ? [...shown].sort(byBag) : shown;
 
@@ -158,7 +162,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     if (!together) return [];
     const by = new Map<string, Row[]>();
     for (const r of ordered) {
-      const k = gold ? goldKarat(r.key) : [r.shape, r.mm, r.size].filter(Boolean).join(LOT_SEP);
+      // A gem's stone stays apart: Tanzanite 1.0 mm is never added to Ruby 1.0 mm.
+      const k = gold ? goldKarat(r.key) : [r.variety, r.shape, r.mm, r.size].filter(Boolean).join(LOT_SEP);
       by.set(k, [...(by.get(k) ?? []), r]);
     }
     return [...by.entries()].map(([k, members]) => {
@@ -170,7 +175,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
       const first = members[0];
       return {
         key: `together:${k}`, label: k, members,
-        shape: first.shape, mm: first.mm, size: first.size,
+        shape: first.shape, variety: first.variety, mm: first.mm, size: first.size,
         type: joinParts(members.map(m => m.type)), color: joinParts(members.map(m => m.color)), clarity: joinParts(members.map(m => m.clarity)),
         qty, pcs: pcsKnown.length ? pcsKnown.reduce((s, m) => s + (m.pcs ?? 0), 0) : null,
         fine: gold ? r2(members.reduce((s, m) => s + (m.fine ?? 0), 0)) : undefined,
@@ -203,6 +208,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const columns: DataColumn<Row>[] = lotLike ? [
     ...(diamond ? [{ key: "bag", header: together ? "Bags" : "Bag", always: true, sortValue: (r: Row) => (r.members ? r.members.length : r.bag ?? "~"),
       csv: (r: Row) => (r.members ? r.members.map(m => m.bag).filter(Boolean).join(", ") : r.bag ?? ""), cell: bagsCell }] : []),
+    ...(gem ? [{ key: "variety", header: "Stone", always: true, sortValue: (r: Row) => r.variety ?? "~", csv: (r: Row) => r.variety ?? "",
+      cell: (r: Row) => (r.variety ? <span className="font-medium text-brand-dark whitespace-nowrap">{r.variety}</span> : <span className="text-muted-foreground/60 text-xs">not recorded</span>) }] : []),
     { key: "lot", header: "Shape", always: gem, sortValue: r => `${r.shape ?? ""}`, csv: r => (r.members ? r.label ?? "" : diamond ? lotLabel(r.key) : r.key),
       cell: r => (r.shape ? <CellMain title={r.shape} sub={diamond && !r.members && !r.key.includes(LOT_SEP) ? "size not recorded" : !diamond && r.members ? `${r.members.length} ${r.members.length === 1 ? "line" : "lines"}` : undefined} /> : dash) },
     { key: "type", header: "Type", sortValue: r => r.type ?? "", cell: r => (r.type ? <CellTag tone="amber">{r.type}</CellTag> : dash) },
@@ -236,7 +243,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const totalPcs = pcsKnown.reduce((s, r) => s + (r.pcs ?? 0), 0);
   const totalValue = shown.reduce((s, r) => s + (r.value ?? 0), 0);
   const unpriced = shown.filter(r => r.value == null).length;
-  const filtered = shape !== ALL || type !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
+  const filtered = shape !== ALL || variety !== ALL || type !== ALL || mm !== ALL || size !== ALL || color !== ALL || clarity !== ALL;
   const noBag = diamond ? rows.filter(r => !r.bag) : [];
   const isStaff = user?.role === "admin" || user?.role === "employee";
   const coName = hasCompanies(db.settings) && companyId !== "all" ? companyById(db.settings, companyId).name : undefined;
@@ -304,8 +311,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         ]) : undefined}
         columns={columns}
         filters={filters}
-        onClearFilters={() => { setShape(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
-        searchText={r => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ")}
+        onClearFilters={() => { setShape(ALL); setVariety(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
+        searchText={r => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ")}
         searchPlaceholder={diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search"}
         defaultSort={lotLike || together ? null : { key: "qty", dir: "desc" }}
         onRowClick={r => (sameKeys(r) ? onSelect(null) : onSelect(keysOf(r), nameOf(r)))}

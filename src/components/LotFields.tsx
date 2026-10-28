@@ -101,7 +101,9 @@ export function LotPicker({ value, onChange, companyId, id, className = "h-10 ro
 /** A loose lot's parts as a form holds them (every one a string, "" = not recorded). */
 export interface LooseLotDraft { shape: string; mm: string; size: string; color: string; clarity: string;
   /** Natural, CVD, HPHT… (gems: natural, lab-created, treated…). "" = not recorded. */
-  type?: string }
+  type?: string;
+  /** Gems: which stone — Tanzanite, Garnet… "" = not recorded. */
+  variety?: string }
 
 /** The stone types a lot can be — the business's diamond types (or gem types), without "Mount Only" and the like. */
 export function stoneTypeChoices(settings: Parameters<typeof listOf>[1], gem = false): string[] {
@@ -117,13 +119,15 @@ export function stoneTypeChoices(settings: Parameters<typeof listOf>[1], gem = f
  * stones). Gems are asked the same, with their own colours and a grade in place
  * of clarity. Under it: the bag the stones go into, and what that bag holds now.
  */
-export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false, showType = true }: {
+export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false, showType = true, showStone = false }: {
   value: LooseLotDraft; onChange: (patch: Partial<LooseLotDraft>) => void; idPrefix: string;
   companyId?: string; showBag?: boolean; compact?: boolean;
   /** Gems (emerald, ruby…), not diamonds: colour, type and grade in the gem trade's words. */
   gem?: boolean;
   /** Off where the form asks the type itself (a new order's Diamond Type). */
   showType?: boolean;
+  /** Gems going into stock: which stone (Tanzanite, Garnet…) — first, as the trade names a gem. */
+  showStone?: boolean;
 }) {
   const db = useDb();
   const sizes = listOf("diamondSizes", db.settings);
@@ -138,6 +142,12 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+        {gem && showStone && (
+          <div>
+            <Label htmlFor={`${idPrefix}-stone`} className={lbl}>Stone</Label>
+            <ListSelect id={`${idPrefix}-stone`} list="gemStones" value={value.variety ?? ""} onChange={v => onChange({ variety: v })} className={box} placeholder="e.g. Tanzanite" />
+          </div>
+        )}
         <div>
           <Label htmlFor={`${idPrefix}-shape`} className={lbl}>Shape</Label>
           <ListSelect id={`${idPrefix}-shape`} list="diamondShapes" value={value.shape} onChange={v => onChange({ shape: v || "Round" })} optional={false} className={box} />
@@ -180,7 +190,7 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
 
 /** A loose lot from a form's strings. */
 export function lotFromDraft(d: Partial<LooseLotDraft>): LotSpec {
-  return { shape: d.shape?.trim() || "Round", type: d.type?.trim() || undefined, size: d.size?.trim() || undefined, mm: d.mm?.trim() || undefined,
+  return { shape: d.shape?.trim() || "Round", variety: d.variety?.trim() || undefined, type: d.type?.trim() || undefined, size: d.size?.trim() || undefined, mm: d.mm?.trim() || undefined,
     color: d.color?.trim() || undefined, clarity: d.clarity?.trim() || undefined };
 }
 

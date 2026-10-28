@@ -103,7 +103,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
   const filteredRows = rows.filter(m => inDateRange(m.createdAt, filterFromDate, filterToDate));
 
   const materialLabel = material === "gold" ? "Gold Reserve" : material === "diamond" ? "Loose Diamonds" : (def?.name ?? "Material");
-  const bucketLabel = material === "gold" ? "Purity" : material === "diamond" ? "Lot" : "Grade"; // purityOrQuality = the lot for loose diamonds (lib/diamondLots.ts), grade for the rest
+  const bucketLabel = material === "gold" ? "Purity" : material === "diamond" || def?.kind === "stone" ? "Lot" : "Grade"; // purityOrQuality = the lot for loose diamonds and gems (lib/diamondLots.ts), grade for the rest
 
   // ── One-time cleanup: older order-bought loose diamonds were filed by quality
   // grade ("EF VVS") or "unspecified" instead of shape. Each is part of a
@@ -340,7 +340,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
       <PageHeader
         back={{ label: "Back to Stock", onClick: () => navigate("/stock") }}
         title={materialLabel}
-        subtitle={material === "gold" ? "By karat, or each purity" : material === "diamond" ? "By size, or each bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · by size, or each line — shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
+        subtitle={material === "gold" ? "By karat, or each purity" : material === "diamond" ? "By size, or each bag — shape · type · mm · sieve · colour · clarity" : def?.kind === "stone" ? `Gem · by size, or each line — stone · shape · type · mm · sieve · colour · grade, in ${unit}` : `${def && KIND_LABEL[def.kind] ? `${KIND_LABEL[def.kind]} · ` : ""}by grade, in ${unit}`}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
       />
 

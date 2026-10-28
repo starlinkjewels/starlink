@@ -17,7 +17,10 @@ import type { StockMovement } from "./db";
  *  lots kept a millimetre size in `size` — read through `lotParts`, it is the mm. */
 export interface LotSpec { shape: string; size?: string; mm?: string; color?: string; clarity?: string;
   /** Natural, CVD, HPHT… — a lot holds one type of stone. Older lots have none. */
-  type?: string }
+  type?: string;
+  /** Gems: which stone — Tanzanite, Blue Sapphire, Garnet… (one material, say "CZ Color
+   *  Gems", holds many). Diamonds and older gem lots have none. */
+  variety?: string }
 
 export const LOT_SEP = " · ";
 
@@ -46,15 +49,16 @@ export function tidySpec(s: Partial<LotSpec>): LotSpec {
   let size = s.size?.trim() || undefined;
   let mm = s.mm?.trim() || undefined;
   if (size && isMm(size) && !mm) { mm = size; size = undefined; }
-  return { shape: s.shape?.trim() || "Round", type: s.type?.trim() || undefined, size, mm, color: s.color?.trim() || undefined, clarity: s.clarity?.trim() || undefined };
+  return { shape: s.shape?.trim() || "Round", variety: s.variety?.trim() || undefined, type: s.type?.trim() || undefined, size, mm, color: s.color?.trim() || undefined, clarity: s.clarity?.trim() || undefined };
 }
 
 /** "Round · CVD · +6.5-7 · 1.3 mm · G-H · VS" — just "Round" when nothing else is known.
- *  The type right after the shape; sieve before mm, as a lot entered with only one
- *  of them has always been written. A lot without a type is written as it always was. */
+ *  A gem's stone, then the type, right after the shape ("Round · Tanzanite · 1.0 mm");
+ *  sieve before mm, as a lot entered with only one of them has always been written.
+ *  A lot without a stone or a type is written as it always was. */
 export function lotKey(s: Partial<LotSpec>): string {
   const t = tidySpec(s);
-  return [t.shape, t.type, t.size, t.mm, t.color, t.clarity].filter(Boolean).join(LOT_SEP);
+  return [t.shape, t.variety, t.type, t.size, t.mm, t.color, t.clarity].filter(Boolean).join(LOT_SEP);
 }
 
 /** The shape alone — the first part of a lot. */

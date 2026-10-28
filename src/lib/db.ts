@@ -1857,7 +1857,7 @@ export interface StockMovement {
   quantity: number; // always positive; direction implied by `type`
   /** Loose diamonds: the lot's parts (lib/diamondLots.ts), for filtering — the
    *  bucket above is already the lot's label. Absent on older movements. */
-  lot?: { shape: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string };
+  lot?: { shape: string; variety?: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string };
   /** Loose diamonds: how many stones moved, when known. */
   pieces?: number;
   /** "transfer": moved between our companies (in at the sending company's average cost). */
