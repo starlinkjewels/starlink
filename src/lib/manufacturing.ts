@@ -406,12 +406,14 @@ export function deriveStockBalances(movements: StockMovement[], material: string
 export function stockBucketHistory(
   movements: StockMovement[],
   material: string,
-  purityOrQuality: string | null,
+  /** One bucket, several (every bag of one size), or null for all. */
+  purityOrQuality: string | string[] | null,
   ctx: StockLinkContext,
   companyId?: string,
 ): (StockMovement & { link: StockMovementLink })[] {
+  const want = purityOrQuality === null ? null : new Set(Array.isArray(purityOrQuality) ? purityOrQuality : [purityOrQuality]);
   return movements
-    .filter(m => m.material === material && (purityOrQuality === null || m.purityOrQuality === purityOrQuality)
+    .filter(m => m.material === material && (want === null || want.has(m.purityOrQuality))
       && (!companyId || companyId === "all" || moveCompany(m) === companyId))
     .sort((a, b) => +new Date(b.createdAt) - +new Date(a.createdAt))
     .map(m => ({ ...m, link: resolveStockMovementLink(m, ctx) }));
