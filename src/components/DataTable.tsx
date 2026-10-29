@@ -42,11 +42,20 @@ export interface DataColumn<T> {
   hideIfEmpty?: boolean;
   /** A date or an amount — reads "newest first" / "high → low" in the hint. */
   kind?: "date" | "number" | "text";
+  /** On a phone card / list row: "figure" — the row's own number, shown big on the
+   *  right (the first figure column a row has a value in: In or Out, Debit or
+   *  Credit); "first" — among the facts under the title before the others;
+   *  "hide" — left off the card (still in the table and in All details). */
+  card?: "figure" | "first" | "hide";
   className?: string;
 }
 
 type Sort = { key: string; dir: "asc" | "desc" } | null;
 type Prefs = { sort?: Sort; hidden?: string[]; dense?: Density; pageSize?: number; layout?: "cards" | "table"; forced?: string[] };
+
+/** A card's facts in the order the columns ask: "first" ones first, "hide" ones left off. */
+const cardOrder = <C extends { card?: DataColumn<never>["card"] }>(list: C[]): C[] =>
+  [...list.filter(c => c.card === "first"), ...list.filter(c => c.card !== "first" && c.card !== "hide")];
 
 const read = (id: string): Prefs => { try { return JSON.parse(localStorage.getItem(`dt:${id}`) || "{}"); } catch { return {}; } };
 const write = (id: string, p: Prefs) => { try { localStorage.setItem(`dt:${id}`, JSON.stringify(p)); } catch { /* private window */ } };
@@ -453,11 +462,12 @@ export function DataTable<T>({
                 const opens = !pin && canOpen(r), isOpen = opens && open.has(k);
                 const opensPage = !pin && pageable && (canClickRow ? canClickRow(r) : true);
                 const [head, ...restCols] = shown;
-                const filled = restCols.filter(c => c.header && (pin || !blank(c, r)))
-                  .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== "");
-                // The row's figure on the right (its last amount column); up to three facts under the name.
-                const trail = [...filled].reverse().find(c => c.align === "right");
-                const meta = filled.filter(c => c !== trail).slice(0, pin ? 8 : 3);
+                const filled = cardOrder(restCols.filter(c => c.header && (pin || !blank(c, r)))
+                  .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== ""));
+                // The row's figure on the right — the column marked as its figure, else its
+                // last amount column; up to three facts under the name.
+                const trail = filled.find(c => c.card === "figure") ?? [...filled].reverse().find(c => c.align === "right" && !c.card);
+                const meta = filled.filter(c => c !== trail && c.card !== "figure").slice(0, pin ? 8 : 3);
                 const tap = !pin && (opensPage || opens);
                 return (
                   <div key={k} className={`dt-row-slim ${on ? "bg-primary/[0.04]" : ""} ${pin ? "bg-secondary/30 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
@@ -509,9 +519,11 @@ export function DataTable<T>({
             const [head, ...restCols] = shown;
             // Its next few figures, the empty ones left out — the rest are a tap
             // away. A pinned line (an opening balance) shows whatever it holds.
-            const filled = restCols.filter(c => c.header && (pin || !blank(c, r)))
-              .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== "");
-            const pairs = pin ? filled : filled.slice(0, 4);
+            const filled = cardOrder(restCols.filter(c => c.header && (pin || !blank(c, r)))
+              .map(c => ({ ...c, v: c.cell(r) })).filter(x => x.v !== null && x.v !== undefined && x.v !== false && x.v !== ""));
+            // The row's own number beside its name, when a column is marked as it.
+            const fig = pin ? undefined : filled.find(c => c.card === "figure");
+            const pairs = (pin ? filled : filled.filter(c => c.card !== "figure").slice(0, 4));
             return (
               <div key={k} className={`dt-card rounded-xl border bg-white overflow-hidden ${on ? "border-primary/40 bg-primary/[0.03]" : "border-border/60"} ${pin ? "bg-secondary/25 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
                 <div onClick={!pin && (opensPage || opens) ? rowClick(r) : undefined}
@@ -519,6 +531,7 @@ export function DataTable<T>({
                   <div className="flex items-start gap-2.5">
                     {ticking && !pin && <span className="pt-0.5"><Tick state={on ? "on" : "off"} onClick={() => toggleRow(k)} label={on ? "Untick this row" : "Tick this row"} /></span>}
                     <div className="min-w-0 flex-1">{head ? head.cell(r) : null}</div>
+                    {fig && <div className="shrink-0 text-right text-sm font-semibold text-foreground tabular-nums leading-snug pt-0.5">{fig.v}</div>}
                     {rowActions && !pin && (
                       <div data-no-row className="-mr-1 -mt-0.5 shrink-0">
                         <MoreMenu size="sm" label="Row actions" actions={rowActions(r)} onOpen={onRowActionsOpen ? () => onRowActionsOpen(r) : undefined} />

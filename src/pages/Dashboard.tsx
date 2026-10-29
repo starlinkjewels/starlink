@@ -113,7 +113,10 @@ export function Dashboard() {
   // waiting only for dispatch), so it is not counted here — the same as the Orders filter.
   const pending = orders.filter(o => o.status === "Waiting").length;
   const inProd = orders.filter(o => o.status === "In Production").length;
-  const ready = orders.filter(o => o.status === "Ready" || o.status === "Dispatched").length;
+  const ready = orders.filter(o => o.status === "Ready").length;
+  const shipped = orders.filter(o => o.status === "Dispatched").length;
+  // A client's own figures leave out what was turned down.
+  const live = orders.filter(o => o.status !== "Rejected");
   const completed = orders.filter(o => o.status === "Delivered").length;
   // Revenue = money actually collected to date (sum of all payments/advances),
   // not just the value of delivered orders — so collected advances show up too.
@@ -179,13 +182,19 @@ export function Dashboard() {
   const totalExpensesInr = allExpenses.reduce((s, e) => s + inInr(e), 0);
   const staffExpenseSummary = useMemo(() => {
     const staff = db.users.filter(u => u.role === "admin" || u.role === "employee");
-    return staff
+    const rows = staff
       .map(u => {
         const mine = allExpenses.filter(e => e.employeeId === u.id);
         return { user: u, mix: sumByCcy(mine, e => e.amount, e => e.currency), inr: mine.reduce((s, e) => s + inInr(e), 0), count: mine.length };
       })
       .filter(s => s.count > 0)
       .sort((a, b) => b.inr - a.inr);
+    // Entries by someone no longer in the team (or not recorded) are still money spent.
+    const known = new Set(staff.map(u => u.id));
+    const rest = allExpenses.filter(e => !known.has(e.employeeId));
+    return rest.length
+      ? [...rows, { user: { id: "__others", name: "Others" } as (typeof staff)[number], mix: sumByCcy(rest, e => e.amount, e => e.currency), inr: rest.reduce((s, e) => s + inInr(e), 0), count: rest.length }]
+      : rows;
   }, [db.users, allExpenses]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 5th element = optional link target (clicking the card opens that filtered view).
@@ -193,11 +202,11 @@ export function Dashboard() {
     ? [
         ["Today's orders", todayOrders, Clock, undefined, "/orders"],
         ["For approval", forApproval, ClipboardCheck, "warn", "/orders?status=Waiting"],
-        ["Pending", pending, Package, "warn", "/orders?status=Pending"],
         ["In production", inProd, Factory, undefined, "/orders?status=In%20Production"],
-        ["Ready", ready, PackageCheck, undefined, "/orders?status=Ready"],
+        ["Ready to ship", ready, PackageCheck, undefined, "/orders?status=Ready"],
+        ["Shipped", shipped, Package, undefined, "/orders?status=Dispatched"],
         ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
-        ["Revenue", fmtMoney(revenue), DollarSign, "in", "/reports"],
+        ["Collected", fmtMoney(revenue), DollarSign, "in", "/reports"],
         ["Clients", db.clients.length, Users, undefined, "/clients"],
         ["Employees", db.users.filter(u => u.role === "employee").length, Briefcase, undefined, "/employees"],
       ]
@@ -209,10 +218,10 @@ export function Dashboard() {
         ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
       ]
     : [
-        ["Current orders", orders.filter(o => o.status !== "Delivered").length, Package, undefined, "/orders"],
+        ["Current orders", live.filter(o => o.status !== "Delivered").length, Package, undefined, "/orders"],
         ["Completed", completed, CheckCircle2, "in", "/orders?status=Delivered"],
-        ["Invoices", fmtMoney(orders.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, undefined, "/invoices"],
-        ["Pending payment", fmtMoney(orders.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "warn", "/invoices"],
+        ["Order value", fmtMoney(live.reduce((s, o) => s + orderTotal(o), 0)), DollarSign, undefined, "/invoices"],
+        ["Pending payment", fmtMoney(live.reduce((s, o) => s + balanceDue(o), 0)), TrendingUp, "warn", "/invoices"],
       ];
 
   return (
@@ -291,16 +300,16 @@ export function Dashboard() {
       {user!.role === "admin" && (
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.14 }}
           className="card-luxe p-5">
-          <SectionTitle className="mb-4" icon={Wallet} title="Cash Position & Profit" sub="By currency"
+          <SectionTitle className="mb-4" icon={Wallet} title="Net cash in" sub="Money in less money out, by currency — profit is in Reports"
             info="Income minus expense, from every payment tagged to a locker." />
 
           <div className="grid grid-cols-2 gap-3">
-            <Kpi label="USD profit" value={fmtMoney(usdProfit)} tone={usdProfit >= 0 ? "in" : "out"} sub={`${usdLockers.length} locker${usdLockers.length !== 1 ? "s" : ""}`} to="/locker" />
-            <Kpi label="INR profit" value={fmtMoneyInr(inrProfit)} tone={inrProfit >= 0 ? "in" : "out"} sub={`${inrLockers.length} locker${inrLockers.length !== 1 ? "s" : ""}`} to="/locker" />
+            <Kpi label="USD net cash" value={fmtMoney(usdProfit)} tone={usdProfit >= 0 ? "in" : "out"} sub={`${usdLockers.length} locker${usdLockers.length !== 1 ? "s" : ""}`} to="/locker" />
+            <Kpi label="INR net cash" value={fmtMoneyInr(inrProfit)} tone={inrProfit >= 0 ? "in" : "out"} sub={`${inrLockers.length} locker${inrLockers.length !== 1 ? "s" : ""}`} to="/locker" />
             {otherCodes.map(c => {
               const v = otherProfit.get(c) ?? 0;
               const n = otherLockers.filter(l => ccy(l.currency) === c).length;
-              return <Kpi key={c} label={`${c} profit`} value={fmtCcy(v, c)} tone={v >= 0 ? "in" : "out"} sub={`${n} locker${n !== 1 ? "s" : ""}`} to="/locker" />;
+              return <Kpi key={c} label={`${c} net cash`} value={fmtCcy(v, c)} tone={v >= 0 ? "in" : "out"} sub={`${n} locker${n !== 1 ? "s" : ""}`} to="/locker" />;
             })}
           </div>
 
@@ -317,8 +326,8 @@ export function Dashboard() {
             </div>
             {combinedUsd !== null && combinedInr !== null ? (
               <div className="grid grid-cols-2 gap-3 mt-3">
-                <Kpi label="Total profit (USD)" value={fmtMoney(combinedUsd)} tone={combinedUsd >= 0 ? "in" : "out"} />
-                <Kpi label="Total profit (INR)" value={fmtMoneyInr(combinedInr)} tone={combinedInr >= 0 ? "in" : "out"} />
+                <Kpi label="Total net cash (USD)" value={fmtMoney(combinedUsd)} tone={combinedUsd >= 0 ? "in" : "out"} />
+                <Kpi label="Total net cash (INR)" value={fmtMoneyInr(combinedInr)} tone={combinedInr >= 0 ? "in" : "out"} />
                 {otherCodes.length > 0 && (
                   <p className="col-span-2 text-[11px] text-muted-foreground">
                     {otherInr.filter(x => x.perUnit).length > 0 && (
@@ -331,7 +340,7 @@ export function Dashboard() {
                 )}
               </div>
             ) : (
-              <p className="text-xs text-muted-foreground mt-2">Add today's exchange rate for one combined profit.</p>
+              <p className="text-xs text-muted-foreground mt-2">Add today's exchange rate for one combined figure.</p>
             )}
           </div>
         </motion.div>
@@ -342,7 +351,7 @@ export function Dashboard() {
         <div className="card-luxe p-5">
           <SectionTitle className="mb-4" title="Staff Expenses"
             sub={<><span className="font-semibold text-destructive">{fmtCcyMix(totalExpenseMix)}</span> · {allExpenses.length} entries</>}
-            actions={<Link to="/expenses?tab=passbook" className="text-sm text-primary flex items-center gap-1 hover:underline">Full Passbook <ArrowRight className="h-3 w-3" /></Link>} />
+            actions={<Link to="/expenses?tab=all" className="text-sm text-primary flex items-center gap-1 hover:underline">All expenses <ArrowRight className="h-3 w-3" /></Link>} />
           {staffExpenseSummary.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-8 gap-2">
               <Receipt className="h-8 w-8 text-muted-foreground/30" />

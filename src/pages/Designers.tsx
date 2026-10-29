@@ -85,7 +85,7 @@ export function DesignersPage() {
       cell: x => <span className="tabular-nums">{st(x).thisMonth || "—"}</span> },
     { key: "approved", header: "Approved", align: "right", kind: "number", sortValue: x => st(x).approved, csv: x => st(x).approved,
       cell: x => <span className="tabular-nums">{st(x).approved || "—"}</span> },
-    { key: "due", header: "To pay", align: "right", kind: "number", sortValue: x => st(x).acc?.due ?? null, csv: x => st(x).acc?.due ?? "",
+    { key: "due", card: "figure" as const, header: "To pay", align: "right", kind: "number", sortValue: x => st(x).acc?.due ?? null, csv: x => st(x).acc?.due ?? "",
       cell: x => {
         const a = st(x).acc;
         if (!a) return <span className="text-muted-foreground/60 text-xs">—</span>;

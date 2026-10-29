@@ -29,6 +29,7 @@ import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { clientDeleteBlocker, deleteClientFlow, toggleClientActive } from "@/lib/clientActions";
 import { needsAccess } from "@/lib/actionHints";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const PAGE_SIZE = 9;
 
@@ -148,7 +149,8 @@ export function ClientsPage() {
   const mayExport = useMayExport();
   const db = useDb();
   const navigate = useNavigate();
-  const [q, setQ] = useState("");
+  // Kept in the address: Back from a record returns to the list as it was left.
+  const [q, setQ] = useUrlState("q");
   const [view, setView] = useState<"list" | "grid">(() => {
     // The new look opens on the list (slim rows on a phone); a choice made with the switch is kept.
     try { return (localStorage.getItem("clients-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
@@ -193,11 +195,14 @@ export function ClientsPage() {
     .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
     .filter(c => byFilter === "all" || (byFilter === "__none" ? !handlerOf(db, c) : c.accountManagerId === byFilter))
     .filter(c => countryFilter === "all" || (countryFilter === "__none" ? !countryOf(c) : countryOf(c).toLowerCase() === countryFilter))
-    .filter(c =>
-      c.companyName.toLowerCase().includes(q.toLowerCase()) ||
-      countryOf(c).toLowerCase().includes(q.toLowerCase()) ||
-      c.ownerName.toLowerCase().includes(q.toLowerCase())
-    )
+    // Name, owner, country — and the phone, email, login or GST someone has to hand.
+    .filter(c => {
+      const t = q.trim().toLowerCase();
+      if (!t) return true;
+      const digits = t.replace(/\D/g, "");
+      return [c.companyName, countryOf(c), c.ownerName, c.email, c.username, c.gstVat].some(v => (v ?? "").toLowerCase().includes(t))
+        || (digits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(digits));
+    })
     .sort((a, b) => weight(b) - weight(a) || a.companyName.localeCompare(b.companyName));
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
@@ -310,7 +315,7 @@ export function ClientsPage() {
       cell: c => <CellAmount tone="in">{fmtMoney(accountOf(c).received)}</CellAmount> },
     // Sorts by the money to settle either way — the page's own order. In Excel
     // one signed figure: plus, they owe us; minus, we hold their credit.
-    { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: weight,
+    { key: "balance", card: "figure" as const, header: "Balance", align: "right", kind: "number", sortValue: weight,
       csv: c => Math.round((accountOf(c).outstanding - accountOf(c).credit) * 100) / 100,
       cell: c => {
         const a = accountOf(c);

@@ -20,6 +20,7 @@ import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/com
 import { PageHeader, ScrollRow, TabBar } from "@/components/PageHeader";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { oneLine } from "@/components/MoneyEntryEditor";
+import { useSearchParams } from "react-router-dom";
 
 const FALLBACK_CATEGORY_STYLE = "bg-gray-50 text-gray-600 ring-1 ring-gray-200";
 
@@ -42,7 +43,9 @@ export function ExpensesPage() {
   const { user } = useAuth();
   const [db, setDb] = useState(() => loadDb());
   const addNew = useAddNew();
-  const [tab, setTab] = useState<"mine" | "passbook">("mine");
+  // An admin opens on every expense (the Dashboard links here with ?tab=all); "Mine" is a tab away.
+  const [tabSp] = useSearchParams();
+  const [tab, setTab] = useState<"mine" | "passbook">(() => (tabSp.get("tab") === "mine" ? "mine" : "passbook"));
   const [showAdd, setShowAdd] = useState(false);
   // "My Expenses" tab employee filter (admin only) — defaults to own id
   const [mineFilter, setMineFilter] = useState<string>("self");
@@ -53,7 +56,13 @@ export function ExpensesPage() {
   const [dateFrom, setDateFrom] = useState(""); // YYYY-MM-DD
   const [dateTo, setDateTo] = useState("");
   const [form, setForm] = useState(EMPTY_FORM);
-  const [expLockerId, setExpLockerId] = useState("");
+  // The account last paid from (this person, this browser) — chosen already when it is still open.
+  const [expLockerId, setExpLockerId] = useState(() => {
+    try {
+      const id = localStorage.getItem(`exp-locker:${user?.id ?? ""}`) ?? "";
+      return loadDb().lockers.some(l => l.id === id && l.active !== false) ? id : "";
+    } catch { return ""; }
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const activeLockers = db.lockers.filter(l => l.active !== false);
@@ -203,7 +212,8 @@ export function ExpensesPage() {
     setDb(loadDb());
     await flush(); // keep the button in "Saving…" until Firebase confirms
     setForm(EMPTY_FORM);
-    setExpLockerId("");
+    // The account stays chosen — the next one is usually paid from the same — and is remembered.
+    try { localStorage.setItem(`exp-locker:${user!.id}`, expLockerId); } catch { /* private window */ }
     setShowAdd(false);
     setSaving(false);
   }
@@ -290,7 +300,7 @@ export function ExpensesPage() {
       {/* ── Admin tabs. What the open list adds up to is under its table. ── */}
       {isAdmin && (
         <TabBar label="Expenses" value={tab} onChange={setTab}
-          tabs={[{ key: "mine", label: "My Expenses" }, { key: "passbook", label: "All Passbook" }]} />
+          tabs={[{ key: "passbook", label: "All expenses" }, { key: "mine", label: "Mine" }]} />
       )}
 
       {/* ── My Expenses list — date range for everyone, employee/client for an admin, in its table's Filters ── */}
@@ -565,7 +575,7 @@ function ExpenseList({ expenses, onAdd, showEmployee, users, clients, lockers, o
     // in the Excel file, where the amount is a bare number.
     { key: "currency", header: "Currency", hidden: new Set(expenses.map(e => ccy(e.currency))).size < 2, sortValue: e => ccy(e.currency),
       cell: e => <span className="font-mono text-xs">{ccy(e.currency)}</span> },
-    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: e => e.amount, csv: e => e.amount,
+    { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: e => e.amount, csv: e => e.amount,
       cell: e => <CellAmount tone="out">{fmtExpenseAmount(e.amount, e.currency)}</CellAmount> },
   ];
   return (

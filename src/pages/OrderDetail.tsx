@@ -1558,6 +1558,7 @@ function OrderDetailPageBody() {
         : paidInFull ? `Final payment recorded${receiptNo} — order paid in full`
         : isFirst ? `Advance payment recorded${receiptNo}` : `Payment recorded${receiptNo}`
     );
+    try { if (advLockerId) localStorage.setItem(`pay-locker:${user!.id}`, advLockerId); } catch { /* private window */ }
     setAdvAmt(""); setAdvNote(""); setAdvLockerId(""); setAdvLockerAmount(""); setShowAdvForm(false);
   };
 
@@ -2165,7 +2166,8 @@ function OrderDetailPageBody() {
             <div className="flex items-start gap-4 sm:gap-5">
               {heroImg && (
                 <div className="h-[72px] w-[72px] sm:h-24 sm:w-24 rounded-xl overflow-hidden bg-white ring-1 ring-border/70 shrink-0">
-                  <img src={heroImg} alt={order.orderNumber} className="w-full h-full object-contain" />
+                  <img src={heroImg} alt="" className="w-full h-full object-contain"
+                    onError={e => { const box = e.currentTarget.parentElement; if (box) box.style.display = "none"; }} />
                 </div>
               )}
               <div className="flex-1 min-w-0">
@@ -2185,7 +2187,11 @@ function OrderDetailPageBody() {
                 </div>
                 <h1 className="text-[22px] sm:text-[28px] leading-tight text-foreground mt-2 break-words">{orderTitle(order)}</h1>
                 <p className="text-sm text-muted-foreground mt-1 break-words">
-                  {order.forReadyStock ? "Ready Stock — in-house build" : client ? <span className="font-medium text-foreground/80">{client.companyName}</span> : null}
+                  {order.forReadyStock ? "Ready Stock — in-house build" : client
+                    ? (isStaffUser && can("clients")
+                      ? <Link to={`/clients/${client.id}`} className="font-medium text-foreground/80 hover:text-primary hover:underline">{client.companyName}</Link>
+                      : <span className="font-medium text-foreground/80">{client.companyName}</span>)
+                    : null}
                   {order.materialSourcing === "readyStock" ? (() => {
                     const it = order.readyStockItemId ? db.readyStock.find(i => i.id === order.readyStockItemId) : undefined;
                     return ` · Sold from Ready Stock${it && officeOf(it) ? ` — ${officeLabel(officeOf(it))}` : ""}`;
@@ -3041,7 +3047,19 @@ function OrderDetailPageBody() {
           <SectionTitle icon={Wallet} title="Payments"
             sub={<>{advances.length} payment{advances.length !== 1 ? "s" : ""}{advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}</>} />
           {canEditStage() && balance > 0 && (user!.role === "admin" || can("payments", "add")) && (
-            <Button size="sm" onClick={() => setShowAdvForm(v => !v)} className="btn-hero rounded-xl gap-2">
+            <Button size="sm" onClick={() => {
+              // Opens with what is still due and the account last paid into — both can be changed.
+              if (!showAdvForm) {
+                if (!advAmt) setAdvAmt(String(Math.round(balance * 100) / 100));
+                if (!advLockerId) {
+                  try {
+                    const last = localStorage.getItem(`pay-locker:${user!.id}`) ?? "";
+                    if (db.lockers.some(l => l.id === last && l.active !== false)) setAdvLockerId(last);
+                  } catch { /* private window */ }
+                }
+              }
+              setShowAdvForm(v => !v);
+            }} className="btn-hero rounded-xl gap-2">
               <Plus className="h-4 w-4" /> {advances.length === 0 ? "Add Advance" : "Collect Payment"}
             </Button>
           )}

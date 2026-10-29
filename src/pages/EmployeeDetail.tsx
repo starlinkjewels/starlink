@@ -25,6 +25,7 @@ import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ccy, ccyOrder, fmtCcyPdf, sumByCcy } from "@/lib/currency";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
+import { PhoneLink, EmailLink } from "@/components/ContactLink";
 
 export function EmployeeDetailPage() {
   const mayExport = useMayExport();
@@ -274,11 +275,11 @@ export function EmployeeDetailPage() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm flex-1 min-w-0">
           <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={employee.email || undefined}>{employee.email || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate"><EmailLink email={employee.email} /></p></div>
           </div>
           <div className="flex items-start gap-2">
             <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{employee.phone || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium"><PhoneLink phone={employee.phone} /></p></div>
           </div>
           <div className="flex items-start gap-2">
             <Clock className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />

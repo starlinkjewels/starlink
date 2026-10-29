@@ -57,6 +57,7 @@ import { saleCcy, saleOwed, saleReceived, saleTotal } from "@/lib/diamondSalePay
 import { SalePaymentSheet } from "@/components/SalePaymentSheet";
 import type { DiamondSale } from "@/lib/db";
 import type { LockerTransaction } from "@/lib/db";
+import { PhoneLink, EmailLink } from "@/components/ContactLink";
 
 /**
  * The page waits for its record before drawing anything that holds state. The
@@ -687,11 +688,11 @@ function ClientHistoryPageBody() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm min-w-0">
           <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={client.email || undefined}>{client.email || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate"><EmailLink email={client.email} /></p></div>
           </div>
           <div className="flex items-start gap-2">
             <Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium">{client.phone || "—"}</p></div>
+            <div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium"><PhoneLink phone={client.phone} /></p></div>
           </div>
           <div className="flex items-start gap-2">
             <Globe className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
@@ -861,10 +862,14 @@ function ClientHistoryPageBody() {
                       <span className="text-muted-foreground">Received</span>
                       <span className="font-medium text-foreground">{fmtMoney(Number(payAmount))}</span>
                     </div>
+                    {/* Where it goes, as it will be saved: against the invoice chosen, else held as credit. */}
                     <div className="flex items-center justify-between gap-3 text-sm">
-                      <span className="text-muted-foreground">Applied to order</span>
+                      <span className="text-muted-foreground min-w-0 truncate">{payInvoiceId
+                        ? `Against invoice ${openInvoicesForPay.find(x => x.inv.id === payInvoiceId)?.inv.number ?? ""}`
+                        : "Held as credit"}</span>
                       <span className="font-semibold text-primary">{fmtMoney(Number(payAmount))}</span>
                     </div>
+                    {!payInvoiceId && <p className="text-[11px] text-muted-foreground">Settles no bill yet — use “Apply credit” to put it on their bills.</p>}
                     {payDepositPreview != null && payLocker && (
                       <div className="flex items-center justify-between gap-3 text-sm">
                         <span className="text-muted-foreground min-w-0 truncate">Deposited to {payLocker.name}</span>

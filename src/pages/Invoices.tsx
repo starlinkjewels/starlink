@@ -314,7 +314,7 @@ export function InvoicesPage() {
       cell: o => <CellAmount>{fmtMoney(orderTotal(o))}</CellAmount> },
     { key: "advance", header: "Advance paid", align: "right", kind: "number", sortValue: o => totalAdvance(o),
       cell: o => <CellAmount tone="in">{fmtMoney(totalAdvance(o))}</CellAmount> },
-    { key: "balance", header: "Balance due", align: "right", kind: "number", sortValue: o => balanceDue(o),
+    { key: "balance", card: "figure" as const, header: "Balance due", align: "right", kind: "number", sortValue: o => balanceDue(o),
       cell: o => { const bal = balanceDue(o); return bal > 0 ? <CellAmount tone="out">{fmtMoney(bal)}</CellAmount> : <span className="text-muted-foreground font-medium whitespace-nowrap">✓ Cleared</span>; } },
   ];
   const ledgerSum = (rows: Order[], f: (o: Order) => number) => rows.reduce((s, o) => s + f(o), 0);
@@ -494,8 +494,8 @@ export function InvoicesPage() {
               { key: "date", header: "Date", kind: "date", sortValue: r => r.inv.createdAt, cell: r => <span className="font-semibold text-brand-dark text-xs whitespace-nowrap">{fmtDate(r.inv.createdAt)}</span> },
               { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount, cell: r => <span className="font-semibold">{fmtMoney(r.amount)}</span> },
               { key: "received", header: "Received", align: "right", sortValue: r => r.adv, cell: r => (r.adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(r.adv)}</span> : <span className="text-muted-foreground text-xs">—</span>) },
-              { key: "balance", header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs ${r.bal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
-              { key: "status", header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
+              { key: "balance", card: "figure" as const, header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs ${r.bal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
+              { key: "status", card: "first" as const, header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
                 cell: r => r.paid
                   ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
                   : <span className="inline-flex items-center gap-1 text-xs font-medium text-warning-foreground"><Clock className="h-3 w-3" />Pending</span> },

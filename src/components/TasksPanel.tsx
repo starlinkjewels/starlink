@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { ensureCollections, updateDb, uid, type Task, type User } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { CheckCircle2, Circle, ChevronDown, ChevronRight, X, ListTodo, Pencil, Check } from "lucide-react";
 import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
+import { useLocation } from "react-router-dom";
 
 interface Props {
   /** Whose tasks to show. Pass the userId. */
@@ -25,6 +26,17 @@ export function TasksPanel({ userId, open, onClose, asAdmin }: Props) {
   // Live: a task someone assigns (or ticks) shows at once, not when the panel is opened again.
   const db = useDb();
   useEffect(() => { if (open) void ensureCollections(["tasks"]).catch(() => {}); }, [open]);
+  // Closes like every other panel: Esc, or going to another page.
+  const { pathname } = useLocation();
+  const openedAt = useRef(pathname);
+  useEffect(() => { if (open) openedAt.current = pathname; }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (open && pathname !== openedAt.current) onClose(); }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!open) return;
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", esc);
+    return () => window.removeEventListener("keydown", esc);
+  }, [open, onClose]);
   const reload = () => { /* the live data re-renders the panel */ };
 
   const allTasks = (db.tasks ?? []).filter(t => t.assignedTo === userId);

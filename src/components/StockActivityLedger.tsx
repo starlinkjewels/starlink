@@ -489,13 +489,13 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
             {r.billNo}
           </button>
         : <span className="font-mono text-[11px] text-muted-foreground">—</span> },
-    { key: "material", header: "Material", sortValue: r => r.material, csv: r => (r.detail ? `${r.material} · ${r.detail}` : r.material),
+    { key: "material", card: "first" as const, header: "Material", sortValue: r => r.material, csv: r => (r.detail ? `${r.material} · ${r.detail}` : r.material),
       cell: r => <div className="max-w-[240px]" title={r.detail ? `${r.material} · ${r.detail}` : r.material}><CellMain title={r.material} sub={r.detail} /></div> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: r => r.qty,
       cell: r => <span className="font-medium tabular-nums whitespace-nowrap">{r.qty}{r.unit}</span> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.rate ?? 0, csv: r => r.rate ?? "",
       cell: r => (r.rate != null ? <span className="text-xs tabular-nums whitespace-nowrap">{fmtMoneyInr(r.rate)}/{r.unit}</span> : <span className="text-muted-foreground">—</span>) },
-    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountInr,
+    { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: r => r.amountInr,
       cell: r => (r.amountInr != null ? <CellAmount>{fmtMoneyInr(r.amountInr)}</CellAmount> : <span className="text-muted-foreground">—</span>) },
     { key: "remark", header: "Remark", sortValue: r => r.remark ?? "",
       cell: r => <span className="block text-xs text-muted-foreground max-w-[160px] truncate" title={r.remark ?? ""}>{r.remark ?? "—"}</span> },
@@ -503,13 +503,13 @@ export function StockActivityLedger({ onTotals }: { onTotals?: (t: LedgerTotals)
   // A bill's own lines, so the chitthi can be checked a line at a time as well
   // as on the total — and each line corrected on its own.
   const lineColumns: DataColumn<Item>[] = [
-    { key: "material", header: "Item", always: true, sortValue: it => it.material,
+    { key: "material", card: "first" as const, header: "Item", always: true, sortValue: it => it.material,
       cell: it => <CellMain title={it.material} sub={[it.detail, it.discountPct ? discountLabel(it.discountPct) : undefined].filter(Boolean).join(" · ") || undefined} /> },
     { key: "qty", header: "Quantity", align: "right", kind: "number", sortValue: it => it.qty,
       cell: it => <span className="tabular-nums whitespace-nowrap">{it.qty}{it.unit}</span> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: it => it.rate ?? 0,
       cell: it => (it.rate != null ? <span className="text-xs tabular-nums whitespace-nowrap">{fmtMoneyInr(it.rate)}/{it.unit}</span> : <span className="text-muted-foreground">—</span>) },
-    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: it => it.amountInr,
+    { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: it => it.amountInr,
       cell: it => <CellAmount>{fmtMoneyInr(it.amountInr)}</CellAmount> },
   ];
 

@@ -156,7 +156,7 @@ export function ReceiptLedger() {
       cell: r => <CellDate>{fmtDate(r.date)}</CellDate> },
     { key: "client", header: "Client", sortValue: r => clientName(r.clientId),
       cell: r => <span className="block font-medium max-w-[160px] truncate">{clientName(r.clientId) || "—"}</span> },
-    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: r => r.amountUsd,
+    { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: r => r.amountUsd,
       cell: r => <CellAmount tone="in">{fmtMoney(r.amountUsd)}</CellAmount> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: r => r.exchangeRate,
       cell: r => <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{rateLabel(r) || "—"}</span> },

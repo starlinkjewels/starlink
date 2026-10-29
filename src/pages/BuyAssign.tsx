@@ -7,7 +7,8 @@ import { StockActivityLedger, type LedgerTotals } from "@/components/StockActivi
 import { LotPicker } from "@/components/LotFields";
 import { lotParts, lotShape } from "@/lib/diamondLots";
 import { BuyMaterialForm, OpeningStockForm } from "@/components/BuyMaterialForm";
-import { updateDb, uid, toPureGold, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency, worksOnClientId } from "@/lib/db";
+import { updateDb, loadDb, uid, toPureGold, todayLocal, stampFor, type MaterialIssuance, type PurchaseCurrency, worksOnClientId } from "@/lib/db";
+import { fmtG } from "@/lib/weights";
 import { useDb } from "@/hooks/useDb";
 import { decreaseStockSelfHealing } from "@/lib/stock";
 import { fmtMoneyInr, factoryFineGoldBalance, deriveStockBalances, lockerBalance } from "@/lib/manufacturing";
@@ -188,7 +189,11 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
   const [what, setWhat] = useState<"gold" | "other">("gold");
   const [materialId, setMaterialId] = useState("");
   const [grade, setGrade] = useState("");
-  const [purity, setPurity] = useState("22K");
+  // Starts on the purity there is most of — never on one with nothing in stock.
+  const [purity, setPurity] = useState(() => {
+    const bal = deriveStockBalances(loadDb().stockMovements, "gold", companyId);
+    return Object.entries(bal).filter(([, g]) => g > 0.0005).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "22K";
+  });
   const [grams, setGrams] = useState("");
   const [date, setDate] = useState(todayLocal());
   const [notes, setNotes] = useState("");
@@ -284,7 +289,16 @@ function AssignGold({ open, onOpenChange }: PanelProps) {
               <Field label="Purity">{id => (
                 <Select value={purity} onValueChange={setPurity}>
                   <SelectTrigger id={id} className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-                  <SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent>
+                  <SelectContent>{(() => {
+                    // What is in stock first, with its grams; the other purities after.
+                    const bal = deriveStockBalances(db.stockMovements, "gold", companyId);
+                    const held = Object.entries(bal).filter(([, g]) => g > 0.0005).sort((a, b) => b[1] - a[1]);
+                    const rest = GOLD_PURITIES.filter(p => !held.some(([k]) => k === p));
+                    return [
+                      ...held.map(([p, g]) => <SelectItem key={p} value={p}>{p} · {fmtG(g)} g in stock</SelectItem>),
+                      ...rest.map(p => <SelectItem key={p} value={p}><span className="text-muted-foreground">{p} · none in stock</span></SelectItem>),
+                    ];
+                  })()}</SelectContent>
                 </Select>
               )}</Field>
             ) : (

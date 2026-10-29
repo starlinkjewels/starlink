@@ -159,9 +159,9 @@ export function StatementLedger({
       cell: (r: StatementRow) => (r.invoiceNo ? <span className="font-medium text-brand-dark whitespace-nowrap">{r.invoiceNo}</span> : <span className="text-muted-foreground/50">—</span>) }] : []),
     { key: "particulars", header: "Particulars", always: true, sortValue: r => r.particulars,
       cell: r => <CellMain title={r.particulars} sub={refsOf(r) || undefined} /> },
-    { key: "debit", header: debitLabel, align: "right", kind: "number", sortValue: r => r.debit,
+    { key: "debit", card: "figure" as const, header: debitLabel, align: "right", kind: "number", sortValue: r => r.debit,
       cell: r => (r.debit > 0 ? <CellAmount tone="out">{fmt(r.debit)}</CellAmount> : null) },
-    ...(showCredit ? [{ key: "credit", header: creditLabel, align: "right" as const, kind: "number" as const, sortValue: (r: StatementRow) => r.credit,
+    ...(showCredit ? [{ key: "credit", card: "figure" as const, header: creditLabel, align: "right" as const, kind: "number" as const, sortValue: (r: StatementRow) => r.credit,
       // Plain: on a supplier's statement this is money we paid, not money received.
       cell: (r: StatementRow) => (r.credit > 0 ? <CellAmount>{fmt(r.credit)}</CellAmount> : null) }] : []),
     { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => r.balance,

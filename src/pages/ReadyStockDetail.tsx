@@ -165,8 +165,9 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
       disabled: !canEdit || item.quantity <= 0, onSelect: () => setMoving(true) },
     { label: "Share / PDF", icon: Share2, hint: mayExport ? "Photos, CAD, gold, diamonds, price" : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setSharing(true) },
     { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
+    // The main button when it can be sold; here, greyed with why, when it can't.
     { label: "Sell this piece", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece" : "Sold out — nothing left to sell",
-      disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref) },
+      disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(sellHref), show: !(mayOrder && item.quantity > 0) },
     { label: "Delete", icon: Trash2, danger: true, hint: delWhy, disabled: !!delWhy, onSelect: del },
   ];
 
@@ -242,8 +243,10 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
         back={{ label: "Back to Ready Stock", to: "/ready-stock" }}
         title={item.name}
         primary={canManage
-          ? (canEdit ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null)
+          ? (mayOrder && item.quantity > 0 ? { label: "Sell", icon: ShoppingBag, onClick: () => nav(sellHref) }
+            : canEdit ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null)
           : (item.quantity > 0 ? { label: "Order this piece", icon: ShoppingBag, onClick: () => nav(sellHref) } : null)}
+        secondary={canManage && canEdit && mayOrder && item.quantity > 0 ? { label: "Edit", icon: Pencil, onClick: () => setEditing(true) } : null}
         menu={canManage ? actions : undefined}
         menuLabel={`Actions for ${item.name}`}
       >
