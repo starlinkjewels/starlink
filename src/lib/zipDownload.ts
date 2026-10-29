@@ -30,6 +30,14 @@ function saveBlob(blob: Blob, filename: string) {
   setTimeout(() => URL.revokeObjectURL(obj), 10000);
 }
 
+/** A zip is built in the browser's memory, and a big one ran out of room ("can't
+ *  construct the Blob" on a whole catalog of originals and videos). Past this
+ *  many bytes the download is cut into parts — each saved, and its memory let
+ *  go, before the next is gathered. */
+const PART_BYTES = 300 * 1024 * 1024;
+/** How many files are fetched ahead of the one being added. */
+const AHEAD = 6;
+
 /**
  * Download a set of files as one zip.
  *
@@ -41,7 +49,8 @@ function saveBlob(blob: Blob, filename: string) {
  *
  * A filename may carry a path ("Rings/Bands/ring.jpg") — it becomes a folder
  * inside the zip. A few files are fetched at a time, so a folder of hundreds
- * doesn't take one round trip after another.
+ * doesn't take one round trip after another. A very large set is saved as
+ * "Name (part 1).zip", "Name (part 2).zip"… — see PART_BYTES.
  */
 export async function downloadAsZip(
   files: { url: string; filename: string }[],
@@ -49,41 +58,62 @@ export async function downloadAsZip(
   onProgress?: (done: number, total: number) => void,
   /** Off: not written to Activity (an admin's own Catalog downloads). */
   log = true,
-): Promise<{ added: number; failed: string[] }> {
-  if (!exportAllowed()) return { added: 0, failed: [] };
-  const zip = new JSZip();
+  /** For tests: a smaller part size. */
+  partBytes = PART_BYTES,
+): Promise<{ added: number; failed: string[]; parts: number }> {
+  if (!exportAllowed()) return { added: 0, failed: [], parts: 0 };
   const failed: string[] = [];
   // Two photos of the same piece often arrive with the same name; the second
   // would silently replace the first inside the archive. Named up front, in
   // order, so the names don't depend on which download finishes first.
   const used = new Set<string>();
   const named = files.map((f, i) => ({ ...f, name: uniqueName(f.filename || `file-${i + 1}`, used) }));
-  let added = 0;
-  let next = 0;
+  const base = zipName.replace(/\.zip$/i, "");
 
-  const worker = async () => {
-    while (next < named.length) {
-      const f = named[next++];
+  // Fetched a few ahead of the one being added — never the whole set held at once.
+  const got: (Promise<Blob | null> | undefined)[] = [];
+  const fetchOne = (i: number) => {
+    got[i] = (async () => {
       try {
-        const res = await fetch(f.url);
+        const res = await fetch(named[i].url);
         if (!res.ok) throw new Error(String(res.status));
-        zip.file(f.name, await res.blob());
-        added++;
-      } catch {
-        failed.push(f.filename);
-      }
-      onProgress?.(added + failed.length, named.length);
-    }
+        return await res.blob();
+      } catch { return null; }
+    })();
   };
-  await Promise.all(Array.from({ length: Math.min(6, named.length) }, worker));
+  for (let i = 0; i < Math.min(AHEAD, named.length); i++) fetchOne(i);
 
-  if (!added) return { added: 0, failed };
+  let zip = new JSZip();
+  let inZip = 0, bytes = 0, added = 0, parts = 0;
+  // Photos and videos are compressed already: stored as they are, which is
+  // quicker and asks less memory than squeezing them again.
+  const save = async (last: boolean) => {
+    const blob = await zip.generateAsync({ type: "blob", compression: "STORE", streamFiles: true });
+    parts++;
+    const multi = parts > 1 || !last;
+    saveBlob(blob, multi ? `${base} (part ${parts}).zip` : `${base}.zip`);
+    zip = new JSZip(); inZip = 0; bytes = 0;
+  };
 
-  const blob = await zip.generateAsync({ type: "blob" });
-  const filename = zipName.endsWith(".zip") ? zipName : `${zipName}.zip`;
-  if (log) logEvent("export", `Downloaded ${added} file${added !== 1 ? "s" : ""} as ${filename}`, { file: filename, files: added });
-  saveBlob(blob, filename);
-  return { added, failed };
+  for (let i = 0; i < named.length; i++) {
+    if (i + AHEAD < named.length) fetchOne(i + AHEAD);
+    const blob = await got[i]!;
+    got[i] = undefined; // let it go once it is in the zip
+    if (blob) {
+      // This one would take the part past its size: the part is saved first.
+      if (inZip > 0 && bytes + blob.size > partBytes) await save(false);
+      zip.file(named[i].name, blob);
+      inZip++; bytes += blob.size; added++;
+    } else failed.push(named[i].filename);
+    onProgress?.(i + 1, named.length);
+  }
+  if (inZip > 0) await save(true);
+
+  if (added && log) {
+    const what = parts > 1 ? `${base} in ${parts} parts` : `${base}.zip`;
+    logEvent("export", `Downloaded ${added} file${added !== 1 ? "s" : ""} as ${what}`, { file: `${base}.zip`, files: added });
+  }
+  return { added, failed, parts };
 }
 
 /**
