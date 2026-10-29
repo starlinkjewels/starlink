@@ -2,7 +2,7 @@ import { LooseLotFields } from "@/components/LotFields";
 import { ListCombo } from "@/components/ListCombo";
 import type { ListKey } from "@/lib/optionLists";
 import { useState, type ReactNode } from "react";
-import { Lock, Pencil } from "lucide-react";
+import { Info, Lock, Pencil, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import {
   loadDb, updateDbAs, uid, findInvoiceForOrder, isDiamondOnlyOrder, fmtDate,
@@ -17,6 +17,8 @@ import { activeMaterials } from "@/lib/materials";
 import { hasDiamonds } from "@/lib/orderText";
 import { choicesOf, listOf } from "@/lib/optionLists";
 import { orderEditAccess, orderSpecLocks } from "@/lib/orderGuards";
+import { canCancelIssuance, deleteIssuance, issuanceVoidImpact } from "@/lib/issuanceEdit";
+import { isMetalMaterial } from "@/lib/materials";
 import { weightProblem } from "@/lib/weights";
 import { confirmBox } from "@/lib/confirm";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -77,8 +79,9 @@ const LABEL: Record<string, string> = {
 const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec"]);
 
 // Outside the panel, so typing in a field never remounts it (and loses focus).
-function Note({ children }: { children: ReactNode }) {
-  return <p className="flex items-start gap-1.5 rounded-lg bg-secondary/60 px-2.5 py-1.5 text-[11px] text-muted-foreground"><Lock className="h-3 w-3 mt-0.5 shrink-0" />{children}</p>;
+function Note({ children, info }: { children: ReactNode; info?: boolean }) {
+  const Icon = info ? Info : Lock;
+  return <p className="flex items-start gap-1.5 rounded-lg bg-secondary/60 px-2.5 py-1.5 text-[11px] text-muted-foreground"><Icon className="h-3 w-3 mt-0.5 shrink-0" />{children}</p>;
 }
 function Field({ label, children, wide }: { label: string; children: ReactNode; wide?: boolean }) {
   return <div className={`space-y-1 ${wide ? "col-span-2" : ""}`}><Label className="text-xs">{label}</Label>{children}</div>;
@@ -101,7 +104,35 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
   const locks = orderSpecLocks(db, order);
   const all = access ?? locks.all;
   const pieceLock = all ?? locks.piece;
-  const matLock = pieceLock ?? locks.material;
+  // Only the metal waits for its issue to be cancelled; type, karats, quantity
+  // and diamond type change here, and what was issued stays issued.
+  const doneLock = pieceLock ?? locks.finished;
+  const metalLock = doneLock ?? locks.metal;
+  const metalIssues = () => loadDb().materialIssuances.filter(i => i.orderId === order.id && (i.quantityIssued > 0 || i.status === "open") && isMetalMaterial(db.settings, i.material));
+  const [cancelling, setCancelling] = useState(false);
+  // The metal issue cancelled right here — the same as Cancel issue in Manufacturing.
+  const cancelMetalIssue = async () => {
+    const d0 = loadDb();
+    const list = metalIssues();
+    if (!list.length) return;
+    for (const mi of list) { const c = canCancelIssuance(d0, mi); if (!c.ok) { toast.error(c.reason!); return; } }
+    if (!(await confirmBox([
+      `Cancel the metal issued for ${order.orderNumber}, so its metal can change?`,
+      "",
+      ...list.flatMap(mi => issuanceVoidImpact(d0, mi)),
+      "",
+      "This cannot be undone.",
+    ].join("\n"), { confirmText: "Cancel the issue" }))) return;
+    setCancelling(true);
+    let done = 0;
+    try {
+      for (const mi of list) { await deleteIssuance(loadDb(), mi, user!.id); done++; }
+      toast.success("Metal issue cancelled — the metal can change now");
+    } catch (e) {
+      const why = e instanceof Error ? e.message : "Couldn't cancel the issue.";
+      toast.error(done ? `${done} of ${list.length} metal issues cancelled — the rest: ${why}` : why);
+    } finally { setCancelling(false); }
+  };
   const diamondOnly = isDiamondOnlyOrder(order);
   // Gems only (an emerald sale): no diamond type, no sieve.
   const gemOnly = diamondOnly && !hasDiamonds(f.stoneName || "Diamond");
@@ -177,10 +208,13 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
 
     // Whatever is locked now is refused, not quietly skipped.
     const PIECE = ["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "diamondType", "diamondShape", "diamondWeight", "estimatedGrossWeight", "estimatedNetWeight", "rhodium", "stamping", "engraving"];
-    const MATERIAL = ["jewelleryType", "metal", "productKarats", "quantity", "diamondType"];
-    const pieceNow = nowLocks.piece, matNow = nowLocks.piece ?? nowLocks.material;
+    const FINISHED = ["jewelleryType", "metal", "productKarats", "quantity", "diamondType"];
+    const MATERIAL = ["metal"];
+    const pieceNow = nowLocks.piece, doneNow = nowLocks.piece ?? nowLocks.finished, matNow = doneNow ?? nowLocks.metal;
     const hitPiece = pieceNow && changed.find(k => PIECE.includes(k));
     if (hitPiece) { toast.error(`The ${LABEL[hitPiece]} can't change: ${pieceNow}`); return; }
+    const hitDone = doneNow && changed.find(k => FINISHED.includes(k));
+    if (hitDone) { toast.error(`The ${LABEL[hitDone]} can't change: ${doneNow}`); return; }
     const hitMat = matNow && changed.find(k => MATERIAL.includes(k));
     if (hitMat) { toast.error(`The ${LABEL[hitMat]} can't change: ${matNow}`); return; }
     if (isDiamondOnlyOrder({ metal: next.metal! }) !== isDiamondOnlyOrder(o)) { toast.error(nowLocks.kind); return; }
@@ -245,19 +279,32 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
         <section className="space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">The piece</p>
           {!all && pieceLock && <Note>{pieceLock}</Note>}
-          {!pieceLock && locks.material && <Note>Quantity, type, metal, karats and diamond type: {locks.material}</Note>}
+          {!pieceLock && locks.finished && <Note>Type, metal, karats, quantity and diamond type: {locks.finished}</Note>}
+          {!doneLock && locks.material && (
+            <Note info>Already issued for this order: {locks.material}. Change the type, karats or quantity here — then issue more, or return the extra, in Manufacturing.</Note>
+          )}
+          {!doneLock && locks.metal && (
+            <div className="rounded-lg bg-secondary/60 px-2.5 py-2 space-y-2">
+              <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground"><Lock className="h-3 w-3 mt-0.5 shrink-0" />{locks.metal}.</p>
+              {metalIssues().length > 0 && (
+                <Button type="button" variant="outline" size="sm" onClick={cancelMetalIssue} disabled={cancelling} className="rounded-lg h-8 gap-1.5 w-full sm:w-auto">
+                  <Undo2 className="h-3.5 w-3.5" /> Cancel the metal issue
+                </Button>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Jewellery type">
-              <Select value={f.jewelleryType} onValueChange={v => set("jewelleryType", v)} disabled={!!matLock || diamondOnly}>
-                <SelectTrigger className="h-10 rounded-xl" title={matLock ?? (diamondOnly ? locks.kind : undefined)}><SelectValue /></SelectTrigger>
+              <Select value={f.jewelleryType} onValueChange={v => set("jewelleryType", v)} disabled={!!doneLock || diamondOnly}>
+                <SelectTrigger className="h-10 rounded-xl" title={doneLock ?? (diamondOnly ? locks.kind : undefined)}><SelectValue /></SelectTrigger>
                 <SelectContent>{typeOpts.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
               </Select>
             </Field>
             {/* A loose-diamond order has no metal — its stones are below. */}
             {!diamondOnly && (
               <Field label="Metal">
-                <Select value={f.metal} onValueChange={setMetal} disabled={!!matLock}>
-                  <SelectTrigger className="h-10 rounded-xl" title={matLock}><SelectValue /></SelectTrigger>
+                <Select value={f.metal} onValueChange={setMetal} disabled={!!metalLock}>
+                  <SelectTrigger className="h-10 rounded-xl" title={metalLock}><SelectValue /></SelectTrigger>
                   <SelectContent>{metalOpts.map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
                 </Select>
               </Field>
@@ -282,7 +329,7 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
               <>
                 <Field label="Karats">
                   {metalHasKarats(f.metal)
-                    ? pick("productKarats", KARATS, matLock)
+                    ? pick("productKarats", KARATS, doneLock)
                     : <div className="h-10 rounded-xl px-3 flex items-center bg-secondary/60 text-xs text-muted-foreground">No karats for {f.metal}</div>}
                 </Field>
                 <Field label="Colour">{pickList("productColor", "colours", pieceLock)}</Field>
@@ -292,11 +339,11 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
               </>
             )}
             <Field label={diamondOnly ? "Stones (pcs)" : "Quantity"}>
-              <Input type="number" min={1} step={1} value={f.quantity} onChange={e => set("quantity", e.target.value)} disabled={!!matLock} title={matLock} className="h-10 rounded-xl" />
+              <Input type="number" min={1} step={1} value={f.quantity} onChange={e => set("quantity", e.target.value)} disabled={!!doneLock} title={doneLock} className="h-10 rounded-xl" />
             </Field>
             {!gemOnly && (
               <Field label="Diamond type">
-                {pickList("diamondType", "diamondTypes", matLock)}
+                {pickList("diamondType", "diamondTypes", doneLock)}
               </Field>
             )}
             <Field label="Est. diamond weight (ct)">

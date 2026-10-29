@@ -41,6 +41,7 @@ import { meltPlan } from "@/lib/melt";
 import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
+import { PIECE_PHOTO_MAX, dropDeletedPicture, followOrderPictures, orderPictures } from "@/lib/readyStockPhotos";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -1601,7 +1602,9 @@ function OrderDetailPageBody() {
       const cadUrl = await uploadDataUrl(await imageForUpload(file), `orders/${order.id}/cad`);
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
+        const before = orderPictures(o);
         o.cadImage = cadUrl;
+        followOrderPictures(d, order.id, before, whoOf(user)); // its piece in Ready Stock follows
         const clientUser = d.users.find(u => u.clientId === o.clientId);
         if (clientUser) d.notifications.unshift({ id: uid("n_"), userId: clientUser.id, title: "CAD Design Ready", body: `CAD design uploaded for ${o.orderNumber}. Please review.`, type: "info", read: false, createdAt: new Date().toISOString() });
       });
@@ -1637,7 +1640,9 @@ function OrderDetailPageBody() {
       const urls = await Promise.all(incoming.slice(0, room).map(async f => uploadDataUrl(await imageForUpload(f), `orders/${order.id}`)));
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
+        const before = orderPictures(o);
         o.images = [...(o.images ?? []), ...urls];
+        followOrderPictures(d, order.id, before, whoOf(user)); // its piece in Ready Stock follows
       });
       toast.success(`${urls.length} reference image${urls.length !== 1 ? "s" : ""} added${room < incoming.length ? " · max 3" : ""}`);
     } catch { toast.error("Failed to upload images"); }
@@ -1645,7 +1650,12 @@ function OrderDetailPageBody() {
   };
   const removeRefImage = async (src: string) => {
     if (!(await confirmBox("Remove this reference image?"))) return;
-    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.images = (o.images ?? []).filter(u => u !== src); });
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      const before = orderPictures(o);
+      o.images = (o.images ?? []).filter(u => u !== src);
+      followOrderPictures(d, order.id, before, whoOf(user));
+    });
   };
 
   // ── Finished-product photography ────────────────────────────────────────
@@ -1668,7 +1678,9 @@ function OrderDetailPageBody() {
           : uploadDataUrl(await compressImg(f, PRODUCT_PHOTO_MAX, PRODUCT_PHOTO_QUALITY), `orders/${order.id}/product`)));
       updateDb(d => {
         const o = d.orders.find(x => x.id === order.id)!;
+        const before = orderPictures(o);
         o.productPhotos = [...(o.productPhotos ?? []), ...urls];
+        followOrderPictures(d, order.id, before, whoOf(user)); // its piece in Ready Stock follows
       });
       toast.success(`${urls.length} photo${urls.length !== 1 ? "s" : ""} added${batch.length < incoming.length ? " · max 8" : ""}`);
     } catch { toast.error("Failed to upload photos"); }
@@ -1721,7 +1733,15 @@ function OrderDetailPageBody() {
       "",
       `The file is deleted — it disappears from this order and from Product Photos (design ${order.designNumber || order.orderNumber}), and the client can no longer download it. This cannot be undone.`,
     ].join("\n")))) return;
-    updateDb(d => { const o = d.orders.find(x => x.id === order.id)!; o.productPhotos = (o.productPhotos ?? []).filter(u => u !== photoUrl); });
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id)!;
+      const before = orderPictures(o);
+      o.productPhotos = (o.productPhotos ?? []).filter(u => u !== photoUrl);
+      // Its piece in Ready Stock lets go of it too — the file is deleted just below —
+      // and so does any other piece showing it (copies split off, return pieces).
+      followOrderPictures(d, order.id, before, whoOf(user));
+      dropDeletedPicture(d, photoUrl, whoOf(user));
+    });
     await deleteByUrl(photoUrl);
     toast.success("Photo removed");
   };
@@ -2019,7 +2039,7 @@ function OrderDetailPageBody() {
       "Record actual details first? Cancel to go back and do that.",
     ].join("\n")))) return false;
     const itemId = uid("rs_");
-    const imgs = [order.cadImage, ...(order.productPhotos || []), ...(order.images || [])].filter(Boolean).slice(0, 3) as string[];
+    const imgs = orderPictures(order).slice(0, PIECE_PHOTO_MAX);
     const pw = pieceWeights(order, db.materialIssuances);
     if (pw.problem) { toast.error(`Fix the weights first — ${pw.problem}`); return false; }
     const diaWt = pw.diamondCt || undefined;

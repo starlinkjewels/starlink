@@ -7,7 +7,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   ArrowRightLeft, CircleX, Gem, History, Layers, Lock, Maximize2, Minus, PackagePlus, Pencil, Play, Plus,
   RotateCcw, ShoppingBag, Split, Tag, Trash2, Undo2, type LucideIcon,
-  Share2,
+  Share2, Images,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -32,6 +32,7 @@ import { companyIdOfClient, companyOf } from "@/lib/companies";
 import { officeLabel, officeOf, officeRank, otherLots } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf, type TimelineEntry } from "@/lib/readyStockHistory";
 import { readyStockDeleteBlocker } from "@/lib/readyStockGuards";
+import { builtFrom, orderPicturesPlan, piecePhotosBehind, takeOrderPictures } from "@/lib/readyStockPhotos";
 import { needsAccess } from "@/lib/actionHints";
 
 /** How each kind of history line looks. */
@@ -116,6 +117,25 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
   const profit = cost != null ? item.price - cost : undefined;
   const nameOfUser = (id?: string) => (id ? db.users.find(u => u.id === id)?.name : undefined);
 
+  // Built from an order whose photos changed since: one tap takes the order's photos again.
+  const buildOrder = builtFrom(db, item);
+  const photosBehind = canEdit && piecePhotosBehind(db, item);
+  const takeOrderPhotos = async () => {
+    const plan = orderPicturesPlan(loadDb(), item);
+    if (!plan.order || !plan.next.length) return;
+    if (!(await confirmBox([
+      `Use the photos on order ${plan.order.orderNumber} for this piece?`,
+      "",
+      `• The piece shows the order's ${plan.next.length} photo${plan.next.length !== 1 ? "s" : ""}.`,
+      plan.off.length
+        ? `• ${plan.off.length} photo${plan.off.length !== 1 ? "s" : ""} on the piece now ${plan.off.length !== 1 ? "are" : "is"} taken off it — written in its history, so ${plan.off.length !== 1 ? "they" : "it"} can be found again.`
+        : "• No photo on the piece is taken off.",
+    ].join("\n"), { confirmText: "Use the order's photos" }))) return;
+    let done = false;
+    updateDb(d => { done = takeOrderPictures(d, item.id, whoOf(user)); });
+    if (done) { setShown(0); toast.success(`Photos taken from order ${buildOrder?.orderNumber ?? ""}`.trim()); }
+  };
+
   // ── Media: the photos, then the video ──
   const media = [
     ...(item.images ?? []).map(src => ({ kind: "image" as const, src })),
@@ -163,6 +183,8 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
     { label: "Edit", icon: Pencil, hint: editWhy, disabled: true, onSelect: () => undefined, show: !canEdit },
     { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(office)}` : "Sold out — nothing to move"),
       disabled: !canEdit || item.quantity <= 0, onSelect: () => setMoving(true) },
+    { label: "Use the order's photos", icon: Images, hint: editWhy ?? (buildOrder ? `The photos on order ${buildOrder.orderNumber} now` : undefined),
+      disabled: !canEdit || !photosBehind, onSelect: takeOrderPhotos, show: !!buildOrder },
     { label: "Share / PDF", icon: Share2, hint: mayExport ? "Photos, CAD, gold, diamonds, price" : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setSharing(true) },
     { label: "Print band", icon: Tag, hint: mayExport ? undefined : needsAccess("readyStock", "export"), disabled: !mayExport, onSelect: () => setBandOpen(true), show: db.settings.barcodeBandEnabled !== false },
     // The main button when it can be sold; here, greyed with why, when it can't.
@@ -279,6 +301,12 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
             {item.quantity === 0 && <span className="absolute top-3 left-3 rounded-full bg-black/70 text-white text-[11px] font-semibold tracking-wide px-2.5 py-1">SOLD OUT</span>}
             {media.length > 1 && <span className="absolute top-3 right-3 rounded-full bg-black/50 text-white text-[11px] tabular-nums px-2 py-0.5">{at + 1} / {media.length}</span>}
           </div>
+          {photosBehind && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl bg-secondary/60 px-3 py-2">
+              <p className="text-xs text-muted-foreground flex-1 min-w-[12rem]">The photos on order {buildOrder?.orderNumber} have changed since this piece was added.</p>
+              <button type="button" onClick={takeOrderPhotos} className="text-xs font-semibold text-primary hover:underline shrink-0">Use the order's photos</button>
+            </div>
+          )}
           {media.length > 1 && (
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-1">
               {media.map((m, i) => (
