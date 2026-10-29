@@ -258,6 +258,18 @@ export function LockerPage() {
   // With the order number too — for search, sorting and the downloads.
   const txnText = (t: (typeof txns)[number]) => lockerEntryText(lk, t).text;
   const txnSigned = (t: (typeof txns)[number]) => (t.type === "income" || t.type === "transfer_in" ? t.amountInr : -t.amountInr);
+  // A date range picked (no category): the day's cash check — what the account
+  // held when the range began, what came in and went out within it, and what it
+  // held at its end. Opening + in − out = closing, for those dates.
+  const rangeOn = (!!filterFrom || !!filterTo) && !filterCat;
+  const rFrom = filterFrom ? new Date(`${filterFrom}T00:00:00`) : null;
+  const rTo = filterTo ? new Date(`${filterTo}T23:59:59.999`) : null;
+  const inRange = (t: (typeof txns)[number]) => (!rFrom || new Date(t.createdAt) >= rFrom) && (!rTo || new Date(t.createdAt) <= rTo);
+  const rangeOpen = (selected?.openingBalance || 0) + txns.filter(t => rFrom && new Date(t.createdAt) < rFrom).reduce((s, t) => s + txnSigned(t), 0);
+  const rangeTxns = txns.filter(inRange);
+  const rangeIn = rangeTxns.filter(t => txnSigned(t) > 0).reduce((s, t) => s + t.amountInr, 0);
+  const rangeOut = rangeTxns.filter(t => txnSigned(t) < 0).reduce((s, t) => s + t.amountInr, 0);
+  const rangeNIn = rangeTxns.filter(t => txnSigned(t) > 0).length, rangeNOut = rangeTxns.length - rangeNIn;
 
   // The rate an entry moved money at, the way people say it ("1 AUD = ₹55.2"),
   // or "" when no currency changed hands. Older rows carry only exchangeRate
@@ -342,11 +354,11 @@ export function LockerPage() {
           </div>
         );
       } },
-    { key: "category", header: "Category", sortValue: r => (r.t ? categoryOf(r.t) : ""), csv: r => (r.t ? categoryOf(r.t) : ""),
+    { key: "category", card: "hide" as const, header: "Category", sortValue: r => (r.t ? categoryOf(r.t) : ""), csv: r => (r.t ? categoryOf(r.t) : ""),
       cell: r => (r.t ? <CellTag>{categoryOf(r.t)}</CellTag> : null) },
-    { key: "debit", header: "Debit", align: "right", kind: "number", sortValue: r => (r.t && !isIn(r.t) ? r.t.amountInr : null),
+    { key: "debit", card: "figure" as const, header: "Debit", align: "right", kind: "number", sortValue: r => (r.t && !isIn(r.t) ? r.t.amountInr : null),
       cell: r => (r.t && !isIn(r.t) ? <CellAmount tone="out">{fmtCcy(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
-    { key: "credit", header: "Credit", align: "right", kind: "number", sortValue: r => (r.t && isIn(r.t) ? r.t.amountInr : null),
+    { key: "credit", card: "figure" as const, header: "Credit", align: "right", kind: "number", sortValue: r => (r.t && isIn(r.t) ? r.t.amountInr : null),
       cell: r => (r.t && isIn(r.t) ? <CellAmount tone="in">{fmtCcy(r.t.amountInr, r.t.currency ?? selected?.currency)}</CellAmount> : null) },
     // Each entry's balance at the time, from the full history — a filter never changes it.
     { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: r => (r.t ? txnBalances.get(r.t.id) ?? 0 : null),
@@ -485,12 +497,21 @@ export function LockerPage() {
             onClearFilters={() => { setFilterFrom(""); setFilterTo(""); setFilterCat(""); }}
             exports={[{ label: "PDF or Excel", icon: Download, hint: "With the running balance", onSelect: () => setShowExport(true) }]}
             summary={
+              rangeOn ? (
+                <StatStrip items={[
+                  { label: filterFrom ? "Opening" : "Opening balance", value: fmtCcy(rangeOpen, selected.currency), icon: History, sub: filterFrom ? `At the start of ${fmtDate(rFrom!.toISOString())}` : "At the start" },
+                  { label: "Money in", value: fmtCcy(rangeIn, selected.currency), tone: "in", op: "+", sub: `${rangeNIn} ${rangeNIn === 1 ? "entry" : "entries"}` },
+                  { label: "Money out", value: fmtCcy(rangeOut, selected.currency), tone: "out", op: "−", sub: `${rangeNOut} ${rangeNOut === 1 ? "entry" : "entries"}` },
+                  { label: "Closing", value: fmtCcy(rangeOpen + rangeIn - rangeOut, selected.currency), tone: "strong", op: "=", icon: Wallet, sub: filterTo ? `At the end of ${fmtDate(rTo!.toISOString())}` : "Now" },
+                ]} />
+              ) : (
               <StatStrip items={[
                 { label: "Opening balance", value: fmtCcy(selected.openingBalance || 0, selected.currency), icon: History },
                 { label: "Money in", value: fmtCcy(totalIn, selected.currency), tone: "in", op: "+", sub: `${nIn} ${nIn === 1 ? "entry" : "entries"}` },
                 { label: "Money out", value: fmtCcy(totalOut, selected.currency), tone: "out", op: "−", sub: `${nOut} ${nOut === 1 ? "entry" : "entries"}` },
                 { label: "Balance", value: fmtCcy(lockerBalance(selected, db.lockerTransactions), selected.currency), tone: "strong", op: "=", icon: Wallet },
-              ]} note={filtersActive ? "Whole account — not narrowed by the filters" : undefined} />
+              ]} note={filtersActive ? "Whole account — not narrowed by the category" : undefined} />
+              )
             }
             resetKey={`${selected.id}|${filterFrom}|${filterTo}|${filterCat}`}
             id="locker-ledger"

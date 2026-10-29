@@ -230,7 +230,7 @@ export function IncomePage() {
     { key: "description", header: "Description", sortValue: r => r.description,
       cell: r => <span title={r.description} className="text-muted-foreground text-xs max-w-[200px] truncate block">{r.description}</span> },
     // Signed, so "high to low" puts the biggest money in first and the biggest out last.
-    { key: "amount", header: "Amount", align: "right", kind: "number", sortValue: signed,
+    { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: signed,
       cell: r => <CellAmount tone={r.direction}>{r.direction === "in" ? "+" : "−"}{fmt(r.amount)}</CellAmount> },
   ];
 

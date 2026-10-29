@@ -23,6 +23,7 @@ import { toast } from "sonner";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
 import { confirmBox } from "@/lib/confirm";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const PAGE_SIZE = 9;
 
@@ -35,10 +36,11 @@ export function FactoriesPage() {
   const db = useDb();
   const { user } = useAuth();
   const isAdmin = user?.role === "admin";
-  const [q, setQ] = useState("");
+  // Kept in the address: Back from a record returns to the list as it was left.
+  const [q, setQ] = useUrlState("q");
   const [view, setView] = useState<"list" | "grid">(() => {
-    // The new look opens on the list (slim rows on a phone); a choice made with the switch is kept.
-    try { return (localStorage.getItem("factories-view") as "list" | "grid") || (studioOn() ? "list" : "grid"); } catch { return "grid"; }
+    // Opens on the list — what each owes and is owed, side by side; a choice made with the switch is kept.
+    try { return (localStorage.getItem("factories-view") as "list" | "grid") || "list"; } catch { return "list"; }
   });
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);

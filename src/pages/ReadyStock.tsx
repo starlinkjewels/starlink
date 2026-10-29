@@ -14,7 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { usePagination } from "@/hooks/usePagination";
 import { PaginationBar } from "@/components/PaginationBar";
-import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX, Share2 } from "lucide-react";
+import { Plus, Search, Trash2, Gem, X, Minus, Pencil, MapPin, Tag, Play, FileText, FileSpreadsheet, Check, ArrowRightLeft, Building2, Eye, Wallet, Lock, PackageX, Share2, ShoppingBag } from "lucide-react";
 import { ShareProductsSheet } from "@/components/ShareProductsSheet";
 import { exportReadyStockCsv } from "@/lib/productExport";
 import { downloadStockListPdf } from "@/lib/piecesPdf";
@@ -33,6 +33,7 @@ import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyS
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const PAGE_SIZE = 24;
 /** The office tab for pieces that were never given one. */
@@ -64,8 +65,9 @@ export function ReadyStockPage() {
   const can = useCan();
   const mayExport = useMayExport();
   const db = useDb();
-  const [q, setQ] = useState("");
-  const [avail, setAvail] = useState<"all" | "available" | "sold">("all"); // stock availability filter
+  // Kept in the address: Back from a record returns to the list as it was left.
+  const [q, setQ] = useUrlState("q");
+  const [avail, setAvail] = useState<"all" | "available" | "sold">("available"); // stock availability filter — what can be sold, first
   // Each company has its own Ready Stock. Staff choose whose; a client sees the
   // company they buy from.
   const multiCo = useMultiCo();
@@ -189,11 +191,14 @@ export function ReadyStockPage() {
   };
 
   // Every action is listed; one this person or this piece can't take is greyed with why.
+  const mayOrder = user?.role === "admin" || (user?.role === "employee" && can("orders", "add"));
   const itemActions = (item: ReadyStockItem): MoreAction[] => {
     const editWhy = can("readyStock", "edit") ? undefined : needsAccess("readyStock", "edit");
     const delWhy = !can("readyStock", "delete") ? needsAccess("readyStock", "delete") : readyStockDeleteBlocker(db, item);
     return [
       { label: "View", icon: Eye, onSelect: () => nav(pieceHref(item)) },
+      { label: "Sell", icon: ShoppingBag, hint: !mayOrder ? needsAccess("orders", "add") : item.quantity > 0 ? "A new order with this piece" : "Sold out — nothing left to sell",
+        disabled: !mayOrder || item.quantity <= 0, onSelect: () => nav(`/orders/new?readyStock=${encodeURIComponent(item.id)}`) },
       { label: "Edit", icon: Pencil, hint: editWhy, disabled: !!editWhy, onSelect: () => openEdit(item) },
       { label: "Move to another office", icon: ArrowRightLeft, hint: editWhy ?? (item.quantity > 0 ? `Now at the ${officeLabel(officeOf(item))}` : "Sold out — nothing to move"),
         disabled: !!editWhy || item.quantity <= 0, onSelect: () => setMoving([item]) },

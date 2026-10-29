@@ -40,6 +40,7 @@ import { OrderProfitBadge } from "@/components/OrderProfitCard";
 import { InvoiceBadge, needsInvoice } from "@/components/InvoiceBadge";
 import { PaginationBar } from "@/components/PaginationBar";
 import type { Order, MaterialIssuance } from "@/lib/db";
+import { useUrlState } from "@/hooks/useUrlState";
 
 const PAGE_SIZE = 12;
 
@@ -91,7 +92,8 @@ export function OrdersPage() {
   // filtered list follows an order that moves stage or status.
   const dbVersion = useDbVersion();
   const [sp] = useSearchParams();
-  const [q, setQ] = useState("");
+  // Kept in the address: Back from a record returns to the list as it was left.
+  const [q, setQ] = useUrlState("q");
   const [status, setStatus] = useState<string>(sp.get("status") ?? "all");
   const [clientFilter, setClientFilter] = useState<string>("all");
   // The admin can look at one person's orders: assigned to them, or for a
@@ -162,11 +164,19 @@ export function OrdersPage() {
     // exactly those pieces. Without a comma this is the single term it always
     // was, so "white gold" still matches as one phrase.
     const terms = q.split(",").map(t => t.trim().toLowerCase()).filter(Boolean);
+    // A client's name finds their orders too — as do the person who placed it,
+    // the parcel's tracking no., the factory's bill no. and an earlier order no.
+    const clientName = new Map(db.clients.map(c => [c.id, `${c.companyName} ${c.ownerName}`.toLowerCase()]));
     if (terms.length) list = list.filter(o => terms.some(t =>
       o.orderNumber.toLowerCase().includes(t) ||
       o.jewelleryType.toLowerCase().includes(t) ||
       (o.designNumber ?? "").toLowerCase().includes(t) ||
-      (o.returns ?? []).some(r => r.creditNoteNo.toLowerCase().includes(t))
+      (o.returns ?? []).some(r => r.creditNoteNo.toLowerCase().includes(t)) ||
+      (clientName.get(o.clientId) ?? "").includes(t) ||
+      (o.contactPerson ?? "").toLowerCase().includes(t) ||
+      (o.trackingNumber ?? "").toLowerCase().includes(t) ||
+      (o.factoryBillNo ?? "").toLowerCase().includes(t) ||
+      (o.previousOrderNumber ?? "").toLowerCase().includes(t)
     ));
     // A copy: for the admin with no filter, `list` is the store's own array,
     // and sorting it in place reordered every other page's lists too.
@@ -308,7 +318,7 @@ export function OrdersPage() {
       sortValue: (o: Order) => { const t = tracks.get(o.id); return t?.running ? t.days ?? 0 : null; },
       cell: (o: Order) => { const t = tracks.get(o.id); return t ? <div className="min-w-[10.5rem]"><ProductionInfo t={t} compact /></div> : <span className="text-muted-foreground">—</span>; } }] : []),
     { key: "due", header: "Due", kind: "date", sortFirst: "asc", sortValue: o => o.expectedDelivery, cell: o => <CellDate>{fmtDate(o.expectedDelivery)}</CellDate> },
-    { key: "weights", header: "Weights", sortValue: o => pieceWeights(o, issByOrder.get(o.id) ?? []).gross || null,
+    { key: "weights", header: "Weights", hidden: true, sortValue: o => pieceWeights(o, issByOrder.get(o.id) ?? []).gross || null,
       cell: o => {
         const pw = pieceWeights(o, issByOrder.get(o.id) ?? []);
         if (!pw.gross && !pw.net && !pw.diamondCt) return <span className="text-muted-foreground/50">—</span>;
@@ -320,7 +330,7 @@ export function OrdersPage() {
         );
       } },
     ...(isStaff ? [
-      { key: "factory", header: "Factory", sortValue: (o: Order) => factoriesOf(o).join(", "),
+      { key: "factory", header: "Factory", hidden: true, sortValue: (o: Order) => factoriesOf(o).join(", "),
         cell: (o: Order) => factoriesOf(o).length ? <span className="whitespace-nowrap">{factoriesOf(o).join(", ")}</span> : <span className="text-muted-foreground/50">—</span> },
       { key: "issued", header: "Issued", hidden: true, sortValue: (o: Order) => (issByOrder.get(o.id) ?? []).filter(i => i.material === "gold").reduce((s, i) => s + i.quantityIssued, 0) || null,
         cell: (o: Order) => {
@@ -349,6 +359,14 @@ export function OrdersPage() {
           <CellAmount>{fmtMoney(o.returns?.length ? keptValue(o) : o.amount)}</CellAmount>
         </span>
       ) },
+    // Has the client paid? — at a glance, not five sections down the order.
+    { key: "balance", header: "Balance due", align: "right", kind: "number", card: "first" as const,
+      sortValue: o => (o.status === "Rejected" || o.deletedAt ? null : balanceDue(o)), csv: o => (o.status === "Rejected" ? "" : balanceDue(o)),
+      cell: o => {
+        if (o.status === "Rejected" || o.deletedAt || !(o.amount > 0)) return <span className="text-muted-foreground/50">—</span>;
+        const due = balanceDue(o);
+        return due > 0.005 ? <CellAmount tone="out">{fmtMoney(due)}</CellAmount> : <span className="text-success text-xs font-semibold">Paid</span>;
+      } },
   ];
 
   // What an opened row adds to its columns: the order page's own facts —
@@ -423,7 +441,6 @@ export function OrdersPage() {
   const filters: TableFilter[] = [
     { kind: "select", label: "Status", value: status === "all" ? "" : status, onChange: pick(setStatus), allLabel: "All status",
       options: [
-        { value: "Pending", label: "Pending — waiting for approval" },
         ...(isStaff ? [{ value: "uninvoiced", label: "Not invoiced (shipped)" }] : []),
         { value: "returned", label: "Returned by client" },
         ...(isStaff ? [
@@ -431,7 +448,8 @@ export function OrdersPage() {
           { value: "nodiamonds", label: "In production — diamonds not issued" },
         ] : []),
         ...(user!.role === "admin" ? [{ value: "deleted", label: "Deleted (to restore)" }] : []),
-        ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s })),
+        // "Waiting" is the one for approval (an old ?status=Pending link still lands there).
+        ...["Waiting", "Approved", "In Production", "Ready", "Dispatched", "Delivered", "Rejected"].map(s => ({ value: s, label: s === "Waiting" ? "Waiting — for approval" : s })),
       ] },
     ...(isStaff ? [{ kind: "select" as const, label: "Client", value: clientFilter === "all" ? "" : clientFilter, onChange: pick(setClientFilter), allLabel: "All clients",
       options: db.clients.filter(c => worksOnClientId(db, user, c.id)).sort((a, b) => a.companyName.localeCompare(b.companyName)).map(c => ({ value: c.id, label: c.companyName })) }] : []),

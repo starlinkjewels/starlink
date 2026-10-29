@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { PushPermissionBanner } from "@/components/PushPermissionBanner";
 import { confirmBox } from "@/lib/confirm";
+import { useNavigate } from "react-router-dom";
 
 const typeIcon = (type: string) => {
   if (type === "order") return <Package className="h-4 w-4 text-primary" />;
@@ -86,6 +87,7 @@ function groupAlerts(list: Notification[]): AlertRow[] {
 
 export function NotificationsPage() {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const [db, setDb] = useState(loadDb());
 
   useEffect(() => {
@@ -203,8 +205,9 @@ export function NotificationsPage() {
           defaultSort={{ key: "when", dir: "desc" }}
           searchText={n => `${n.title} ${n.body} ${n.type} ${n.items.map(x => x.body).join(" ")}`}
           searchPlaceholder="Search notifications"
-          onRowClick={n => { if (!n.read) markRow(n); }}
-          canClickRow={n => !n.read}
+          // A tap reads it — and opens its order when it names exactly one.
+          onRowClick={n => { if (!n.read) markRow(n); const o = ordersIn(n); if (o.length === 1) navigate(`/orders/${o[0].id}`); }}
+          canClickRow={n => !n.read || ordersIn(n).length === 1}
           details={notificationDetails}
           rowClassName={n => (n.read ? "opacity-75" : "bg-primary/[0.04]")}
           rowActions={n => [

@@ -13,6 +13,7 @@ import { materialDef, materialUnit, fmtQty, type MaterialKey } from "@/lib/mater
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
+import { useUrlState } from "@/hooks/useUrlState";
 import { Coins, Gem, Layers, Package, Printer, Wallet, X } from "lucide-react";
 
 /** One line of stock: a gold purity, a loose-diamond lot, or a material's grade —
@@ -186,7 +187,10 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     }).sort(gold ? ((a, b) => (parseInt(b.label ?? "", 10) || 0) - (parseInt(a.label ?? "", 10) || 0)) : byBag);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [together, ordered]);
-  const tableRows = together ? grouped : ordered;
+  // The search is kept in the address, so a search result ("BAG-0007") opens the table already narrowed.
+  const [q, setQ] = useUrlState("q");
+  const textOf = (r: Row) => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ").toLowerCase();
+  const tableRows = (together ? grouped : ordered).filter(r => !q.trim() || textOf(r).includes(q.trim().toLowerCase()));
 
   const keysOf = (r: Row) => (r.members ? r.members.map(m => m.key) : [r.key]);
   const sameKeys = (r: Row) => !!selected && keysOf(r).length === selected.length && keysOf(r).every(k => selected.includes(k));
@@ -219,22 +223,22 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
     { key: "clarity", header: gem ? "Grade" : "Clarity", sortValue: r => r.clarity ?? "", cell: r => r.clarity ?? dash },
     ...(diamond ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (r: Row) => r.pcs,
       cell: (r: Row) => (r.pcs != null ? <span className="tabular-nums">{r.pcs.toLocaleString()}</span> : dash) }] : []),
-    { key: "qty", header: diamond ? "Carats" : `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
+    { key: "qty", card: "figure" as const, header: diamond ? "Carats" : `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
       cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}</span> },
     { key: "avg", header: `Avg ₹/${unit}`, align: "right", kind: "number", sortValue: r => r.avg,
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
-    { key: "value", header: "Value", align: "right", kind: "number", sortValue: r => r.value,
+    { key: "value", card: "first" as const, header: "Value", align: "right", kind: "number", sortValue: r => r.value,
       cell: r => (r.value != null ? <CellAmount>{fmtMoneyInr(r.value)}</CellAmount> : dash) },
   ] : [
     { key: "lot", header: gold ? (together ? "Karat" : "Purity") : "Grade", always: true, sortValue: r => r.label ?? r.key, csv: r => r.label ?? r.key,
       cell: r => <CellMain title={r.label ?? r.key} sub={r.members ? (r.members.length > 1 ? r.members.map(m => m.key).join(" · ") : r.members[0].key !== r.label ? r.members[0].key : undefined) : undefined} /> },
-    { key: "qty", header: `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
+    { key: "qty", card: "figure" as const, header: `In stock (${unit})`, align: "right", kind: "number", sortValue: r => r.qty,
       cell: r => <span className="tabular-nums font-semibold text-brand-dark whitespace-nowrap">{fmtQty(r.qty, unit)}</span> },
     ...(gold ? [{ key: "fine", header: "Fine (24K)", align: "right" as const, kind: "number" as const, sortValue: (r: Row) => r.fine,
       cell: (r: Row) => <span className="tabular-nums whitespace-nowrap">{fmtQty(r.fine ?? 0, "g")}</span> }] : []),
     { key: "avg", header: `Avg ₹/${unit}`, align: "right", kind: "number", sortValue: r => r.avg,
       cell: r => (r.avg != null ? <span className="tabular-nums whitespace-nowrap">{fmtMoneyInr(r.avg)}</span> : dash) },
-    { key: "value", header: "Value", align: "right", kind: "number", sortValue: r => r.value,
+    { key: "value", card: "first" as const, header: "Value", align: "right", kind: "number", sortValue: r => r.value,
       cell: r => (r.value != null ? <CellAmount>{fmtMoneyInr(r.value)}</CellAmount> : dash) },
   ];
 
@@ -312,8 +316,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         columns={columns}
         filters={filters}
         onClearFilters={() => { setShape(ALL); setVariety(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
-        searchText={r => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ")}
-        searchPlaceholder={diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search"}
+        search={{ value: q, onChange: setQ, placeholder: diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search", ariaLabel: "Search stock" }}
         defaultSort={lotLike || together ? null : { key: "qty", dir: "desc" }}
         onRowClick={r => (sameKeys(r) ? onSelect(null) : onSelect(keysOf(r), nameOf(r)))}
         rowClassName={r => (sameKeys(r) || (r.members && holdsSelection(r)) || (!r.members && selected?.length === 1 && selected[0] === r.key) ? "dt-on bg-primary/[0.05]" : "")}
