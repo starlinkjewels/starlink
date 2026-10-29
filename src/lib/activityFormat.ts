@@ -54,7 +54,7 @@ export interface ActivityEntry {
 
 /** Collections whose changes are not worth a line in the log: chat, alerts,
  *  favourites — every one of them would bury what matters. */
-export const LOG_SKIP_COLS = new Set(["messages", "notifications", "catalogFavorites"]);
+export const LOG_SKIP_COLS = new Set(["messages", "chats", "notifications", "catalogFavorites"]);
 
 /** Fields that change on their own and say nothing about what a person did. */
 const NOISE_FIELDS = new Set(["lastActiveAt", "fcmTokens", "updatedAt"]);

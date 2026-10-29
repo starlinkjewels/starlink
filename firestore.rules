@@ -110,14 +110,58 @@ service cloud.firestore {
       allow update, delete: if isStaff() || (isClientRole() && resource.data.userId == myAppId());
     }
 
-    // Messages — a client may read/modify only threads they are part of; may
-    // create only messages they send.
+    // Messages — a client reads only the conversations they are in (one-to-one,
+    // or a group they are a member of) and writes only messages they send. On
+    // anyone else's message they may change only how it was received (the
+    // ticks) and reactions; their own they may also edit or delete for everyone.
+    function inMessage(d) {
+      return d.fromUserId == myAppId() || d.toUserId == myAppId() || myAppId() in d.get('members', []);
+    }
+    function chatDoc(chatId) { return /databases/$(database)/documents/chats/$(chatId); }
+    function inChat(chatId) {
+      return exists(chatDoc(chatId)) && myAppId() in get(chatDoc(chatId)).data.memberIds;
+    }
+    // A message a client sends: its words are words; in a group, addressed to
+    // that group with exactly its members; one-to-one, only the two of them.
+    function wellFormed(m) {
+      return m.text is string
+        && (('chatId' in m)
+          ? (inChat(m.chatId) && m.toUserId == m.chatId && m.members == get(chatDoc(m.chatId)).data.memberIds)
+          : (!('members' in m) || m.members.hasOnly([m.fromUserId, m.toUserId])));
+    }
+    // In a map of member id → value (read marks, reactions): only your own line changes.
+    function onlyMyLine(field) {
+      return request.resource.data.get(field, {}).diff(resource.data.get(field, {})).affectedKeys().hasOnly([myAppId()]);
+    }
     match /messages/{id} {
-      allow read:   if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
-      allow create: if isStaff() || (isClientRole() && request.resource.data.fromUserId == myAppId());
-      allow update: if isStaff() || (isClientRole() && (resource.data.fromUserId == myAppId() || resource.data.toUserId == myAppId()));
+      // Read: separate lines, so a client's query for one kind ("my group messages")
+      // is checked on its own line — one field it doesn't ask about can't refuse it.
+      allow read: if isStaff();
+      allow read: if isClientRole() && resource.data.fromUserId == myAppId();
+      allow read: if isClientRole() && resource.data.toUserId == myAppId();
+      allow read: if isClientRole() && myAppId() in resource.data.members;
+      allow create: if isStaff() || (isClientRole()
+        && request.resource.data.fromUserId == myAppId()
+        && wellFormed(request.resource.data));
+      allow update: if isStaff() || (isClientRole() && inMessage(resource.data) && (
+        // Anyone's message: their own read mark and reaction — one-to-one, read only by the one it was sent to.
+        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['read', 'readAt', 'readBy', 'reactions'])
+          && onlyMyLine('readBy') && onlyMyLine('reactions')
+          && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['read', 'readAt']) || resource.data.toUserId == myAppId()))
+        // Their own: edit it, or delete it for everyone (its reactions go with it).
+        || (resource.data.fromUserId == myAppId()
+          && request.resource.data.diff(resource.data).affectedKeys()
+            .hasOnly(['reactions', 'text', 'editedAt', 'deletedAt', 'attachments', 'orderCard', 'replyTo'])
+          && request.resource.data.text is string)));
       // Staff may delete any message; a client may delete only ones they sent.
       allow delete: if isStaff() || (isClientRole() && resource.data.fromUserId == myAppId());
+    }
+
+    // Group conversations — made and changed by staff; a client reads the ones they are in.
+    match /chats/{id} {
+      allow read: if isStaff();
+      allow read: if isClientRole() && myAppId() in resource.data.memberIds;
+      allow create, update, delete: if isStaff();
     }
 
     // Atomic sequence counters (order no. / invoice no. / diamond stock no.) —
