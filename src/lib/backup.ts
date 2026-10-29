@@ -12,7 +12,7 @@
 // admin e-mails only — never leave it on the default "any signed-in user" rule.
 import { ref, uploadString, getDownloadURL, listAll, deleteObject } from "firebase/storage";
 import { storage } from "./firebase";
-import { loadDb, ensureAllCollections } from "./db";
+import { loadDb, ensureAllCollections, whenFresh } from "./db";
 
 const FOLDER = "backups";
 const KEEP = 14; // retain this many daily snapshots
@@ -49,6 +49,8 @@ export async function createBackup(): Promise<BackupEntry> {
   // The WHOLE database, every record loaded first: heavy records load when a
   // page needs them, and a backup taken before they had would leave them out.
   await ensureAllCollections();
+  // ...and the server's answer for them, never this device's saved copy.
+  await whenFresh();
   await uploadString(ref(storage, path), JSON.stringify(loadDb()), "raw", {
     contentType: "application/json",
   });

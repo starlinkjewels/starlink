@@ -106,8 +106,13 @@ export function App() {
     const id = window.setTimeout(() => {
       // Old client records held their login password in plain text — take it
       // off (once; a no-op after that), before the day's backup copies them.
-      import("./lib/db").then(m => m.dropStoredClientPasswords()).catch(() => {});
-      import("./lib/backup").then(m => m.autoBackup()).catch(() => {});
+      // Both from the server's answer — never a backup of the device's saved copy.
+      import("./lib/db").then(async m => {
+        await m.whenFresh();
+        try { m.dropStoredClientPasswords(); } catch (e) { console.warn("[app] client password clean-up skipped:", e); }
+        const b = await import("./lib/backup");
+        await b.autoBackup();
+      }).catch(() => {});
       // And the off-site copy — the main admin's job only (the owner login, not
       // every admin), and never by opening Google's window: when its permission
       // has lapsed, a note offers "Back up now" and Google opens on that press.

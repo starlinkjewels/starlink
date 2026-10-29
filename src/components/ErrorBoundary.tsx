@@ -1,6 +1,6 @@
 import { Component, type ErrorInfo, type ReactNode } from "react";
 import { AlertTriangle, RotateCw } from "lucide-react";
-import { flush } from "@/lib/db";
+import { flush, whenFresh } from "@/lib/db";
 
 /**
  * A screen that breaks while drawing used to take the whole app with it — React
@@ -45,6 +45,9 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
+    // Something saved by itself in the first second, from the saved copy: refused
+    // before anything changed — draw the screen again once the server has answered.
+    if (error?.name === "StaleDataError") { void whenFresh().then(() => this.setState({ error: null, reloading: false })); return; }
     console.error("[app] a screen failed to draw:", error, info.componentStack);
     if (CHUNK_ERROR.test(String(error?.message ?? error)) && reloadOnceForNewBuild()) this.setState({ reloading: true });
   }
@@ -56,6 +59,7 @@ export class ErrorBoundary extends Component<
   render() {
     const { error, reloading } = this.state;
     if (!error) return this.props.children;
+    if (error.name === "StaleDataError") return <div className="py-24 text-center text-xs text-muted-foreground">Getting the latest…</div>;
     const box = (
       <div className="card-luxe max-w-lg w-full mx-auto p-8 text-center">
         <AlertTriangle className="h-8 w-8 text-amber-500 mx-auto mb-3" />

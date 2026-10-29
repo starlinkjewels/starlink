@@ -20,6 +20,7 @@ import { CompanyFilter, useMultiCo } from "@/components/CompanyFields";
 import { StockTransferDialog } from "@/components/StockTransfer";
 import { companiesOf, companyOf } from "@/lib/companies";
 import { ArrowRightLeft } from "lucide-react";
+import { useDataFresh } from "@/hooks/useDataFresh";
 
 /**
  * One material's stock, in the app's one figure style: its name and how many
@@ -155,9 +156,10 @@ export function StockPage() {
   // its movement reaches this screen, and rebuilding in that moment, from a
   // history one entry short, would take the very change just made back out.
   const healed = useRef(false);
+  const fresh = useDataFresh();
   const driftKey = driftingCos.join(",");
   useEffect(() => {
-    if (user?.role !== "admin" || !driftKey || healed.current) return;
+    if (user?.role !== "admin" || !driftKey || healed.current || !fresh) return;
     const t = setTimeout(() => {
       healed.current = true;
       // A company with no movements of its own yet has nothing to rebuild from — left alone.
@@ -166,7 +168,7 @@ export function StockPage() {
         .map(id => recomputeStockFromHistory(movements, id))).catch(() => { /* manual button remains */ });
     }, 4000);
     return () => clearTimeout(t);
-  }, [driftKey, user, db.stockMovements, levelsBy]);
+  }, [driftKey, user, db.stockMovements, levelsBy, fresh]);
 
   const recompute = async () => {
     setRecomputing(true);

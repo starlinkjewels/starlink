@@ -24,6 +24,7 @@ import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 import { AI_ENABLED } from "@/lib/firebase";
+import { useFreshKey } from "@/hooks/useDataFresh";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
@@ -238,6 +239,8 @@ function PageData({ children, isClient }: { children: React.ReactNode; isClient:
 export function AppLayout() {
   const { user, logout } = useAuth();
   const db = useDb();
+  // A page drawn from the device's saved copy is drawn again from the server's answer.
+  const freshKey = useFreshKey();
   // The table style chosen in Settings, on every page. Keyed on its value, so
   // it is applied when it changes and not on every redraw.
   // The app's frame never scrolls — pages scroll inside <main>. Anything that
@@ -617,7 +620,7 @@ export function AppLayout() {
             {/* One frame for every page: as wide as the screen allows (Settings →
                 Appearance → Page width), the same on every page. */}
             <div className="app-page">
-            {roleAllows(loc.pathname) ? <PageData isClient={user?.role === "client"}><Outlet /></PageData> : (
+            {roleAllows(loc.pathname) ? <PageData key={freshKey} isClient={user?.role === "client"}><Outlet /></PageData> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
                 <h2 className="font-display text-xl text-brand-dark">Not part of your access</h2>

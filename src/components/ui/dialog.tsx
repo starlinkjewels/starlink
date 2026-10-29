@@ -5,8 +5,32 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { HeldFormContext, useDataFresh, useHeldWhileStale, useNoteFields } from "@/hooks/useDataFresh";
 
-const Dialog = DialogPrimitive.Root;
+// Opened in the first second, while the device's saved copy is on screen: held,
+// and if it has fields, closed once the server's answer is in so it is opened
+// again from the latest (see useHeldWhileStale).
+const Dialog = ({ open, onOpenChange, ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) => {
+  const { hasForm } = useHeldWhileStale(open, onOpenChange);
+  return (
+    <HeldFormContext.Provider value={hasForm}>
+      <DialogPrimitive.Root open={open} onOpenChange={onOpenChange} {...props} />
+    </HeldFormContext.Provider>
+  );
+};
+
+/** A dialog's or a panel's content while the saved copy is on screen: shown, not usable. */
+export function HeldWhileStale({ held, hasForm, children }: { held: boolean; hasForm: React.MutableRefObject<boolean> | null; children: React.ReactNode }) {
+  const el = React.useRef<HTMLDivElement>(null);
+  useNoteFields(held, el, hasForm);
+  if (!held) return <>{children}</>;
+  return (
+    <div aria-busy="true" className="relative">
+      <div className="mb-3 rounded-lg bg-secondary/60 px-3 py-2 text-center text-xs text-muted-foreground">Getting the latest…</div>
+      <div ref={el} inert className="pointer-events-none select-none opacity-50">{children}</div>
+    </div>
+  );
+}
 
 const DialogTrigger = DialogPrimitive.Trigger;
 
@@ -64,12 +88,20 @@ const DialogContent = React.forwardRef<
   React.ElementRef<typeof DialogPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof DialogPrimitive.Content>
 >(({ className, children, ...props }, ref) => {
+  // Never a form filled from the saved copy — see Dialog above.
+  const held = !useDataFresh();
+  const hasForm = React.useContext(HeldFormContext);
   const own = /(^|\s)(p|px|py|pt|pb|pl|pr)-\d/.test(className ?? "");
+  if (held && own) children = <HeldWhileStale held hasForm={hasForm}>{children}</HeldWhileStale>;
   if (!own) {
-    const parts = React.Children.toArray(children);
+    let parts = React.Children.toArray(children);
     const hi = parts.findIndex(c => React.isValidElement(c) && c.type === DialogHeader);
     const header = hi >= 0 && hi <= 1 ? parts.splice(hi, 1)[0] : null;
-    const footer = parts.length > 0 && isActions(parts[parts.length - 1]) ? parts.pop() : null;
+    let footer = parts.length > 0 && isActions(parts[parts.length - 1]) ? parts.pop() : null;
+    if (held) {
+      parts = [<HeldWhileStale key="held" held hasForm={hasForm}>{parts}</HeldWhileStale>];
+      if (footer) footer = <div inert className="pointer-events-none opacity-50">{footer}</div>;
+    }
     // The caller's spacing belongs to the middle; scrolling is the middle's own.
     const tokens = (className ?? "").split(/\s+/).filter(Boolean);
     const spacing = tokens.filter(t => /^(space-y-|gap-)/.test(t)).join(" ");

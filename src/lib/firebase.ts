@@ -122,6 +122,8 @@ if (APP_CHECK_ON && RECAPTCHA_SITE_KEY) {
  * localStorage "sl-no-device-cache" = "1" turns it off for that device.
  */
 let deviceCacheOn = false;
+/** Whether this device keeps a saved copy of the data between opens. */
+export function deviceCacheActive(): boolean { return deviceCacheOn; }
 function makeFirestore(): Firestore {
   let off = false;
   try { off = typeof localStorage !== "undefined" && localStorage.getItem("sl-no-device-cache") === "1"; } catch { /* no storage */ }
@@ -146,8 +148,8 @@ export const db: Firestore = makeFirestore();
  * this, so the caller reloads the page.
  */
 export async function clearDeviceCache(): Promise<boolean> {
-  // The role remembered for opening offline goes with it.
-  try { for (const k of Object.keys(localStorage)) if (k.startsWith("sl-scope:")) localStorage.removeItem(k); } catch { /* no storage */ }
+  // The role remembered for opening offline goes with it, and the note of which lists it holds.
+  try { for (const k of Object.keys(localStorage)) if (k.startsWith("sl-scope:") || k === "sl-synced") localStorage.removeItem(k); } catch { /* no storage */ }
   if (!deviceCacheOn) return false;
   try { await Promise.race([waitForPendingWrites(db), new Promise(r => setTimeout(r, 4000))]); } catch { /* offline — nothing to wait for */ }
   try {

@@ -12,6 +12,7 @@ import { applyRememberedAppearance } from "@/lib/appearance";
 import { applyStudio } from "@/lib/studio";
 import { applyBrand, getBrand, loadBrand } from "@/lib/brand";
 import { watchForNewVersion } from "@/lib/appUpdate";
+import { toast } from "sonner";
 
 // Open in the look this device last showed, before any data arrives — no flash of the default.
 // The new look (preview) first, so the appearance below knows whether to step aside.
@@ -50,6 +51,21 @@ window.addEventListener("vite:preloadError", (e) => {
     window.location.reload();
   }
 });
+
+// A save tapped in the first second after opening, while the device's saved
+// copy is still on screen, is refused before anything changes (see
+// StaleDataError in lib/db.ts) — a short note instead of an error.
+let staleNoteAt = 0;
+const onStale = (err: unknown, e: Event) => {
+  if ((err as Error | undefined)?.name !== "StaleDataError") return;
+  e.preventDefault();
+  const now = Date.now();
+  if (now - staleNoteAt < 3000) return;
+  staleNoteAt = now;
+  toast("One moment — getting the latest. Try again.");
+};
+window.addEventListener("error", (e) => onStale(e.error, e));
+window.addEventListener("unhandledrejection", (e) => onStale(e.reason, e));
 
 // AuthProvider owns the boot sequence: it shows a splash until Firebase Auth
 // resolves, loads Firestore data only after sign-in, and renders the app.

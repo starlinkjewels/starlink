@@ -3,7 +3,7 @@
 // same thing — and an action that isn't possible is shown greyed with its
 // reason instead of disappearing.
 import {
-  collectionsLoaded, findInvoiceForOrder, isDiamondOnlyOrder, orderIsDispatched, worksOnOrder,
+  collectionsFresh, findInvoiceForOrder, isDiamondOnlyOrder, orderIsDispatched, worksOnOrder,
   type DB, type Order, type User,
 } from "./db";
 import { CHECKING, needsAccess } from "./actionHints";
@@ -27,7 +27,7 @@ export function cancelBlocker(db: DB, o: Order): string | undefined {
   if (o.melted) return "Melted — the piece no longer exists";
   if (o.status === "Rejected") return "Already cancelled — re-open it on the order page to change it";
   if (orderIsDispatched(o) || o.returns?.length) return "Already dispatched — use “Return pieces” instead (credit note, piece back into Ready Stock)";
-  if (!collectionsLoaded(CANCEL_REF_COLS)) return CHECKING;
+  if (!collectionsFresh(CANCEL_REF_COLS)) return CHECKING;
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `On invoice ${inv.number} — delete or credit the invoice first`;
   // An in-house build already in Ready Stock: cancelling would put its gold

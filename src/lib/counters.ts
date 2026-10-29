@@ -13,6 +13,7 @@ import { doc, runTransaction } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
 import { MAIN_COMPANY_ID, companyById, formatInvoiceNumber, invoiceSequenceName, invoicesOfCompany } from "./companies";
 import type { Invoice, Settings } from "./db";
+import { assertFresh } from "./db";
 
 const COL = "counters";
 
@@ -26,6 +27,8 @@ const COL = "counters";
  * that is already in use.
  */
 export async function reserveSequence(name: string, floor: number): Promise<number> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const ref = doc(fsdb, COL, name);
   return runTransaction(fsdb, async (tx) => {
     const snap = await tx.get(ref);
@@ -48,6 +51,8 @@ export async function reserveSequence(name: string, floor: number): Promise<numb
  * never hand out a number that is in use.
  */
 export async function resetSequence(name: string, next: number): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const ref = doc(fsdb, COL, name);
   await runTransaction(fsdb, async (tx) => {
     tx.set(ref, { next, updatedAt: new Date().toISOString() }, { merge: true });

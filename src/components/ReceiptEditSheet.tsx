@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { useDb } from "@/hooks/useDb";
 import { useCan } from "@/hooks/useCan";
-import { collectionsLoaded, dayOf, ensureCollections, fmtMoney, fmtDate, loadDb, type AdvancePayment, type ClientReceipt, type DB } from "@/lib/db";
+import { collectionsFresh, dayOf, ensureCollections, fmtMoney, fmtDate, loadDb, type AdvancePayment, type ClientReceipt, type DB } from "@/lib/db";
 import { ccy } from "@/lib/currency";
 import { moveToDay } from "@/lib/moneyEntries";
 import { editReceipt, deleteReceipt, deleteImpact, receiptApplied, receiptCancelBlocker } from "@/lib/receipts";
@@ -45,7 +45,7 @@ export function paymentLockReason(db: DB, a: Pick<AdvancePayment, "receiptId" | 
   if (!a.receiptId) return "Recorded before receipt numbers — number it first";
   // Only checked once the receipt book is here (reading it earlier would fetch
   // it for every row drawn); otherwise it is checked at the moment of use.
-  if (collectionsLoaded(["clientReceipts"]) && !(db.clientReceipts ?? []).some(r => r.id === a.receiptId)) return "Its receipt is no longer on record";
+  if (collectionsFresh(["clientReceipts"]) && !(db.clientReceipts ?? []).some(r => r.id === a.receiptId)) return "Its receipt is no longer on record";
   return undefined;
 }
 

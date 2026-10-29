@@ -7,7 +7,7 @@
 // books would lose who it belonged to. So a client with any of that is
 // deactivated instead (they can no longer sign in; their history stays).
 import { toast } from "sonner";
-import { collectionsLoaded, fmtMoney, hasOpeningBalance, loadDb, updateDbAs, type DB } from "./db";
+import { collectionsFresh, fmtMoney, hasOpeningBalance, loadDb, updateDbAs, type DB } from "./db";
 import { confirmBox } from "./confirm";
 import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
 
@@ -28,14 +28,14 @@ const CLIENT_DELETE_COLS = [...CLIENT_REF_COLS, "clientReceipts", "lockerTransac
 export function clientDeleteBlocker(db: DB, clientId: string): string | undefined {
   const c = db.clients.find(x => x.id === clientId);
   if (!c) return "That client is no longer there";
-  if (!collectionsLoaded(CLIENT_REF_COLS)) return CHECKING;
+  if (!collectionsFresh(CLIENT_REF_COLS)) return CHECKING;
   const orders = db.orders.filter(o => o.clientId === clientId).length;
   const invoices = (db.invoices ?? []).filter(i => i.clientId === clientId).length;
-  const receipts = collectionsLoaded(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;
+  const receipts = collectionsFresh(["clientReceipts"]) ? (db.clientReceipts ?? []).filter(r => r.clientId === clientId).length : 0;
   const cards = (db.giftCards ?? []).filter(g => g.clientId === clientId).length;
   const expenses = (db.expenses ?? []).filter(e => e.clientId === clientId).length;
   // A refund paid back to them names them in the account books.
-  const refunds = collectionsLoaded(["lockerTransactions"]) ? (db.lockerTransactions ?? []).filter(t => t.refType === "clientRefund" && t.refId === clientId).length : 0;
+  const refunds = collectionsFresh(["lockerTransactions"]) ? (db.lockerTransactions ?? []).filter(t => t.refType === "clientRefund" && t.refId === clientId).length : 0;
   const has = [
     orders && plural(orders, "order"),
     invoices && plural(invoices, "invoice"),
