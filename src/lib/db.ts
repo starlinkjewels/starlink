@@ -647,14 +647,58 @@ export interface Task {
   createdAt: string;
 }
 
+/** A photo, a file or a voice note sent in a conversation (Storage URL). */
+export interface ChatAttachment {
+  kind: "image" | "file" | "voice";
+  url: string;
+  name?: string;
+  size?: number;
+  mime?: string;
+  /** A voice note's length. */
+  seconds?: number;
+}
+
 export interface Message {
   id: string;
   orderId?: string;
   fromUserId: string;
+  /** The person written to — or, in a group, the group's id (= chatId). */
   toUserId: string;
   text: string;
   createdAt: string;
+  /** Read by the person written to (one-to-one). */
   read: boolean;
+  /** A group conversation (ChatGroup.id). */
+  chatId?: string;
+  /** Everyone who may read it, as it was sent: [from, to], or the group's members.
+   *  A client's app asks for its group messages by this. */
+  members?: string[];
+  /** One-to-one: when they read it. */
+  readAt?: string;
+  /** A group: member id → when they read it. */
+  readBy?: Record<string, string>;
+  /** The message it answers — a copy of its start, so it shows even if that one goes. */
+  replyTo?: { id: string; fromUserId: string; text: string; kind?: ChatAttachment["kind"] };
+  attachments?: ChatAttachment[];
+  /** An order shared in the conversation — opens the order. */
+  orderCard?: { orderId: string; orderNumber: string; label?: string };
+  /** Member id → emoji. */
+  reactions?: Record<string, string>;
+  forwarded?: boolean;
+  editedAt?: string;
+  /** Deleted for everyone: the words and attachments come off it, "This message was deleted" stays
+   *  (the files themselves stay in Storage — a forwarded copy may still show them). */
+  deletedAt?: string;
+}
+
+/** A group conversation — the team on one client, say. */
+export interface ChatGroup {
+  id: string;
+  name: string;
+  memberIds: string[];
+  createdBy: string;
+  createdAt: string;
+  updatedAt?: string;
 }
 
 export interface Notification {
@@ -1881,6 +1925,8 @@ export interface DB {
   orders: Order[];
   tasks: Task[];
   messages: Message[];
+  /** Group conversations. */
+  chats: ChatGroup[];
   notifications: Notification[];
   invoices: Invoice[];
   giftCards: GiftCard[];
@@ -1968,6 +2014,7 @@ function emptyDb(): DB {
     orders: [],
     tasks: [],
     messages: [],
+    chats: [],
     notifications: [],
     invoices: [],
     giftCards: [],
@@ -2453,6 +2500,7 @@ type ArrayCol =
   | "orders"
   | "tasks"
   | "messages"
+  | "chats"
   | "notifications"
   | "invoices"
   | "giftCards"
@@ -2489,6 +2537,7 @@ const ARRAY_COLS: ArrayCol[] = [
   "orders",
   "tasks",
   "messages",
+  "chats",
   "notifications",
   "invoices",
   "giftCards",
@@ -3666,6 +3715,8 @@ function subscribeAll(scope: Scope): Promise<void> {
         specs.push({ col, q: query(c, where("clientId", "==", client.clientId)) });
       else if (col === "notifications")
         specs.push({ col, q: query(c, where("userId", "==", client.appId)) });
+      else if (col === "chats")
+        specs.push({ col, q: query(c, where("memberIds", "array-contains", client.appId)) });
       else if (col === "clients")
         specs.push({ col, q: query(c, where(documentId(), "==", client.clientId)) });
       else specs.push({ col, q: c }); // users, catalog* — shared / names
@@ -3845,16 +3896,18 @@ function subscribeAll(scope: Scope): Promise<void> {
     if (client) {
       let fromMsgs: Record<string, unknown>[] = [];
       let toMsgs: Record<string, unknown>[] = [];
+      let groupMsgs: Record<string, unknown>[] = [];
       let firedFrom = false,
-        firedTo = false;
+        firedTo = false,
+        firedGroup = false;
       const apply = () => {
         const map = new Map<string, Record<string, unknown>>();
-        for (const m of [...fromMsgs, ...toMsgs]) map.set(String(m.id), m);
+        for (const m of [...fromMsgs, ...toMsgs, ...groupMsgs]) map.set(String(m.id), m);
         applyList("messages", [...map.values()]);
         if (seeded) emit();
       };
       const doneMsg = () => {
-        if (firedFrom && firedTo) first("messages");
+        if (firedFrom && firedTo && firedGroup) first("messages");
       };
       const msgs = collection(fsdb, "messages");
       unsubscribers.push(
@@ -3895,6 +3948,26 @@ function subscribeAll(scope: Scope): Promise<void> {
             console.error("[db] listener messages(to) failed:", err);
             dropStale("messages(to)", () => { toMsgs = []; apply(); });
             firedTo = true;
+            doneMsg();
+          },
+        ),
+      );
+      // …and the group conversations they are a member of.
+      unsubscribers.push(
+        onSnapshot(
+          query(msgs, where("members", "array-contains", client.appId)),
+          LISTEN,
+          serverFirst("messages(group)", (snap) => {
+            groupMsgs = snap.docs.map((d) => d.data() as Record<string, unknown>).filter((m) => !!m.chatId);
+            if (!writePending["messages"]) apply();
+            firedGroup = true;
+            doneMsg();
+          }),
+          (err) => {
+            // Before the rules that allow it are in: no group messages, nothing else held up.
+            console.warn("[db] listener messages(group) failed:", err?.message ?? err);
+            dropStale("messages(group)", () => { groupMsgs = []; apply(); });
+            firedGroup = true;
             doneMsg();
           },
         ),

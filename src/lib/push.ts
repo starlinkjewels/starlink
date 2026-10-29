@@ -62,6 +62,8 @@ export async function initForegroundPush(): Promise<void> {
   onMessage(messaging, payload => {
     const title = payload.notification?.title || "Notification";
     const body = payload.notification?.body;
+    // A chat message is announced by Messages itself (a tone and its own pop-up — see useChatAlerts).
+    if (/^Message (from|in) /.test(title)) return;
     toast(title, { description: body });
   });
 }

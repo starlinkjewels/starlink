@@ -24,6 +24,7 @@ import { ScanModal } from "@/components/ScanModal";
 import { TasksPanel } from "@/components/TasksPanel";
 import { SyncStatus } from "@/components/SyncStatus";
 import { useFreshKey } from "@/hooks/useDataFresh";
+import { useChatAlerts } from "@/hooks/useChatAlerts";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
@@ -240,6 +241,8 @@ export function AppLayout() {
   const db = useDb();
   // A page drawn from the device's saved copy is drawn again from the server's answer.
   const freshKey = useFreshKey();
+  // A message coming in, on any page: a tone and a pop-up (Messages, see useChatAlerts).
+  useChatAlerts();
   // The table style chosen in Settings, on every page. Keyed on its value, so
   // it is applied when it changes and not on every redraw.
   // The app's frame never scrolls — pages scroll inside <main>. Anything that
