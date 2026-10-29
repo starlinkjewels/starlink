@@ -7,6 +7,7 @@ import {
   type DB, type Order, type User,
 } from "./db";
 import { CHECKING, needsAccess } from "./actionHints";
+import { isMetalMaterial, materialName, materialUnit } from "./materials";
 
 type Can = (module: "orders", action: "edit") => boolean;
 
@@ -64,8 +65,12 @@ export interface SpecLocks {
   all?: string;
   /** The piece itself — type, metal, karats, colour, size, quantity, stones, weights, finishing. */
   piece?: string;
-  /** Quantity, type, metal, karats and diamond type — material went out against them. */
+  /** What went out against the order, said once ("12.5 g 18K gold, 0.8 ct diamond") — shown, never a lock. */
   material?: string;
+  /** The metal — metal was issued or bought for it; that issue is cancelled first. */
+  metal?: string;
+  /** Type, metal, karats, quantity and diamond type — the piece is made (Final Approval) or the loose stones are bought. */
+  finished?: string;
   /** Changing to or from a loose-diamond order: its stages were set for one or the other. */
   kind: string;
 }
@@ -82,10 +87,36 @@ export function orderSpecLocks(db: DB, o: Order): SpecLocks {
   else if (o.materialSourcing === "readyStock") piece = "Sold from Ready Stock — the piece's details come from it";
   else if (o.readyStockCreatedId) piece = "Already in Ready Stock — change the piece there";
   else if (o.forReadyStock && o.status === "Ready") piece = "Finished — the piece is waiting to go into Ready Stock";
-  const issued = (db.materialIssuances ?? []).some(i => i.orderId === o.id && (i.quantityIssued > 0 || i.status === "open"));
-  const bought = (db.purchases ?? []).some(p => p.orderId === o.id);
-  const material = issued
-    ? "Material is issued against it — cancel the issue first (Manufacturing, on the order page)"
-    : bought ? "Material is bought for it — remove the purchase first (Manufacturing, on the order page)" : undefined;
-  return { piece, material, kind };
+  // Type, karats, quantity and diamond type follow the order as it is changed —
+  // what was issued stays issued (more is issued, or the extra returned, in
+  // Manufacturing). Only the metal is held: gold sent for a gold piece can't
+  // become a platinum one.
+  const issues = (db.materialIssuances ?? []).filter(i => i.orderId === o.id && (i.quantityIssued > 0 || i.status === "open"));
+  const bought = (db.purchases ?? []).filter(p => p.orderId === o.id);
+  const isMetal = (m: string | undefined) => isMetalMaterial(db.settings, m);
+  const sums = new Map<string, number>();
+  for (const i of issues) {
+    const k = `${i.material}|${i.purityOrQuality ?? ""}`;
+    sums.set(k, (sums.get(k) ?? 0) + (i.quantityIssued || 0));
+  }
+  const material = sums.size
+    ? [...sums.entries()].map(([k, q]) => {
+        const [m, pur] = k.split("|");
+        return `${Math.round(q * 1000) / 1000} ${materialUnit(db.settings, m)} ${pur ? `${pur} ` : ""}${materialName(db.settings, m).toLowerCase()}`;
+      }).join(", ")
+    : bought.length ? "material bought for it" : undefined;
+  const metal = issues.some(i => isMetal(i.material))
+    ? "Metal is issued for this order — cancel that issue to change the metal"
+    : bought.some(p => isMetal(p.material))
+      ? "Metal is bought for this order — remove that purchase (Manufacturing, on the order page) to change the metal"
+      : undefined;
+  // Once the factory has made it (or a loose order's stones are in), what it IS
+  // stays: its bill, band, returns and cost per piece are read from these.
+  const made = o.timeline.some(t => t.step === "Final Approval" && t.status === "done");
+  const finished = made
+    ? "Finished — the piece stays as the factory made it"
+    : isDiamondOnlyOrder(o) && (issues.length > 0 || bought.length > 0)
+      ? "The stones are issued or bought for it — they stay as they are"
+      : undefined;
+  return { piece, material, metal, finished, kind };
 }

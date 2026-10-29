@@ -66,6 +66,11 @@ export function materialName(s: Pick<Settings, "materials"> | undefined, key: st
   return materialDef(s, key)?.name ?? "Other material";
 }
 
+/** Gold, or a material of the metal kind (platinum, silver…) — not a stone or a finding. */
+export function isMetalMaterial(s: Pick<Settings, "materials"> | undefined, key: string | undefined): boolean {
+  return key === "gold" || (isOtherMaterial(key) && materialDef(s, key)?.kind === "metal");
+}
+
 /** The unit a material is counted in. */
 export function materialUnit(s: Pick<Settings, "materials"> | undefined, key: string | undefined): MaterialUnit {
   if (key === "gold") return "g";

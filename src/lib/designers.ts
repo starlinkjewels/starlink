@@ -21,6 +21,7 @@ import {
   type CadJob, type CadJobFile, type CadJobStatus, type DB, type Designer, type LockerTransaction, type Order,
 } from "./db";
 import { notifyUsers } from "./notify";
+import { followOrderPictures, orderPictures } from "./readyStockPhotos";
 import { metalLabel } from "./metals";
 import { fmtG } from "./weights";
 
@@ -283,7 +284,9 @@ export function approveJob(d: DB, jobId: string, a: { chargeInr?: number; cadIma
   // Left out = the order keeps what it shows. What is replaced is written down, never lost.
   if (a.cadImageUrl && a.cadImageUrl !== order.cadImage) {
     if (order.cadImage) log(j, a.by, `The order's CAD picture before: ${order.cadImage}`, now);
+    const before = orderPictures(order);
     order.cadImage = a.cadImageUrl;
+    followOrderPictures(d, order.id, before, { by: a.by.id, byName: a.by.name }); // its piece in Ready Stock follows
     fileOf(a.cadImageUrl)!.onOrder = true;
     // A new CAD picture is the client's to see — they are told, as an upload on the order tells them.
     const client = order.clientId ? d.users.find(u => u.clientId === order.clientId && u.role === "client") : undefined;
