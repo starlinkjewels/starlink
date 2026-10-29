@@ -8,13 +8,13 @@ import { companiesOf, companiesForUser, companyById, companyIdOfClient, hasCompa
 import { useCan, useMayExport } from "@/hooks/useCan";
 import { DataTable, CellMain, CellTag, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { PageHeader, ViewSwitch } from "@/components/PageHeader";
-import { FilterChips, FiltersButton, type TableFilter } from "@/components/TableToolbar";
+import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
+import { invoicedOrderIds, splitClientAccount } from "@/components/billing/clientBilling";
 import { useEffect, useState, type MouseEvent } from "react";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { Link, useNavigate } from "react-router-dom";
-import { loadDb, updateDbAs, fmtMoney, fmtDate, clientAccount, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
+import { loadDb, updateDbAs, fmtMoney, fmtDate, isOnline, timeAgo, currentUserClients, hasOpeningBalance, cashbackPercentFor, giftMaxRedeemPctFor, type Client, type Order } from "@/lib/db";
 import { filled, refLink, noteText, type Detail } from "@/components/rowDetails";
-import { AccountSummary } from "@/components/AccountSummary";
 import { useDb } from "@/hooks/useDb";
 import { auth } from "@/lib/firebase";
 import { sendPasswordResetEmail } from "firebase/auth";
@@ -22,7 +22,7 @@ import { authErrorMessage } from "@/lib/authErrors";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { StatusBadge } from "@/components/StatusBadge";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye, ChevronRight, Globe } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Package, Printer, UserCog, KeyRound, Rows3, LayoutGrid, Camera, Pencil, Building2, Power, Eye, ChevronRight, Globe, Wallet, FileText, Download, ArrowDownLeft, ArrowUpRight, Hourglass, Sigma } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/lib/auth";
 import { usePagination } from "@/hooks/usePagination";
@@ -179,18 +179,22 @@ export function ClientsPage() {
   const scoped = user!.role === "employee" ? currentUserClients(db, user!) : db.clients;
 
   // Every client's account, worked out once — the rows, the sort and the grand
-  // totals all read the same figures.
+  // totals all read the same figures. Split as Invoices reads it: due now (on
+  // an invoice, unpaid) and on order (not billed yet); the two add up to the
+  // old single figure (components/billing/clientBilling.ts).
+  const invoiced = invoicedOrderIds(db.invoices);
   const accounts = new Map(scoped.map(c => [
     c.id,
-    clientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c),
+    splitClientAccount(db.orders.filter(o => o.clientId === c.id && o.status !== "Rejected"), c.creditBalance || 0, c, invoiced),
   ]));
   // The biggest account to settle comes first, whichever way it runs: money a
-  // client owes us, or credit we are holding for them. Square accounts sink to
-  // the bottom, alphabetically.
+  // client owes us now, or credit we are holding for them; then work on order
+  // not billed yet. Square accounts sink to the bottom, alphabetically.
   const weight = (c: Client) => {
     const a = accounts.get(c.id);
-    return a ? Math.max(a.outstanding, a.credit) : 0;
+    return a ? Math.max(a.dueNow, a.credit) : 0;
   };
+  const onOrder = (c: Client) => accounts.get(c.id)?.notBilled ?? 0;
   const list = scoped
     .filter(c => coFilter === "all" || companyIdOfClient(c) === coFilter)
     .filter(c => byFilter === "all" || (byFilter === "__none" ? !handlerOf(db, c) : c.accountManagerId === byFilter))
@@ -203,7 +207,7 @@ export function ClientsPage() {
       return [c.companyName, countryOf(c), c.ownerName, c.email, c.username, c.gstVat].some(v => (v ?? "").toLowerCase().includes(t))
         || (digits.length >= 3 && (c.phone ?? "").replace(/\D/g, "").includes(digits));
     })
-    .sort((a, b) => weight(b) - weight(a) || a.companyName.localeCompare(b.companyName));
+    .sort((a, b) => weight(b) - weight(a) || onOrder(b) - onOrder(a) || a.companyName.localeCompare(b.companyName));
 
   const { paged, page, setPage, totalPages, total, start, end } = usePagination(list, PAGE_SIZE);
 
@@ -236,12 +240,16 @@ export function ClientsPage() {
   // Grand totals across all clients this user can see: outstanding = money
   // clients owe us (receivable · ughrani); credit = advances we hold for them,
   // i.e. money we'd owe back (payable · chukavni). Rejected orders aren't billed.
+  // Receivable is split as each client's is: due now + on order = the total.
   const totals = scoped.reduce((acc, c) => {
     const a = accounts.get(c.id)!;
     acc.receivable += a.outstanding;
+    acc.dueNow += a.dueNow;
+    acc.notBilled += a.notBilled;
     acc.payable += a.credit;
     return acc;
-  }, { payable: 0, receivable: 0 });
+  }, { payable: 0, receivable: 0, dueNow: 0, notBilled: 0 });
+  const net = Math.round((totals.receivable - totals.payable) * 100) / 100;
 
 
   const resetPw = async (c: Client) => {
@@ -309,25 +317,33 @@ export function ClientsPage() {
         const s = statsOf(c);
         return <span className="tabular-nums whitespace-nowrap">{s.total}{s.active > 0 && <span className="text-[11px] font-medium text-primary"> · {s.active} active</span>}</span>;
       } },
-    { key: "billed", header: "Billed", align: "right", kind: "number", sortValue: c => accountOf(c).billed,
+    // Every order's value (and any balance brought forward) — billed or not yet.
+    { key: "billed", header: "Order value", align: "right", kind: "number", sortValue: c => accountOf(c).billed,
       cell: c => <CellAmount>{fmtMoney(accountOf(c).billed)}</CellAmount> },
     { key: "received", header: "Received", align: "right", kind: "number", sortValue: c => accountOf(c).received,
       cell: c => <CellAmount tone="in">{fmtMoney(accountOf(c).received)}</CellAmount> },
+    // Due now is what their invoices say is due — the figure Invoices shows.
     // Sorts by the money to settle either way — the page's own order. In Excel
-    // one signed figure: plus, they owe us; minus, we hold their credit.
-    { key: "balance", card: "figure" as const, header: "Balance", align: "right", kind: "number", sortValue: weight,
-      csv: c => Math.round((accountOf(c).outstanding - accountOf(c).credit) * 100) / 100,
+    // one signed figure: plus, they owe us now; minus, we hold their credit.
+    { key: "balance", card: "figure" as const, header: "Due now", align: "right", kind: "number", sortValue: weight,
+      csv: c => Math.round((accountOf(c).dueNow - accountOf(c).credit) * 100) / 100,
       cell: c => {
         const a = accountOf(c);
-        if (a.outstanding > 0) return (
+        if (a.dueNow > 0) return (
           <div>
-            <CellAmount tone="out">{fmtMoney(a.outstanding)}</CellAmount>
+            <CellAmount tone="out">{fmtMoney(a.dueNow)}</CellAmount>
             {a.credit > 0 && <p className="text-[10px] text-success tabular-nums whitespace-nowrap">+{fmtMoney(a.credit)} credit</p>}
           </div>
         );
         if (a.credit > 0) return <div><CellAmount tone="in">{fmtMoney(a.credit)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">credit held</p></div>;
         return <span className="text-xs font-semibold text-success whitespace-nowrap">✓ Clear</span>;
       } },
+    // Work not invoiced yet: owed once it is billed, not before. Due now plus
+    // this is the whole balance the page used to show as one figure.
+    { key: "onorder", header: "On order", align: "right", kind: "number", sortValue: c => accountOf(c).notBilled,
+      cell: c => (accountOf(c).notBilled > 0
+        ? <div><CellAmount>{fmtMoney(accountOf(c).notBilled)}</CellAmount><p className="text-[10px] text-muted-foreground whitespace-nowrap">not billed</p></div>
+        : <span className="text-muted-foreground/50">—</span>) },
     { key: "seen", header: "Last seen", kind: "date", sortValue: c => loginOf.get(c.id)?.lastActiveAt,
       csv: c => { const u = loginOf.get(c.id); return !u ? "" : isOnline(u.lastActiveAt) ? "Online" : timeAgo(u.lastActiveAt); },
       cell: c => {
@@ -368,8 +384,19 @@ export function ClientsPage() {
     const delWhy = staff ? deleteWhy(c) : undefined;
     // A walk-in (B2C) client can be made without a login — nothing to reset.
     const hasLogin = db.users.some(u => u.clientId === c.id && !!u.authUid);
+    const a = accountOf(c);
     return [
       { label: "View", icon: Eye, hint: "Account, invoices and orders", onSelect: () => navigate(`/clients/${c.id}`) },
+      // The client page's own panels, opened on arrival — nothing new is
+      // worked out here, it is a shortcut to where it is already done.
+      { label: "Record payment", icon: Wallet, show: staff, disabled: !can("payments", "add"),
+        hint: !can("payments", "add") ? needsAccess("payments", "add") : a.dueNow > 0 ? `${fmtMoney(a.dueNow)} due now` : "Held as credit, or against an invoice",
+        onSelect: () => navigate(`/clients/${c.id}?pay=1`) },
+      { label: "Create invoice", icon: FileText, show: staff, disabled: !can("invoices", "add"),
+        hint: can("invoices", "add") ? "From their dispatched orders" : needsAccess("invoices", "add"),
+        onSelect: () => navigate(`/invoices?bill=${encodeURIComponent(c.id)}`) },
+      { label: "Send statement", icon: Download, show: staff && mayExport, hint: "PDF or Excel, invoice by invoice",
+        onSelect: () => navigate(`/clients/${c.id}?statement=1`) },
       { label: "Print shipping label", icon: Printer, onSelect: () => printLabel(c), show: mayExport },
       { label: c.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: () => toggle(c), show: staff,
         disabled: !mayEdit, hint: noEdit ?? (c.status === "active" ? "Stops sign-in; history stays" : undefined) },
@@ -407,12 +434,17 @@ export function ClientsPage() {
 
       <ClientEditDialog clientId={editingId} onClose={() => setEditingId(null)} />
 
-      <AccountSummary
-        receivable={totals.receivable}
-        payable={totals.payable}
-        fmt={fmtMoney}
-        receivableSub="clients owe us · ughrani"
-        payableSub="client advances held · chukavni"
+      {/* What clients owe, read as Invoices reads it: due now is billed and
+          unpaid; on order is work not invoiced yet. The two add up to the
+          total receivable this strip used to show alone. */}
+      <StatStrip
+        items={[
+          { label: "Due now", value: fmtMoney(totals.dueNow), tone: "in", icon: ArrowDownLeft, sub: <>Billed, not paid<span className="ui-local"> · ughrani</span></> },
+          { label: "On order, not billed", value: fmtMoney(totals.notBilled), icon: Hourglass, op: "+", sub: "Owed once invoiced" },
+          { label: "Total receivable", value: fmtMoney(totals.receivable), tone: "strong", icon: Sigma, op: "=", sub: "Due now + on order" },
+          { label: "Credit held", value: fmtMoney(totals.payable), tone: "out", icon: ArrowUpRight, sub: <>Client advances<span className="ui-local"> · chukavni</span></> },
+        ]}
+        note={net === 0 ? "All settled" : `Net ${net > 0 ? "receivable" : "payable"} ${fmtMoney(Math.abs(net))} — total receivable less credit held`}
       />
 
       {/* ── List view — the shared table: sort by any heading, Excel, pages.
@@ -439,10 +471,11 @@ export function ClientsPage() {
               billed: rows => fmtMoney(rows.reduce((s, c) => s + accountOf(c).billed, 0)),
               received: rows => <span className="text-success">{fmtMoney(rows.reduce((s, c) => s + accountOf(c).received, 0))}</span>,
               balance: rows => {
-                const due = rows.reduce((s, c) => s + accountOf(c).outstanding, 0);
+                const due = rows.reduce((s, c) => s + accountOf(c).dueNow, 0);
                 const held = rows.reduce((s, c) => s + accountOf(c).credit, 0);
                 return <><span className="text-destructive">{fmtMoney(due)}</span>{held > 0 && <span className="text-success"> · +{fmtMoney(held)}</span>}</>;
               },
+              onorder: rows => fmtMoney(rows.reduce((s, c) => s + accountOf(c).notBilled, 0)),
             }}
             // The grid card's buttons, plus View. An action someone's access
             // doesn't reach, or that this client can't take (Delete for a client
@@ -534,18 +567,22 @@ export function ClientsPage() {
               {/* Figures: colour on the figure only, a zero in grey. */}
               <div className="@container grid grid-cols-3 gap-3 mt-4 pt-3 border-t border-border/60">
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Total</p>
+                  <p className="text-xs text-muted-foreground">Order value</p>
                   <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.billed ? "text-foreground" : "text-muted-foreground"}`}>{fmtMoney(acc.billed)}</p>
                 </div>
                 <div className="min-w-0">
                   <p className="text-xs text-muted-foreground">Received</p>
                   <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.received ? "text-success" : "text-muted-foreground"}`}>{fmtMoney(acc.received)}</p>
                 </div>
+                {/* Due now as the invoices say it; credit we hold when nothing
+                    is due (it read "Cleared" before, hiding the credit); work
+                    not billed yet under it. */}
                 <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Pending</p>
-                  <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.outstanding > 0 ? "text-destructive" : "text-success"}`}>
-                    {acc.outstanding > 0 ? fmtMoney(acc.outstanding) : "Cleared"}
+                  <p className="text-xs text-muted-foreground">{acc.dueNow <= 0 && acc.credit > 0 ? "Credit held" : "Due now"}</p>
+                  <p className={`mt-0.5 text-[clamp(0.8rem,6cqi,0.95rem)] font-semibold tabular-nums whitespace-nowrap ${acc.dueNow > 0 ? "text-destructive" : "text-success"}`}>
+                    {acc.dueNow > 0 ? fmtMoney(acc.dueNow) : acc.credit > 0 ? `+${fmtMoney(acc.credit)}` : "Cleared"}
                   </p>
+                  {acc.notBilled > 0 && <p className="text-[10px] text-muted-foreground tabular-nums whitespace-nowrap truncate">+{fmtMoney(acc.notBilled)} on order</p>}
                 </div>
               </div>
 

@@ -757,11 +757,13 @@ export function PayFactory({ open, onOpenChange, lockerId: fixedLocker, frame = 
 }
 
 /* ── Pay Expense — mirrors Expenses.tsx's handleAdd ── */
-export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame, forEmployee }: SheetProps & EmbedProps & {
+export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = sheetFrame, forEmployee, employeeId }: SheetProps & EmbedProps & {
   /** Paying a team member (salary, an advance, a bonus): who it is comes
    *  first and is required, whatever the category, so it lands on their
    *  salary ledger. */
   forEmployee?: boolean;
+  /** That team member, already chosen — opened from their own page. */
+  employeeId?: string;
 }) {
   const { user } = useAuth();
   const db = useDb();
@@ -772,7 +774,7 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
   const [note, setNote] = useState("");
   const [lockerPick, setLockerId] = useState("");
   const lockerId = fixedLocker ?? lockerPick;
-  const [paidToEmployeeId, setPaidToEmployeeId] = useState("");
+  const [paidToEmployeeId, setPaidToEmployeeId] = useState(employeeId ?? "");
   const [saving, setSaving] = useState(false);
   // Entries are often written up a day or two later, so the date is chosen
   // rather than assumed to be today.
@@ -805,7 +807,7 @@ export function PayExpense({ open, onOpenChange, lockerId: fixedLocker, frame = 
         paidToEmployeeId: forEmployee || category === "Salary" ? paidToEmployeeId : undefined,
       }));
       toast.success("Expense recorded");
-      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(""); setDate(todayLocal());
+      setTitle(""); setAmount(""); setNote(""); setLockerId(""); setPaidToEmployeeId(employeeId ?? ""); setDate(todayLocal());
       onOpenChange(false);
     } finally { setSaving(false); }
   };

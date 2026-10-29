@@ -1,6 +1,6 @@
 import { UserAvatar } from "@/components/UserAvatar";
 import { stageLabel } from "@/lib/stages";
-import { useMayExport } from "@/hooks/useCan";
+import { useCan, useMayExport } from "@/hooks/useCan";
 import type { MoreAction } from "@/components/MoreMenu";
 import { EmployeeEditDialog } from "@/components/EmployeeEditDialog";
 import { ExpenseEditDialog, confirmDeleteExpense, useExpenseRights } from "@/components/ExpenseEditDialog";
@@ -8,7 +8,16 @@ import { confirmDeleteEmployee, employeeDeleteBlock } from "@/lib/employeeGuards
 import { useState } from "react";
 import { OrderThumb } from "@/components/OrderThumb";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, orderTotal, findInvoiceForOrder, employeePayments, employeePaymentTotals, keptValue, type Client, type Order } from "@/lib/db";
+import { AccessSummary, ManageAccessDialog } from "@/components/AccessManager";
+import { setAdminRole } from "@/components/RolesAccess";
+import { hasCompanies } from "@/lib/companies";
+import { auth, isAdminEmail } from "@/lib/firebase";
+import { sendPasswordResetEmail } from "firebase/auth";
+import { authErrorMessage } from "@/lib/authErrors";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
+import { PayExpense } from "@/pages/Payments";
+import { loadDb, fmtMoney, fmtDate, fmtExpenseAmount, totalAdvance, balanceDue, orderTotal, findInvoiceForOrder, employeePayments, employeePaymentTotals, keptValue, updateDb, rolesStoreReady, type Client, type Order, type User } from "@/lib/db";
 import { filled, when, userName, refLink, refNo, type Detail } from "@/components/rowDetails";
 import { DataTable, CellMain, CellAmount, CellDate, type DataColumn } from "@/components/DataTable";
 import { useDb } from "@/hooks/useDb";
@@ -20,12 +29,14 @@ import { TasksPanel } from "@/components/TasksPanel";
 import {
   Mail, Phone, Building2, Users,
   CheckCircle2, Clock, ListTodo, Wallet, Receipt, FileSpreadsheet, FileText, Pencil, Trash2,
+  ShieldCheck, Crown, LogIn, KeyRound, Power, ShieldOff, Banknote,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { downloadCsv, downloadLedgerPdf } from "@/lib/ledgerExport";
 import { ccy, ccyOrder, fmtCcyPdf, sumByCcy } from "@/lib/currency";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
 import { PhoneLink, EmailLink } from "@/components/ContactLink";
+import { CompaniesDialog, GiveLoginDialog } from "@/pages/Employees";
 
 export function EmployeeDetailPage() {
   const mayExport = useMayExport();
@@ -37,6 +48,16 @@ export function EmployeeDetailPage() {
   const [editingSelf, setEditingSelf] = useState(false);
   const [editingExpense, setEditingExpense] = useState<string | null>(null);
   const expenseRight = useExpenseRights();
+  // What the Employees list's ⋯ opens, here too: their access, a login, the
+  // companies they sell for — and paying them.
+  const [managing, setManaging] = useState(false);
+  const [givingLogin, setGivingLogin] = useState(false);
+  const [companiesOpen, setCompaniesOpen] = useState(false);
+  const [paying, setPaying] = useState(false);
+  // A fresh form each time it opens (the payment panel keeps what was typed while mounted).
+  const [payKey, setPayKey] = useState(0);
+  const can = useCan();
+  const mayPay = can("payments", "add");
 
   // Salary is payable to any staff member — employees AND the admin/owner.
   const employee = db.users.find(u => u.id === id && (u.role === "employee" || u.role === "admin"));
@@ -202,14 +223,40 @@ export function EmployeeDetailPage() {
     ];
   };
 
-  // The profile's ⋯: their details, and deleting them — greyed, saying why,
-  // when the books still point at them.
+  // The profile's ⋯: the same actions as their row's ⋯ on the Employees list,
+  // with the same conditions (see actionsFor in Employees.tsx). An owner can't
+  // be deactivated, demoted or reset; access and admin are for someone who
+  // signs in. Deactivate and Delete stay greyed, saying why, rather than vanish.
   const delBlock = employeeDeleteBlock(db, employee);
+  const owner = isAdminEmail(employee.email);
+  const signsIn = employee.role === "employee" && !!employee.authUid && !owner;
+  const rolesLive = rolesStoreReady();
+  const multiCo = hasCompanies(db.settings);
+  const offBlock = owner ? "An owner can't be deactivated" : employee.role === "admin" ? "Remove admin first" : undefined;
+  const resetPw = async () => {
+    try { await sendPasswordResetEmail(auth, employee.email); toast.success(`Password reset email sent to ${employee.email}`); }
+    catch (e) { toast.error(authErrorMessage(e)); }
+  };
+  const toggleActive = () => {
+    updateDb(d => { const x = d.users.find(x => x.id === employee.id); if (x) x.status = x.status === "active" ? "inactive" : "active"; });
+    toast.success("Updated");
+  };
   const profileActions: MoreAction[] = [
     { label: "Edit details", icon: Pencil, hint: "Name, phone, department, login, opening salary", onSelect: () => setEditingSelf(true) },
+    { label: "Manage access", icon: ShieldCheck, hint: rolesLive ? "What they may see and do" : "After the security update",
+      disabled: !rolesLive, onSelect: () => setManaging(true), show: signsIn },
+    { label: "Make admin", icon: Crown, hint: "Full access — asks first", onSelect: () => setAdminRole(employee, true), show: rolesLive && signsIn },
+    { label: "Companies they sell for", icon: Building2, hint: employee.companyIds?.length ? `${employee.companyIds.length} ticked` : "Every company",
+      onSelect: () => setCompaniesOpen(true), show: multiCo && employee.role === "employee" },
+    { label: "Give login", icon: LogIn, hint: "An email and password", onSelect: () => setGivingLogin(true), show: employee.role !== "admin" && !employee.authUid },
+    { label: "Send password reset", icon: KeyRound, onSelect: resetPw, show: employee.role !== "admin" && !!employee.authUid && !!employee.email },
+    { label: employee.status === "active" ? "Deactivate" : "Activate", icon: Power, onSelect: toggleActive, disabled: !!offBlock, hint: offBlock },
+    { label: "Remove admin", icon: ShieldOff, hint: "Back to Standard staff access", danger: true, onSelect: () => setAdminRole(employee, false), show: rolesLive && employee.role === "admin" && !owner },
     { label: "Delete", icon: Trash2, danger: true, hint: delBlock ?? "Removes them and their login", disabled: !!delBlock,
       onSelect: async () => { if (await confirmDeleteEmployee(employee)) navigate("/employees"); } },
   ];
+  // Paying them: the Payments page's "Pay an employee" panel, here.
+  const paySalary = () => { setPayKey(k => k + 1); setPaying(true); };
 
 
   // jsPDF's built-in font can't render ₹ — fmtCcyPdf writes "Rs." (and the
@@ -272,7 +319,7 @@ export function EmployeeDetailPage() {
         <div className="hidden sm:block shrink-0">
           <UserAvatar photo={employee.photo} name={employee.name} className="h-14 w-14 rounded-full font-semibold text-xl" />
         </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm flex-1 min-w-0">
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-4 text-sm flex-1 min-w-0">
           <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
             <Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate"><EmailLink email={employee.email} /></p></div>
@@ -289,6 +336,29 @@ export function EmployeeDetailPage() {
             <Building2 className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
             <div className="min-w-0"><p className="text-xs text-muted-foreground">Username</p><p className="font-medium font-mono text-xs truncate" title={employee.username}>{employee.username}</p></div>
           </div>
+          {/* What they may do — as the Employees list's Access column reads —
+              and the way to change it, without going back to the list. */}
+          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0">
+            <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Access</p>
+              {employee.role === "admin" ? (
+                <p className="font-medium text-amber-700">{owner ? "Everything · Owner" : "Everything · Admin"}</p>
+              ) : employee.authUid ? (
+                <>
+                  <div className="mt-0.5"><AccessSummary u={employee} db={db} /></div>
+                  {rolesLive
+                    ? <button type="button" onClick={() => setManaging(true)} className="mt-1 text-xs text-primary hover:underline font-medium">Change</button>
+                    : <p className="mt-1 text-[11px] text-muted-foreground">Changeable after the security update</p>}
+                </>
+              ) : (
+                <>
+                  <p className="font-medium text-muted-foreground">No login</p>
+                  <button type="button" onClick={() => setGivingLogin(true)} className="mt-1 text-xs text-primary hover:underline font-medium">Give login</button>
+                </>
+              )}
+            </div>
+          </div>
         </div>
       </motion.div>
 
@@ -304,18 +374,28 @@ export function EmployeeDetailPage() {
       {!hasSalary ? (
         <div className="card-luxe overflow-hidden">
           <SectionTitle title="Salary & Payments" className="px-5 py-4 border-b border-border/60"
-            info={<>Record one from <span className="font-medium">Payments → Pay Expense</span> or the Expenses page, tagged to this member.</>} />
+            info={<>Pay salary here, or from <span className="font-medium">Payments → Pay → Pay an employee</span>. Each payment is an expense tagged to this member.</>} />
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground px-5 text-center">
             <Wallet className="h-10 w-10 mb-2 opacity-20" />
             <p className="text-sm">No salary paid yet.</p>
+            {mayPay && (
+              <Button type="button" onClick={paySalary} className="btn-hero rounded-xl h-9 mt-3 gap-1.5"><Banknote className="h-4 w-4" /> Pay salary</Button>
+            )}
             <button type="button" onClick={() => setEditingSelf(true)} className="mt-3 text-xs text-primary hover:underline font-medium">Add opening amount</button>
           </div>
         </div>
       ) : (
         /* Same ledger shape as every other account: search, a date range, a
            type filter and a running total paid. One ledger per currency paid
-           in — almost always just the one, exactly as before. */
-        salaryCcys.map(code => {
+           in — almost always just the one, exactly as before. Paying them
+           sits just above (the ledger has no place for a button of its own). */
+        <div className="space-y-2">
+        {mayPay && (
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" onClick={paySalary} className="rounded-xl h-9 gap-1.5"><Banknote className="h-4 w-4" /> Pay salary</Button>
+          </div>
+        )}
+        {salaryCcys.map(code => {
           const rows = statementIn(code);
           const n = rows.length;
           const single = salaryCcys.length === 1;
@@ -337,7 +417,8 @@ export function EmployeeDetailPage() {
               ]}
             />
           );
-        })
+        })}
+        </div>
       )}
 
       {/* Assigned Clients — how many, and their orders, are the strip's above. */}
@@ -393,6 +474,12 @@ export function EmployeeDetailPage() {
       <TasksPanel userId={employee.id} open={tasksOpen} onClose={() => setTasksOpen(false)} asAdmin />
       <EmployeeEditDialog userId={editingSelf ? employee.id : null} onClose={() => setEditingSelf(false)} />
       <ExpenseEditDialog expenseId={editingExpense} onClose={() => setEditingExpense(null)} />
+      {/* "Pay salary": the Payments page's own "Pay an employee" panel, with
+          Salary chosen and this person already picked. */}
+      {mayPay && <PayExpense key={payKey} open={paying} onOpenChange={setPaying} forEmployee employeeId={employee.id} />}
+      {managing && <ManageAccessDialog u={employee} onClose={() => setManaging(false)} />}
+      {givingLogin && <GiveLoginDialog u={employee} onClose={() => setGivingLogin(false)} />}
+      {companiesOpen && <CompaniesDialog u={employee} onClose={() => setCompaniesOpen(false)} />}
     </div>
   );
 }

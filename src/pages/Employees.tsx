@@ -387,7 +387,7 @@ export function EmployeesPage() {
  * card used to show inline (and a list row's details still do): each tick is
  * saved as it is made.
  */
-function CompaniesDialog({ u, onClose }: { u: User; onClose: () => void }) {
+export function CompaniesDialog({ u, onClose }: { u: User; onClose: () => void }) {
   return (
     <Dialog open onOpenChange={v => !v && onClose()}>
       <DialogContent className="max-w-md rounded-2xl">
@@ -409,7 +409,7 @@ function CompaniesDialog({ u, onClose }: { u: User; onClose: () => void }) {
  * A login for someone first added for salary only. Their record stays as it
  * is — history, salary ledger, everything — and gains an email and password.
  */
-function GiveLoginDialog({ u, onClose }: { u: User; onClose: () => void }) {
+export function GiveLoginDialog({ u, onClose }: { u: User; onClose: () => void }) {
   const [email, setEmail] = useState(u.email || "");
   const [password, setPassword] = useState("");
   const [saving, setSaving] = useState(false);

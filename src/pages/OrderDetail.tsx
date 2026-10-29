@@ -5,7 +5,7 @@ import { ProductVideo } from "@/components/ProductVideo";
 import { productionTrack } from "@/lib/production";
 import { stageLabel } from "@/lib/stages";
 import { issuePick, type StockPick } from "@/lib/orderStock";
-import { otherChargesTotal, writeStockCost } from "@/lib/db";
+import { costDataReady, otherChargesTotal, writeStockCost } from "@/lib/db";
 import { OtherChargesEditor, chargeDrafts, chargesOf, type ChargeDraft } from "@/components/OtherCharges";
 import { hasDiamonds, orderTitle, stoneOf } from "@/lib/orderText";
 import { ChangeClientSheet } from "@/components/ChangeClientSheet";
@@ -46,6 +46,8 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
 import { OrderProfitCard } from "@/components/OrderProfitCard";
+import { BulkInvoiceDialog } from "@/components/BulkInvoiceDialog";
+import { invoiceBlocker } from "@/lib/invoiceBatch";
 import { ShippingCostFields } from "@/components/BulkDispatchDialog";
 import { recordShippingCost, EMPTY_SHIPPING_COST, type ShippingCost } from "@/lib/dispatch";
 import { collectionLoaded,
@@ -65,7 +67,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, type LucideIcon } from "lucide-react";
+import { Share2, ArrowLeft, CheckCircle2, Users, Circle, Loader2, Printer, DollarSign, Plus, TrendingUp, AlertCircle, Wallet, ImagePlus, Truck, ExternalLink, Eye, Scale, Calculator, Minimize2, Maximize2, RotateCcw, Factory as FactoryIcon, Coins, Gem, X, Box, Camera, Video, Download, Trash2, Pencil, PackageCheck, Gift, Tag, Flame, Undo2, XCircle, ShoppingCart, Copy, FileText, type LucideIcon } from "lucide-react";
 import { copyBlocker, copyHref } from "@/lib/orderCopy";
 import { MeltDialog } from "@/components/MeltDialog";
 import { OtherMaterialSelect, StockGradeInput, useOtherMaterials } from "@/components/MaterialFields";
@@ -341,6 +343,8 @@ function OrderDetailPageBody() {
   const [rsPrice, setRsPrice] = useState("");
   const [sharingPiece, setSharingPiece] = useState(false);
   const [rsCost, setRsCost] = useState("");
+  // "Make invoice" from the header — the Orders list's own create-invoice panel, for this one order.
+  const [invoicing, setInvoicing] = useState(false);
 
   // Single materials flow: factory + estimate + diamond (stock or buy).
   const [showEstimate, setShowEstimate] = useState(false);
@@ -512,6 +516,34 @@ function OrderDetailPageBody() {
     }
   };
   const linkedIssuances = db.materialIssuances.filter(i => i.orderId === order.id).sort((a, b) => +new Date(b.issuedAt) - +new Date(a.issuedAt));
+  // The material already went to a factory, but nobody picked it under Factory:
+  // the order read "Not assigned" and Final Approval waited for a factory that
+  // was plainly making it. When every issue names the same one, that is the
+  // factory — shown, and set with one tap. Several factories: left to a person.
+  // (A melt sends the gold of a finished piece away — not who made it.)
+  const issuedFactoryIds = [...new Set(linkedIssuances.filter(i => i.factoryId && i.source !== "melt").map(i => i.factoryId))];
+  const issuedFactory = !order.assignedFactoryId && issuedFactoryIds.length === 1
+    ? db.factories.find(f => f.id === issuedFactoryIds[0]) : undefined;
+  // Only the factory is written — no log line, nothing else on the order.
+  const setFactoryFromIssued = () => {
+    if (!issuedFactory) return;
+    let set = false;
+    updateDb(d => {
+      const o = d.orders.find(x => x.id === order.id);
+      if (!o || o.assignedFactoryId) return; // set meanwhile (another tab, a second tap)
+      o.assignedFactoryId = issuedFactory.id;
+      // In the order's own log, as choosing it in Manufacturing → Factory writes it.
+      if (!o.manufacturingLog) o.manufacturingLog = [];
+      o.manufacturingLog.push({
+        id: uid("mlog_"), type: "factory_assigned", at: new Date().toISOString(), employeeId: user!.id, factoryId: issuedFactory.id,
+        remarks: `Factory assigned: ${issuedFactory.name} (from the material issued)`,
+      });
+      set = true;
+    });
+    if (!set) { toast.error("A factory was set meanwhile — check Manufacturing → Factory"); return; }
+    setIssueFactoryId(issuedFactory.id);
+    toast.success(`${issuedFactory.name} set as this order's factory`);
+  };
   // Why a linked purchase can't be corrected / removed from here (admin only,
   // as before) — shown on its greyed button rather than the button vanishing.
   const purchaseWhy = (p: Purchase, what: "edit" | "remove"): string | undefined => {
@@ -1886,6 +1918,13 @@ function OrderDetailPageBody() {
     } finally { setDispatchSaving(false); }
   };
 
+  // The price form starts from what the order holds now.
+  const fillPricing = () => {
+    setPriceValue(order.amount ? String(order.amount) : "");
+    setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
+    setPriceCharges(chargeDrafts(order.otherCharges));
+  };
+
   const savePricing = () => {
     const val = parseFloat(priceValue);
     const ship = parseFloat(priceShipping) || 0;
@@ -2045,6 +2084,48 @@ function OrderDetailPageBody() {
     toast.success("Gift card removed");
   };
 
+  // Take the eye to a section further down (the header's chips and bar point there).
+  const scrollToSection = (id: "order-timeline" | "order-manufacturing") =>
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+
+  // ── The header's main button: the order's NEXT step, for someone who can take
+  // it. Each one runs the very handler the timeline and sections run — with
+  // their checks and questions — so nothing here decides a business rule.
+  // Null: nothing to do now, and the header keeps its usual button (the bill).
+  const mayInvoice = user!.role !== "client" && can("invoices", "add") && invoiceBlocker(db, order) === null;
+  type NextAction = { label: string; icon: LucideIcon; run: () => unknown };
+  const nextAction = ((): NextAction | null => {
+    if (!canEditStage() || order.deletedAt || order.melted || order.status === "Rejected") return null;
+    // A made build's next step is the shelf — the header's own Ready Stock button.
+    if (order.forReadyStock && (faStepIdx < 0 || faDone)) return null;
+    if (order.status === "Waiting") return { label: "Approve", icon: CheckCircle2, run: () => approve(true) };
+    // The step the timeline shows as the one to do now (its own rule for a diamond-only order).
+    const active = diamondOnly ? shownSteps.find(s => s.t.status !== "done") : shownSteps.find(s => s.t.status === "in_progress");
+    if (!active) return mayInvoice ? { label: "Make invoice", icon: FileText, run: () => setInvoicing(true) } : null;
+    const { t, i } = active;
+    // Held up before Final Approval: what is missing comes first. The factory
+    // picked, or the diamonds added — both live under Manufacturing.
+    if (!diamondOnly && !readiness.ready && (t.step === "In Production" || t.step === "Final Approval")) {
+      if (readiness.missing.includes("gold")) {
+        return issuedFactory
+          ? { label: `Set to ${issuedFactory.name}`, icon: FactoryIcon, run: setFactoryFromIssued }
+          : { label: "Assign factory", icon: FactoryIcon, run: () => scrollToSection("order-manufacturing") };
+      }
+      return { label: "Add diamonds", icon: Gem, run: () => scrollToSection("order-manufacturing") };
+    }
+    switch (t.step) {
+      case "Final Approval": return { label: "Enter actuals", icon: PackageCheck, run: () => openFinalApproval(i) };
+      case "Dispatch": return { label: "Dispatch", icon: Truck, run: () => openDispatchModal(i) };
+      case "Delivered": return { label: "Mark delivered", icon: CheckCircle2, run: () => { setDeliverDay(order.deliveredAt ? dayOf(order.deliveredAt) : todayLocal()); setDeliverModalIdx(i); } };
+      // A build goes on the shelf with its price — the header's own Ready Stock button.
+      case "Ready for Stock": return null;
+      default: return { label: `Mark ${stageLabel(t.step)} done`, icon: CheckCircle2, run: () => advanceStep(i) };
+    }
+  })();
+  // The bill, when the next step has the header's button: first in the ⋯ menu.
+  const billInvoice = findInvoiceForOrder(db.invoices, order.id);
+  const billOffered = !order.forReadyStock && (order.status !== "Rejected" || !!billInvoice) && mayExport;
+
   // ── The ⋯ menus. Staff see every action; one that can't be used now is
   // greyed with the reason under it, never left out. A client's view has none.
   const isStaffUser = user!.role !== "client";
@@ -2064,6 +2145,10 @@ function OrderDetailPageBody() {
   };
   const meltReason = meltWhy();
   const orderActions: MoreAction[] = [
+    { label: billInvoice ? "Print / Download Bill" : "Proforma Bill", icon: Printer, hint: billInvoice ? `Invoice ${billInvoice.number}` : "No invoice number — the real one is made from Invoices",
+      onSelect: handlePrintInvoice, show: !!nextAction && billOffered },
+    { label: "Make invoice", icon: FileText, hint: "Dispatched and priced — bill it now", onSelect: () => setInvoicing(true),
+      show: mayInvoice && nextAction?.label !== "Make invoice" },
     { label: "Edit details", icon: Pencil, hint: editWhy ?? "Type, metal, size, due date, instructions…", disabled: !!editWhy, onSelect: () => setEditOpen(true), show: isStaffUser },
     { label: "Share this piece", icon: Share2, hint: "A product PDF or a link — photos, video, details, a price you set", onSelect: () => setSharingPiece(true),
       show: isStaffUser && !isDiamondOnlyOrder(order) },
@@ -2142,7 +2227,9 @@ function OrderDetailPageBody() {
         // A build goes into Ready Stock once it is made — Final Approval done (its
         // real weights recorded); before that the timeline is the way forward.
         const buildMade = !order.timeline.some(t => t.step === "Final Approval") || order.timeline.some(t => t.step === "Final Approval" && t.status === "done");
-        const mainAction = order.forReadyStock
+        const mainAction = nextAction
+          ? <AsyncButton onClick={nextAction.run} title={nextAction.label} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1 min-w-0"><nextAction.icon className="h-4 w-4 shrink-0" /><span className="truncate sm:max-w-[16rem]">{nextAction.label}</span></AsyncButton>
+          : order.forReadyStock
           ? (user!.role === "admin" && ((order.status !== "Rejected" && !order.deletedAt && !order.melted) || !!order.readyStockCreatedId) && (
               order.readyStockCreatedId
                 ? <Button onClick={() => nav(`/ready-stock/${order.readyStockCreatedId}`)} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />In Ready Stock ✓</Button>
@@ -2150,7 +2237,7 @@ function OrderDetailPageBody() {
                   ? <Button onClick={openAddToStock} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><PackageCheck className="h-4 w-4" />Add to Ready Stock</Button>
                   : null
             ))
-          : (order.status !== "Rejected" || findInvoiceForOrder(db.invoices, order.id)) && <IfExport><Button onClick={handlePrintInvoice} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{findInvoiceForOrder(db.invoices, order.id) ? "Print / Download Bill" : "Proforma Bill"}</Button></IfExport>;
+          : billOffered && <Button onClick={handlePrintInvoice} className="h-11 sm:h-10 rounded-xl px-4 gap-2 max-sm:flex-1"><Printer className="h-4 w-4" />{billInvoice ? "Print / Download Bill" : "Proforma Bill"}</Button>;
         const closed = order.status === "Rejected";
         return (
           <div className="p-4 sm:p-6">
@@ -2217,26 +2304,31 @@ function OrderDetailPageBody() {
               {order.diamondWeight > 0 && <HeaderFact label="Diamonds" value={`${order.diamondWeight} ct`} note={[order.diamondShape, order.diamondType].filter(Boolean).join(" · ")} />}
             </div>
 
-            <div className="mt-5">
-              <div className="flex items-baseline justify-between gap-3">
+            {/* Where it stands — a tap opens the timeline below. */}
+            <button type="button" onClick={() => scrollToSection("order-timeline")} title="See the timeline"
+              className="group mt-5 block w-full text-left rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+              <span className="flex items-baseline justify-between gap-3">
                 {closed
-                  ? <span className="text-sm font-medium text-destructive">Order closed — {order.melted ? "melted" : "rejected"}</span>
-                  : <span className="text-sm font-medium text-foreground">{stageLabel(stage)}</span>}
+                  ? <span className="text-sm font-medium text-destructive group-hover:underline underline-offset-2">Order closed — {order.melted ? "melted" : "rejected"}</span>
+                  : <span className="text-sm font-medium text-foreground group-hover:text-primary group-hover:underline underline-offset-2">{stageLabel(stage)}</span>}
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {closed
                     ? <>stopped at {doneSteps} of {order.timeline.length}</>
                     : <>{doneSteps} of {order.timeline.length} steps done · {pct}%</>}
                 </span>
-              </div>
-              <div className="mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
-                <div className={`h-full rounded-full transition-all duration-500 ${closed ? "bg-destructive/50" : "bg-primary"}`} style={{ width: `${pct}%` }} />
-              </div>
-            </div>
+              </span>
+              <span className="block mt-2 h-1.5 rounded-full bg-secondary overflow-hidden">
+                <span className={`block h-full rounded-full transition-all duration-500 ${closed ? "bg-destructive/50" : "bg-primary"}`} style={{ width: `${pct}%` }} />
+              </span>
+            </button>
 
             {/* Staff: days in production and whether its diamonds have gone out. */}
             {isStaffUser && (() => {
               const t = productionTrack(order, db.materialIssuances ?? [], db.settings);
-              return t ? <div className="mt-4 max-w-sm"><ProductionInfo t={t} /></div> : null;
+              // A tap on "Delayed" opens the timeline; on "Diamonds not issued", Manufacturing.
+              const mfgShown = order.materialSourcing !== "readyStock";
+              return t ? <div className="mt-4 max-w-sm"><ProductionInfo t={t} onDays={() => scrollToSection("order-timeline")}
+                onDiamonds={mfgShown ? () => scrollToSection("order-manufacturing") : undefined} /></div> : null;
             })()}
 
             {/* On a phone the main action spans the width, under the facts. */}
@@ -2344,19 +2436,14 @@ function OrderDetailPageBody() {
         {/* ── Pricing — set/edited by admin & employee only, never by the client.
               Not on an in-house build: nothing is sold or billed on it. ── */}
         {user!.role !== "client" && !order.forReadyStock && (
-          <div className={ORDER_SECTION}>
+          <div id="order-price" className={`${ORDER_SECTION} scroll-mt-20`}>
             <div className="flex items-center justify-between gap-3 mb-3">
               <p className="text-sm font-semibold text-foreground">Price</p>
               {canEditStage() && (
                 <button
                   type="button"
                   className="h-8 -mr-2 px-2 rounded-lg text-sm font-medium text-primary hover:bg-primary/[0.07] transition-colors"
-                  onClick={() => {
-                    setPriceValue(order.amount ? String(order.amount) : "");
-                    setPriceShipping(order.shippingCharge ? String(order.shippingCharge) : "");
-                    setPriceCharges(chargeDrafts(order.otherCharges));
-                    setShowPricing(v => !v);
-                  }}
+                  onClick={() => { fillPricing(); setShowPricing(v => !v); }}
                 >
                   {order.amount ? "Edit" : "Set price"}
                 </button>
@@ -3038,7 +3125,37 @@ function OrderDetailPageBody() {
       {/* ── Cost & Profit — the admin's eyes only. Employees can open this
           page, and the client portal renders it too, so the gate is the role
           itself, never the page. */}
-      {user!.role === "admin" && <div style={{ order: secRank.profit }} className="min-w-0 empty:hidden"><OrderProfitCard db={db} order={order} /></div>}
+      {/* No price yet: the profit would be the whole cost as a big red loss —
+          a number that means nothing until the piece is priced. Say so instead;
+          what it has cost so far still shows. A stock build has no price by
+          design, so its card stays as it was. */}
+      {user!.role === "admin" && (
+        <div style={{ order: secRank.profit }} className="min-w-0 empty:hidden">
+          {!order.forReadyStock && !(order.amount > 0) ? (() => {
+            let spent: { inr: number; complete: boolean } | null = null;
+            if (costDataReady()) { try { const c = orderCost(db, order); spent = { inr: c.totalInr, complete: c.complete }; } catch { /* shown without it */ } }
+            return (
+              <div className="card-luxe p-6 border-amber-500/30">
+                <div className="flex items-start justify-between gap-3 flex-wrap">
+                  <div className="min-w-0">
+                    <h3 className="font-display text-lg text-brand-dark">Cost &amp; Profit</h3>
+                    <p className="text-sm text-muted-foreground mt-1">Set a price to see the profit.</p>
+                    {spent && spent.inr > 0 && (
+                      <p className="text-xs text-muted-foreground mt-1">Cost so far <span className="font-semibold text-foreground tabular-nums">{fmtMoneyInr(spent.inr)}</span>{spent.complete ? "" : " — part not valued yet"}</p>
+                    )}
+                  </div>
+                  {canEditStage() && order.status !== "Rejected" && !order.deletedAt && (
+                    <Button size="sm" variant="outline" className="rounded-lg h-9"
+                      onClick={() => { fillPricing(); setShowPricing(true); document.getElementById("order-price")?.scrollIntoView({ behavior: "smooth", block: "center" }); }}>
+                      Set price
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })() : <OrderProfitCard db={db} order={order} />}
+        </div>
+      )}
 
       {/* ── Advance Payment Card — not on an in-house build (no client, no bill) ── */}
       {(!order.forReadyStock || advances.length > 0) && (
@@ -3295,7 +3412,7 @@ function OrderDetailPageBody() {
 
       {/* Production Timeline. A diamond-only order is not produced, so it shows
           only the stages it really has — order, dispatch, delivery. */}
-      <div style={{ order: secRank.timeline }} className="card-luxe p-6">
+      <div id="order-timeline" style={{ order: secRank.timeline }} className="card-luxe p-6 scroll-mt-20">
         <SectionTitle className="mb-5" title={diamondOnly ? "Order Progress" : "Production Timeline"} />
         <div className="relative pl-8 space-y-4">
           <div className="absolute left-3 top-2 bottom-2 w-0.5 bg-border" />
@@ -3328,6 +3445,12 @@ function OrderDetailPageBody() {
                       <p className="text-[11px] text-destructive font-medium">
                         Issue {readiness.missing.join(" and ")} to a factory before Final Approval
                       </p>
+                      {/* "Gold" here means no factory picked — and the material already names one. */}
+                      {issuedFactory && readiness.missing.includes("gold") && (
+                        <button type="button" onClick={setFactoryFromIssued} className="mt-1 block text-[11px] font-medium text-primary hover:underline">
+                          Set to {issuedFactory.name} — the material went there
+                        </button>
+                      )}
                       {user!.role === "admin" && (
                         <button onClick={() => forceAdvanceStep(idx)} className="mt-1 text-[10px] text-muted-foreground hover:text-foreground underline">
                           Force complete anyway (admin override)
@@ -3380,7 +3503,7 @@ function OrderDetailPageBody() {
           internal sourcing cost, never shown to the client). Hidden for a
           Ready-Stock sale — the piece already exists, nothing is manufactured. */}
       {user!.role !== "client" && order.materialSourcing !== "readyStock" && (
-        <div style={{ order: secRank.manufacturing }} className="card-luxe p-6 space-y-5">
+        <div id="order-manufacturing" style={{ order: secRank.manufacturing }} className="card-luxe p-6 space-y-5 scroll-mt-20">
           {(() => {
             const editable = canEditStage();
             const needsDia = orderMaterialRequirements(order).needsDiamond;
@@ -3392,7 +3515,7 @@ function OrderDetailPageBody() {
             const noDiaWeight = !needsDia && !order.noDiamond && !mountOnly && !linkedIssuances.some(i => i.material === "diamond");
             // Other materials we actually hold (for this order's company) — none, and the form would open empty.
             const othersInStock = otherMaterials.filter(m => Object.values(deriveStockBalances(db.stockMovements, m.id, workCompanyOf(db, order))).some(q => q > 0));
-            const noFactoryWhy = !order.assignedFactoryId ? "Choose the factory first" : undefined;
+            const noFactoryWhy = !order.assignedFactoryId ? (issuedFactory ? `Set the factory first — ${issuedFactory.name}, under Factory` : "Choose the factory first") : undefined;
             const afterFaWhy = faDone ? "Final Approval is done — use Rework for changes" : undefined;
             const blockWhy = afterFaWhy ?? noFactoryWhy;
             const openDiamond = (s: "stock" | "buy") => {
@@ -3586,12 +3709,19 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                     <MfgStep n={1} title="Factory" state={order.assignedFactoryId ? "done" : "todo"}>
                       <Select disabled={!editable} value={order.assignedFactoryId || "__none"} onValueChange={addNew("factory", v => assignFactory(v === "__none" ? "" : v))}>
-                        <SelectTrigger className="h-9 w-full rounded-lg text-sm bg-white" aria-label="Factory"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                        {/* Not picked, but the material went to one factory: show which, not "Not assigned". */}
+                        <SelectTrigger className="h-9 w-full rounded-lg text-sm bg-white" aria-label="Factory"><SelectValue placeholder="Choose factory">{issuedFactory ? issuedFactory.name : undefined}</SelectValue></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="__none">Not assigned</SelectItem>
                           {db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}
                         <AddNewItem kind="factory" /></SelectContent>
                       </Select>
+                      {issuedFactory && <p className="text-[11px] text-muted-foreground mt-1.5">From the material issued — not set on the order yet</p>}
+                      {issuedFactory && editable && (
+                        <AsyncButton size="sm" variant="outline" onClick={setFactoryFromIssued} className="mt-1.5 h-8 max-w-full rounded-lg text-xs gap-1.5">
+                          <FactoryIcon className="h-3.5 w-3.5 shrink-0" /><span className="truncate">Set to {issuedFactory.name}</span>
+                        </AsyncButton>
+                      )}
                       {order.assignedFactoryId && (
                         <p className="text-[11px] text-muted-foreground mt-1.5 flex items-center gap-1">
                           <Coins className="h-3 w-3 text-amber-600 shrink-0" /> Our gold there:
@@ -4168,6 +4298,12 @@ The piece then takes ours — add them from stock or buy them, as for any order.
         </motion.div>
       )}
     </AnimatePresence>
+
+      {/* ── Make invoice (the header's button once it has shipped) — the same
+             panel the Orders list bills ticked orders with, for this one. ── */}
+      {invoicing && (
+        <BulkInvoiceDialog orders={[order]} onClose={() => setInvoicing(false)} onDone={() => setInvoicing(false)} />
+      )}
 
       {/* ── Delivery date popup (from the timeline "Mark complete") ── */}
       <Dialog open={deliverModalIdx !== null} onOpenChange={v => { if (!v) setDeliverModalIdx(null); }}>

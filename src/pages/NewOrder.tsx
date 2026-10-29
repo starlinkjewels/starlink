@@ -1,6 +1,6 @@
 import { hasDiamonds, looseLabel, stonesLine } from "@/lib/orderText";
 import { activeMaterials, materialDef } from "@/lib/materials";
-import { COPY_PARAM, copyFields, copyKind } from "@/lib/orderCopy";
+import { COPY_PARAM, copyBlocker, copyFields, copyHref, copyKind } from "@/lib/orderCopy";
 import { chargeDrafts } from "@/components/OtherCharges";
 import { useCan } from "@/hooks/useCan";
 import { buildLooseTimelineSteps } from "@/lib/db";
@@ -24,7 +24,7 @@ import { weightProblem } from "@/lib/weights";
 import { useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/lib/auth";
-import { loadDb, updateDb, updateDbAs, uid, currentUserClients, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
+import { loadDb, updateDb, updateDbAs, uid, currentUserClients, currentUserOrders, isDiamondOnlyOrder, buildTimelineSteps, DIAMOND_ONLY_METAL, buildReadyStockTimelineSteps, buildReadyStockSaleTimelineSteps, activeGiftCardsFor, giftCardBalanceFor, giftCardRemaining, giftMaxRedeemPctFor, type Order } from "@/lib/db";
 import { reserveOrderNumber } from "@/lib/counters";
 import { metalHasKarats as hasKarats, metalColour } from "@/lib/metals";
 import { choicesOf, listOf } from "@/lib/optionLists";
@@ -54,7 +54,7 @@ import {
 } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { toast } from "sonner";
-import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool } from "lucide-react";
+import { Users, Coins, Plus, DollarSign, Building2, ImagePlus, X, Gem, Clock, Sparkles, Truck, CreditCard, AlertCircle, BadgeCheck, Boxes, ShoppingBag, HelpCircle, PackageCheck, Gift, Factory as FactoryIconLucide, Search, MapPin, Copy, PenTool, Repeat } from "lucide-react";
 import { DesignerFields, NO_DESIGNER, assignAndTell, type DesignerChoice } from "@/components/designers/AssignDesigner";
 
 const READY_STOCK_NONE = "none";
@@ -74,7 +74,52 @@ function cleanStoneSpec(sp: LooseLotDraft) {
   return out;
 }
 
+/**
+ * The colour a gold's own name gives — "Rose Gold" is Rose, "White Gold (…)"
+ * White — as the business's colour list spells it. "" when the name gives none
+ * (Platinum, plain "Gold"…): then nobody guesses.
+ */
+function namedColour(metal: string): string {
+  if (!hasKarats(metal)) return "";
+  const m = /\b(yellow|white|rose)\b/i.exec(metal);
+  if (!m) return "";
+  const word = m[1].toLowerCase();
+  const list = listOf("colours");
+  return list.find(c => c.toLowerCase() === word) ?? list.find(c => c.toLowerCase().includes(word)) ?? word[0].toUpperCase() + word.slice(1);
+}
+
+const NO_OPTS = { rhodium: "", stamping: "", stampingNote: "" };
+
+/** Something Submit found missing: the form's own key, a short name, and what to do. */
+type Fix = { key: string; label: string; msg: string };
+
+/**
+ * Brings a field Submit found missing into sight — by scrolling the page's own
+ * box, never the window: the frame moving is what once left a blank screen
+ * (AppLayout puts it back, but the field would be lost with it).
+ */
+function scrollToFix(key: string): boolean {
+  const el = document.querySelector<HTMLElement>(`[data-fix="${key}"]`);
+  if (!el) return false;
+  let box = el.parentElement;
+  while (box && !(/(auto|scroll)/.test(getComputedStyle(box).overflowY) && box.scrollHeight > box.clientHeight)) box = box.parentElement;
+  if (!box) return false;
+  const top = el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - Math.min(160, box.clientHeight / 4);
+  box.scrollTo({ top: Math.max(0, top), behavior: "smooth" });
+  return true;
+}
+
+/**
+ * New Order, started afresh for each order it copies: a "Repeat" chip opens the
+ * same ?copy= page Duplicate does, and the form fills from it just as it does
+ * there — nothing typed for another order is carried into the copy.
+ */
 export function NewOrderPage() {
+  const [params] = useSearchParams();
+  return <NewOrderForm key={params.get(COPY_PARAM) ?? ""} />;
+}
+
+function NewOrderForm() {
   const { user } = useAuth();
   const nav = useNavigate();
   const db = useDb();
@@ -93,12 +138,13 @@ export function NewOrderPage() {
   const diamondRate     = initDb.settings.diamondRate             ?? 3500;
   const metalRate       = initDb.settings.metalRate               ?? 65;
   const defaultShipping = initDb.settings.defaultShippingCharge  ?? 0;
+  const firstMetal      = listOf("metals")[0] ?? "Yellow Gold";
 
   const [f, setF] = useState({
     clientId: isClient ? (user!.clientId ?? "") : "",
     // The first of each of the business's own lists (Settings → Dropdown lists).
     jewelleryType: listOf("jewelleryTypes")[0] ?? "Ring",
-    metal: listOf("metals")[0] ?? "Yellow Gold",
+    metal: firstMetal,
     diamondType: listOf("diamondTypes")[0] ?? "Natural",
     diamondShape: "",
     // The client's own material for this piece (lib/clientMaterial.ts).
@@ -108,7 +154,8 @@ export function NewOrderPage() {
     // An admin's new order is theirs unless they give it to someone else (AssignPicker).
     assignedTo: isAdmin ? user!.id : "",
     quantity: 1,
-    diamondWeight: 0.5,
+    // Blank until it is typed: a weight nobody gave is 0, never a made-up 0.5 ct.
+    diamondWeight: "" as number | "",
     estimatedGrossWeight: 0,
     estimatedNetWeight: 0,
     instructions: "",
@@ -116,7 +163,8 @@ export function NewOrderPage() {
     priority: "Normal",
     designNumber: "",
     productSize: "",
-    productColor: "",
+    // "Yellow Gold" is yellow: the colour its name gives, until one is chosen by hand.
+    productColor: namedColour(firstMetal),
     productKarats: "",
     deliveryTime: "",
     rhodium: "",
@@ -169,8 +217,31 @@ export function NewOrderPage() {
   // Net follows the gross and the diamonds: gross − stones (1 ct = 0.2 g).
   const setGross = (g: number) =>
     setF(prev => ({ ...prev, estimatedGrossWeight: g, estimatedNetWeight: g > 0 ? netFromGross(g, Number(prev.diamondWeight)) : 0 }));
-  const setDiamondCt = (ct: number) =>
-    setF(prev => ({ ...prev, diamondWeight: ct, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netFromGross(prev.estimatedGrossWeight, ct) } : {}) }));
+  // Blank ("") is not entered — no stones taken off the gross.
+  const setDiamondCt = (ct: number | "") =>
+    setF(prev => ({ ...prev, diamondWeight: ct, ...(prev.estimatedGrossWeight > 0 ? { estimatedNetWeight: netFromGross(prev.estimatedGrossWeight, Number(ct) || 0) } : {}) }));
+  // The colour follows the metal while nobody has picked one by hand (namedColour).
+  const colourByHand = useRef(false);
+  const colourFor = (prev: { metal: string; productColor: string }, metal: string): { productColor?: string } => {
+    if (colourByHand.current) return {};
+    const auto = namedColour(metal);
+    // A metal that names no colour takes back only the colour the last one gave.
+    return auto ? { productColor: auto } : prev.productColor === namedColour(prev.metal) ? { productColor: "" } : {};
+  };
+  // Rhodium and Stamping as the chosen client had them last (chooseClient), and
+  // what of that the form was given: only a piece to make asks for them, so loose
+  // stones and a stock sale are given nothing — they'd be saved on the order unseen.
+  const clientOpts = useRef(NO_OPTS);
+  const optsGiven = useRef(NO_OPTS);
+  // A choice still blank, or still what was given before, takes the new one; one picked by hand stays.
+  const giveOpts = (next: typeof NO_OPTS) => {
+    const given = optsGiven.current;
+    optsGiven.current = next;
+    return (prev: { rhodium: string; stamping: string; stampingNote: string }) => ({
+      ...(!prev.rhodium || prev.rhodium === given.rhodium ? { rhodium: next.rhodium } : {}),
+      ...(!prev.stamping || (prev.stamping === given.stamping && prev.stampingNote === given.stampingNote) ? { stamping: next.stamping, stampingNote: next.stampingNote } : {}),
+    });
+  };
 
   const metalHasKarats = hasKarats(f.metal);
   // A pure diamond sale, no jewellery piece at all — hides every field that
@@ -233,6 +304,7 @@ export function NewOrderPage() {
       ...prev,
       metal: v,
       productKarats: hasKarats(v) ? prev.productKarats : "",
+      ...colourFor(prev, v),
     }));
   };
 
@@ -242,6 +314,8 @@ export function NewOrderPage() {
       jewelleryType: v,
       metal: v === "Diamond Only" ? "None (Diamond only)" : prev.metal,
       productKarats: v === "Diamond Only" ? "" : prev.productKarats,
+      // Loose stones have no metal, so no colour from one.
+      ...(v === "Diamond Only" ? colourFor(prev, "None (Diamond only)") : {}),
     }));
   };
 
@@ -251,23 +325,29 @@ export function NewOrderPage() {
     // What was planned belongs to the kind it was planned for.
     setPicks([]); setPlannedBuy(null);
     if (!stoneChosen.current) setStoneState("Diamond");
+    const opts = giveOpts(k === "piece" ? clientOpts.current : NO_OPTS);
+    setF(prev => ({ ...prev, ...opts(prev) }));
     if (k === "loose") { setJewelleryType("Diamond Only"); setF(prev => ({ ...prev, readyStockItemId: "", materialSourcing: "later", assignedFactoryId: "" })); }
     else {
-      setF(prev => ({
-        ...prev,
-        ...(prev.jewelleryType === "Diamond Only" ? {
-          jewelleryType: listOf("jewelleryTypes").find(t => t !== "Diamond Only") ?? "Ring",
-          metal: listOf("metals").find(m => m !== "None (Diamond only)") ?? "Yellow Gold",
-        } : {}),
-        ...(k === "piece" ? { readyStockItemId: "", materialSourcing: "later" } : {}),
-      }));
+      setF(prev => {
+        const metal = listOf("metals").find(m => m !== "None (Diamond only)") ?? "Yellow Gold";
+        return {
+          ...prev,
+          ...(prev.jewelleryType === "Diamond Only" ? {
+            jewelleryType: listOf("jewelleryTypes").find(t => t !== "Diamond Only") ?? "Ring",
+            metal,
+            ...colourFor(prev, metal),
+          } : {}),
+          ...(k === "piece" ? { readyStockItemId: "", materialSourcing: "later" } : {}),
+        };
+      });
     }
   };
 
   const applyEstimate = () => {
     // Must match the displayed estimate (metal + diamond), not diamond alone —
     // otherwise the button silently under-prices the order by the metal value.
-    const auto = Math.round(Number(f.estimatedNetWeight) * metalRate + Number(f.diamondWeight) * diamondRate);
+    const auto = Math.round(Number(f.estimatedNetWeight) * metalRate + (Number(f.diamondWeight) || 0) * diamondRate);
     setF(prev => ({ ...prev, orderValue: auto }));
   };
 
@@ -302,7 +382,9 @@ export function NewOrderPage() {
       jewelleryType: item.jewelleryType,
       metal: item.metal,
       productKarats: item.productKarats || "",
-      productColor: prev.productColor || colorGuess,
+      // The piece's own colour — unless one was picked by hand (a colour that only
+      // followed the form's metal says nothing about this piece).
+      productColor: (colourByHand.current && prev.productColor) || colorGuess,
       diamondType: item.diamondType || prev.diamondType,
       diamondWeight: item.diamondWeight || 0,
       estimatedGrossWeight: item.grossWeight || 0,
@@ -338,6 +420,8 @@ export function NewOrderPage() {
     if (src.forReadyStock && src.companyId) setBuildCompany(src.companyId);
     if (src.stoneSpec?.stone) { stoneChosen.current = true; setStoneState(src.stoneSpec.stone); }
     setImages((src.images ?? []).slice(0, 3));
+    // A colour its metal doesn't give (two-tone on yellow gold) was chosen by hand: it stays.
+    colourByHand.current = !!src.productColor && src.productColor !== namedColour(src.metal);
     setF(prev => ({
       ...prev,
       ...copyFields(src),
@@ -359,24 +443,75 @@ export function NewOrderPage() {
     if (!clientOk) toast.info(`${db.clients.find(c => c.id === src.clientId)?.companyName ?? "That client"} isn't in your client list — choose the client.`);
   }, [db.orders]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // The client's orders, newest first — only those this person may see (lib/db.ts).
+  const clientOrders = (clientId: string): Order[] => !user || isClient || !clientId || clientId === READY_STOCK_CLIENT ? []
+    : currentUserOrders(db, user).filter(o => o.clientId === clientId && !o.forReadyStock)
+        .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
+  // Rhodium and Stamping start as the client had them on their last order (no
+  // engraving — that was those words alone); our own stock build starts with none.
+  const chooseClient = (v: string) => {
+    const last = clientOrders(v).find(o => o.rhodium && o.stamping);
+    const c = last ? copyFields(last) : null;
+    clientOpts.current = c ? { rhodium: c.rhodium, stamping: c.stamping, stampingNote: c.stampingNote } : NO_OPTS;
+    const opts = giveOpts(kind === "piece" ? clientOpts.current : NO_OPTS);
+    setF(prev => ({ ...prev, clientId: v, ...opts(prev) }));
+  };
+  // "Repeat a recent order": the client's last three, each opening as Duplicate does.
+  const recentOrders = !isClient && !forReadyStock && f.clientId && !copyBlocker(user, canDo) ? clientOrders(f.clientId).slice(0, 3) : [];
+
+  // Everything Submit finds simply missing — all at once, in the form's order, each
+  // with the message it always had. Checks that weigh one field against another
+  // (weights, the plan, the client's material, stock) still run after these, one by one.
+  const fixesNow = (): Fix[] => {
+    const out: Fix[] = [];
+    const need = (missing: boolean, key: string, label: string, msg: string) => { if (missing) out.push({ key, label, msg }); };
+    // A Ready-Stock sale reuses the finished piece's specs — don't re-ask for them; loose diamonds have none.
+    const needSpecs = kind === "piece" && !isDiamondOnly && !isReadyStockSale;
+    need((isAdmin || isEmployee) && !f.clientId, "clientId", "Client", "Please select a client for this order.");
+    need(kind === "readyStock" && !f.readyStockItemId, "readyStockItemId", "Ready Stock piece", "Choose the piece from Ready Stock.");
+    need(!f.quantity || Number(f.quantity) < 1, "quantity", "Quantity", "Quantity must be at least 1.");
+    need(needSpecs && !f.designNumber.trim(), "designNumber", "Design Number", "Design Number is required.");
+    need(needSpecs && !f.productSize.trim(), "productSize", "Product Size", "Product Size is required.");
+    // Colour is the gold's (yellow, white, rose) — not needed for silver, platinum or any metal without karats.
+    need(needSpecs && metalHasKarats && !f.productColor, "productColor", "Color", "Color of Product is required.");
+    need(needSpecs && metalHasKarats && !f.productKarats, "productKarats", "Karats", "Karats of Product is required.");
+    // Asked, never assumed: a forgotten weight saved as 0 would let Final Approval
+    // pass without the diamonds ever being issued. 0 is a fine answer for no stones.
+    need(needSpecs && f.diamondWeight === "", "diamondWeight", "Est. Diamond Weight", "Enter the estimated diamond weight — 0 if the piece has no diamonds.");
+    need(needSpecs && !f.rhodium, "rhodium", "Rhodium", "Please select a Rhodium option.");
+    need(needSpecs && !f.stamping, "stamping", "Stamping", "Please select a Stamping option.");
+    need(needSpecs && f.stamping === "Special Stamp" && !f.stampingNote.trim(), "stampingNote", "Special stamp", "Please describe the special stamp.");
+    need(needSpecs && f.engraving.on && !f.engraving.text.trim(), "engraving", "Engraving", "Engraving: type the words — or remove the engraving.");
+    need(!isClient && !forReadyStock && f.orderValue <= 0, "orderValue", "Order Value", "Please enter a valid order value.");
+    if (Number(f.advanceAmount) > 0) {
+      need(!f.advanceLockerId, "advanceLockerId", "Locker", "Choose which locker the advance was deposited into.");
+      need(!!f.advanceLockerId && (!f.advanceLockerAmount || Number(f.advanceLockerAmount) <= 0), "advanceLockerAmount", "Amount deposited", "Enter the amount actually deposited in that locker.");
+    }
+    return out;
+  };
+  // What the last Submit marked, and each field's value then: a mark goes as soon as
+  // its field is changed, or once it is no longer needed (the order changed kind).
+  const [marks, setMarks] = useState<Record<string, string>>({});
+  const markedAt = useRef<Record<string, unknown>>({});
+  const stillMissing = Object.keys(marks).length ? new Set(fixesNow().map(x => x.key)) : null;
+  const shownMarks = stillMissing
+    ? Object.keys(marks).filter(k => stillMissing.has(k) && (f as Record<string, unknown>)[k] === markedAt.current[k])
+    : [];
+  const markOf = (key: string) => ({ fixKey: key, error: shownMarks.includes(key) ? marks[key] : undefined });
+  const toFirstMark = () => { for (const k of shownMarks) if (scrollToFix(k)) return; };
+
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!isClient && !isAdmin && !isEmployee) { toast.error("You don't have permission to create orders."); return; }
-    if ((isAdmin || isEmployee) && !f.clientId) { toast.error("Please select a client for this order."); return; }
-    if (!isClient && !forReadyStock && f.orderValue <= 0) { toast.error("Please enter a valid order value."); return; }
-    // A Ready-Stock sale reuses the finished piece's specs — don't re-ask for them; loose diamonds have none.
-    if (kind === "readyStock" && !f.readyStockItemId) { toast.error("Choose the piece from Ready Stock."); return; }
+    const fixes = fixesNow();
+    setMarks(Object.fromEntries(fixes.map(x => [x.key, x.msg])));
+    markedAt.current = Object.fromEntries(fixes.map(x => [x.key, (f as Record<string, unknown>)[x.key]]));
+    if (fixes.length) {
+      toast.error(fixes.length === 1 ? fixes[0].msg : `${fixes.length} things to fix: ${fixes.map(x => x.label).join(", ")}`);
+      requestAnimationFrame(() => { for (const x of fixes) if (scrollToFix(x.key)) return; });
+      return;
+    }
     const needSpecs = kind === "piece" && !isDiamondOnly && !isReadyStockSale;
-    if (needSpecs && !f.designNumber.trim()) { toast.error("Design Number is required."); return; }
-    if (needSpecs && !f.productSize.trim())  { toast.error("Product Size is required."); return; }
-    // Colour is the gold's (yellow, white, rose) — not needed for silver, platinum or any metal without karats.
-    if (needSpecs && metalHasKarats && !f.productColor) { toast.error("Color of Product is required."); return; }
-    if (needSpecs && metalHasKarats && !f.productKarats) { toast.error("Karats of Product is required."); return; }
-    if (needSpecs && !f.rhodium)             { toast.error("Please select a Rhodium option."); return; }
-    if (needSpecs && !f.stamping)            { toast.error("Please select a Stamping option."); return; }
-    if (needSpecs && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Please describe the special stamp."); return; }
-    if (needSpecs && f.engraving.on && !f.engraving.text.trim()) { toast.error("Engraving: type the words — or remove the engraving."); return; }
-    if (!f.quantity || Number(f.quantity) < 1) { toast.error("Quantity must be at least 1."); return; }
     // Gross is the whole piece, net the metal only: an estimate that says
     // otherwise is a typing slip, and it would carry onto every card and band.
     if (needSpecs) {
@@ -410,10 +545,7 @@ export function NewOrderPage() {
     }
     const designOn = mayPlan && kind === "piece" && !isDiamondOnly && !!designerPick.designerId;
     if (designOn && designerPick.rate.trim() && !(Number(designerPick.rate) >= 0)) { toast.error("CAD designer: enter a charge of 0 or more."); return; }
-    if (Number(f.advanceAmount) > 0) {
-      if (!f.advanceLockerId) { toast.error("Choose which locker the advance was deposited into."); return; }
-      if (!f.advanceLockerAmount || Number(f.advanceLockerAmount) <= 0) { toast.error("Enter the amount actually deposited in that locker."); return; }
-    }
+    // The advance's locker and amount were checked with the other missing fields (fixesNow).
 
     setSaving(true);
     const clientId = isClient ? user!.clientId! : (forReadyStock ? "" : f.clientId);
@@ -473,7 +605,7 @@ export function NewOrderPage() {
           ...(cmDia ? { diamonds: true } : {}),
         } } : {}),
         quantity: Number(f.quantity),
-        diamondWeight: Number(f.diamondWeight),
+        diamondWeight: Number(f.diamondWeight) || 0,
         metalWeight: 0,
         estimatedGrossWeight: Number(f.estimatedGrossWeight) || undefined,
         estimatedNetWeight: Number(f.estimatedNetWeight) || undefined,
@@ -695,7 +827,7 @@ export function NewOrderPage() {
   // The advance is billed in USD; the locker it lands in can hold any currency.
   const advLockerCcy = ccy(db.lockers.find(l => l.id === f.advanceLockerId)?.currency);
   const advRate = useSuggestedRate("USD", advLockerCcy);
-  const autoValue  = Math.round(Number(f.estimatedNetWeight) * metalRate + Number(f.diamondWeight) * diamondRate);
+  const autoValue  = Math.round(Number(f.estimatedNetWeight) * metalRate + (Number(f.diamondWeight) || 0) * diamondRate);
 
   // ── Gift card on this new order ──
   const giftClientId = forReadyStock ? "" : (isClient ? (user?.clientId ?? "") : f.clientId);
@@ -751,7 +883,8 @@ export function NewOrderPage() {
                   onClick={() => {
                     if (forReadyStock === rs) return;
                     // A build is always a piece made by a factory — never loose stones or a stock sale.
-                    if (rs) { setKind("piece"); set("clientId", READY_STOCK_CLIENT); } else set("clientId", "");
+                    // Through chooseClient: the last client's rhodium/stamping don't stay on a build.
+                    if (rs) { setKind("piece"); chooseClient(READY_STOCK_CLIENT); } else chooseClient("");
                   }}
                   className={`h-9 rounded-lg text-sm font-medium inline-flex items-center justify-center gap-1.5 transition-colors min-w-0 ${forReadyStock === rs ? "bg-card text-primary shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
                   <Icon className="h-4 w-4 shrink-0" /><span className="truncate">{label}{more && <span className="hidden sm:inline">{more}</span>}</span>
@@ -775,8 +908,8 @@ export function NewOrderPage() {
                   className="h-auto min-h-[52px] !mt-1.5 rounded-xl [&>span]:flex-1 [&>span]:text-left" />
               )}
               {!forReadyStock && (
-                <Field label="Client *">
-                  <Select value={f.clientId} onValueChange={addNew("client", v => set("clientId", v))} required>
+                <Field label="Client *" {...markOf("clientId")}>
+                  <Select value={f.clientId} onValueChange={addNew("client", chooseClient)} required>
                     <SelectTrigger className="rounded-xl h-auto min-h-[52px] py-1.5" aria-label="Client"><SelectValue placeholder="Choose a client…" /></SelectTrigger>
                     <SelectContent>
                       {allClients.map(c => (
@@ -803,6 +936,25 @@ export function NewOrderPage() {
             </div>
             {!forReadyStock && f.clientId && hasCompanies(db.settings) && (
               <p className="text-[11px] text-muted-foreground -mt-1 flex items-center gap-1.5">For <CompanyBadge id={orderCompany} /> — the client&rsquo;s company: its stock and its Ready Stock.</p>
+            )}
+            {/* The same client often asks for the same thing again: one tap opens it as Duplicate does. */}
+            {recentOrders.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Repeat className="h-3.5 w-3.5" /> Repeat a recent order</p>
+                <div className="flex flex-wrap gap-2">
+                  {recentOrders.map(o => (
+                    <button key={o.id} type="button" onClick={() => nav(copyHref(o))} disabled={saving}
+                      title={`A new order with ${o.orderNumber}'s details filled in`}
+                      className={`max-w-full inline-flex items-center gap-1.5 h-8 px-3 rounded-full border text-xs transition-colors ${copiedFrom?.id === o.id ? "border-primary bg-primary/5 text-primary" : "border-border bg-card hover:border-primary/40 hover:bg-secondary/60"}`}>
+                      <span className="truncate">
+                        <span className="font-semibold">{o.orderNumber}</span>
+                        {" · "}{isDiamondOnlyOrder(o) ? looseLabel(o) : o.jewelleryType}
+                        {o.designNumber ? ` · ${o.designNumber}` : ""}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </div>
             )}
           </SectionCard>
         )}
@@ -832,6 +984,7 @@ export function NewOrderPage() {
         {/* ══ 1b. Sell from Ready Stock — the "From Ready Stock" kind ══ */}
         {!forReadyStock && kind === "readyStock" && (
         <SectionCard icon={<PackageCheck className="h-4 w-4 text-primary" />} title="Sell from Ready Stock" subtitle="Choose the piece — its details and price come with it">
+          <FixMark {...markOf("readyStockItemId")}>
           <Select value={f.readyStockItemId || READY_STOCK_NONE} onValueChange={v => { selectReadyStock(v === READY_STOCK_NONE ? "" : v); setStockSearch(""); }}>
             <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Choose a piece…" /></SelectTrigger>
             <SelectContent>
@@ -860,6 +1013,7 @@ export function NewOrderPage() {
               )}
             </SelectContent>
           </Select>
+          </FixMark>
 
           {selectedStockItem && (
             <div className="flex items-center gap-3 p-3 rounded-xl bg-secondary/50 mt-3">
@@ -886,7 +1040,7 @@ export function NewOrderPage() {
           {/* A ready piece needs no design/production details — just quantity + a note. */}
           {selectedStockItem && (
             <div className="grid grid-cols-2 gap-3 mt-3">
-              <Field label={`Quantity — ${selectedStockItem.quantity} in stock`}>
+              <Field label={`Quantity — ${selectedStockItem.quantity} in stock`} {...markOf("quantity")}>
                 <Input type="number" min={1} max={selectedStockItem.quantity} value={f.quantity}
                   onChange={e => {
                     const q = +e.target.value;
@@ -953,16 +1107,16 @@ export function NewOrderPage() {
               </Select>
             </Field>
 
-            <Field label={isDiamondOnly ? "Stones (pcs)" : "Quantity"}>
+            <Field label={isDiamondOnly ? "Stones (pcs)" : "Quantity"} {...markOf("quantity")}>
               <Input type="number" min={1} value={f.quantity}
                 onChange={e => set("quantity", +e.target.value)}
                 className="rounded-xl h-11" />
             </Field>
 
-            <Field label={isDiamondOnly ? "Carats (est.)" : "Est. Diamond Weight (ct)"}>
+            <Field label={isDiamondOnly ? "Carats (est.)" : "Est. Diamond Weight (ct)"} {...(isDiamondOnly ? {} : markOf("diamondWeight"))}>
               <Input type="number" step="0.01" min={0} value={f.diamondWeight}
-                onChange={e => setDiamondCt(+e.target.value)}
-                className="rounded-xl h-11" placeholder="0.00" />
+                onChange={e => setDiamondCt(e.target.value === "" ? "" : +e.target.value)}
+                className="rounded-xl h-11" placeholder={isDiamondOnly ? "0.00" : "0 if no diamonds"} />
             </Field>
 
             {!isDiamondOnly && !cmDiaNow && (
@@ -1053,7 +1207,7 @@ export function NewOrderPage() {
         <SectionCard icon={<Gem className="h-4 w-4 text-primary" />} title={isDiamondOnly ? "Delivery" : "Product Specifications"}>
 
           {!isDiamondOnly && (
-            <Field label="Design Number *">
+            <Field label="Design Number *" {...markOf("designNumber")}>
               <Input value={f.designNumber} onChange={e => set("designNumber", e.target.value)}
                 className="rounded-xl h-11" placeholder="e.g. SL-2024-001" required />
             </Field>
@@ -1062,7 +1216,7 @@ export function NewOrderPage() {
           {!isDiamondOnly && (
             <>
               <div className="space-y-1">
-                <Field label="Product Size *">
+                <Field label="Product Size *" {...markOf("productSize")}>
                   <Input value={f.productSize} onChange={e => set("productSize", e.target.value)}
                     className="rounded-xl h-11" placeholder="e.g. Ring size 7, Bracelet 18cm, Chain 20 inches" required />
                 </Field>
@@ -1071,12 +1225,12 @@ export function NewOrderPage() {
 
               {/* Color + Karats — 2 cols always */}
               <div className="grid grid-cols-2 gap-3">
-                <Field label={metalHasKarats ? "Color *" : "Color · optional"}>
-                  <ListCombo list="colours" value={f.productColor} onChange={v => set("productColor", v)} optional={!metalHasKarats} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Color" />
+                <Field label={metalHasKarats ? "Color *" : "Color · optional"} {...markOf("productColor")}>
+                  <ListCombo list="colours" value={f.productColor} onChange={v => { colourByHand.current = true; set("productColor", v); }} optional={!metalHasKarats} placeholder="Select…" className="rounded-xl h-11" ariaLabel="Color" />
                 </Field>
 
                 {metalHasKarats ? (
-                  <Field label="Karats *">
+                  <Field label="Karats *" {...markOf("productKarats")}>
                     <Select value={f.productKarats} onValueChange={v => set("productKarats", v)} required>
                       <SelectTrigger className="rounded-xl h-11"><SelectValue placeholder="Select…" /></SelectTrigger>
                       <SelectContent>
@@ -1117,10 +1271,10 @@ export function NewOrderPage() {
           {!isDiamondOnly && (
             <>
               {/* Rhodium — 2 cols mobile, 4 cols desktop */}
-              <div>
-                <p className="text-sm font-medium text-foreground mb-2.5">Rhodium *</p>
+              <div data-fix="rhodium">
+                <p className={`text-sm font-medium mb-2.5 ${markOf("rhodium").error ? "text-destructive" : "text-foreground"}`}>Rhodium *</p>
                 <RadioGroup value={f.rhodium} onValueChange={v => set("rhodium", v)}
-                  className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  className={`grid grid-cols-2 md:grid-cols-4 gap-2 ${markOf("rhodium").error ? FIX_RING : ""}`}>
                   {choicesOf("rhodium", f.rhodium, db.settings).map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
@@ -1130,13 +1284,14 @@ export function NewOrderPage() {
                     </label>
                   ))}
                 </RadioGroup>
+                <FixNote error={markOf("rhodium").error} />
               </div>
 
               {/* Stamping — 2 cols mobile, 4 cols desktop */}
-              <div>
-                <p className="text-sm font-medium text-foreground mb-2.5">Stamping *</p>
+              <div data-fix="stamping">
+                <p className={`text-sm font-medium mb-2.5 ${markOf("stamping").error ? "text-destructive" : "text-foreground"}`}>Stamping *</p>
                 <RadioGroup value={f.stamping} onValueChange={v => set("stamping", v)}
-                  className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  className={`grid grid-cols-2 md:grid-cols-4 gap-2 ${markOf("stamping").error ? FIX_RING : ""}`}>
                   {choicesOf("stamping", f.stamping, db.settings).map(opt => (
                     <label key={opt}
                       className={`flex items-center gap-2 p-2.5 rounded-xl border cursor-pointer transition-colors text-xs leading-tight
@@ -1146,12 +1301,17 @@ export function NewOrderPage() {
                     </label>
                   ))}
                 </RadioGroup>
+                <FixNote error={markOf("stamping").error} />
                 {f.stamping === "Special Stamp" && (
-                  <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)}
-                    placeholder="Describe the special stamp (e.g. custom logo, initials, text…)"
-                    className="rounded-xl mt-2" autoFocus />
+                  <FixMark {...markOf("stampingNote")} className="mt-2">
+                    <Input value={f.stampingNote} onChange={e => set("stampingNote", e.target.value)}
+                      placeholder="Describe the special stamp (e.g. custom logo, initials, text…)"
+                      className="rounded-xl" autoFocus />
+                  </FixMark>
                 )}
-                <EngravingField value={f.engraving} onChange={v => setF(prev => ({ ...prev, engraving: v }))} />
+                <FixMark {...markOf("engraving")}>
+                  <EngravingField value={f.engraving} onChange={v => setF(prev => ({ ...prev, engraving: v }))} />
+                </FixMark>
               </div>
             </>
           )}
@@ -1314,7 +1474,7 @@ export function NewOrderPage() {
           <>
             {/* Order Value */}
             <SectionCard icon={<DollarSign className="h-4 w-4 text-brand-dark" />} title="Order Value" iconBg="bg-brand-light/15">
-              <Field label={cmOn ? "Order Value (USD) * — labour & setting" : "Order Value (USD) *"}>
+              <Field label={cmOn ? "Order Value (USD) * — labour & setting" : "Order Value (USD) *"} {...markOf("orderValue")}>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-medium text-sm">$</span>
                   <Input type="number" min={0} step="0.01" required
@@ -1334,7 +1494,7 @@ export function NewOrderPage() {
                     <p className="text-xs font-medium text-foreground">Weight-based estimate</p>
                     <div className="text-xs text-muted-foreground mt-0.5 space-y-0.5">
                       {!isDiamondOnly && <p>Metal: {fmtG(f.estimatedNetWeight)}g × ${metalRate}/g = <span className="text-foreground font-medium">${Math.round(Number(f.estimatedNetWeight) * metalRate).toLocaleString()}</span></p>}
-                      <p>Diamond: {f.diamondWeight}ct × ${diamondRate.toLocaleString()}/ct = <span className="text-foreground font-medium">${Math.round(Number(f.diamondWeight) * diamondRate).toLocaleString()}</span></p>
+                      <p>Diamond: {Number(f.diamondWeight) || 0}ct × ${diamondRate.toLocaleString()}/ct = <span className="text-foreground font-medium">${Math.round((Number(f.diamondWeight) || 0) * diamondRate).toLocaleString()}</span></p>
                       <p className="font-semibold text-foreground">Est. Total = ${autoValue.toLocaleString()}</p>
                     </div>
                   </div>
@@ -1391,7 +1551,7 @@ export function NewOrderPage() {
               )}
               {Number(f.advanceAmount) > 0 && (
                 <div className="grid md:grid-cols-2 gap-3">
-                  <Field label="Deposited to Locker *">
+                  <Field label="Deposited to Locker *" {...markOf("advanceLockerId")}>
                     <Select value={f.advanceLockerId} onValueChange={addNew("locker", v => {
                       const db0 = loadDb();
                       const l = db0.lockers.find(x => x.id === v);
@@ -1412,7 +1572,7 @@ export function NewOrderPage() {
                     </Select>
                   </Field>
                   {f.advanceLockerId && (
-                    <Field label={`Amount Deposited (${ccySymbol(advLockerCcy).trim()})`}>
+                    <Field label={`Amount Deposited (${ccySymbol(advLockerCcy).trim()})`} {...markOf("advanceLockerAmount")}>
                       <Input type="number" min={0} step="0.01" value={f.advanceLockerAmount}
                         onChange={e => set("advanceLockerAmount", e.target.value)}
                         className="rounded-xl h-11" />
@@ -1426,7 +1586,9 @@ export function NewOrderPage() {
                 </div>
               )}
 
-              {/* Balance summary — always 2×2 on mobile */}
+              {/* Balance summary — always 2×2 on mobile. Only once there is a value:
+                  on an empty form "Balance Due ✓ Cleared" said a $0 order was paid. */}
+              {Number(f.orderValue) > 0 && (
               <div className="grid grid-cols-2 gap-2.5">
                 <BalanceTile label="Order Value" value={`${Number(f.orderValue).toLocaleString()}`} />
                 <BalanceTile label="Shipping" value={shipping > 0 ? `${shipping.toLocaleString()}` : "—"} />
@@ -1446,6 +1608,7 @@ export function NewOrderPage() {
                   highlight={balanceDue > 0 ? "danger" : "success"}
                 />
               </div>
+              )}
 
               {/* Grand total line */}
               {(shipping > 0 || certFee > 0 || extraCharges > 0) && (
@@ -1516,6 +1679,13 @@ export function NewOrderPage() {
                   {Number(f.advanceAmount) > 0 && <span className="ml-2 text-xs font-normal text-muted-foreground">balance ${balanceDue.toLocaleString("en-US", { maximumFractionDigits: 2 })}</span>}
                 </p>
               </div>
+            )}
+            {/* After a Submit that found things missing: how many are left — a tap goes to the first. */}
+            {shownMarks.length > 0 && (
+              <button type="button" onClick={toFirstMark}
+                className="shrink-0 inline-flex items-center gap-1.5 h-11 px-1 text-sm font-semibold text-destructive hover:underline">
+                <AlertCircle className="h-4 w-4 shrink-0" />{shownMarks.length} to fix
+              </button>
             )}
             <Button type="button" variant="outline" onClick={() => nav(-1)} className="rounded-xl h-11 px-5 shadow-none">
               Cancel
@@ -1592,12 +1762,31 @@ function BalanceTile({
   );
 }
 
-/* ── Form field wrapper ── */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+/* ── A field Submit found missing: a red ring round it, and what to do under it ── */
+const FIX_RING = "rounded-xl ring-2 ring-destructive/70 ring-offset-2 ring-offset-card";
+
+function FixNote({ error }: { error?: string }) {
+  return error ? <p role="alert" className="mt-1.5 text-xs text-destructive">{error}</p> : null;
+}
+
+/** The wrapper is always there, marked or not — so a box being typed in is never
+ *  swapped for a new one (and its focus lost) the moment its mark goes. */
+function FixMark({ fixKey, error, className = "", children }: { fixKey?: string; error?: string; className?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5 min-w-0">
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
-      {children}
+    <div data-fix={fixKey} className={`min-w-0 ${className}`}>
+      <div className={error ? FIX_RING : undefined}>{children}</div>
+      <FixNote error={error} />
+    </div>
+  );
+}
+
+/* ── Form field wrapper ── */
+function Field({ label, children, fixKey, error }: { label: string; children: React.ReactNode; fixKey?: string; error?: string }) {
+  return (
+    <div data-fix={fixKey} className="space-y-1.5 min-w-0">
+      <Label className={`text-sm font-medium ${error ? "text-destructive" : "text-foreground"}`}>{label}</Label>
+      <div className={`space-y-1.5 ${error ? FIX_RING : ""}`}>{children}</div>
+      {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
     </div>
   );
 }

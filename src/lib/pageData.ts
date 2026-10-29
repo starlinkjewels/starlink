@@ -90,7 +90,8 @@ const PAGE: Record<string, readonly LazyCol[]> = {
   "/notifications": [],
   "/search": [],
   "/employees": [],
-  "/employees/:id": [],
+  // Pay salary checks the account's balance before it pays.
+  "/employees/:id": ["lockerTransactions"],
   "/profile": [],
   "/ai": [],
 };

@@ -17,6 +17,8 @@ import { OrderLayoutSettings } from "@/components/OrderLayoutSettings";
 import { VideoFixSettings } from "@/components/VideoFixSettings";
 import { ListOrdered, LayoutList, Film } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useUrlState } from "@/hooks/useUrlState";
+import { SettingsSearch } from "@/components/settings-search/SettingsSearch";
 import { loadDb, saveDb, updateDb, updateDbAs, uid, orderTotal, balanceDue, fmtMoney, fmtDate, todayLocal, orderInvoiced, logEvent, collectionLoaded, DEFAULT_EXPENSE_CATEGORIES, DEFAULT_LOCKER_CATEGORIES, type DB } from "@/lib/db";
 import { listBackups, createBackup, backupUrl, fetchBackup, type BackupEntry } from "@/lib/backup";
 import { IS_DEMO } from "@/lib/firebase";
@@ -44,7 +46,6 @@ import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { toast } from "sonner";
 import {
@@ -122,7 +123,11 @@ export function SettingsPage() {
   const [lpEdit, setLpEdit] = useState<{ id: string; name: string; style: "tag" | "label"; w: string; h: string } | null>(null);
   // A dated ₹-per-$ profit rate being corrected in place.
   const [fxEdit, setFxEdit] = useState<{ from: string; rate: string } | null>(null);
-  const [active, setActive] = useState("company");
+  // The open section is kept in the address (?tab=pricing), so a reload, Back
+  // from another page, or a link sent to someone opens the same section.
+  const [active, setActive] = useUrlState("tab", "company");
+  // What is typed in the search over the section list.
+  const [findQ, setFindQ] = useState("");
 
   const qr1Ref = useRef<HTMLInputElement>(null);
   const qr2Ref = useRef<HTMLInputElement>(null);
@@ -794,10 +799,15 @@ export function SettingsPage() {
       <PageHeader title="Settings" />
 
       <div className="grid lg:grid-cols-[230px_1fr] gap-5 items-start">
-        {/* Section nav — the shared tab bar on a phone or tablet, a rail on a laptop. */}
+        {/* Section nav — the shared tab bar on a phone or tablet, a rail on a
+            laptop — with the search above it. While something is typed, what
+            it finds takes the list's place, on either. */}
+        <div className="min-w-0 lg:sticky lg:top-4 space-y-2">
+        <SettingsSearch value={findQ} onChange={setFindQ} sections={sections} onPick={setActive} />
+        {!findQ.trim() && (<>
         <TabBar className="lg:hidden min-w-0" label="Settings" value={activeId ?? ""} onChange={setActive}
           tabs={sections.map(s => ({ key: s.id, label: s.label, icon: s.icon }))} />
-        <nav className="max-lg:hidden lg:sticky lg:top-4 flex flex-col gap-1">
+        <nav className="max-lg:hidden flex flex-col gap-1">
           {sections.map((s) => {
             const Icon = s.icon;
             const on = activeId === s.id;
@@ -815,6 +825,8 @@ export function SettingsPage() {
             );
           })}
         </nav>
+        </>)}
+        </div>
 
         {/* Active section content */}
         <div className="min-w-0 space-y-4">
@@ -878,15 +890,10 @@ export function SettingsPage() {
             className="rounded-xl mt-1"
           />
         </div>
-        <label className="flex items-center justify-between">
-          <span className="text-sm">Push notifications</span>
-          <Switch
-            checked={db.settings.notifications}
-            onCheckedChange={(v) =>
-              setDb({ ...db, settings: { ...db.settings, notifications: v } })
-            }
-          />
-        </label>
+        {/* There was a "Push notifications" switch here. Nothing in the app or
+            the server ever read settings.notifications, so turning it off
+            stopped nothing — push is each person's own choice on their device.
+            The switch is gone; the saved value is left as it is. */}
         <AsyncButton onClick={save} className="btn-hero rounded-xl h-10 px-5 flex w-fit ml-auto">
           Save Settings
         </AsyncButton>

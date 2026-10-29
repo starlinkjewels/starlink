@@ -5,7 +5,8 @@ import { AddNewItem, useAddNew } from "@/components/create/QuickCreate";
 import { companiesOf, companyIdOfInvoice, hasCompanies } from "@/lib/companies";
 import { companyIdOfClient } from "@/lib/companies";
 import { useCan, useMayExport } from "@/hooks/useCan";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { daysSince, invoicedOrderIds } from "@/components/billing/clientBilling";
 import { OrderThumb } from "@/components/OrderThumb";
 import { receiptForAdvance } from "@/lib/receipts";
 import { useAuth } from "@/lib/auth";
@@ -19,7 +20,7 @@ import { reachOf } from "@/lib/permissions";
 import type { Order, Invoice } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle } from "lucide-react";
+import { FileText, CheckCircle2, Clock, Plus, DollarSign, Printer, Gift, Undo2, Eye, Pencil, Trash2, XCircle, MessageCircle, Mail } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
 import { SectionTitle } from "@/components/SectionTitle";
@@ -69,19 +70,37 @@ export function InvoicesPage() {
   const isStaff = user!.role !== "client";
   // Arriving from an order's invoice badge: open with that invoice already
   // searched for, rather than landing on the whole list to hunt for it.
-  const [sp] = useSearchParams();
+  const [sp, setSp] = useSearchParams();
   const [q, setQ] = useState(sp.get("q") ?? "");
   const [clientFilter, setClientFilter] = useState("all");
+  // Paid or still pending — the list's own filter, beside Client and Company.
+  const [statusFilter, setStatusFilter] = useState<"all" | "pending" | "paid">("all");
+  // Arriving with ?bill=<client> (the client page's "Create invoice", the
+  // Clients list's ⋯): Create invoice opens on that client. Read once, then
+  // taken off the address so a refresh doesn't open it again.
+  const billParam = isStaff ? sp.get("bill") : null;
+  useEffect(() => {
+    if (!sp.has("bill")) return;
+    const next = new URLSearchParams(sp);
+    next.delete("bill");
+    setSp(next, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Each company bills on its own; shown once there is more than one.
   const [companyFilter, setCompanyFilter] = useState("all");
   const multiCo = hasCompanies(db.settings);
   const [ledgerQ, setLedgerQ] = useState("");
   const [ledgerClientFilter, setLedgerClientFilter] = useState("all");
 
-  // Create-invoice selection (staff): which of the client's un-invoiced orders to bill.
-  const [selected, setSelected] = useState<Set<string>>(new Set());
+  // The client being invoiced. Its own choice, not the list's Client filter:
+  // picking someone to bill used to filter the list behind the panel too, and
+  // it stayed filtered after the panel closed.
+  const [billClient, setBillClient] = useState(billParam || "all");
+  // Create-invoice selection (staff): which of the client's un-invoiced orders
+  // to bill. null = untouched, which is every order that can be billed — so a
+  // client's ready orders come ticked, even ones still loading when it opened.
+  const [ticks, setTicks] = useState<Set<string> | null>(null);
   // The create-invoice panel, opened from the page's main button.
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(!!billParam);
   // Invoice detail modal + inline per-order payment form.
   const [detailInvId, setDetailInvId] = useState<string | null>(null);
   // Pieces sent back from an invoice — which orders, and how many of each to start with.
@@ -139,13 +158,22 @@ export function InvoicesPage() {
     return { orders, amount, adv, bal, gift, paid };
   };
 
+  // Paid or Pending as the Status column reads it (the live figures). The
+  // table's own order puts what is still owed first, newest first within each
+  // (the sort is stable, so the date order above holds).
+  const paidOf = new Map(list.map(inv => [inv.id, invLive(inv).paid]));
+  if (statusFilter !== "all") list = list.filter(inv => paidOf.get(inv.id) === (statusFilter === "paid"));
+  list = [...list].sort((a, b) => Number(paidOf.get(a.id)) - Number(paidOf.get(b.id)));
+
   // ── Create invoice: DISPATCHED, priced, not-yet-invoiced orders only. ──
   // Undispatched work used to be listed here too, just sorted lower, so it could
   // be ticked by mistake — which is how a bill went out for a piece that had not
   // shipped. createInvoiceFromOrders() refuses them now as well; this keeps them
   // off the screen so the refusal never has to fire.
-  const eligible = clientFilter === "all" || !isStaff ? [] : db.orders
-    .filter(o => o.clientId === clientFilter && invoiceBlocker(db, o) === null)
+  // Only a client this person may bill — a ?bill= link can't reach past that.
+  const billFor = billClient !== "all" && clientOptions.some(c => c.id === billClient) ? billClient : "all";
+  const eligible = billFor === "all" || !isStaff ? [] : db.orders
+    .filter(o => o.clientId === billFor && invoiceBlocker(db, o) === null)
     .map(o => ({ o, disp: dispatchInfo(o) }))
     .sort((a, b) => {
       const ad = a.disp.date || a.o.createdAt, bd = b.disp.date || b.o.createdAt;
@@ -154,8 +182,8 @@ export function InvoicesPage() {
   const eligibleIds = eligible.map(e => e.o.id);
   // The client's orders that are not on an invoice and cannot be yet — shown
   // with the reason, so an empty list never reads as "nothing to do".
-  const notYet = clientFilter === "all" || !isStaff ? [] : db.orders
-    .filter(o => o.clientId === clientFilter && !o.forReadyStock && o.status !== "Rejected" && !findInvoiceForOrder(db.invoices ?? [], o.id))
+  const notYet = billFor === "all" || !isStaff ? [] : db.orders
+    .filter(o => o.clientId === billFor && !o.forReadyStock && !o.deletedAt && o.status !== "Rejected" && !findInvoiceForOrder(db.invoices ?? [], o.id))
     .map(o => ({ o, blocker: invoiceBlocker(db, o) }))
     .filter(x => x.blocker !== null)
     .map(({ o, blocker }) => ({
@@ -164,23 +192,47 @@ export function InvoicesPage() {
         : blocker === "No price set on this order." ? "No price set" : blocker!.replace(/\.$/, ""),
     }))
     .sort((a, b) => +new Date(b.o.createdAt) - +new Date(a.o.createdAt));
+  // Only orders still listed count as ticked — one billed meanwhile drops out.
+  const selected = ticks ? new Set(eligibleIds.filter(id => ticks.has(id))) : new Set(eligibleIds);
+  // The ticks are taken once, when the client is chosen: an order that becomes
+  // billable while the panel is open shows up unticked, never billed unseen.
+  useEffect(() => {
+    if (creating && billFor !== "all" && ticks === null) setTicks(new Set(eligibleIds));
+  }, [creating, billFor, ticks]); // eslint-disable-line react-hooks/exhaustive-deps
   const selectedTotal = eligible.filter(e => selected.has(e.o.id)).reduce((s, e) => s + orderTotal(e.o), 0);
 
-  const toggle = (id: string) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const toggleAll = () => setSelected(prev => prev.size === eligibleIds.length ? new Set() : new Set(eligibleIds));
+  const toggle = (id: string) => { const n = new Set(selected); if (!n.delete(id)) n.add(id); setTicks(n); };
+  const toggleAll = () => setTicks(selected.size === eligibleIds.length ? new Set() : new Set(eligibleIds));
+  // A new client to bill starts with every order that can be billed ticked.
+  const pickBillClient = (v: string) => { setBillClient(v); setTicks(null); };
+
+  // Beside each client in the panel's picker: how many orders are ready to
+  // bill and what they come to — by the same rule as the ticks (invoiceBlocker),
+  // worked out only while the panel is open.
+  const readyByClient = new Map<string, { n: number; total: number }>();
+  const alreadyBilled = creating && isStaff ? invoicedOrderIds(db.invoices) : new Set<string>();
+  if (creating && isStaff) for (const o of db.orders) {
+    if (!o.clientId || alreadyBilled.has(o.id) || invoiceBlocker(db, o) !== null) continue;
+    const r = readyByClient.get(o.clientId) ?? { n: 0, total: 0 };
+    r.n++; r.total += orderTotal(o);
+    readyByClient.set(o.clientId, r);
+  }
+  // Clients with something to bill first, the most to bill on top; then A → Z.
+  const billOptions = clientOptions.slice().sort((a, b) =>
+    (readyByClient.get(b.id)?.total ?? -1) - (readyByClient.get(a.id)?.total ?? -1) || a.companyName.localeCompare(b.companyName));
 
   const generateInvoice = async () => {
-    if (clientFilter === "all") { toast.error("Select a client first"); return; }
+    if (billFor === "all") { toast.error("Select a client first"); return; }
     const ids = eligibleIds.filter(id => selected.has(id));
     if (!ids.length) { toast.error("Select at least one order"); return; }
     let created: Invoice | null = null;
     // Claim the number in the database first, so two people invoicing at the same
     // moment can never be handed the same invoice number.
     // Each company numbers its own invoices; the client's decides which series.
-    const companyId = companyIdOfClient(db.clients.find(c => c.id === clientFilter));
+    const companyId = companyIdOfClient(db.clients.find(c => c.id === billFor));
     const number = await reserveInvoiceNumber(db.invoices || [], db.settings, companyId);
     try {
-      updateDb(d => { created = createInvoiceFromOrders(d, clientFilter, ids, new Date().toISOString(), number); });
+      updateDb(d => { created = createInvoiceFromOrders(d, billFor, ids, new Date().toISOString(), number); });
     } catch (e) {
       // The write blew up, so the number was never used. Give it back before
       // the error goes up, or the sequence skips one for good.
@@ -189,7 +241,10 @@ export function InvoicesPage() {
     }
     if (created) {
       toast.success(`Invoice ${(created as Invoice).number} created — ${ids.length} order${ids.length > 1 ? "s" : ""}`);
-      setSelected(new Set());
+      // Done here: the panel closes and the new invoice opens, ready to print or send.
+      setTicks(null);
+      setCreating(false);
+      openInvoice((created as Invoice).id);
     } else {
       // Nothing was written, so the number was never used — give it back
       // rather than leave a hole in the sequence.
@@ -286,9 +341,9 @@ export function InvoicesPage() {
   // Each invoice's live figures, worked out once for the table.
   const invRows = list.map(inv => ({ inv, client: db.clients.find(c => c.id === inv.clientId), ...invLive(inv) }));
 
-  // The client filter is also the client being invoiced: a new pick starts
-  // the order ticks afresh, wherever it is made.
-  const pickClient = (v: string) => { setClientFilter(v); setSelected(new Set()); };
+  // The list's client filter — only the list. Who is being invoiced is the
+  // Create invoice panel's own pick (billClient).
+  const pickClient = (v: string) => setClientFilter(v);
   // Staff narrow the list by client (and company, once there are several),
   // behind the table's one Filters button.
   const invoiceFilters: TableFilter[] = [];
@@ -301,6 +356,12 @@ export function InvoicesPage() {
     kind: "select", label: "Company", allLabel: "All companies", value: companyFilter === "all" ? "" : companyFilter,
     onChange: v => setCompanyFilter(v || "all"),
     options: companiesOf(db.settings).map(c => ({ value: c.id, label: c.name })),
+  });
+  // Paid or still to collect — for a client looking at their own bills too.
+  invoiceFilters.push({
+    kind: "select", label: "Status", allLabel: "Any status", value: statusFilter === "all" ? "" : statusFilter,
+    onChange: v => setStatusFilter((v || "all") as "all" | "pending" | "paid"),
+    options: [{ value: "pending", label: "Pending" }, { value: "paid", label: "Paid" }],
   });
 
   // The Advance Payment Ledger, one order a row, live from the order's payments.
@@ -451,7 +512,11 @@ export function InvoicesPage() {
   return (
     <div className="max-w-7xl mx-auto space-y-5">
       <PageHeader title="Invoices"
-        primary={isStaff && can("invoices", "add") ? { label: "Create Invoice", icon: Plus, onClick: () => setCreating(true) } : null} />
+        primary={isStaff && can("invoices", "add") ? { label: "Create Invoice", icon: Plus, onClick: () => {
+          // A list narrowed to one client opens the panel on them, as it always did.
+          if (clientFilter !== "all" && billClient === "all") pickBillClient(clientFilter);
+          setCreating(true);
+        } } : null} />
 
       {/* Invoices section — the page title already names it. */}
       <div className="card-luxe overflow-hidden">
@@ -463,7 +528,7 @@ export function InvoicesPage() {
           <DataTable
             search={{ value: q, onChange: setQ, placeholder: "Search invoice, order, client…" }}
             filters={invoiceFilters}
-            onClearFilters={() => { pickClient("all"); setCompanyFilter("all"); }}
+            onClearFilters={() => { pickClient("all"); setCompanyFilter("all"); setStatusFilter("all"); }}
             summary={
               <StatStrip items={[
                 { label: "Billed", value: fmtMoney(totalBilled), tone: "strong", icon: FileText },
@@ -471,7 +536,7 @@ export function InvoicesPage() {
                 { label: "Outstanding", value: fmtMoney(totalOutstanding), tone: "out" },
               ]} />
             }
-            resetKey={JSON.stringify([ql, clientFilter, companyFilter])}
+            resetKey={JSON.stringify([ql, clientFilter, companyFilter, statusFilter])}
             id="invoices"
             noun="invoice"
             rows={invRows}
@@ -479,7 +544,8 @@ export function InvoicesPage() {
             onRowClick={r => openInvoice(r.inv.id)}
             details={invoiceDetails}
             rowActions={r => invoiceActions(r.inv)}
-            defaultSort={{ key: "date", dir: "desc" }}
+            // No sort of its own: the list comes pending first, newest first.
+            defaultSort={null}
             pageSizes={[25, 50, 100]}
             emptyText={ql ? "No invoices match your search." : "No invoices yet."}
             columns={[
@@ -495,6 +561,10 @@ export function InvoicesPage() {
               { key: "amount", header: "Amount", align: "right", sortValue: r => r.amount, cell: r => <span className="font-semibold">{fmtMoney(r.amount)}</span> },
               { key: "received", header: "Received", align: "right", sortValue: r => r.adv, cell: r => (r.adv > 0 ? <span className="text-success font-medium text-xs">{fmtMoney(r.adv)}</span> : <span className="text-muted-foreground text-xs">—</span>) },
               { key: "balance", card: "figure" as const, header: "Balance", align: "right", sortValue: r => r.bal, cell: r => <span className={`text-xs ${r.bal > 0 ? "font-semibold text-destructive" : "text-muted-foreground"}`}>{r.bal > 0 ? fmtMoney(r.bal) : "Cleared"}</span> },
+              // How long an unpaid bill has waited, from its date; nothing once paid.
+              { key: "age", header: "Age", align: "right", kind: "number", sortValue: r => (r.paid ? null : daysSince(r.inv.createdAt)),
+                cell: r => (r.paid ? <span className="text-muted-foreground/50 text-xs">—</span>
+                  : <span className="text-xs tabular-nums whitespace-nowrap text-muted-foreground">{daysSince(r.inv.createdAt)} d</span>) },
               { key: "status", card: "first" as const, header: "Status", align: "center", sortValue: r => (r.paid ? "Paid" : "Pending"),
                 cell: r => r.paid
                   ? <span className="inline-flex items-center gap-1 text-xs font-medium text-success"><CheckCircle2 className="h-3 w-3" />Paid</span>
@@ -557,6 +627,20 @@ export function InvoicesPage() {
           {detailInv && (() => {
             const { orders, amount, adv, bal, gift } = invLive(detailInv);
             const client = db.clients.find(c => c.id === detailInv.clientId);
+            // Sending it: a short note — the number, what it comes to, what is
+            // still due, from which company — ready in WhatsApp or the mail app.
+            // Plain links; nothing is sent from here.
+            const fromCo = companyById(db.settings, companyIdOfInvoice(detailInv)).name;
+            const sendText = [
+              `Invoice ${detailInv.number} from ${fromCo}`,
+              `Amount: ${fmtMoney(amount)}`,
+              bal > 0 ? `Balance due: ${fmtMoney(bal)}` : "Paid in full — thank you",
+            ].join("\n");
+            // wa.me wants the number in full with no + or leading zeros; one too
+            // short to be that opens WhatsApp to pick the chat instead.
+            const waDigits = (client?.phone ?? "").replace(/\D/g, "").replace(/^0+/, "");
+            const waLink = `https://wa.me/${waDigits.length >= 8 ? waDigits : ""}?text=${encodeURIComponent(sendText)}`;
+            const mailLink = `mailto:${client?.email ?? ""}?subject=${encodeURIComponent(`Invoice ${detailInv.number} — ${fromCo}`)}&body=${encodeURIComponent(sendText)}`;
             return (
               <>
                 <DialogHeader>
@@ -577,6 +661,16 @@ export function InvoicesPage() {
                     <div className="flex items-center gap-2 flex-wrap">
                       {mayReturn && orders.some(o => !returnBlocker(o)) && (
                         <Button size="sm" variant="outline" onClick={() => setReturning({ inv: detailInv })} className="rounded-xl gap-2"><Undo2 className="h-3.5 w-3.5" /> Record return</Button>
+                      )}
+                      {isStaff && (
+                        <Button size="sm" variant="outline" asChild className="rounded-xl gap-2">
+                          <a href={waLink} target="_blank" rel="noopener noreferrer" title="Share on WhatsApp"><MessageCircle className="h-3.5 w-3.5" /> WhatsApp</a>
+                        </Button>
+                      )}
+                      {isStaff && (
+                        <Button size="sm" variant="outline" asChild className="rounded-xl gap-2">
+                          <a href={mailLink} title="Email this invoice"><Mail className="h-3.5 w-3.5" /> Email</a>
+                        </Button>
                       )}
                       <IfExport>
                       <Button size="sm" variant="outline" onClick={() => printInv(detailInv)} className="rounded-xl gap-2"><Printer className="h-3.5 w-3.5" /> Print Invoice</Button>
@@ -735,12 +829,12 @@ export function InvoicesPage() {
           title="Create invoice" description="From priced, dispatched orders"
           footer={
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              {clientFilter !== "all" && eligible.length > 0
+              {billFor !== "all" && eligible.length > 0
                 ? <span className="text-xs text-muted-foreground">{selected.size} selected · <span className="font-semibold text-foreground">{fmtMoney(selectedTotal)}</span></span>
                 : <span />}
               <div className="flex items-center gap-2 max-sm:w-full">
                 <Button variant="outline" onClick={() => setCreating(false)} className="rounded-xl h-10 max-sm:flex-1">Close</Button>
-                {clientFilter !== "all" && eligible.length > 0 && (
+                {billFor !== "all" && eligible.length > 0 && (
                   <Button onClick={generateInvoice} disabled={selected.size === 0} className="btn-hero rounded-xl gap-2 h-10 max-sm:flex-1">
                     <FileText className="h-4 w-4" /> Generate Invoice
                   </Button>
@@ -751,15 +845,25 @@ export function InvoicesPage() {
           <div className="space-y-4">
             <div>
               <Label className="text-xs">Client</Label>
-              <Select value={clientFilter} onValueChange={pickClient}>
+              {/* The panel's own pick — the list behind keeps its filter. Clients
+                  with orders ready to bill come first, with how many and how much. */}
+              <Select value={billClient} onValueChange={pickBillClient}>
                 <SelectTrigger aria-label="Client to invoice" className="h-10 rounded-xl mt-1"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">Choose a client…</SelectItem>
-                  {clientOptions.map(c => <SelectItem key={c.id} value={c.id}>{c.companyName}</SelectItem>)}
+                  {billOptions.map(c => {
+                    const r = readyByClient.get(c.id);
+                    return (
+                      <SelectItem key={c.id} value={c.id} textValue={c.companyName}>
+                        {c.companyName}
+                        {r && <span className="ml-2 text-xs font-medium text-primary">{r.n} ready · {fmtMoney(r.total)}</span>}
+                      </SelectItem>
+                    );
+                  })}
                 </SelectContent>
               </Select>
             </div>
-            {clientFilter !== "all" && (
+            {billFor !== "all" && (
               eligible.length === 0 ? (
                 notYet.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Nothing left to bill.</p>

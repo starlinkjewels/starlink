@@ -30,7 +30,9 @@ import {
   ListChecks,
   ArrowUp,
   ArrowDown,
+  Search,
 } from "lucide-react";
+import { useUrlState } from "@/hooks/useUrlState";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader } from "@/components/PageHeader";
 import { ActionSheet } from "@/components/ActionSheet";
@@ -39,7 +41,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { needsAccess } from "@/lib/actionHints";
-import { updateCatalogItem, folderPath, moveCatalogItems } from "@/lib/catalogItemEdit";
+import { updateCatalogItem, folderPath, folderPath as folderPathText, moveCatalogItems } from "@/lib/catalogItemEdit";
 import { loadDb, updateDb, uid } from "@/lib/db";
 import type { CatalogFolder, CatalogItem } from "@/lib/db";
 import { ShareFolderButton } from "@/components/ShareFolderButton";
@@ -106,10 +108,18 @@ function Lightbox({
   items,
   startIndex,
   onClose,
+  onDownload,
+  downloadBlocked,
 }: {
   items: CatalogItem[];
   startIndex: number;
   onClose: () => void;
+  /** The same download as an item's ⋯ → Download: the access check, and the
+   *  Activity line. It used to be a plain link here that skipped both. None
+   *  (a client, who has no ⋯ either): no Download button. */
+  onDownload?: (item: CatalogItem) => void;
+  /** Why this person can't download (greyed, saying so), as the ⋯ does. */
+  downloadBlocked?: string;
 }) {
   const [idx, setIdx] = useState(startIndex);
   const [dir, setDir] = useState(0);
@@ -166,13 +176,19 @@ function Lightbox({
           )}
         </p>
         <div className="flex items-center gap-2 shrink-0">
-          <a
-            href={item.data}
-            download={item.name}
-            className="h-10 w-10 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"
+          {onDownload && (
+          <button
+            type="button"
+            // Greyed but still answers a tap with the reason — a phone shows no tooltip.
+            onClick={() => (downloadBlocked ? toast.error(downloadBlocked) : onDownload(item))}
+            aria-disabled={!!downloadBlocked}
+            aria-label="Download"
+            title={downloadBlocked ?? "Download"}
+            className="h-10 w-10 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white aria-disabled:opacity-35 aria-disabled:cursor-not-allowed"
           >
             <Download className="h-5 w-5" />
-          </a>
+          </button>
+          )}
           <button
             onClick={onClose}
             className="h-10 w-10 rounded-full bg-white/10 active:bg-white/20 flex items-center justify-center text-white"
@@ -464,7 +480,7 @@ function ItemCard({
             {item.name}
           </p>
           {folderName && (
-            <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5 mt-0.5">
+            <p className="text-[10px] text-muted-foreground truncate flex items-center gap-0.5 mt-0.5" title={folderName}>
               <Folder className="h-2.5 w-2.5 shrink-0 text-amber-500" />
               {folderName}
             </p>
@@ -1202,21 +1218,74 @@ export function CatalogPage() {
     };
   }, [favIds]);
 
+  /* ── Search across the whole catalog ── */
+  // Kept in the address (?q=), so Back from a photo or a link keeps the search.
+  const [findQ, setFindQ] = useUrlState("q");
+  const findWords = findQ.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const searching = findWords.length > 0;
+  const nameHas = (name: string) => { const n = (name || "").toLowerCase(); return findWords.every((w) => n.includes(w)); };
+  // Folders are already here; items are read only once something is typed,
+  // the way a folder's Download reads them — every folder's, once per visit
+  // (then searched in memory as you type). Forgotten after an upload, move or
+  // delete, so the next search reads them fresh.
+  const [allItems, setAllItems] = useState<CatalogItem[] | null>(null);
+  const [allLoading, setAllLoading] = useState(false);
+  const allFailed = useRef(false);
+  useEffect(() => {
+    if (!searching || allItems || allLoading || allFailed.current || folders.length === 0) return;
+    setAllLoading(true);
+    fetchAllCatalogItems(folders.map((f) => f.id))
+      .then((list) => setAllItems(list))
+      .catch(() => { allFailed.current = true; toast.error("Couldn't search the files — folders only"); })
+      .finally(() => setAllLoading(false));
+  }, [searching, allItems, allLoading, folders]);
+  const foundFolders = useMemo(
+    () => (searching ? folders.filter((f) => nameHas(f.name)).sort((a, b) => a.name.localeCompare(b.name)) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searching, findQ, folders],
+  );
+  const foundItems = useMemo(
+    () => (searching && allItems
+      ? allItems.filter((it) => nameHas(it.name)).sort((a, b) => a.name.localeCompare(b.name))
+      : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [searching, findQ, allItems],
+  );
+  // Files still being read (or about to be — the read starts just after this draw).
+  const filesPending = searching && !allItems && !allFailed.current && folders.length > 0;
+  /** Open a folder found by the search: the way down to it, as if walked. */
+  function openFound(id: string) {
+    const chain: string[] = [];
+    let cur: string | null | undefined = id;
+    for (let guard = 0; cur && guard < 50; guard++) {
+      chain.unshift(cur);
+      cur = folders.find((f) => f.id === cur)?.parentId;
+    }
+    setFolderPath(chain);
+    setShowNewFolder(false);
+    setViewingFavorites(false);
+    setFindQ("");
+  }
+
   /* ── Navigation ── */
+  // Going anywhere ends a search — the folder is what is shown then.
   function enterFolder(id: string) {
     setFolderPath((p) => [...p, id]);
     setShowNewFolder(false);
     setViewingFavorites(false);
+    if (searching) setFindQ("");
   }
   function navigateTo(idx: number) {
     setFolderPath((p) => (idx < 0 ? [] : p.slice(0, idx + 1)));
     setShowNewFolder(false);
     setViewingFavorites(false);
+    if (searching) setFindQ("");
   }
   function goToRoot() {
     setFolderPath([]);
     setShowNewFolder(false);
     setViewingFavorites(false);
+    if (searching) setFindQ("");
   }
 
   /* ── Favorites ── */
@@ -1289,6 +1358,7 @@ export function CatalogPage() {
       db.catalogFavorites = db.catalogFavorites.filter((f) => !deletedItemIds.includes(f.itemId));
     });
     setDeleteConfirm(null);
+    setAllItems((prev) => prev && prev.filter((it) => !ids.includes(it.folderId)));
     setFolderPath((p) => {
       const cut = p.findIndex((x) => ids.includes(x));
       return cut < 0 ? p : p.slice(0, cut);
@@ -1457,6 +1527,8 @@ export function CatalogPage() {
     } finally {
       setUploading(false);
       setUploadProgress(null);
+      // The search's copy of every file doesn't have these; read again when next searched.
+      setAllItems(null);
     }
   }
 
@@ -1525,6 +1597,7 @@ export function CatalogPage() {
       ? prev.filter((it) => it.id !== next.id)
       : prev.map((it) => (it.id === next.id ? next : it))));
     setFavoriteItems((prev) => prev.map((it) => (it.id === next.id ? next : it)));
+    setAllItems((prev) => prev && prev.map((it) => (it.id === next.id ? next : it)));
     if (next.folderId !== before.folderId) {
       updateDb((db) => {
         const f = db.catalogFolders.find((x) => x.id === before.folderId);
@@ -1536,6 +1609,7 @@ export function CatalogPage() {
   async function deleteItem(id: string) {
     await deleteCatalogItem(id);
     setItems((prev) => prev.filter((it) => it.id !== id));
+    setAllItems((prev) => prev && prev.filter((it) => it.id !== id));
     updateDb((db) => {
       db.catalogFavorites = db.catalogFavorites.filter((f) => f.itemId !== id);
     });
@@ -1722,7 +1796,8 @@ export function CatalogPage() {
   function DeleteModal() {
     const isFolder = folders.some((f) => f.id === deleteConfirm);
     const folder = folders.find((f) => f.id === deleteConfirm);
-    const item = items.find((it) => it.id === deleteConfirm) ?? favoriteItems.find((it) => it.id === deleteConfirm);
+    const item = items.find((it) => it.id === deleteConfirm) ?? favoriteItems.find((it) => it.id === deleteConfirm)
+      ?? allItems?.find((it) => it.id === deleteConfirm);
     const childCnt = folder ? (folderCounts[folder.id] ?? 0) : 0;
 
     return (
@@ -1814,7 +1889,7 @@ export function CatalogPage() {
         primary={canAdd ? { label: "New Folder", icon: Plus, onClick: () => { setShowNewFolder((v) => !v); setNewFolderName(""); } } : null}
         menu={!viewingFavorites && ((canEdit && subfolders.length > 1) || (isStaff && (subfolders.length > 0 || items.length > 0))) ? [
           { label: "Select to move", icon: ListChecks, show: isStaff && (subfolders.length > 0 || items.length > 0),
-            hint: isAdmin ? "Several folders and files at once" : ADMIN_MOVE, disabled: !isAdmin, onSelect: () => setPicking(true) },
+            hint: isAdmin ? "Several folders and files at once" : ADMIN_MOVE, disabled: !isAdmin, onSelect: () => { setFindQ(""); setPicking(true); } },
           { label: "Arrange folders", icon: ArrowUpDown, show: canEdit && subfolders.length > 1, hint: "Set the order they show in", onSelect: () => setArranging(true) },
         ] : undefined}
         actions={(canAdd || canShare) ? (
@@ -1970,8 +2045,105 @@ export function CatalogPage() {
         )}
       </AnimatePresence>
 
+      {/* Search: every folder and file in the catalog by name, wherever it is. */}
+      {!picking && (
+        <div className="relative max-w-md">
+          <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <Input
+            type="search"
+            value={findQ}
+            onChange={(e) => setFindQ(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Escape") setFindQ(""); }}
+            placeholder="Search the whole catalog…"
+            aria-label="Search the catalog"
+            className="h-10 pl-9 pr-9 rounded-xl bg-white [&::-webkit-search-cancel-button]:hidden"
+          />
+          {findQ && (
+            <button type="button" onClick={() => setFindQ("")} aria-label="Clear the search"
+              className="absolute right-1.5 top-1/2 -translate-y-1/2 h-7 w-7 grid place-items-center rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* ── Search results: folders (each with where it sits), then files ── */}
+      {searching && (
+        <div className="space-y-5">
+          {foundFolders.length > 0 && (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-0.5">
+                Folders · {foundFolders.length}
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-auto-photos gap-3 sm:gap-4">
+                {foundFolders.map((folder) => {
+                  const up = folder.parentId ? folderPathText(folders, folder.parentId) : "";
+                  return (
+                    <button key={folder.id} type="button" onClick={() => openFound(folder.id)}
+                      className="flex items-start gap-2.5 rounded-2xl border border-border/60 bg-white shadow-sm p-3 text-left active:border-primary/40 hover:border-primary/40 min-w-0">
+                      <div className="h-10 w-10 rounded-xl bg-gradient-to-br from-amber-50 to-amber-100 overflow-hidden grid place-items-center shrink-0">
+                        {folder.bannerUrl
+                          ? <img src={folder.bannerUrl} alt="" className="w-full h-full object-cover" />
+                          : <Folder className="h-5 w-5 text-amber-500" />}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-medium text-foreground truncate" title={folder.name}>{folder.name}</p>
+                        <p className="text-[11px] text-muted-foreground truncate" title={up || "Catalog"}>{up ? `in ${up}` : "In Catalog"}</p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {(foundItems.length > 0 || filesPending) && (
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider px-0.5">
+                Files · {filesPending ? "…" : foundItems.length}
+              </p>
+              {foundItems.length > 0 && (
+                <VirtualGrid
+                  items={foundItems}
+                  estimateRowHeight={ITEM_ROW_ESTIMATE_PX}
+                  getKey={(item) => item.id}
+                  renderItem={(item, i) => (
+                    <ItemCard
+                      item={item}
+                      isFav={favIds.has(item.id)}
+                      canEdit={canEdit || canDelete}
+                      // Where it is: the whole way down, not just its folder.
+                      folderName={folderPathText(folders, item.folderId) || undefined}
+                      onOpen={() => setLightbox({ items: foundItems, idx: i })}
+                      onToggleFav={() => toggleFavorite(item.id)}
+                      onDelete={canDelete ? () => setDeleteConfirm(item.id) : undefined}
+                      menu={isStaff ? itemMenu(item) : undefined}
+                    />
+                  )}
+                />
+              )}
+              {filesPending && (
+                <div className="flex items-center gap-2 py-3 text-xs text-muted-foreground">
+                  <span className="h-4 w-4 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  Looking through every folder…
+                </div>
+              )}
+            </div>
+          )}
+
+          {!filesPending && foundFolders.length === 0 && foundItems.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-center gap-3">
+              <div className="h-16 w-16 rounded-2xl bg-primary/10 grid place-items-center">
+                <Search className="h-8 w-8 text-primary/40" />
+              </div>
+              <p className="font-semibold text-brand-dark">Nothing named “{findQ.trim()}”</p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Favourites folder view ── */}
-      {viewingFavorites && (
+      {!searching && viewingFavorites && (
         <FavoritesGallery
           favoriteItems={favoriteItems}
           folders={folders}
@@ -1985,7 +2157,7 @@ export function CatalogPage() {
       )}
 
       {/* ── Normal folder/gallery view ── */}
-      {!viewingFavorites && (
+      {!searching && !viewingFavorites && (
         <>
           {/* Root: Favourites virtual card + real folders in one grid */}
           {isRoot && (subfolders.length > 0 || favoriteItems.length > 0) && (
@@ -2162,6 +2334,7 @@ export function CatalogPage() {
             if (moved.size && to) {
               setItems((prev) => prev.filter((it) => !moved.has(it.id)));
               setFavoriteItems((prev) => prev.map((it) => (moved.has(it.id) ? { ...it, folderId: to } : it)));
+              setAllItems((prev) => prev && prev.map((it) => (moved.has(it.id) ? { ...it, folderId: to } : it)));
               const banner = folders.find((f) => f.id === currentFolderId)?.bannerItemId;
               if (banner && moved.has(banner)) {
                 updateDb((db) => {
@@ -2179,6 +2352,10 @@ export function CatalogPage() {
             items={lightbox.items}
             startIndex={lightbox.idx}
             onClose={() => setLightbox(null)}
+            // As the item's ⋯ → Download, and logged: a staff member needs export access;
+            // a client downloads what they can see, as they always could from here.
+            onDownload={(item) => downloadFile(item.data, downloadName(item), !isAdmin)}
+            downloadBlocked={isStaff && !canShare ? needsAccess("catalog", "export") : undefined}
           />
         )}
       </AnimatePresence>

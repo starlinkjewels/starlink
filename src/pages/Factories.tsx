@@ -6,6 +6,9 @@ import { Link, useNavigate } from "react-router-dom";
 import { updateDb, uid, fmtDate, hasOpeningBalance, openingCreditAmt, openingDebitAmt, type Factory } from "@/lib/db";
 import { factoryDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { FactoryEditDialog } from "@/components/FactoryEditDialog";
+import { PayFactorySheet } from "@/components/party/PayFactorySheet";
+import { useCan } from "@/hooks/useCan";
+import { needsAccess } from "@/lib/actionHints";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { filled, noteText, type Detail } from "@/components/rowDetails";
 import { useDb } from "@/hooks/useDb";
@@ -16,7 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, Power, Pencil } from "lucide-react";
+import { Plus, Mail, Phone, MapPin, Search, Trash2, Factory as FactoryIcon, History, Rows3, LayoutGrid, Package, Power, Pencil, CreditCard } from "lucide-react";
 import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/components/DataTable";
 import { PageHeader, ViewSwitch } from "@/components/PageHeader";
 import { toast } from "sonner";
@@ -45,6 +48,10 @@ export function FactoriesPage() {
   const saveView = (v: "list" | "grid") => { setView(v); try { localStorage.setItem("factories-view", v); } catch { /* ignore */ } };
   const [open, setOpen] = useState(false);
   const [editing, setEditing] = useState<Factory | null>(null);
+  // Paying one factory's labour from its row, oldest jobs first (components/party/PayFactorySheet).
+  const [paying, setPaying] = useState<string | null>(null);
+  const can = useCan();
+  const mayPay = isAdmin || can("payments", "add");
   const navigate = useNavigate();
 
   // Every factory's figures, worked out once — rows, sort and totals share it.
@@ -116,6 +123,8 @@ export function FactoriesPage() {
     const guard = guardOf(fac);
     return [
       { label: "View ledger", icon: History, hint: "Material issued, labour and payments", onSelect: () => navigate(`/factories/${fac.id}`) },
+      { label: "Pay", icon: CreditCard, onSelect: () => setPaying(fac.id), disabled: !mayPay,
+        hint: !mayPay ? needsAccess("payments", "add") : accounts.get(fac.id)!.chargesPending > 0 ? `Labour owed ${fmtMoneyInr(accounts.get(fac.id)!.chargesPending)} · oldest jobs first` : "Nothing owed now — would be paid ahead" },
       { label: "Edit details", icon: Pencil, onSelect: () => setEditing(fac), disabled: !isAdmin, hint: isAdmin ? "Name, contact, phone, address" : ADMIN_ONLY },
       { label: fac.active === false ? "Activate" : "Deactivate", icon: Power, onSelect: () => toggle(fac), disabled: !isAdmin, hint: isAdmin ? undefined : ADMIN_ONLY },
       { label: "Delete factory", icon: Trash2, danger: true, onSelect: () => del(fac),
@@ -314,6 +323,7 @@ export function FactoriesPage() {
       {view === "grid" && <PaginationBar page={page} totalPages={totalPages} onPageChange={setPage} label={total > 0 ? `Showing ${start + 1}–${end} of ${total} factories` : undefined} />}
 
       <FactoryEditDialog factory={editing} onClose={() => setEditing(null)} />
+      {paying && <PayFactorySheet factoryId={paying} open={!!paying} onOpenChange={o => { if (!o) setPaying(null); }} />}
     </div>
   );
 }

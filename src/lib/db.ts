@@ -775,7 +775,9 @@ export function createInvoiceFromOrders(d: DB, clientId: string, orderIds: strin
   if (!d.invoices) d.invoices = [];
   const eligible = orderIds.filter(oid => {
     const o = d.orders.find(x => x.id === oid);
-    return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected"
+    // The same test the screen applies (invoiceBlocker): a deleted order or an
+    // in-house build is never billed, even if it was ticked before it changed.
+    return o && o.clientId === clientId && o.amount > 0 && o.status !== "Rejected" && !o.deletedAt && !o.forReadyStock
       && orderIsDispatched(o) && !orderInvoiced(d.invoices, oid) && keptQty(o) > 0;
   });
   if (!eligible.length) return null;

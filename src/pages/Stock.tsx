@@ -1,14 +1,17 @@
 import { PageHeader } from "@/components/PageHeader";
 import { OpeningStock } from "@/pages/BuyAssign";
+import { BuyMaterialForm } from "@/components/BuyMaterialForm";
+import { useLoaded } from "@/hooks/useLoaded";
+import { stockAverageRate } from "@/lib/orderCost";
 import { lotBalances } from "@/lib/diamondLots";
 import { useCan } from "@/hooks/useCan";
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDb } from "@/hooks/useDb";
-import { loadDb } from "@/lib/db";
+import { loadDb, toPureGold } from "@/lib/db";
 import { useAuth } from "@/lib/auth";
 import { subscribeStockLevelsByCompany, recomputeStockFromHistory, type StockLevels } from "@/lib/stock";
-import { deriveStockBalances } from "@/lib/manufacturing";
+import { deriveStockBalances, factoryAccount, factoryFineGoldBalance, factoryOtherBalances, fmtMoneyInr } from "@/lib/manufacturing";
 import { Gem, Coins, BadgeCheck, RotateCcw, History, Layers, Link2, Plus, Boxes, type LucideIcon } from "lucide-react";
 import { toast } from "sonner";
 import { materialDefs, KIND_LABEL, fmtQty } from "@/lib/materials";
@@ -23,9 +26,13 @@ import { ArrowRightLeft } from "lucide-react";
  * grades, the amount in tabular digits, and the way to its history — the whole
  * card opens it.
  */
-function MaterialCard({ name, sub, value, icon: Icon, to, dim }: {
-  name: string; sub: string; value: string; icon: LucideIcon; to: string; dim?: boolean;
+function MaterialCard({ name, sub, value, lines = [], icon: Icon, to, dim }: {
+  name: string; sub: string; value: string;
+  /** Under the figure: what it is worth, and what is out at factories. */
+  lines?: (string | null | undefined)[];
+  icon: LucideIcon; to: string; dim?: boolean;
 }) {
+  const shown = lines.filter(Boolean);
   return (
     <Link to={to} className={`group h-full min-w-0 flex flex-col rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)] transition-shadow hover:shadow-soft focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 ${dim ? "opacity-70" : ""}`}>
       <div className="flex items-center justify-between gap-2">
@@ -34,6 +41,11 @@ function MaterialCard({ name, sub, value, icon: Icon, to, dim }: {
       </div>
       <p className="text-[11px] text-muted-foreground truncate">{sub}</p>
       <p className="mt-2 text-[clamp(1.125rem,4.4vw,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight text-brand-dark break-words">{value}</p>
+      {shown.length > 0 && (
+        <div className="mt-1 space-y-0.5">
+          {shown.map(l => <p key={l} className="text-[11px] text-muted-foreground tabular-nums leading-snug">{l}</p>)}
+        </div>
+      )}
       <span className="mt-auto pt-3 inline-flex items-center gap-1.5 text-xs font-medium text-primary"><History className="h-3.5 w-3.5" />View History</span>
     </Link>
   );
@@ -79,6 +91,41 @@ export function StockPage() {
       return { m, bal, total: Object.values(bal).reduce((s, q) => s + q, 0), grades: Object.values(bal).filter(q => q !== 0).length, moved: (db.stockMovements ?? []).some(x => x.material === m.id) };
     })
     .filter(x => x.m.active !== false || x.moved);
+
+  // ── What it is worth, and what is out at factories ──
+  // Valued as the lots table on each material's page values it: every grade at
+  // its pool's average cost (lib/orderCost.ts stockAverageRate). That reads the
+  // purchase bills, which this page does not otherwise download — so the
+  // value appears once they are here. A grade never priced is counted, not guessed.
+  const priced = useLoaded(["purchases"]);
+  const nowIso = new Date().toISOString();
+  const coArg = view === "all" ? undefined : view;
+  const worth = (material: string, grades: [string, number][]): string | null => {
+    if (!priced) return null;
+    let value = 0, unpriced = 0;
+    for (const [key, qty] of grades) {
+      if (!(qty > 0.0005)) continue;
+      const avg = stockAverageRate(db, material, key, nowIso, coArg);
+      if (avg == null) unpriced++; else value += avg * qty;
+    }
+    if (!value && !unpriced) return null;
+    return `Worth ≈ ${fmtMoneyInr(Math.round(value))}${unpriced ? ` · ${unpriced} not priced` : ""}`;
+  };
+  // Held by the factories for the company being looked at — the figures each factory's page shows.
+  const atFactoriesGold = db.factories.reduce((t, f) => t + factoryFineGoldBalance(db.materialIssuances, f.id, f.openingFineGold, view), 0);
+  const atFactoriesDia = db.factories.reduce((t, f) => t + factoryAccount(db.materialIssuances.filter(i => i.factoryId === f.id && (view === "all" || companyOf(i) === view))).diamondOutstanding, 0);
+  const atFactoriesOther = (material: string) => db.factories.reduce((t, f) => t + (factoryOtherBalances(db.materialIssuances, f.id, view)[material] ?? 0), 0);
+  const r3 = (n: number) => Math.round(n * 1000) / 1000;
+  const atFactories = (n: number, unit: string) => (Math.abs(n) >= 0.0005 ? `At factories: ${r3(n).toLocaleString()} ${unit}` : null);
+  // Gold leads with fine (24KT) grams — what it is worth and what a factory owes back.
+  const goldFine = r3(Object.entries(goldBal).reduce((t, [k, g]) => t + toPureGold(g, k), 0));
+  // A certified stone carries its own cost per carat.
+  const packetsPriced = inStockPackets.filter(p => p.ratePerCaratInr != null);
+  const packetsWorth = packetsPriced.length
+    ? `Worth ≈ ${fmtMoneyInr(Math.round(packetsPriced.reduce((t, p) => t + (p.ratePerCaratInr ?? 0) * p.carat, 0)))}${packetsPriced.length < inStockPackets.length ? ` · ${inStockPackets.length - packetsPriced.length} not priced` : ""}`
+    : null;
+  // New purchase is Buy & Assign's own form; it reads the bills too, so it opens once they are here.
+  const [buying, setBuying] = useState(false);
 
   // The cached counter (used by the floor-check when issuing) can drift from the
   // ledger. Displayed balances already come from the ledger; flag drift so an
@@ -137,11 +184,13 @@ export function StockPage() {
       <PageHeader
         title="Stock"
         subtitle="On hand, by material"
-        // Stock already on hand before the app — the same form as Buy & Assign → Opening stock.
-        primary={mayAddStock ? { label: "Opening stock", icon: Boxes, onClick: () => setOpening(true) } : null}
+        // Buying is the everyday way stock comes in — the same form as Buy & Assign → New purchase.
+        primary={mayAddStock ? { label: "New purchase", icon: Plus, onClick: () => setBuying(true) } : null}
         actions={<CompanyFilter value={co} onChange={pickCo} className="h-10 rounded-xl text-sm bg-white w-full sm:w-52" />}
         menuTitle="Stock"
         menu={[
+          // Stock already on hand before the app — a one-time job, so it waits here.
+          { label: "Opening stock", icon: Boxes, hint: "From before the app — no dues", onSelect: () => setOpening(true), show: mayAddStock },
           { label: "Move between companies", icon: ArrowRightLeft, hint: "From one company to another", onSelect: () => setMoving(true), show: multiCo && user?.role === "admin" },
           { label: recomputing ? "Recomputing…" : "Recompute from history", icon: RotateCcw, hint: "Rebuild counters from movements", onSelect: recompute, disabled: recomputing, show: user?.role === "admin" },
         ]}
@@ -150,16 +199,20 @@ export function StockPage() {
 
 
       <div className="grid gap-3 grid-cols-2 lg:grid-cols-3">
-        <MaterialCard name="Gold Reserve" icon={Coins} sub={`${goldPurities} purit${goldPurities === 1 ? "y" : "ies"} in stock`}
-          value={`${goldTotal.toLocaleString()} g`} to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`} />
+        <MaterialCard name="Gold Reserve" icon={Coins} sub={`${goldTotal.toLocaleString()} g · ${goldPurities} purit${goldPurities === 1 ? "y" : "ies"} in stock`}
+          value={`${goldFine.toLocaleString()} g fine`} to={`/stock/gold${view !== "all" ? `?co=${view}` : ""}`}
+          lines={[worth("gold", Object.entries(goldBal)), atFactories(atFactoriesGold, "g fine")]} />
         <MaterialCard name="Loose Diamonds" icon={Gem} sub={`${lots.length || diamondShapes} lot${(lots.length || diamondShapes) === 1 ? "" : "s"} in stock${lotPcs ? ` · ${lotPcs.toLocaleString()} pcs` : ""}`}
-          value={`${diamondTotal.toLocaleString()} ct`} to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`} />
+          value={`${diamondTotal.toLocaleString()} ct`} to={`/stock/diamond${view !== "all" ? `?co=${view}` : ""}`}
+          lines={[worth("diamond", lots.map(l => [l.key, l.ct] as [string, number])), atFactories(atFactoriesDia, "ct")]} />
         <MaterialCard name="Certified Diamonds" icon={BadgeCheck} sub="One certificate each"
-          value={`${inStockPackets.length} packet${inStockPackets.length !== 1 ? "s" : ""}`} to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`} />
-        {others.map(({ m, total, grades }) => (
+          value={`${inStockPackets.length} packet${inStockPackets.length !== 1 ? "s" : ""}`} to={`/stock/certified${view !== "all" ? `?co=${view}` : ""}`}
+          lines={[packetsWorth]} />
+        {others.map(({ m, bal, total, grades }) => (
           <MaterialCard key={m.id} name={m.name} icon={m.kind === "stone" ? Gem : m.kind === "finding" ? Link2 : Layers}
             sub={`${KIND_LABEL[m.kind] ? `${KIND_LABEL[m.kind]} · ` : ""}${grades} grade${grades === 1 ? "" : "s"} in stock`} value={fmtQty(total, m.unit)}
-            to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`} dim={m.active === false} />
+            to={`/stock/${m.id}${view !== "all" ? `?co=${view}` : ""}`} dim={m.active === false}
+            lines={[worth(m.id, Object.entries(bal)), atFactories(atFactoriesOther(m.id), m.unit)]} />
         ))}
 
         {user?.role === "admin" && (
@@ -173,6 +226,7 @@ export function StockPage() {
       </div>
       {addingMaterial && <MaterialEditor onClose={() => setAddingMaterial(false)} />}
       {mayAddStock && <OpeningStock open={opening} onOpenChange={setOpening} />}
+      {mayAddStock && <BuyMaterialForm open={buying && priced} onOpenChange={setBuying} />}
     </div>
   );
 }
