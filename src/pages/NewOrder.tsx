@@ -941,7 +941,7 @@ function NewOrderForm() {
             {recentOrders.length > 0 && (
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5"><Repeat className="h-3.5 w-3.5" /> Repeat a recent order</p>
-                <div className="flex flex-wrap gap-2">
+                <div className="chip-row">
                   {recentOrders.map(o => (
                     <button key={o.id} type="button" onClick={() => nav(copyHref(o))} disabled={saving}
                       title={`A new order with ${o.orderNumber}'s details filled in`}

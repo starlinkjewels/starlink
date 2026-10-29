@@ -61,7 +61,7 @@ export function PushPermissionBanner({ keepReachable = false }: { keepReachable?
   return (
     <div className="flex items-center gap-2.5 rounded-xl border border-primary/20 bg-primary/5 pl-3 pr-1 py-1 text-[13px]">
       <Bell className="h-4 w-4 shrink-0 text-primary" />
-      <p className="min-w-0 flex-1 truncate text-foreground">Alerts even when the app is closed</p>
+      <p className="min-w-0 flex-1 text-foreground leading-snug">Alerts even when the app is closed</p>
       <button type="button" onClick={enable} disabled={asking}
         className="btn-hero h-8 px-3 rounded-lg text-xs font-semibold shrink-0 disabled:opacity-60">
         {asking ? "Enabling…" : <><span className="sm:hidden">Turn on</span><span className="max-sm:hidden">Enable Notifications</span></>}

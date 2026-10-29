@@ -6,7 +6,7 @@ import { DataTable, CellTag, CellAmount, CellDate, type DataColumn } from "@/com
 import { metalLabel } from "@/lib/metals";
 import { companiesOf, companyIdOfClient, companyOfOrder, hasCompanies } from "@/lib/companies";
 import { PageHeader } from "@/components/PageHeader";
-import { ExportMenu, FilterChips, FiltersButton, type TableExport, type TableFilter } from "@/components/TableToolbar";
+import { ExportMenu, FilterChips, FiltersButton, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { OrderBoard } from "@/components/OrderBoard";
 import { ProductionInfo } from "@/components/ProductionInfo";
 import { diamondsMissing, productionDelayDays, productionTrack, type ProductionTrack } from "@/lib/production";
@@ -474,6 +474,8 @@ export function OrdersPage() {
   const mayExport = useMayExport();
   const countText = `${total} order${total !== 1 ? "s" : ""}`;
   const searchHint = "Search — or 1090, 1091, LR-528";
+  // A phone: just "Search…" in the box — the hint was cut off beside the buttons (it stays as its name).
+  const narrowScreen = useNarrow();
 
   // Bulk work on the ticked pieces.
   const selectionBar = isStaff && sel.size > 0 ? (
@@ -564,7 +566,7 @@ export function OrdersPage() {
       {/* ── Production to chase: pieces past the limit, and pieces being made
           without their diamonds. Each opens the list of them. ── */}
       {isStaff && (delayedCount > 0 || noDiamondCount > 0) && (
-        <div className="flex flex-wrap gap-2">
+        <div className="chip-row">
           {delayedCount > 0 && (
             <button type="button" onClick={() => setStatus(status === "delayed" ? "all" : "delayed")} aria-pressed={status === "delayed"}
               className={`inline-flex items-center gap-2 h-9 px-3 rounded-xl border text-sm transition-colors ${status === "delayed" ? "bg-destructive text-white border-destructive" : "bg-destructive/5 border-destructive/25 text-destructive hover:bg-destructive/10"}`}>
@@ -587,9 +589,9 @@ export function OrdersPage() {
       {view !== "list" && (
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input value={q} onChange={e => setQ(e.target.value)} placeholder={searchHint} aria-label={searchHint}
+              <input value={q} onChange={e => setQ(e.target.value)} placeholder={narrowScreen ? "Search…" : searchHint} aria-label={searchHint}
                 className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
               {q && (
                 <button type="button" onClick={() => setQ("")} aria-label="Clear search"
@@ -598,7 +600,7 @@ export function OrdersPage() {
             </div>
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{chosen.length ? ` · ${chosen.length} ticked` : ""}</span>
+              {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
               {mayExport && <ExportMenu exports={exports} scope={`Product sheet · ${chosen.length ? `${chosen.length} ticked` : `${orders.length} shown`}`} />}
             </div>
           </div>

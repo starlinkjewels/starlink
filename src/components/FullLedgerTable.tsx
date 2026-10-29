@@ -93,7 +93,7 @@ export function FullLedgerTable({
           the rows shows as chips under it. The count is in the pager below. */}
       <div className="px-5 py-3 space-y-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+          <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <input value={q} onChange={e => { setQ(e.target.value); setPage(1); }} placeholder={searchLabel} aria-label={searchLabel}
               className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />

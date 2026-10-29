@@ -30,7 +30,9 @@ export function OrderDesignBlock({ order, canAssign }: { order: Order; canAssign
   const thumbs = (job?.files ?? []).slice(-6).reverse();
   return (
     <div className="rounded-xl border border-border/70 bg-secondary/20 p-3 space-y-3">
-      <div className="flex items-start justify-between gap-3">
+      {/* No designer yet: on a phone the words take the width and the button goes under
+          them — beside them it squeezed the sentence into a narrow column. */}
+      <div className={`flex items-start justify-between gap-3 ${job ? "" : "max-sm:flex-col max-sm:items-stretch"}`}>
         <div className="flex items-start gap-2.5 min-w-0">
           <span className="h-9 w-9 shrink-0 rounded-lg bg-primary/10 text-primary grid place-items-center"><PenTool className="h-4 w-4" /></span>
           <div className="min-w-0">
@@ -60,7 +62,7 @@ export function OrderDesignBlock({ order, canAssign }: { order: Order; canAssign
               <FolderOpen className="h-4 w-4" /><span className="max-sm:hidden">Open design</span>
             </Button>
           ) : canAssign && !why ? (
-            <Button variant="outline" className="h-9 rounded-xl gap-1.5" onClick={() => setAssigning(true)}>
+            <Button variant="outline" className="h-9 rounded-xl gap-1.5 max-sm:flex-1" onClick={() => setAssigning(true)}>
               <UserPlus className="h-4 w-4" /> Give design
             </Button>
           ) : null}

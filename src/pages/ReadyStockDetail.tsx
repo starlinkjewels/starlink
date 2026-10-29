@@ -387,7 +387,7 @@ function PieceBody({ item }: { item: ReadyStockItem }) {
           {!canManage && lots.length > 0 && (
             <div className="card-luxe p-4 sm:p-5">
               <SectionTitle title="Also at" />
-              <div className="mt-2 flex flex-wrap gap-2">
+              <div className="mt-2 chip-row">
                 {lots.map(l => (
                   <Link key={l.id} to={`/ready-stock/${l.id}`} className="inline-flex items-center gap-2 rounded-xl border border-border/60 px-3 py-2 text-sm hover:bg-secondary/50">
                     <OfficeChip office={officeOf(l)} />{stockPill(l.quantity)}

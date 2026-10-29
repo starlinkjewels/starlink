@@ -409,11 +409,14 @@ export function DataTable<T>({
   return (
     <div className="space-y-2.5">
       {full && (
+      // One row on every screen: the search, then its buttons on the right of it. No
+      // "12 orders" count — the page's tiles and tabs already say how many.
       <div className="flex flex-wrap items-center gap-2">
         {hasSearch && (
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+          <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <input ref={searchRef} value={qv} onChange={e => setQv(e.target.value)} placeholder={search?.placeholder ?? searchPlaceholder} aria-label={search?.ariaLabel ?? search?.placeholder ?? searchPlaceholder}
+            {/* A phone: just "Search…" — the long hint was cut off beside the buttons (it stays as the name read out). */}
+            <input ref={searchRef} value={qv} onChange={e => setQv(e.target.value)} placeholder={narrow ? "Search…" : search?.placeholder ?? searchPlaceholder} aria-label={search?.ariaLabel ?? search?.placeholder ?? searchPlaceholder}
               className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
             {qv
               ? <button type="button" onClick={() => setQv("")} aria-label="Clear search" className="absolute right-1.5 top-1/2 -translate-y-1/2 h-6 w-6 grid place-items-center rounded-md text-muted-foreground hover:bg-secondary hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
@@ -423,7 +426,7 @@ export function DataTable<T>({
         {filters && filters.length > 0 && <FiltersButton filters={filters} onClear={clearFilters} count={countText} />}
         {toolbarExtra}
         <div className="ml-auto flex items-center gap-2">
-          <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{!search && q ? ` of ${rows.length}` : ""}{ticking && selected!.size ? ` · ${selected!.size} ticked` : ""}</span>
+          {ticking && selected!.size > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{selected!.size} ticked</span>}
           {/* Always there on a table, the same on every page — greyed when the table fits. */}
           {!cardMode && (
             <span className="max-md:hidden inline-flex rounded-xl border border-border bg-white overflow-hidden" title={wide.over ? "Wider than the screen — drag the table, Shift + scroll, or use these" : "The whole table fits"}>
@@ -467,7 +470,7 @@ export function DataTable<T>({
                 // The row's figure on the right — the column marked as its figure, else its
                 // last amount column; up to three facts under the name.
                 const trail = filled.find(c => c.card === "figure") ?? [...filled].reverse().find(c => c.align === "right" && !c.card);
-                const meta = filled.filter(c => c !== trail && c.card !== "figure").slice(0, pin ? 8 : 3);
+                const meta = filled.filter(c => c !== trail && c.card !== "figure").slice(0, pin ? 8 : 4);
                 const tap = !pin && (opensPage || opens);
                 return (
                   <div key={k} className={`dt-row-slim ${on ? "bg-primary/[0.04]" : ""} ${pin ? "bg-secondary/30 italic" : ""} ${rowClassName?.(r) ?? ""}`}>
@@ -477,24 +480,26 @@ export function DataTable<T>({
                         <div className="flex items-start justify-between gap-3">
                           <div className="min-w-0 flex-1">{head ? head.cell(r) : null}</div>
                           {trail && <div className="shrink-0 text-right text-sm font-semibold text-foreground tabular-nums leading-snug">{trail.v}</div>}
+                          {/* A row that only opens in place: its chevron, beside the figure — a tap anywhere does the same. */}
+                          {opens && !opensPage && (
+                            <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Less" : "All details"}
+                              className="shrink-0 -my-1.5 -mr-1 h-8 w-8 grid place-items-center rounded-full text-muted-foreground active:bg-secondary">
+                              <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                            </button>
+                          )}
                         </div>
-                        {/* One line of facts; the last gives way. A row that only opens
-                            in place shows a chevron — a tap anywhere on it does the same. */}
-                        {(meta.length > 0 || (opens && !opensPage)) && (
-                          <div className="mt-1 flex items-center gap-x-3 text-xs text-muted-foreground whitespace-nowrap overflow-hidden">
-                            {meta.map((c, i) => (
-                              <span key={c.key} className={`inline-flex items-baseline gap-1 ${i === meta.length - 1 ? "min-w-0 shrink" : "shrink-0"}`}>
-                                <span className="shrink-0">{c.header}</span>
-                                <span className="text-foreground/85 min-w-0 truncate">{c.v}</span>
-                              </span>
+                        {/* Its facts two by two, each name over its value — they wrap,
+                            never cut off at the edge of the phone (a single line used to
+                            cut the last one, and a two-line value ran into the next). */}
+                        {meta.length > 0 && (
+                          <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                            {meta.map(c => (
+                              <div key={c.key} className="min-w-0">
+                                <dt className="text-[11px] text-muted-foreground truncate">{c.header}</dt>
+                                <dd className="text-foreground/85 min-w-0 break-words">{c.v}</dd>
+                              </div>
                             ))}
-                            {opens && !opensPage && (
-                              <button type="button" onClick={e => { e.stopPropagation(); toggleOpen(k); }} aria-expanded={isOpen} aria-label={isOpen ? "Less" : "All details"}
-                                className="ml-auto shrink-0 -my-2 h-8 w-8 grid place-items-center rounded-full text-muted-foreground active:bg-secondary">
-                                <ChevronDown className={`h-4 w-4 transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                              </button>
-                            )}
-                          </div>
+                          </dl>
                         )}
                       </div>
                       {rowActions && !pin && (

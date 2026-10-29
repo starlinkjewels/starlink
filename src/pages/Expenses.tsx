@@ -573,7 +573,8 @@ function ExpenseList({ expenses, onAdd, showEmployee, users, clients, lockers, o
     ...(showEmployee ? [{ key: "by", header: "Added by", sortValue: (e: Expense) => userName(e.employeeId), cell: (e: Expense) => <span className="whitespace-nowrap">{userName(e.employeeId) || "—"}</span> }] : []),
     // Which currency each amount is in — on screen when the list mixes them, and
     // in the Excel file, where the amount is a bare number.
-    { key: "currency", header: "Currency", hidden: new Set(expenses.map(e => ccy(e.currency))).size < 2, sortValue: e => ccy(e.currency),
+    // Not on a phone card: its amount already shows the currency ($38, ₹2,100).
+    { key: "currency", header: "Currency", card: "hide", hidden: new Set(expenses.map(e => ccy(e.currency))).size < 2, sortValue: e => ccy(e.currency),
       cell: e => <span className="font-mono text-xs">{ccy(e.currency)}</span> },
     { key: "amount", card: "figure" as const, header: "Amount", align: "right", kind: "number", sortValue: e => e.amount, csv: e => e.amount,
       cell: e => <CellAmount tone="out">{fmtExpenseAmount(e.amount, e.currency)}</CellAmount> },

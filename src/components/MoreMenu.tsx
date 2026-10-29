@@ -38,7 +38,8 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
   onOpen?: () => void;
   /** A labelled button ("Pay ▾") instead of the ⋯ — for a group of actions
    *  that share a name, beside a page's main button. */
-  button?: { label: string; icon?: LucideIcon; primary?: boolean };
+  /** `short`: the word on a phone, where the full name would push the title aside ("Add"). */
+  button?: { label: string; short?: string; icon?: LucideIcon; primary?: boolean };
 }) {
   const shown = actions.filter(a => a.show !== false);
   if (!shown.length) return null;
@@ -66,7 +67,11 @@ export function MoreMenu({ actions, label = "More actions", title, className = "
         {button ? (
           <Button type="button" variant={button.primary ? "default" : "outline"} aria-label={label === "More actions" ? button.label : label}
             className={`h-10 rounded-xl px-3.5 gap-2 shrink-0 ${button.primary ? "btn-hero px-4" : ""} ${className}`}>
-            {button.icon && <button.icon className="h-4 w-4" />}<span>{button.label}</span><ChevronDown className="h-4 w-4 opacity-60" />
+            {button.icon && <button.icon className="h-4 w-4" />}
+            {button.short
+              ? <><span className="sm:hidden">{button.short}</span><span className="max-sm:hidden">{button.label}</span></>
+              : <span>{button.label}</span>}
+            <ChevronDown className="h-4 w-4 opacity-60" />
           </Button>
         ) : (
           <Button type="button" variant="outline" aria-label={label} title={label}
