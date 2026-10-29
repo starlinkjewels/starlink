@@ -9,7 +9,7 @@ import { bagNoOfPurchase } from "@/lib/diamondBags";
 import { diamondSpec, isOtherMaterial, materialName, materialUnit, purchaseQty, purchaseText } from "@/lib/materials";
 import { useState } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, updateDb, uid, fmtDate, KARAT_PURITY, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type LedgerDir, type Supplier } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, KARAT_PURITY, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type Purchase, type LedgerDir, type Supplier } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -30,16 +30,19 @@ import { supplierDeleteGuard, deleteRefusal } from "@/lib/partyGuards";
 import { needsAccess } from "@/lib/actionHints";
 import { EditPurchaseDialog } from "@/components/EditPurchaseDialog";
 import { ActionSheet } from "@/components/ActionSheet";
+import { StatStrip } from "@/components/TableToolbar";
+import { joinDots } from "@/components/party/joinDots";
+import { lastPayLocker, rememberPayLocker } from "@/components/party/payLocker";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Mail, Phone, MapPin, Hash, Plus, CreditCard,
+  Plus, CreditCard, Wallet, ShoppingBag, BookOpen,
   Download, Trash2, Pencil, ArrowDownCircle, ExternalLink, Lock,
   Handshake, Tag,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, fmtInrPlain } from "@/lib/ledgerExport";
 import { StatementLedger, type StatementRow } from "@/components/StatementLedger";
@@ -119,6 +122,20 @@ function SupplierHistoryPageBody() {
     toast.success("Opening balance updated");
     setObOpen(false);
   };
+  const openingSet = hasOpeningBalance(supplier);
+  // Opened from the ⋯: the card appears under the figures, brought into view.
+  const openOpening = () => {
+    setObOpen(true);
+    setTimeout(() => document.getElementById("opening-balance")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
+  // Who to call, on one line under the name — the phone dials from a phone.
+  const contactLine = joinDots([
+    supplier.contactPerson,
+    supplier.phone && <a key="tel" href={`tel:${supplier.phone.replace(/\s+/g, "")}`} className="text-primary hover:underline whitespace-nowrap">{supplier.phone}</a>,
+    supplier.email && <a key="mail" href={`mailto:${supplier.email}`} className="hover:underline break-all">{supplier.email}</a>,
+    supplier.gstin && `GSTIN ${supplier.gstin}`,
+    supplier.address,
+  ]);
 
   // ── Record purchase ──
   const [showExport, setShowExport] = useState(false);
@@ -132,19 +149,31 @@ function SupplierHistoryPageBody() {
   const [payLockerId, setPayLockerId] = useState("");
   const [payTargetPurchase, setPayTargetPurchase] = useState<string>("__fifo");
   const [payNote, setPayNote] = useState("");
+  // The day the money went — today unless the payment is being entered late.
+  const [payDate, setPayDate] = useState(todayLocal());
   // Shown in the panel's footer only; the save looks the locker up afresh.
   const payFromLocker = db.lockers.find(l => l.id === payLockerId);
+  const payLockers = db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR");
+  // Opens on the account this person last paid from, unless one is already picked.
+  const openPay = () => {
+    if (!payLockerId) { const last = lastPayLocker(user?.id); if (payLockers.some(l => l.id === last)) setPayLockerId(last); }
+    setShowPayForm(true);
+  };
 
   const recordPayment = async () => {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
+    if (!payDate) { toast.error("Choose the date"); return; }
+    if (payDate > todayLocal()) { toast.error("A payment can't be dated after today"); return; }
     // Overpayment allowed — the excess beyond what's owed is parked on the newest
     // purchase (shows as Overpaid), never silently lost.
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
         !(await confirmBox(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`))) return;
-    const now = new Date().toISOString();
+    // The picked day (at the time of entry), on the payment and its account
+    // entry alike — what was "now" before a date could be chosen.
+    const now = stampFor(payDate);
 
     updateDb(d => {
       const supplierPurchases = d.purchases.filter(p => p.supplierId === id);
@@ -186,8 +215,9 @@ function SupplierHistoryPageBody() {
         note: payNote.trim() || undefined, recordedBy: user!.id, createdAt: now,
       });
     });
+    rememberPayLocker(user?.id, payLockerId);
     toast.success("Payment recorded");
-    setPayAmount(""); setPayNote(""); setPayTargetPurchase("__fifo"); setShowPayForm(false);
+    setPayAmount(""); setPayNote(""); setPayTargetPurchase("__fifo"); setPayDate(todayLocal()); setShowPayForm(false);
   };
 
   // ── Receive money FROM the supplier (refund / return credit) ──
@@ -652,10 +682,12 @@ function SupplierHistoryPageBody() {
       <PageHeader
         back={{ label: "Back to Suppliers", to: "/suppliers" }}
         title={supplier.name}
-        subtitle={supplier.contactPerson || undefined}
+        subtitle={contactLine}
         primary={isAdmin ? { label: "Record Purchase", icon: Plus, onClick: () => setShowPurchaseForm(true) } : null}
-        secondary={isAdmin ? { label: "Pay", icon: CreditCard, onClick: () => setShowPayForm(true) } : null}
+        secondary={isAdmin ? { label: "Pay", icon: CreditCard, onClick: openPay } : null}
         menu={[
+          // Set once, when moving from an old system — so out of sight until then.
+          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed before the app", onSelect: openOpening, show: isAdmin && !openingSet },
           { label: "Sell to them", icon: Tag, hint: "Diamonds, gold, a piece — off what we owe", onSelect: () => setShowSell(true), show: isAdmin },
           { label: "Receive money", icon: ArrowDownCircle, hint: "A refund from them", onSelect: () => setShowReceiveForm(true), show: user?.role === "admin" },
           { label: "Export statement", icon: Download, hint: "PDF or Excel", onSelect: () => setShowExport(true), show: mayExport },
@@ -685,24 +717,28 @@ function SupplierHistoryPageBody() {
         })()}
       </PageHeader>
 
-      {/* Who they are. Where the account stands is the statement's, below. */}
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm min-w-0">
-          {/* Cut with "…" and whole on hover, never broken mid-word; the full row on a phone. */}
-          <div className="col-span-2 md:col-span-1 flex items-start gap-2 min-w-0"><Mail className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Email</p><p className="font-medium truncate" title={supplier.email || undefined}>{supplier.email || "—"}</p></div></div>
-          <div className="flex items-start gap-2 min-w-0"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium break-words">{supplier.phone || "—"}</p></div></div>
-          <div className="flex items-start gap-2 min-w-0"><Hash className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">GSTIN</p><p className="font-medium truncate" title={supplier.gstin || undefined}>{supplier.gstin || "—"}</p></div></div>
-          {supplier.address && <div className="flex items-start gap-2 min-w-0"><MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{supplier.address}</p></div></div>}
-        </div>
-      </motion.div>
+      {/* Where the account stands, first: what we owe them (or they owe us),
+          what was paid, what was bought — the statement's own figures. Who
+          they are is the line under the name. */}
+      <StatStrip items={[
+        account.net < 0
+          ? { label: "They owe us", value: fmtMoneyInr(-account.net), icon: ArrowDownCircle, tone: "in" as const, sub: "After refunds and overpaid bills" }
+          : { label: "We owe", value: account.net > 0 ? fmtMoneyInr(account.net) : "✓ Settled", icon: Wallet, tone: account.net > 0 ? "out" as const : "in" as const,
+              sub: account.net > 0 ? "After advances and refunds" : "Nothing owed" },
+        { label: "Paid", value: fmtMoneyInr(account.totalPaid), icon: CreditCard, tone: "in", sub: "Bills and advances" },
+        { label: "Purchased", value: fmtMoneyInr(account.totalPurchased), icon: ShoppingBag, sub: `${purchases.length} purchase${purchases.length === 1 ? "" : "s"}` },
+        ...(account.received > 0 ? [{ label: "Refunds received", value: fmtMoneyInr(account.received), icon: ArrowDownCircle }] : []),
+        ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold), icon: Tag }] : []),
+      ]} />
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${supplier.name} ledger`} options={[
         { label: "Account Statement — PDF", sublabel: "Purchases, payments & receipts", kind: "pdf", run: exportPdf },
         { label: "Account Statement — Excel", sublabel: "Purchases, payments & receipts", kind: "excel", run: exportCsv },
       ]} />
 
-      {/* Opening balance (migration) — admin only */}
-      {user?.role === "admin" && (
-        <div className="card-luxe p-5">
+      {/* Opening balance (migration) — admin only; once set it stays in view,
+          until then it waits in the ⋯. */}
+      {isAdmin && (openingSet || obOpen) && (
+        <div id="opening-balance" className="card-luxe p-5 scroll-mt-20">
           <SectionTitle title="Opening Balance"
             sub={hasOpeningBalance(supplier)
               ? `${fmtMoneyInr(Math.abs(supplier.openingBalance!))} · ${supplier.openingDir === "credit" ? "we owe supplier" : "supplier owes us"}${supplier.openingDate ? ` · as of ${fmtDate(supplier.openingDate)}` : ""}`
@@ -730,9 +766,9 @@ function SupplierHistoryPageBody() {
         </div>
       )}
       {/* Account Statement — the same ledger people read on Stock and Locker:
-          summary, filters, then every entry with a running balance. Its
-          figures are the page's one set: what was bought, paid and refunded,
-          and where that leaves the account, said whichever way it runs. */}
+          filters, then every entry with a running balance. Its figures (what
+          was bought, paid and refunded, and where that leaves the account)
+          are the strip under the header, so they are not said twice. */}
       <StatementLedger
         title="Account Statement"
         caption={`${statement.length} entr${statement.length !== 1 ? "ies" : "y"} · INR`}
@@ -743,17 +779,6 @@ function SupplierHistoryPageBody() {
         details={statementDetails}
         rowActions={statementActions}
         onExport={() => setShowExport(true)}
-        summary={[
-          { label: "Total purchased", value: fmtMoneyInr(account.totalPurchased), tone: "out" },
-          { label: "Total paid", value: fmtMoneyInr(account.totalPaid), tone: "in" },
-          { label: "Received (refunds)", value: fmtMoneyInr(account.received) },
-          ...(account.sold > 0 ? [{ label: "Sold to them", value: fmtMoneyInr(account.sold) }] : []),
-          // net = what is owed AFTER refunds received and any overpayment, which
-          // is exactly where the running balance below ends up.
-          { label: account.net < 0 ? "Supplier owes you" : "Net balance",
-            value: account.net > 0 ? fmtMoneyInr(account.net) : account.net < 0 ? fmtMoneyInr(-account.net) : "✓ Settled",
-            tone: account.net > 0 ? "due" : "in" },
-        ]}
       />
 
 
@@ -829,22 +854,53 @@ function SupplierHistoryPageBody() {
         }
       >
         <div className="space-y-3">
-          <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
-          <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-            <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-            <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-          </Select>
-          <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
-            <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__fifo">Oldest pending first (unspecified)</SelectItem>
-              <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
-              {pendingPurchases.map(p => (
-                <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="rounded-xl h-10" placeholder="Note (optional)" />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="text-xs">Amount (₹)</Label>
+              <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10 mt-1" placeholder="0" aria-label="Amount" />
+            </div>
+            <div>
+              <Label className="text-xs">Date</Label>
+              <Input type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
+            </div>
+          </div>
+          {/* What is pending for what it is against: the one bill picked, or the
+              whole account (oldest first). An advance has no "full". */}
+          {(() => {
+            const bill = pendingPurchases.find(p => p.id === payTargetPurchase);
+            const full = bill ? purchasePending(bill) : payTargetPurchase === "__fifo" ? account.net : 0;
+            if (!(full > 0) || Number(payAmount) === full) return null;
+            return (
+              <button type="button" onClick={() => setPayAmount(String(full))}
+                className="-mt-1 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
+                Full amount · {fmtMoneyInr(full)}
+              </button>
+            );
+          })()}
+          <div>
+            <Label className="text-xs">From account</Label>
+            <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+              <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose a rupee account" /></SelectTrigger>
+              <SelectContent>{payLockers.map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Against</Label>
+            <Select value={payTargetPurchase} onValueChange={setPayTargetPurchase}>
+              <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="Against"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__fifo">Oldest pending first (unspecified)</SelectItem>
+                <SelectItem value="__advance">Advance / loan — not against any bill</SelectItem>
+                {pendingPurchases.map(p => (
+                  <SelectItem key={p.id} value={p.id}>{p.invoiceNumber || p.id.slice(-6)} — pending {fmtMoneyInr(purchasePending(p))}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div>
+            <Label className="text-xs">Note</Label>
+            <Input value={payNote} onChange={e => setPayNote(e.target.value)} className="rounded-xl h-10 mt-1" placeholder="Optional — bank ref, cheque no." aria-label="Note" />
+          </div>
         </div>
       </ActionSheet>
 

@@ -28,6 +28,8 @@ export interface InvoicePlan {
 /** Why this order cannot be billed, or nothing if it can. */
 export function invoiceBlocker(db: DB, o: Order): string | null {
   if (o.forReadyStock) return "In-house stock build — there is no client to bill.";
+  // A deleted order is off every list; nothing on it is billed.
+  if (o.deletedAt) return "Order was deleted.";
   if (o.status === "Rejected") return "Order is rejected.";
   // `amount`, not orderTotal: this is the very test createInvoiceFromOrders
   // applies, and a plan that promised an order the guard then dropped would

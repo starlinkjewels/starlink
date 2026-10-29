@@ -21,7 +21,7 @@ import { isOtherMaterial, materialName, materialUnit, type MaterialKey } from "@
 import { otherFlow, factoryOtherBalances } from "@/lib/pure/accounts";
 import { useMemo, useState, type ReactNode } from "react";
 import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, updateDb, uid, fmtDate, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
+import { collectionLoaded, updateDb, uid, fmtDate, todayLocal, stampFor, DIAMOND_SHAPES, toPureGold, pureFromPurity, hasOpeningBalance, openingDebitAmt, openingCreditAmt, type MaterialIssuance, type LedgerDir, type Factory } from "@/lib/db";
 import { OpeningBalanceFields } from "@/components/OpeningBalanceFields";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
@@ -32,16 +32,19 @@ import {
 } from "@/lib/manufacturing";
 import { decreaseStockSelfHealing, increaseStock } from "@/lib/stock";
 import { ActionSheet } from "@/components/ActionSheet";
+import { PayFactorySheet } from "@/components/party/PayFactorySheet";
+import { lastPayLocker, rememberPayLocker } from "@/components/party/payLocker";
+import { joinDots } from "@/components/party/joinDots";
 import { Button } from "@/components/ui/button";
 import { AsyncButton } from "@/components/AsyncButton";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  Phone, MapPin, Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
+  Wallet, Plus, CreditCard, CheckCircle2, Coins, Gem,
   Download, FileText, FileSpreadsheet, Undo2, AlertCircle, Truck, ArrowDownCircle, ArrowUpCircle, ArrowRightLeft, Archive,
-  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, Receipt,
+  Pencil, Trash2, ExternalLink, Lock, RotateCcw, Package, BookOpen,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { toast } from "sonner";
 import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } from "@/lib/ledgerExport";
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
@@ -158,6 +161,19 @@ function FactoryHistoryPageBody() {
     toast.success("Opening balance updated");
     setObOpen(false);
   };
+  const openingSet = hasOpeningBalance(factory) || !!factory.openingFineGold;
+  // Opened from the ⋯: the card appears under the figures, brought into view.
+  const openOpening = () => {
+    setObOpen(true);
+    setTimeout(() => document.getElementById("opening-balance")?.scrollIntoView({ behavior: "smooth", block: "start" }), 60);
+  };
+  const mayPay = isAdmin || can("payments", "add");
+  // Who to call, on one line under the name — the phone dials from a phone.
+  const contactLine = joinDots([
+    factory.contactPerson,
+    factory.phone && <a key="tel" href={`tel:${factory.phone.replace(/\s+/g, "")}`} className="text-primary hover:underline whitespace-nowrap">{factory.phone}</a>,
+    factory.address,
+  ]);
 
   // ── Issue material ──
   // "bulkDelivery" = hand the factory raw material not tied to any order yet
@@ -322,6 +338,10 @@ function FactoryHistoryPageBody() {
   const [chargeAmount, setChargeAmount] = useState("");
   const [payAmount, setPayAmount] = useState("");
   const [payLockerId, setPayLockerId] = useState("");
+  // The day the money went — today unless the payment is being entered late.
+  const [payDate, setPayDate] = useState(todayLocal());
+  // Paying the factory's labour in one go, oldest jobs first (components/party/PayFactorySheet).
+  const [payingFactory, setPayingFactory] = useState(false);
   const [returnQty, setReturnQty] = useState("");
   const [returnNote, setReturnNote] = useState("");
   const [returnPcs, setReturnPcs] = useState("");
@@ -335,7 +355,10 @@ function FactoryHistoryPageBody() {
 
   const openAction = (issuanceId: string, action: IssuanceAction) => {
     setActiveIssuance({ id: issuanceId, action, open: true });
-    setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayLockerId("");
+    setPieceQty(""); setPieceCount("1"); setChargeAmount(""); setPayAmount(""); setPayDate(todayLocal());
+    // The account this person last paid from, while it is still a rupee account in use.
+    const last = lastPayLocker(user?.id);
+    setPayLockerId(db.lockers.some(l => l.id === last && l.active !== false && (l.currency || "INR") === "INR") ? last : "");
     setReturnQty(""); setReturnNote(""); setReturnPcs("");
   };
 
@@ -390,22 +413,26 @@ function FactoryHistoryPageBody() {
     const amt = Number(payAmount);
     if (!amt || amt <= 0) { toast.error("Enter a valid amount"); return; }
     if (!payLockerId) { toast.error("Choose which locker this payment came from"); return; }
+    if (!payDate) { toast.error("Choose the date"); return; }
+    if (payDate > todayLocal()) { toast.error("A payment can't be dated after today"); return; }
     const payLocker = db.lockers.find(l => l.id === payLockerId);
     if (payLocker && amt > lockerBalance(payLocker, db.lockerTransactions) &&
         !(await confirmBox(`This payment of ${fmtLockerAmount(amt, payLocker.currency)} is more than ${payLocker.name}'s balance of ${fmtLockerAmount(lockerBalance(payLocker, db.lockerTransactions), payLocker.currency)}. The locker will go negative — continue only if a deposit is still missing.`))) return;
-    const now = new Date().toISOString();
+    // The picked day (at the time of entry), on the payment and its account entry alike.
+    const at = stampFor(payDate);
     updateDb(d => {
       const mi = d.materialIssuances.find(x => x.id === issuance.id);
       if (!mi) return;
       if (!mi.makingCharges.payments) mi.makingCharges.payments = [];
-      mi.makingCharges.payments.push({ id: uid("fpay_"), amountInr: amt, lockerId: payLockerId, recordedBy: user!.id, createdAt: now });
+      mi.makingCharges.payments.push({ id: uid("fpay_"), amountInr: amt, lockerId: payLockerId, recordedBy: user!.id, createdAt: at });
       if (!d.lockerTransactions) d.lockerTransactions = [];
       d.lockerTransactions.push({
         id: uid("ltx_"), lockerId: payLockerId, type: "expense", amountInr: amt,
         category: `Making Charges — ${factory.name}`, refType: "materialIssuance", refId: issuance.id,
-        recordedBy: user!.id, createdAt: now,
+        recordedBy: user!.id, createdAt: at,
       });
     });
+    rememberPayLocker(user?.id, payLockerId);
     toast.success("Payment recorded");
     closeAction();
   };
@@ -1018,10 +1045,14 @@ function FactoryHistoryPageBody() {
       <PageHeader
         back={{ label: "Back to Factories", to: "/factories" }}
         title={factory.name}
-        subtitle={factory.contactPerson || undefined}
+        subtitle={contactLine}
         actions={<CompanyFilter value={coView} onChange={setCoView} className="h-10 rounded-xl text-sm w-40 sm:w-48 min-w-0" />}
         primary={user?.role === "admin" ? { label: "Issue Material", icon: Plus, onClick: () => setShowIssueForm(true) } : null}
+        // Paying their labour in one go, oldest jobs first — one job at a time is its card's Pay.
+        secondary={mayPay ? { label: "Pay", icon: CreditCard, onClick: () => setPayingFactory(true) } : null}
         menu={[
+          // Set once, when moving from an old system — so out of sight until then.
+          { label: "Opening balance", icon: BookOpen, hint: "Not set — what was owed and held before the app", onSelect: openOpening, show: isAdmin && !openingSet },
           { label: "Move between companies", icon: ArrowRightLeft, hint: "Gold or diamonds, company to company", onSelect: () => setMovingPool(true), show: multiCo && user?.role === "admin" },
           { label: "Export ledger", icon: Download, hint: "Ledger or movement sheet", onSelect: () => setShowExport(true), show: mayExport },
           { label: "Edit details", icon: Pencil, onSelect: () => setEditingFactory(factory), disabled: !isAdmin,
@@ -1031,12 +1062,24 @@ function FactoryHistoryPageBody() {
         ]}
       />
 
-      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="card-luxe p-5 sm:p-6">
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 text-sm min-w-0">
-          <div className="flex items-start gap-2 min-w-0"><Phone className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Phone</p><p className="font-medium break-words">{factory.phone || "—"}</p></div></div>
-          {factory.address && <div className="flex items-start gap-2 min-w-0"><MapPin className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" /><div className="min-w-0"><p className="text-xs text-muted-foreground">Address</p><p className="font-medium break-words">{factory.address}</p></div></div>}
-        </div>
-      </motion.div>
+      {/* Where the factory stands, first: what we owe them, what was paid, and
+          the gold and stones in their hands — for the company picked above. */}
+      <StatStrip
+        note={view !== "all" ? `${companyById(db.settings, view).name} only` : undefined}
+        items={[
+          account.chargesPending <= 0 && account.chargesOverpaid > 0
+            ? { label: "Paid ahead", value: fmtMoneyInr(account.chargesOverpaid), icon: Wallet, sub: `Held by the factory · ${fmtMoneyInr(account.chargesTotal)} billed` }
+            : { label: "We owe", value: account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared",
+                tone: account.chargesPending > 0 ? "out" as const : "in" as const, icon: Coins,
+                sub: `Labour · ${fmtMoneyInr(account.chargesTotal)} billed${account.chargesOverpaid > 0 ? ` · ${fmtMoneyInr(account.chargesOverpaid)} paid ahead` : ""}` },
+          { label: "Paid", value: fmtMoneyInr(account.chargesPaid), tone: "in", icon: CreditCard, sub: "Labour paid" },
+          { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
+          { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
+            tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
+          ...Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => ({
+            label: materialName(db.settings, k), value: `${q.toLocaleString()} ${materialUnit(db.settings, k)}`, icon: Package,
+            tone: q < 0 ? "out" as const : undefined, sub: "At the factory" })),
+        ]} />
       <ExportDialog open={showExport} onClose={() => setShowExport(false)} title={`${factory.name} ledger`}
         extraFilter={{ label: "Order number", placeholder: "e.g. SLJ-2026-1042 (optional)", hint: "Leave blank for the whole factory." }}
         options={[
@@ -1046,30 +1089,10 @@ function FactoryHistoryPageBody() {
           { label: "Movement Sheet — Excel", sublabel: "Every issue and return, line by line", kind: "excel", run: exportCombinedCsv },
         ]} />
 
-      {/* What is with the factory, then its labour account — the company
-          picked in the header decides both. */}
-      <div className="card-luxe p-5 space-y-3">
-        <SectionTitle title="Factory Account" sub={view !== "all" ? companyById(db.settings, view).name : undefined} className="mb-1" />
-        <StatStrip items={[
-          { label: "Fine gold (24KT)", value: `${factoryFineGoldBalance(db.materialIssuances, id!, factory.openingFineGold, view).toLocaleString()} g`, icon: Coins, sub: "At the factory" },
-          { label: "Diamond", value: `${account.diamondOutstanding > 0 ? "+" : ""}${account.diamondOutstanding.toLocaleString()} ct`, icon: Gem,
-            tone: account.diamondOutstanding < 0 ? "out" : undefined, sub: "Net, given less used" },
-          ...Object.entries(factoryOtherBalances(db.materialIssuances, id!, view)).map(([k, q]) => ({
-            label: materialName(db.settings, k), value: `${q.toLocaleString()} ${materialUnit(db.settings, k)}`, icon: Package,
-            tone: q < 0 ? "out" as const : undefined, sub: "At the factory" })),
-        ]} />
-        <StatStrip items={[
-          { label: "Charges pending", value: account.chargesPending > 0 ? fmtMoneyInr(account.chargesPending) : "✓ Cleared",
-            tone: account.chargesPending > 0 ? "out" : "in", icon: Coins, sub: "Still to pay" },
-          { label: "Total charges", value: fmtMoneyInr(account.chargesTotal), icon: Receipt, sub: "Labour billed" },
-          { label: "Charges paid", value: fmtMoneyInr(account.chargesPaid), tone: "in", icon: CreditCard },
-          { label: "Charges overpaid", value: fmtMoneyInr(account.chargesOverpaid), icon: Wallet, sub: "Held by the factory" },
-        ]} />
-      </div>
-
-      {/* Opening balance (migration) — admin only */}
-      {user?.role === "admin" && (
-        <div className="card-luxe p-5">
+      {/* Opening balance (migration) — admin only; once set it stays in view,
+          until then it waits in the ⋯. */}
+      {isAdmin && (openingSet || obOpen) && (
+        <div id="opening-balance" className="card-luxe p-5 scroll-mt-20">
           <SectionTitle title="Opening Balance"
             sub={hasOpeningBalance(factory) || factory.openingFineGold
               ? [
@@ -1114,6 +1137,7 @@ function FactoryHistoryPageBody() {
         </div>
       )}
       {movingPool && <FactoryPoolTransferDialog factoryId={id!} onClose={() => setMovingPool(false)} />}
+      <PayFactorySheet factoryId={id!} open={payingFactory} onOpenChange={setPayingFactory} />
       <FactoryEditDialog factory={editingFactory} onClose={() => setEditingFactory(null)} />
       <IssuanceEditSheet issuance={editingIssuance} onClose={() => setEditingIssuance(null)} />
       {/* ONE ledger for this factory: gold given and used, diamond given and
@@ -1415,11 +1439,29 @@ function FactoryHistoryPageBody() {
                 <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Paid</p><p className={`text-sm font-semibold tabular-nums whitespace-nowrap ${issuancePaid(mi) ? "text-success" : "text-muted-foreground"}`}>{fmtMoneyInr(issuancePaid(mi))}</p></div>
                 <div className="p-2.5 min-w-0"><p className="text-[11px] text-muted-foreground">Pending</p><p className={`text-sm font-semibold tabular-nums whitespace-nowrap ${pending ? "text-destructive" : "text-muted-foreground"}`}>{fmtMoneyInr(pending)}</p></div>
               </div>
-              <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10" placeholder="Amount (₹)" />
-              <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
-                <SelectTrigger className="h-10 rounded-xl"><SelectValue placeholder="From which locker?" /></SelectTrigger>
-                <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
-              </Select>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <Label className="text-xs">Amount (₹)</Label>
+                  <Input type="number" min={1} value={payAmount} onChange={e => setPayAmount(e.target.value)} autoFocus className="rounded-xl h-10 mt-1" placeholder="0" aria-label="Amount" />
+                </div>
+                <div>
+                  <Label className="text-xs">Date</Label>
+                  <Input type="date" value={payDate} max={todayLocal()} onChange={e => setPayDate(e.target.value)} className="rounded-xl h-10 mt-1" aria-label="Date" />
+                </div>
+              </div>
+              {pending > 0 && Number(payAmount) !== pending && (
+                <button type="button" onClick={() => setPayAmount(String(pending))}
+                  className="-mt-1 inline-flex items-center h-7 px-2.5 rounded-full border border-primary/30 bg-primary/5 text-xs font-medium text-primary hover:bg-primary/10">
+                  Full amount · {fmtMoneyInr(pending)}
+                </button>
+              )}
+              <div>
+                <Label className="text-xs">From account</Label>
+                <Select value={payLockerId} onValueChange={addNew("locker", setPayLockerId)}>
+                  <SelectTrigger className="h-10 rounded-xl mt-1" aria-label="From account"><SelectValue placeholder="Choose a rupee account" /></SelectTrigger>
+                  <SelectContent>{db.lockers.filter(l => l.active !== false && (l.currency || "INR") === "INR").map(l => <SelectItem key={l.id} value={l.id}>{l.name}</SelectItem>)}<AddNewItem kind="locker" /></SelectContent>
+                </Select>
+              </div>
             </div>
           );
         } else if (action === "return" && mi.diamondKind === "certified") {

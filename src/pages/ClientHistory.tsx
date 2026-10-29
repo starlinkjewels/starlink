@@ -12,9 +12,10 @@ import { PageHeader } from "@/components/PageHeader";
 import { SectionTitle } from "@/components/SectionTitle";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { advanceIds, receiptForAdvance } from "@/lib/receipts";
-import { useState } from "react";
-import { useParams, Link, useNavigate } from "react-router-dom";
-import { collectionLoaded, worksOnClient, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, clientAccount, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
+import { useEffect, useState } from "react";
+import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
+import { invoicedOrderIds, readyToBill, splitClientAccount } from "@/components/billing/clientBilling";
+import { collectionLoaded, worksOnClient, fmtMoney, fmtDate, totalAdvance, balanceDue, orderTotal, orderGrossTotal, updateDb, uid, settleClientAccount, applyCreditToBills, findInvoiceForOrder, invoiceOrderIds, hasOpeningBalance, openingDebitAmt, openingCreditAmt } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
 import { ClientInvoiceLedger, buildInvoiceBlocks, type InvoiceBlock, type InvoicePayment } from "@/components/ClientInvoiceLedger";
 import { ClientEditDialog } from "@/components/ClientEditDialog";
@@ -41,7 +42,7 @@ import {
   Package, Gem, Mail, Phone, MapPin, Globe, Undo2,
   FileText, Clock, AlertCircle,
   Download, Hash, Wallet, Plus, CreditCard, DollarSign,
-  Pencil, Trash2, Power, Eye, Printer, XCircle,
+  Pencil, Trash2, Power, Eye, Printer, XCircle, Hourglass, ArrowRight,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
@@ -101,6 +102,18 @@ function ClientHistoryPageBody() {
   const [refunding, setRefunding] = useState(false);
   // Taking money for a diamond sold to them on credit (lib/diamondSalePay.ts).
   const [paySale, setPaySale] = useState<DiamondSale | null>(null);
+  // Arriving from the Clients list's ⋯ (Record payment, Send statement): the
+  // page opens with that panel open. The ask is taken off the address once
+  // read, so a refresh or Back doesn't open it again.
+  const [sp, setSp] = useSearchParams();
+  const askedPay = sp.get("pay") === "1";
+  const askedStatement = sp.get("statement") === "1";
+  useEffect(() => {
+    if (!askedPay && !askedStatement) return;
+    const next = new URLSearchParams(sp);
+    next.delete("pay"); next.delete("statement");
+    setSp(next, { replace: true });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const client = db.clients.find(c => c.id === id);
 
@@ -160,7 +173,7 @@ function ClientHistoryPageBody() {
   // Filters
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const [showExport, setShowExport] = useState(false);
+  const [showExport, setShowExport] = useState(() => askedStatement && mayExport);
 
   // ── Client account / payments ──
   const [payAmount, setPayAmount] = useState("");
@@ -170,8 +183,12 @@ function ClientHistoryPageBody() {
   const [payLockerId, setPayLockerId] = useState("");
   // The locker's currency for $1 (₹ per $, A$ per $…).
   const [payExchangeRate, setPayExchangeRate] = useState<number | "">("");
-  const [showPayForm, setShowPayForm] = useState(false);
-  const account = clientAccount(billableOrders, client?.creditBalance || 0, client);
+  const [showPayForm, setShowPayForm] = useState(() => askedPay && can("payments", "add"));
+  // Split as Invoices reads it: due now (on an invoice, unpaid) + on order (not
+  // billed yet) = outstanding. Nothing about the account changes, only how it reads.
+  const account = splitClientAccount(billableOrders, client?.creditBalance || 0, client, invoicedOrderIds(db.invoices));
+  // Shipped work with no invoice — the Orders page's "Not invoiced", for them.
+  const toBill = user!.role !== "client" ? readyToBill(db, id!) : { ready: [], noPrice: [], total: 0 };
   const payLocker = db.lockers.find(l => l.id === payLockerId);
   const payLockerCurrency = ccy(payLocker?.currency);
   // A client always pays in USD (that's what the order is billed in) — a
@@ -666,6 +683,10 @@ function ClientHistoryPageBody() {
           { label: "Export statement", icon: FileText, hint: "PDF or Excel, invoice by invoice", onSelect: () => setShowExport(true) },
         ] } : null}
         menu={[
+          { label: "Create invoice", icon: FileText, onSelect: () => navigate(`/invoices?bill=${encodeURIComponent(client.id)}`),
+            show: user!.role !== "client", disabled: !can("invoices", "add"),
+            hint: !can("invoices", "add") ? needsAccess("invoices", "add")
+              : toBill.ready.length ? `${toBill.ready.length} ready · ${fmtMoney(toBill.total)}` : "From their dispatched orders" },
           { label: "Apply credit", icon: CreditCard, hint: `Use ${fmtMoney(account.credit)} on what's owed`, onSelect: applyCredit,
             show: account.credit > 0 && account.outstanding > 0 && can("payments", "edit") },
           { label: "Refund credit", icon: Undo2, onSelect: () => setRefunding(true), show: can("payments", "add"),
@@ -725,15 +746,40 @@ function ClientHistoryPageBody() {
         </div>
       </motion.div>
 
-      {/* Where the account stands, once. Billed less received is exactly what
-          is still owed (received is worked out that way), so the strip shows
-          the signs; credit held stands on its own. (Total Value is not shown
-          beside it: billed is the same orders plus any balance brought forward.) */}
+      {/* Shipped work with no invoice yet — nothing else asks for it to be
+          billed. Opens Invoices with this client's Create invoice open. */}
+      {(toBill.ready.length > 0 || toBill.noPrice.length > 0) && (
+        <div className="rounded-2xl border border-primary/30 bg-primary/5 px-4 sm:px-5 py-3 flex items-center gap-3 flex-wrap">
+          <FileText className="h-5 w-5 text-primary shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold text-brand-dark">
+              {toBill.ready.length > 0
+                ? <>{toBill.ready.length} order{toBill.ready.length !== 1 ? "s" : ""} ready to bill · {fmtMoney(toBill.total)}</>
+                : <>{toBill.noPrice.length} shipped order{toBill.noPrice.length !== 1 ? "s" : ""} not billed</>}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {toBill.ready.length > 0 ? "Dispatched, not on an invoice yet" : "Needs a price before it can be billed"}
+              {toBill.ready.length > 0 && toBill.noPrice.length > 0 && ` · ${toBill.noPrice.length} more need${toBill.noPrice.length === 1 ? "s" : ""} a price first`}
+            </p>
+          </div>
+          {can("invoices", "add") && (
+            <Button size="sm" onClick={() => navigate(`/invoices?bill=${encodeURIComponent(client.id)}`)} className="btn-hero rounded-xl gap-1.5 max-sm:w-full">
+              {toBill.ready.length > 0 ? "Create invoice" : "Open"} <ArrowRight className="h-3.5 w-3.5" />
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Where the account stands, once — split as Invoices reads it. Due now
+          is what their invoices say is due (the Invoice Statement's figure);
+          on order is work not billed yet. Together they are everything owed,
+          which is order value less what was received. Credit stands on its own. */}
       <StatStrip items={[
-        { label: "Total billed", value: fmtMoney(account.billed), icon: FileText,
-          sub: openingDebitAmt(client) > 0 ? "With balance brought forward" : undefined },
-        { label: "Received", value: fmtMoney(account.allocated), tone: "in", op: "−", sub: "Applied to bills" },
-        { label: "Outstanding", value: account.outstanding > 0 ? fmtMoney(account.outstanding) : "✓ Cleared", tone: account.outstanding > 0 ? "out" : "in", op: "=" },
+        { label: "Due now", value: account.dueNow > 0 ? fmtMoney(account.dueNow) : "✓ Cleared", tone: account.dueNow > 0 ? "out" : "in", icon: AlertCircle,
+          sub: openingDebitAmt(client) > 0 ? "Billed, unpaid · with balance brought forward" : "Billed, not paid" },
+        { label: "On order, not billed", value: fmtMoney(account.notBilled), icon: Hourglass, sub: "Owed once invoiced" },
+        { label: "Order value", value: fmtMoney(account.billed), icon: FileText,
+          sub: `${fmtMoney(account.allocated)} received · ${fmtMoney(account.outstanding)} owed in all` },
         { label: "Credit (advance)", value: fmtMoney(account.credit), icon: Wallet,
           sub: refundedUsd > 0.005 ? `Held for them · ${fmtMoney(refundedUsd)} refunded` : "Held for them" },
       ]} />
