@@ -9,7 +9,7 @@ import { pendingWrites } from "@/lib/db";
  * save is genuinely slow (still pending after ~1s, e.g. a weak connection) or
  * when a save actually FAILS. Mounted once inside the authenticated app shell.
  */
-type State = "idle" | "saving" | "error";
+type State = "idle" | "saving" | "updating" | "error";
 
 export function SyncStatus() {
   const [state, setState] = useState<State>("idle");
@@ -37,9 +37,21 @@ export function SyncStatus() {
       hideTimer.current = setTimeout(() => setState(prev => (prev === "error" ? "idle" : prev)), 4000);
     };
 
+    // Opened from the device's saved copy: a quiet "Updating…" until the
+    // server's answer is in (only if that takes more than a moment).
+    let staleTimer: ReturnType<typeof setTimeout> | undefined;
+    const onStale = (e: Event) => {
+      const n = (e as CustomEvent<number>).detail ?? 0;
+      clearTimeout(staleTimer);
+      if (n > 0) staleTimer = setTimeout(() => setState(prev => (prev === "idle" ? "updating" : prev)), 400);
+      else setState(prev => (prev === "updating" ? "idle" : prev));
+    };
+    window.addEventListener("starlink-db-stale", onStale);
     window.addEventListener("starlink-db-pending", onPending);
     window.addEventListener("starlink-db-error", onError);
     return () => {
+      clearTimeout(staleTimer);
+      window.removeEventListener("starlink-db-stale", onStale);
       clearTimeout(showTimer.current);
       clearTimeout(hideTimer.current);
       window.removeEventListener("starlink-db-pending", onPending);
@@ -51,6 +63,7 @@ export function SyncStatus() {
 
   const cfg = {
     saving: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "Saving…", cls: "bg-foreground/85 text-background" },
+    updating: { icon: <Loader2 className="h-3.5 w-3.5 animate-spin" />, text: "Updating…", cls: "bg-foreground/70 text-background" },
     error:  { icon: <CloudOff className="h-3.5 w-3.5" />,             text: "Save failed — check your connection", cls: "bg-destructive text-white" },
   }[state];
 

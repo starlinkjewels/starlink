@@ -14,7 +14,7 @@
 // records and counts them before anything is removed (deleteRefusal), and
 // counts again on the live records as it removes it.
 import {
-  collectionsLoaded, loadDb, openingCreditAmt,
+  collectionsFresh, loadDb, openingCreditAmt,
   type DB, type Factory, type Supplier,
 } from "./db";
 import { TOTALS_COLS } from "./pageData";
@@ -44,7 +44,7 @@ export function supplierDeleteGuard(db: DB, s: Supplier, figures?: SupplierFigur
     const sold = (figures.sold ?? 0) > 0.5;
     return bought || paid || sold ? { ok: false, reason: "Has purchases / payments / sales — deactivate instead" } : { ok: true };
   }
-  if (!collectionsLoaded(TOTALS_COLS.supplier)) return CHECKING_GUARD;
+  if (!collectionsFresh(TOTALS_COLS.supplier)) return CHECKING_GUARD;
   const purchases = (db.purchases ?? []).filter(p => p.supplierId === s.id).length;
   const payments = (db.supplierPayments ?? []).filter(p => p.supplierId === s.id).length
     + (db.supplierReceipts ?? []).filter(r => r.supplierId === s.id).length;
@@ -69,7 +69,7 @@ export function factoryDeleteGuard(db: DB, f: Factory, figures?: FactoryFigures)
     const paid = figures.chargesPaid > 0.5;
     return has([charged || moved || paid ? "material issues / payments" : "", assigned].filter(Boolean));
   }
-  if (!collectionsLoaded(TOTALS_COLS.factory)) return CHECKING_GUARD;
+  if (!collectionsFresh(TOTALS_COLS.factory)) return CHECKING_GUARD;
   const issues = (db.materialIssuances ?? []).filter(i => i.factoryId === f.id).length;
   const payments = (db.factoryPayments ?? []).filter(p => p.factoryId === f.id).length;
   return has([

@@ -1,7 +1,7 @@
 import { toast } from "sonner";
 import { ACTION_LABEL, type PermAction } from "./permissions";
 import { moduleLabel, type ModuleKey } from "./modules";
-import { collectionsLoaded, collectionsReady } from "./db";
+import { collectionsFresh, collectionsReady } from "./db";
 
 /**
  * The line under a menu action someone's access doesn't reach. An action they
@@ -29,7 +29,7 @@ export const STILL_LOADING = "Still loading — try again in a moment";
  * button that seems to do nothing gets clicked again. True once all are here.
  */
 export async function recordsReady(cols: readonly string[]): Promise<boolean> {
-  if (collectionsLoaded(cols)) return true;
+  if (collectionsFresh(cols)) return true;
   const t = toast.loading("Checking what's on record…");
   try {
     return await collectionsReady(cols);

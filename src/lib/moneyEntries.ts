@@ -9,7 +9,7 @@
 //
 // Client receipts are deliberately NOT here — they allocate across a client's
 // orders and have their own engine (src/lib/receipts.ts).
-import { loadDb, updateDb, uid, collectionsLoaded, ensureCollections, fmtDate, fmtMoney, dayOf, type DB, type Expense, type LockerTransaction } from "./db";
+import { loadDb, updateDb, uid, collectionsFresh, ensureCollections, fmtDate, fmtMoney, dayOf, type DB, type Expense, type LockerTransaction } from "./db";
 import { ccy, fmtCcy, rateFields, rateOf, roundCcy, type CurrencyCode } from "./currency";
 import type { LazyCol } from "./pageData";
 import { undoClientRefund } from "./clientRefunds";
@@ -732,7 +732,7 @@ function dropTxn(d: DB, entry: MoneyEntry) {
  *  Returns why it was refused (nothing is written then), or undefined once saved. */
 export function editEntry(entry: MoneyEntry, patch: EntryPatch): string | undefined {
   // The account rows are what move with it: not loaded, they would be missed.
-  if (!collectionsLoaded(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
+  if (!collectionsFresh(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
   // A payment whose account row shows a different amount: the amount moves
   // only when it was actually changed. Correcting a remark or a date must
   // never quietly rewrite what the account says.
@@ -939,7 +939,7 @@ export function entryDeleteQuestion(entry: MoneyEntry, lockerName?: string): str
 export function deleteEntry(entry: MoneyEntry, opts: { unlinkedConfirmed?: boolean } = {}): string | undefined {
   if (entry.locked) return entry.locked;
   if (entry.unlinked && !opts.unlinkedConfirmed) return `${entry.unlinked}. Confirm that before deleting it.`;
-  if (!collectionsLoaded(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
+  if (!collectionsFresh(ENTRY_COLS[entry.kind])) return "Still loading the account entries — try again in a moment.";
   updateDb(d => {
     if (entry.kind === "supplier") {
       const ids = new Set(entry.legIds ?? [entry.id]);
@@ -1080,7 +1080,7 @@ export function expenseRefusal(d: DB, e: Expense, p: ExpensePatch): string | und
  * Returns why it was refused (nothing is written then).
  */
 export function editExpense(id: string, p: ExpensePatch): string | undefined {
-  if (!collectionsLoaded(["lockerTransactions"])) return "Still loading the account entries — try again in a moment.";
+  if (!collectionsFresh(["lockerTransactions"])) return "Still loading the account entries — try again in a moment.";
   const db = loadDb();
   const e = (db.expenses ?? []).find(x => x.id === id);
   if (!e) return "That expense is no longer on file.";
@@ -1122,7 +1122,7 @@ export function expenseImpact(db: DB, e: Expense): string[] {
   const locker = e.lockerId ? db.lockers.find(l => l.id === e.lockerId) : undefined;
   const money = fmtCcy(e.amount, e.currency);
   if (e.lockerId) {
-    const rows = collectionsLoaded(["lockerTransactions"]) ? expenseRows(db, e) : [];
+    const rows = collectionsFresh(["lockerTransactions"]) ? expenseRows(db, e) : [];
     out.push(rows.length
       ? `• ${locker?.name ?? "its account"} goes back up by ${money} — its entry there goes too`
       : `• no entry for it was found in ${locker?.name ?? "its account"}, so no account balance changes`);

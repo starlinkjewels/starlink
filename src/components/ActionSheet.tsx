@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import type { LucideIcon } from "lucide-react";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
+import { HeldWhileStale } from "@/components/ui/dialog";
+import { useHeldWhileStale } from "@/hooks/useDataFresh";
 
 /**
  * The panel a task slides in on: a new purchase, a payment, a transfer. The
@@ -22,6 +24,8 @@ export function ActionSheet({ open, onOpenChange, title, description, icon: Icon
   footer?: ReactNode;
   children: ReactNode;
 }) {
+  // Never a form filled from the device's saved copy: held, then closed to open again from the latest.
+  const { held, hasForm } = useHeldWhileStale(open, onOpenChange);
   const width = size === "xl" ? "sm:max-w-[60rem]" : size === "lg" ? "sm:max-w-[48rem]" : "sm:max-w-[36rem]";
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -37,8 +41,8 @@ export function ActionSheet({ open, onOpenChange, title, description, icon: Icon
             </div>
           </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5">{children}</div>
-        {footer && <div className="ui-panel-foot shrink-0 border-t border-border/60 bg-secondary/30 px-5 sm:px-6 py-4">{footer}</div>}
+        <div className="flex-1 min-h-0 overflow-y-auto px-5 sm:px-6 py-5"><HeldWhileStale held={held} hasForm={hasForm}>{children}</HeldWhileStale></div>
+        {footer && <div inert={held || undefined} style={held ? { pointerEvents: "none", opacity: 0.5 } : undefined} className="ui-panel-foot shrink-0 border-t border-border/60 bg-secondary/30 px-5 sm:px-6 py-4">{footer}</div>}
       </SheetContent>
     </Sheet>
   );

@@ -1,4 +1,4 @@
-import { collectionsLoaded, type DB } from "./db";
+import { collectionsFresh, type DB } from "./db";
 import { CHECKING } from "./actionHints";
 import type { LazyCol } from "./pageData";
 
@@ -19,7 +19,7 @@ export const LOCKER_DELETE_COLS: readonly string[] = [...LOCKER_REF_COLS, "expen
  * read would load them with a warning); `complete` says whether that was all.
  */
 export function lockerUsage(db: DB, id: string): { count: number; complete: boolean } {
-  const has = (c: string) => collectionsLoaded([c]);
+  const has = (c: string) => collectionsFresh([c]);
   let count = 0;
   if (has("lockerTransactions")) count += (db.lockerTransactions ?? []).filter(t => t.lockerId === id || t.pairedLockerId === id).length;
   if (has("clientReceipts")) count += (db.clientReceipts ?? []).filter(r => r.lockerId === id).length;
@@ -42,6 +42,6 @@ export function lockerUsage(db: DB, id: string): { count: number; complete: bool
 export function lockerDeleteBlock(db: DB, id: string): string | undefined {
   const { count } = lockerUsage(db, id);
   if (count > 0) return `Has ${count} entr${count === 1 ? "y" : "ies"} — deactivate instead`;
-  if (!collectionsLoaded(["expenses"])) return CHECKING;
+  if (!collectionsFresh(["expenses"])) return CHECKING;
   return undefined;
 }

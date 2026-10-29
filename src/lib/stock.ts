@@ -21,6 +21,7 @@ import { db as fsdb } from "./firebase";
 import { ensureCollections, loadDb, uid, type StockMovement, type MaterialKey } from "./db";
 import { ensureBag } from "./diamondBags";
 import { lotParts } from "./diamondLots";
+import { assertFresh } from "./db";
 
 const STOCK_COL = "stockLevels";
 const MAIN_DOC = "current";
@@ -148,6 +149,8 @@ export async function increaseStock(args: {
   lot?: StockMovement["lot"];
   pieces?: number;
 }): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   // Each material its own map, keyed by the material itself.
   const field = args.material;
   // setDoc+merge (not updateDoc) so the very first stock purchase on a fresh
@@ -198,6 +201,8 @@ export async function decreaseStock(args: {
   lot?: StockMovement["lot"];
   pieces?: number;
 }): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const field = args.material;
   const movementId = uid("sm_");
 
@@ -272,6 +277,8 @@ export async function logOrderDirectPurchase(args: {
   lot?: StockMovement["lot"];
   pieces?: number;
 }): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const now = args.createdAt ?? new Date().toISOString();
   const co = args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {};
   await Promise.all([
@@ -302,6 +309,8 @@ export async function decreaseStockSelfHealing(
   args: Parameters<typeof decreaseStock>[0],
   movements: StockMovement[],
 ): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   try {
     await decreaseStock(args);
   } catch (e) {
@@ -331,6 +340,8 @@ export async function adjustStockCounter(args: {
   /** Positive adds, negative takes away. */
   delta: number;
 }, movements: StockMovement[]): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const field = args.material;
   const delta = Math.round(args.delta * 1000) / 1000;
   if (!delta) return;
@@ -386,6 +397,8 @@ export async function transferStock(args: {
   createdBy: string;
   note?: string;
 }): Promise<string> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   if (args.fromCompany === args.toCompany) throw new Error("Choose two different companies.");
   const refId = uid("tr_");
   const what = `${args.quantity} ${args.purityOrQuality}`;
@@ -411,6 +424,8 @@ export async function transferStock(args: {
  * reconciliation) in case of any drift, never called automatically.
  */
 export async function recomputeStockFromHistory(movements: StockMovement[], companyId?: string): Promise<StockLevels> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   // Safety: this OVERWRITES the whole stockLevels doc. If the caller hands us an
   // empty history (movements not loaded yet / a stale cache), rebuilding from it
   // would zero out real stock. Refuse and return what's stored instead.

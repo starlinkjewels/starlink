@@ -1,5 +1,5 @@
 import { toast } from "sonner";
-import { collectionsLoaded, loadDb, updateDb, type DB, type User } from "./db";
+import { collectionsFresh, loadDb, updateDb, type DB, type User } from "./db";
 import { isAdminEmail } from "./firebase";
 import { confirmBox } from "./confirm";
 import { CHECKING, STILL_LOADING, recordsReady } from "./actionHints";
@@ -26,7 +26,7 @@ export function employeeDeleteBlock(db: DB, u: User): string | undefined {
   const clients = db.clients.filter(c => c.accountManagerId === u.id).length;
   const assigned = [orders && plural(orders, "order"), clients && plural(clients, "client")].filter(Boolean);
   if (assigned.length) return `Assigned to ${assigned.join(" / ")} — deactivate instead`;
-  if (!collectionsLoaded(EMPLOYEE_REF_COLS)) return CHECKING;
+  if (!collectionsFresh(EMPLOYEE_REF_COLS)) return CHECKING;
   const paid = (db.expenses ?? []).filter(e => e.paidToEmployeeId === u.id).length;
   if (paid) return `Has ${plural(paid, "salary payment")} — deactivate instead`;
   return undefined;

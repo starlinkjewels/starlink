@@ -9,6 +9,7 @@ import { Send, ArrowLeft, Trash2, Check, CheckCheck } from "lucide-react";
 import { confirmBox } from "@/lib/confirm";
 import { notifyUsers } from "@/lib/notify";
 import { PageHeader } from "@/components/PageHeader";
+import { useDataFresh } from "@/hooks/useDataFresh";
 
 /** How many messages a conversation opens with; scrolling up brings this many more. */
 const PAGE = 20;
@@ -89,15 +90,16 @@ export function MessagesPage() {
     return () => document.removeEventListener("visibilitychange", h);
   }, []);
   const unreadHere = thread.filter(m => m.toUserId === me && !m.read).map(m => m.id).join(",");
+  const fresh = useDataFresh();
   useEffect(() => {
-    if (!threadOnScreen || !inView || !unreadHere || !selectedContact) return;
+    if (!fresh || !threadOnScreen || !inView || !unreadHere || !selectedContact) return;
     const ids = new Set(unreadHere.split(","));
     const alertTitle = `Message from ${selectedContact.name}`;
     updateDb(d => {
       d.messages.forEach(m => { if (ids.has(m.id)) m.read = true; });
       d.notifications.forEach(n => { if (n.userId === me && !n.read && n.type === "message" && n.title === alertTitle) n.read = true; });
     });
-  }, [threadOnScreen, inView, unreadHere, selectedContact, me]);
+  }, [fresh, threadOnScreen, inView, unreadHere, selectedContact, me]);
 
   const send = () => {
     if (!text.trim() || !selected) return;

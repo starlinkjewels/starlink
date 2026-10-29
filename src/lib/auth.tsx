@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { auth, isAdminEmail, clearDeviceCache } from "./firebase";
 import { useBrand, brandName, BUILTIN } from "./brand";
-import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, type User } from "./db";
+import { loadDb, updateDb, uid, startDb, stopDb, resolveScope, watchAccess, logEvent, dataFresh, whenFresh, reloadWhenIdle, type User } from "./db";
 import { sendMail, MARKETING_EMAIL, clientLoginEmail } from "./email";
 
 interface AuthCtx {
@@ -105,11 +105,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (existing) {
         if (existing.authUid !== fb.uid || existing.role !== "admin" || existing.status !== "active") {
           const id = existing.id;
-          updateDb(d => { const a = d.users.find(x => x.id === id); if (a) { a.authUid = fb.uid; a.role = "admin"; a.status = "active"; } });
+          // Written from the server's answer only; until then this tab just treats them as the admin they are.
+          if (dataFresh()) updateDb(d => { const a = d.users.find(x => x.id === id); if (a) { a.authUid = fb.uid; a.role = "admin"; a.status = "active"; } });
           return { ...existing, authUid: fb.uid, role: "admin", status: "active" };
         }
         return existing;
       }
+      // Not in the saved copy: never created from it (handleAuth waits for the server first).
+      if (!dataFresh()) return null;
       const admin: User = {
         id: uid("u_"), authUid: fb.uid, role: "admin", status: "active",
         username: fb.email ?? "admin", name: fb.displayName || "Administrator",
@@ -164,6 +167,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // recognise exactly the same two, so the app and the server agree.
     if (scope.kind === "full") scope = { ...scope, admin: isAdminEmail(fb.email) || !!scope.admin };
     await startDb(scope);                      // load Firestore data (now authenticated)
+    // Opened from this device's saved copy: someone it doesn't hold (a new
+    // account) is looked for again once the server has answered.
+    if (!dataFresh() && !loadDb().users.some(u => u.authUid === fb.uid)) await whenFresh();
     const profile = resolveProfile(fb);
     if (!profile) {
       toast.error("This account has no access. Contact your administrator.");
@@ -180,8 +186,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     setUser(profile);
-    alertClientActive(profile, typedSignInRef.current ? "signed in" : "opened the app");
+    // An alert written to the database — from the server's answer, not the saved copy.
+    const how = typedSignInRef.current ? "signed in" : "opened the app";
+    void whenFresh().then(() => alertClientActive(profile, how)).catch(() => {});
     typedSignInRef.current = false;
+    // Let in from the saved copy: looked at again with the server's answer —
+    // removed or made inactive since this device last synced is signed out, as
+    // at sign-in; a changed role starts the app again with it.
+    if (!dataFresh()) void whenFresh().then(() => {
+      if (auth.currentUser?.uid !== fb.uid) return;
+      const again = resolveProfile(fb);
+      if (again && again.status === "active") { if (again.role !== profile.role) reloadWhenIdle(); return; }
+      const msg = again ? "Your account is inactive. Contact your administrator." : "This account has no access. Contact your administrator.";
+      toast.error(msg);
+      noteAfterReload(msg);
+      signOut(auth).catch(() => {});
+    }).catch(() => {});
     // Auto-logout the instant an admin deactivates or removes this account.
     if (profile.role !== "admin") {
       accessUnsubRef.current = watchAccess(fb.uid, () => {

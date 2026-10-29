@@ -17,7 +17,7 @@
 //     Profit & Loss report shows the sales, their cost, brokerage and profit.
 // Deleting a sale undoes all of it: every line back in stock, its money removed.
 import type { DB, MaterialKey, SupplierSale, SupplierSaleLine, User } from "./db";
-import { loadDb, updateDb, uid } from "./db";
+import { assertFresh, loadDb, updateDb, uid } from "./db";
 import { doc, runTransaction } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
 import { decreaseStockSelfHealing, increaseStock } from "./stock";
@@ -131,6 +131,8 @@ export function saleProblem(db: DB, s: SupplierSaleInput): string | null {
  * sale, the stones, the pieces and the money in one save.
  */
 export async function recordSupplierSale(db: DB, s: SupplierSaleInput, user: Pick<User, "id" | "name" | "role">): Promise<SupplierSale> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   const problem = saleProblem(db, s);
   if (problem) throw new Error(problem);
   const supplier = db.suppliers.find(x => x.id === s.supplierId);
@@ -260,6 +262,8 @@ const undoing = new Set<string>();
 
 /** Delete a sale: every line back in stock, its money removed, the account as before. */
 export async function undoSupplierSale(db: DB, sale: SupplierSale, user: Pick<User, "id" | "name" | "role">): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
   void db;
   if (undoing.has(sale.id)) throw new Error("Already being deleted");
   // As it is now — not as the screen last drew it (it may be gone already).

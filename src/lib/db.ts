@@ -29,7 +29,7 @@ import {
   type DocumentSnapshot,
 } from "firebase/firestore";
 import { LAZY_COLS } from "./pageData";
-import { db as fsdb, auth as fbAuth, isAdminEmail } from "./firebase";
+import { db as fsdb, auth as fbAuth, isAdminEmail, deviceCacheActive } from "./firebase";
 import { describeChanges, summarise, undoBlocker, type ActivityEntry, type ActivityKind } from "./activityFormat";
 import { moduleForPath } from "./modules";
 import { reachOf, type AccessDoc } from "./permissions";
@@ -2859,6 +2859,92 @@ let adminScope = false;
 const loadedCols = new Set<string>();
 
 /**
+ * Collections showing this device's saved copy until the server's answer
+ * replaces it — so the app opens at once, as WhatsApp does, instead of waiting
+ * a few seconds for the server on every open. Usually a second or two.
+ *
+ * Nothing is saved meanwhile: this app writes whole records, and one edited
+ * from an older copy would be written over newer work. updateDb() refuses
+ * (StaleDataError — "try again in a moment"), what changes data by itself waits
+ * for whenFresh(), and the checks before a delete or a cancel wait for the
+ * server's answer (collectionsReady), never the saved copy.
+ */
+const staleCols = new Set<string>();
+const freshWaiters = new Set<() => void>();
+export class StaleDataError extends Error {
+  constructor() { super("Still getting the latest — try again in a moment"); this.name = "StaleDataError"; }
+}
+/** Whether everything on screen is the server's answer (true once nothing is showing a saved copy). */
+export function dataFresh(): boolean { return staleCols.size === 0; }
+/** Refuses (StaleDataError) while the saved copy is on screen — every write starts with this. */
+export function assertFresh(): void { if (staleCols.size > 0) throw new StaleDataError(); }
+/** Resolves once nothing is showing the saved copy any more. */
+export function whenFresh(): Promise<void> {
+  if (!staleCols.size) return Promise.resolve();
+  return new Promise(res => {
+    const w = () => { if (!staleCols.size) { freshWaiters.delete(w); res(); } };
+    freshWaiters.add(w);
+  });
+}
+/**
+ * Only the opening shows the saved copy. Once everything on screen is the
+ * server's answer, it stays that way for the session: a list a page asks for
+ * later waits for the server, as before — so the app never goes back to
+ * refusing saves halfway through something (a cancel putting stock back, a
+ * sale taking it out).
+ */
+let staleWindowOver = false;
+/** Marks a list as showing its saved copy — false once the opening is over (wait for the server). */
+function markStale(label: string): boolean {
+  if (staleWindowOver) return false;
+  if (staleCols.has(label)) return true;
+  staleCols.add(label);
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-db-stale", { detail: staleCols.size }));
+  return true;
+}
+/** The server's answer (or offline, the saved copy accepted): applied as fresh, then the news goes out. */
+function freshen(label: string, apply?: () => void) {
+  const was = staleCols.delete(label);
+  apply?.();
+  if (!was) return;
+  if (staleCols.size === 0) staleWindowOver = true;
+  freshWaiters.forEach(w => w());
+  loadWaiters.forEach(w => w());
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("starlink-db-stale", { detail: staleCols.size }));
+}
+/** A listener the server refused while its saved copy was on screen: the copy is dropped
+ *  (as before — nothing from it), and saving is not held up for good. */
+function dropStale(label: string, clear: () => void) {
+  if (staleCols.has(label)) freshen(label, clear);
+}
+/**
+ * Whether a saved-copy snapshot is worth showing. One with something in it, yes.
+ * An empty one is ambiguous — nothing there, or never fetched on this device (a
+ * first sign-in) — so it counts only for a list this device has had the
+ * server's answer for before ("sl-synced", wiped with the saved copy at
+ * sign-out); otherwise the server is waited for, as before.
+ */
+function hasContent(label: string, snap: unknown): boolean {
+  const q = snap as { docs?: unknown[]; exists?: () => boolean };
+  if (Array.isArray(q.docs) ? q.docs.length > 0 : typeof q.exists === "function" && q.exists()) return true;
+  return deviceCacheActive() && syncedLabels().has(label);
+}
+const SYNCED_KEY = "sl-synced";
+let synced: Set<string> | null = null;
+function syncedLabels(): Set<string> {
+  if (!synced) {
+    try { synced = new Set(JSON.parse(localStorage.getItem(SYNCED_KEY) || "[]") as string[]); } catch { synced = new Set(); }
+  }
+  return synced;
+}
+function noteSynced(label: string) {
+  const s = syncedLabels();
+  if (s.has(label)) return;
+  s.add(label);
+  try { localStorage.setItem(SYNCED_KEY, JSON.stringify([...s])); } catch { /* private mode */ }
+}
+
+/**
  * Whether everything a cost is worked out from has arrived.
  *
  * Only the people, clients and orders hold the door when the app opens; the
@@ -3056,14 +3142,23 @@ export function collectionsLoaded(cols: readonly string[]): boolean {
  * ("Still loading — try again in a moment") rather than guess.
  */
 export async function collectionsReady(cols: readonly string[], ms = 15000): Promise<boolean> {
-  if (collectionsLoaded(cols)) return true;
+  if (collectionsFresh(cols)) return true;
   let timer: ReturnType<typeof setTimeout> | undefined;
   await Promise.race([
-    ensureCollections(cols),
+    // Here, then the server's own answer — a check is never made on the saved copy.
+    ensureCollections(cols).then(() => new Promise<void>(res => {
+      const w = () => { if (collectionsFresh(cols)) { loadWaiters.delete(w); res(); } };
+      loadWaiters.add(w); w();
+    })),
     new Promise<void>(res => { timer = setTimeout(res, ms); }),
   ]);
   if (timer) clearTimeout(timer);
-  return collectionsLoaded(cols);
+  return collectionsFresh(cols);
+}
+/** Loaded, and the server's answer — not the device's saved copy. */
+export function collectionsFresh(cols: readonly string[]): boolean {
+  // A client's messages come in two halves: "messages(from)", "messages(to)".
+  return cols.every(c => loadedCols.has(c) && ![...staleCols].some(s => s === c || s.startsWith(c + "(")));
 }
 
 /* ── Totals kept by the server (functions/src/summaries.ts), read-only ── */
@@ -3169,6 +3264,8 @@ export function dropStoredClientPasswords(): number {
 }
 
 export function updateDb(fn: (db: DB) => void) {
+  // Never from the device's saved copy — see staleCols. Refused before anything changes.
+  assertFresh();
   const before = idsByCol();
   fn(lazyMode ? guarded(cache, true) : cache);
   markIntentionalRemovals(before); // whatever the mutator removed is a real delete
@@ -3264,7 +3361,45 @@ export async function resolveScope(authUid: string): Promise<Scope> {
     const r = rememberedScope(authUid);
     if (r) return r;
   }
+  // Opened again: the role this account had last time, at once, and the
+  // server asked behind it — if it has changed (made admin, made a client…),
+  // the app starts again with the new one. The security rules decide what can
+  // be read either way; this only saves a wait on every open.
+  const remembered = rememberedScope(authUid);
+  if (remembered) {
+    void readScope(authUid).then(now => {
+      if (now === null || JSON.stringify(now) === JSON.stringify(remembered)) return;
+      if (now === "missing") { try { localStorage.removeItem(SCOPE_KEY(authUid)); } catch { /* private mode */ } }
+      console.warn("[db] this account's role has changed — starting again with it");
+      reloadWhenIdle();
+    });
+    return remembered;
+  }
   return resolveScopeOnline(authUid);
+}
+/**
+ * Start the app again — once nothing has been saving for a few seconds, so a
+ * reload never lands between the steps of something (stock taken out, its
+ * record not yet written).
+ */
+export function reloadWhenIdle(quietMs = 3000): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const arm = () => {
+    clearTimeout(timer);
+    if (pendingWrites() === 0) timer = setTimeout(() => { if (pendingWrites() === 0) window.location.reload(); else arm(); }, quietMs);
+  };
+  window.addEventListener("starlink-db-pending", arm);
+  arm();
+}
+/** The account's role from the server, remembered for next time — "missing" when it has none, null when it can't be read. */
+async function readScope(authUid: string): Promise<Scope | "missing" | null> {
+  try {
+    const s = await getDoc(doc(fsdb, INDEX_COL, authUid));
+    if (!s.exists()) return "missing";
+    const scope = scopeOfIndex(s.data() as IndexDoc);
+    try { localStorage.setItem(SCOPE_KEY(authUid), JSON.stringify(scope)); } catch { /* private mode */ }
+    return scope;
+  } catch { return null; }
 }
 function scopeOfIndex(d: IndexDoc): Scope {
   if (d.role === "client" && d.clientId) return { kind: "client", appId: d.appId, clientId: d.clientId };
@@ -3328,14 +3463,21 @@ export function startDb(scope: Scope = { kind: "full" }): Promise<void> {
   if (startPromise) return startPromise;
   startPromise = (async () => {
     await subscribeAll(scope);
-    if (scope.kind === "full" && scope.admin) await reconcileRoleIndex();
-    // Legacy localStorage migration only runs for staff (admin) sessions.
-    if (scope.kind === "full") {
-      const legacy = readLegacy();
-      if (legacy && legacy.users.length > 0) { await ensureAllCollections(); await migrateLegacy(legacy); }
-    }
     seeded = true;
     emit();
+    // These write — so only from the server's answer, never the saved copy the
+    // app may be showing for its first second or two. They hold nothing up.
+    const gen = subGeneration;
+    void (async () => {
+      await whenFresh();
+      if (gen !== subGeneration) return;
+      if (scope.kind === "full" && scope.admin) await reconcileRoleIndex();
+      // Legacy localStorage migration only runs for staff (admin) sessions.
+      if (scope.kind === "full") {
+        const legacy = readLegacy();
+        if (legacy && legacy.users.length > 0) { await ensureAllCollections(); await migrateLegacy(legacy); }
+      }
+    })().catch(e => console.error("[db] after-open checks failed:", e));
   })();
   return startPromise;
 }
@@ -3356,6 +3498,9 @@ export function stopDb() {
   lazyAttached.clear();
   lazyWanted.clear();
   loadWaiters.clear();
+  staleCols.clear();
+  staleWindowOver = false;
+  freshWaiters.clear();
   summaryMap = new Map();
   summariesOn = false;
   summariesDone = false;
@@ -3379,7 +3524,8 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
     );
   (cache[col] as unknown) = list;
   (remote[col] as unknown) = clean(list);
-  if (col === "users" && !idxSeeded) {
+  // Seeded from the server's answer, never the device's saved copy.
+  if (col === "users" && !idxSeeded && !staleCols.has("users")) {
     for (const u of cache.users) if (u.authUid) remoteIdx[u.authUid] = JSON.stringify(indexOf(u));
     idxSeeded = true;
   }
@@ -3387,15 +3533,17 @@ function applyList(col: ArrayCol, docs: Record<string, unknown>[]) {
 
 /**
  * With the device cache on (lib/firebase.ts), a listener first answers from
- * the copy saved on this device — which can be hours old. This app saves whole
- * records, so showing that copy and letting someone edit it could write stale
- * data over newer work. So the first answer taken is the SERVER's, exactly as
- * before the cache existed; the saved copy only means the server has less to
- * send. Once the server has answered, every later update is taken as it comes.
+ * the copy saved on this device — which can be hours old. It is SHOWN at once
+ * (the app opens in a second instead of waiting on the server every time), but
+ * marked stale: nothing is saved until the server's answer has replaced it —
+ * this app saves whole records, and one edited from an older copy would be
+ * written over newer work (see staleCols, updateDb). An empty saved copy (a
+ * first sign-in on this device) waits for the server, as before. Once the
+ * server has answered, every later update is taken as it comes.
  *
- * Offline there is no server answer at all. Rather than never opening, the
- * saved copy is taken after OFFLINE_FALLBACK_MS — only while the device
- * reports itself offline; a slow connection keeps waiting for the server.
+ * Offline there is no server answer at all. Rather than never letting anyone
+ * work, the saved copy is accepted after OFFLINE_FALLBACK_MS — only while the
+ * device reports itself offline; a slow connection keeps waiting for the server.
  */
 const OFFLINE_FALLBACK_MS = 12_000;
 function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: string, onData: (s: S) => void): (s: S) => void {
@@ -3409,7 +3557,8 @@ function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: stri
       if (typeof navigator !== "undefined" && navigator.onLine === false) {
         console.warn(`[db] ${label}: offline — opening this device's saved copy until the server answers`);
         live = true;
-        onData(cached);
+        const c = cached;
+        freshen(label, () => onData(c));
       } else arm();
     }, OFFLINE_FALLBACK_MS);
   };
@@ -3426,10 +3575,13 @@ function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: stri
     if (!snap.metadata.fromCache) {
       live = true;
       if (timer) { clearTimeout(timer); timer = null; }
-      onData(snap);
+      freshen(label, () => onData(snap));
+      noteSynced(label);
       return;
     }
     cached = snap;
+    // The saved copy, on screen at once — held back from saving until the server answers.
+    if (hasContent(label, snap) && markStale(label)) onData(snap);
     // The device says it is offline: no server can answer, so waiting only
     // keeps the app on its splash screen. Use the saved copy now; the server's
     // answer replaces it the moment the connection is back.
@@ -3437,7 +3589,7 @@ function serverFirst<S extends { metadata: { fromCache: boolean } }>(label: stri
       console.warn(`[db] ${label}: offline — opening this device's saved copy until the server answers`);
       live = true;
       if (timer) { clearTimeout(timer); timer = null; }
-      onData(snap);
+      freshen(label, () => onData(snap));
       return;
     }
     if (!timer) arm();
@@ -3465,6 +3617,8 @@ function subscribeAll(scope: Scope): Promise<void> {
   rolesStoreLive = false;
   adminScope = amAdminScope;
   loadedCols.clear();
+  staleCols.clear();
+  staleWindowOver = false;
   lazyMode = !client;
   lazySpecs.clear();
   lazyAttached.clear();
@@ -3569,7 +3723,7 @@ function subscribeAll(scope: Scope): Promise<void> {
   let restAttach: (() => void) | null = null;
 
   return new Promise((resolve) => {
-    let opened = false;
+    let opened = false, finished = false;
     const first = (name: string) => {
       pending.delete(name);
       corePending.delete(name);
@@ -3579,6 +3733,8 @@ function subscribeAll(scope: Scope): Promise<void> {
       // behind it and refreshes the screen as it does.
       if (!opened && corePending.size === 0) {
         opened = true;
+        // Opened straight from the server: nothing more is shown from the saved copy.
+        if (staleCols.size === 0) staleWindowOver = true;
         seeded = true;
         const ms = Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - t0);
         startup.openedMs = ms;
@@ -3590,7 +3746,9 @@ function subscribeAll(scope: Scope): Promise<void> {
         restAttach = null;
         if (go) setTimeout(() => { if (gen === subGeneration) go(); }, 0);
       }
-      if (pending.size === 0) {
+      // Once — every later answer (the saved copy, then the server's) comes through here too.
+      if (pending.size === 0 && !finished) {
+        finished = true;
         const total = timing.length ? Math.max(...timing.map((t) => t.ms)) : 0;
         const docs = timing.reduce((s, t) => s + t.docs, 0);
         if (!startup.loadedMs) startup.loadedMs = total;
@@ -3633,6 +3791,7 @@ function subscribeAll(scope: Scope): Promise<void> {
             console.error(`[db] listener ${col} failed:`, err);
             if (col === "adminRecords") adminStoreLive = false;
             if (col === "roles") rolesStoreLive = false;
+            dropStale(col, () => applyList(col, []));
             first(col);
           },
         ),
@@ -3664,6 +3823,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         if (seeded) emit();
       }), (err) => {
         console.warn("[db] server totals not available:", err?.message ?? err);
+        dropStale("summaries", () => { summaryMap = new Map(); });
         summariesOn = false;
         summariesDone = true;
         emit();
@@ -3673,7 +3833,10 @@ function subscribeAll(scope: Scope): Promise<void> {
     const core = specs.filter((s) => corePending.has(s.col));
     const rest = specs.filter((s) => !corePending.has(s.col));
     core.forEach(attach);
-    const attachRest = () => { rest.forEach(attach); attachSummaries(); };
+    // The server's totals are small and read-only: with the core, so a page
+    // drawn from them (the Dashboard) does not wait behind everything else.
+    attachSummaries();
+    const attachRest = () => { rest.forEach(attach); };
     if (core.length === 0) attachRest();
     else restAttach = attachRest;
 
@@ -3709,6 +3872,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           }),
           (err) => {
             console.error("[db] listener messages(from) failed:", err);
+            dropStale("messages(from)", () => { fromMsgs = []; apply(); });
             firedFrom = true;
             doneMsg();
           },
@@ -3729,6 +3893,7 @@ function subscribeAll(scope: Scope): Promise<void> {
           }),
           (err) => {
             console.error("[db] listener messages(to) failed:", err);
+            dropStale("messages(to)", () => { toMsgs = []; apply(); });
             firedTo = true;
             doneMsg();
           },
@@ -3740,7 +3905,7 @@ function subscribeAll(scope: Scope): Promise<void> {
       onSnapshot(
         doc(fsdb, SETTINGS_COL, SETTINGS_DOC),
         LISTEN,
-        serverFirst<DocumentSnapshot<DocumentData>>("settings", (snap) => {
+        serverFirst<DocumentSnapshot<DocumentData>>(SETTINGS_COL, (snap) => {
           if (writePending[SETTINGS_COL]) {
             first(SETTINGS_COL);
             return;
@@ -3754,6 +3919,7 @@ function subscribeAll(scope: Scope): Promise<void> {
         }),
         (err) => {
           console.error("[db] listener settings failed:", err);
+          dropStale(SETTINGS_COL, () => { cache.settings = defaultSettings(); remote.settings = clean(cache.settings); });
           first(SETTINGS_COL);
         },
       ),

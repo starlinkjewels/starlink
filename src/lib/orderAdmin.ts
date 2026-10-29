@@ -15,7 +15,7 @@
 // Change client: only while nothing hangs on the order yet — no money, no
 // bill — so no statement is left pointing at the wrong client.
 import { toast } from "sonner";
-import { collectionsLoaded, findInvoiceForOrder, flush, loadDb, updateDbAs, orderIsDispatched, fmtMoney, type DB, type Order, type User } from "./db";
+import { collectionsFresh, findInvoiceForOrder, flush, loadDb, updateDbAs, orderIsDispatched, fmtMoney, type DB, type Order, type User } from "./db";
 import { cancelOrder, usedOnUndo } from "./orderCancel";
 import { materialName, materialUnit } from "./materials";
 import { lotLabel } from "./diamondLots";
@@ -69,7 +69,7 @@ function deleteStopper(db: DB, o: Order): string | undefined {
 /** Why this order can't be deleted; undefined when it can. Admin only. */
 export function orderDeleteBlocker(db: DB, user: Pick<User, "role"> | null | undefined, o: Order): string | undefined {
   if (user?.role !== "admin") return "Only the admin can delete an order";
-  if (!collectionsLoaded(ORDER_ADMIN_COLS)) return CHECKING;
+  if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
   return deleteStopper(db, o);
 }
 
@@ -191,7 +191,7 @@ export async function restoreOrderFlow(orderId: string, user: Pick<User, "role">
 
 /** Why this order can't move to another client now; undefined when it can. */
 export function clientChangeBlocker(db: DB, o: Order): string | undefined {
-  if (!collectionsLoaded(ORDER_ADMIN_COLS)) return CHECKING;
+  if (!collectionsFresh(ORDER_ADMIN_COLS)) return CHECKING;
   if ((o.advances ?? []).length) return "It has a payment from this client — delete it first, then record it under the right client";
   const inv = findInvoiceForOrder(db.invoices ?? [], o.id);
   if (inv) return `It is on invoice ${inv.number} — delete the invoice first`;

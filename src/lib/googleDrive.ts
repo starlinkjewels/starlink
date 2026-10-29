@@ -12,7 +12,7 @@
 // Scope is drive.file — the app can only ever see and touch files it created
 // itself, never the rest of the account's Drive. That is also why Google's
 // verification for it is light.
-import { loadDb, ensureAllCollections } from "./db";
+import { loadDb, ensureAllCollections, whenFresh } from "./db";
 
 // drive.file is the narrow one: only files this app creates itself. "email"
 // is asked for alongside it purely so the card can name the account that got
@@ -245,6 +245,8 @@ export async function backupToDrive(interactive = false): Promise<string> {
   const name = `starlink-backup-${stamp}.json`;
   // Every record loaded first — see createBackup() in backup.ts.
   await ensureAllCollections();
+  // ...and the server's answer for them, never this device's saved copy.
+  await whenFresh();
 
   // Multipart: the metadata and the file in one request.
   const boundary = `sl${Math.random().toString(36).slice(2)}`;
