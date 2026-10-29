@@ -1565,13 +1565,19 @@ export function CatalogPage() {
       const files = all
         .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
         .map((it) => ({ url: it.data, filename: `${sub(it.folderId)}${downloadName(it)}` }));
-      const { added, failed } = await downloadAsZip(files, folder.name, (done, total) =>
+      const { added, failed, parts } = await downloadAsZip(files, folder.name, (done, total) =>
         toast.loading(`Downloading ${folder.name} — ${done} of ${total}`, { id: t }), !isAdmin);
+      // A big folder comes as several zips — say so, so none is missed (the browser may ask to allow them).
+      const inParts = parts > 1 ? ` in ${parts} zips (part 1, part 2…)` : "";
       if (!added) toast.error(`Couldn't download ${folder.name}`, { id: t });
-      else if (failed.length) toast.warning(`${added} of ${files.length} downloaded — ${failed.length} couldn't be fetched`, { id: t });
-      else toast.success(`${folder.name} downloaded — ${added} file${added !== 1 ? "s" : ""}`, { id: t });
+      else if (failed.length) toast.warning(`${added} of ${files.length} downloaded${inParts} — ${failed.length} couldn't be fetched`, { id: t });
+      else toast.success(`${folder.name} downloaded — ${added} file${added !== 1 ? "s" : ""}${inParts}`, { id: t, duration: parts > 1 ? 10000 : undefined });
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : `Couldn't download ${folder.name}`, { id: t });
+      // Out of the browser's memory even for one part: say what to do rather than its own words.
+      const msg = e instanceof Error ? e.message : "";
+      toast.error(/blob|memory|allocation|quota/i.test(msg)
+        ? `${folder.name} is too big to download in one go here — download its sub-folders one by one`
+        : `Couldn't download ${folder.name}${msg ? ` — ${msg}` : ""}`, { id: t });
     } finally { setDownloadingId(null); }
   }
   // Staff: what can be done to one folder — each greyed with the reason when
