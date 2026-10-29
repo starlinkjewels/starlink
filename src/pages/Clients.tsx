@@ -491,12 +491,12 @@ export function ClientsPage() {
       {view === "grid" && (
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
               <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search clients..." aria-label="Search clients..." className="h-9 pl-9 rounded-xl bg-white" />
             </div>
             {filters.length > 0 && <FiltersButton filters={filters} onClear={clearFilters} count={countText} />}
-            <span className="ml-auto text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}</span>
+            <span className="ml-auto" aria-hidden />
           </div>
           <FilterChips filters={filters} onClear={clearFilters} />
         </div>

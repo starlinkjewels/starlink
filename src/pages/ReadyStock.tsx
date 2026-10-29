@@ -28,7 +28,7 @@ import { CompanyBadge, useMultiCo, useDefaultCompany } from "@/components/Compan
 import { companiesOf, companyOf, companyIdOfClient } from "@/lib/companies";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
-import { ExportMenu, FilterChips, FiltersButton, StatStrip, type TableExport, type TableFilter } from "@/components/TableToolbar";
+import { ExportMenu, FilterChips, FiltersButton, StatStrip, useNarrow, type TableExport, type TableFilter } from "@/components/TableToolbar";
 import { MoveOfficeDialog, OfficesDialog, OfficeChip } from "@/components/ReadyStockOffices";
 import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
@@ -318,6 +318,8 @@ export function ReadyStockPage() {
   const clearFilters = () => { setCoSel("all"); setAvail("all"); setPage(1); };
   const onSearch = (v: string) => { setQ(v); setPage(1); };
   const searchHint = "Search name or SKU — SKU-1, SKU-2";
+  // A phone: just "Search…" in the box — the hint was cut off beside the buttons (it stays as its name).
+  const narrowScreen = useNarrow();
   const which = chosen.length ? `The ${chosen.length} selected` : `The ${items.length} shown`;
   const listPdf = async () => {
     const t = toast.loading(`Making the PDF — ${exportItems.length} item${exportItems.length !== 1 ? "s" : ""} with photos…`);
@@ -408,9 +410,9 @@ export function ReadyStockPage() {
       {view === "grid" && (
         <div className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+            <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
               <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-              <input value={q} onChange={e => onSearch(e.target.value)} placeholder={searchHint} aria-label={searchHint}
+              <input value={q} onChange={e => onSearch(e.target.value)} placeholder={narrowScreen ? "Search…" : searchHint} aria-label={searchHint}
                 className="h-9 w-full rounded-xl border border-border bg-white pl-9 pr-8 text-sm placeholder:text-muted-foreground/80 focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary/40" />
               {q && (
                 <button type="button" onClick={() => onSearch("")} aria-label="Clear search"
@@ -419,7 +421,7 @@ export function ReadyStockPage() {
             </div>
             <FiltersButton filters={filters} onClear={clearFilters} count={countText} />
             <div className="ml-auto flex items-center gap-2">
-              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{countText}{chosen.length ? ` · ${chosen.length} ticked` : ""}</span>
+              {chosen.length > 0 && <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">{chosen.length} ticked</span>}
               {mayExport && <ExportMenu exports={exports} scope={`${which}${chosen.length ? "" : (q || coSel !== "all" || avail !== "all" ? ", as filtered" : "")}`} />}
             </div>
           </div>

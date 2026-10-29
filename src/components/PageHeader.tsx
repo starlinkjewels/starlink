@@ -58,6 +58,14 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
   const crumb = back ? back.label.replace(/^back to\s+/i, "") : "";
   // A bare "Back" names no place — that page keeps its plain back link.
   const trail = studio && !!back && !/^back$/i.test(crumb);
+  // The main button (or its named group), placed where the screen size wants it.
+  const renderPrimary = (cls: string) => !primary ? null : "items" in primary
+    ? <MoreMenu button={{ label: primary.label, icon: primary.icon, primary: true }} actions={primary.items} className={`ui-primary ${tight} ${cls}`} />
+    : (
+      <Button onClick={primary.onClick} disabled={primary.disabled} title={primary.title} className={`ui-primary btn-hero h-10 rounded-xl px-4 gap-2 ${tight} ${cls}`}>
+        {primary.icon && <primary.icon className="h-4 w-4" />}{primary.label}
+      </Button>
+    );
   return (
     <header className="space-y-2">
       {back && trail && (
@@ -73,33 +81,42 @@ export function PageHeader({ title, subtitle, info, back, eyebrow, primary, seco
           ? <Link to={back.to} className="ui-back inline-flex items-center gap-1.5 min-h-10 -my-2.5 pr-2 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />{back.label}</Link>
           : <button type="button" onClick={back.onClick} className="ui-back inline-flex items-center gap-1.5 min-h-10 -my-2.5 pr-2 text-sm text-muted-foreground hover:text-foreground -ml-0.5"><ArrowLeft className="h-4 w-4" />{back.label}</button>
       )}
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3">
-        <div className="min-w-0 flex-[1_1_16rem]">
+      {/* On a phone the page's buttons sit at the top right, beside the title (as in any
+          app) — the title wraps onto a second line rather than pushing them onto a row of
+          their own under it. On a computer, as before. The main button: floating above the
+          tab bar in the new look; in the classic look, a full-width row under the title. */}
+      <div className="flex max-sm:flex-nowrap flex-wrap items-start justify-between gap-x-3 sm:gap-x-4 gap-y-3">
+        <div className="min-w-0 max-sm:flex-1 sm:flex-[1_1_16rem]">
           {eyebrow && <div className="text-xs text-muted-foreground mb-1">{eyebrow}</div>}
-          <h1 className="ui-page-title font-display text-[26px] sm:text-[30px] leading-[1.15] text-brand-dark [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{title}{info && <span className="ml-2 align-middle"><InfoTip text={info} /></span>}</h1>
-          {subtitle && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{subtitle}</p>}
-          {children}
+          <h1 className="ui-page-title font-display text-[23px] sm:text-[30px] leading-[1.2] text-brand-dark [overflow-wrap:anywhere] sm:[overflow-wrap:normal]">{title}{info && <span className="ml-2 align-middle"><InfoTip text={info} /></span>}</h1>
+          {/* A computer: the line under the title, beside the buttons as before. */}
+          <div className="max-sm:hidden">
+            {subtitle && <p className="text-sm text-muted-foreground mt-1 max-w-2xl">{subtitle}</p>}
+            {children}
+          </div>
         </div>
         {hasActions && (
-          <div className={`flex items-center gap-2 shrink-0 ${primary || secondary ? "max-sm:w-full" : ""}`}>
+          <div className="flex items-center gap-2 shrink-0">
             {actions}
             {secondary && ("items" in secondary
               ? <MoreMenu button={{ label: secondary.label, icon: secondary.icon }} actions={secondary.items} className={tight} />
               : <Button variant="outline" onClick={secondary.onClick} disabled={secondary.disabled} title={secondary.title} className={`h-10 rounded-xl px-3.5 gap-2 ${tight}`}>
                   {secondary.icon && <secondary.icon className="h-4 w-4" />}{secondary.label}
                 </Button>)}
-            {primary && "items" in primary && (
-              <MoreMenu button={{ label: primary.label, icon: primary.icon, primary: true }} actions={primary.items} className={`ui-primary max-sm:flex-1 ${tight}`} />
-            )}
-            {primary && !("items" in primary) && (
-              <Button onClick={primary.onClick} disabled={primary.disabled} title={primary.title} className={`ui-primary btn-hero h-10 rounded-xl px-4 gap-2 max-sm:flex-1 ${tight}`}>
-                {primary.icon && <primary.icon className="h-4 w-4" />}{primary.label}
-              </Button>
-            )}
+            {primary && renderPrimary(studio ? "" : "max-sm:hidden")}
             {menu && <MoreMenu title={menuTitle} label={menuLabel} actions={menu} />}
           </div>
         )}
       </div>
+      {/* A phone: the title and the buttons share the top line; the line under the title
+          and its badges take the whole width below — never squeezed beside the buttons. */}
+      {(subtitle || children) && (
+        <div className="sm:hidden -mt-1.5 space-y-2">
+          {subtitle && <p className="text-sm text-muted-foreground leading-snug">{subtitle}</p>}
+          {children}
+        </div>
+      )}
+      {primary && !studio && <div className="sm:hidden flex">{renderPrimary("flex-1")}</div>}
     </header>
   );
 }

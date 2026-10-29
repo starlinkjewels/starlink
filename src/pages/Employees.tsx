@@ -11,7 +11,7 @@ import { AccessSummary, ManageAccessDialog } from "@/components/AccessManager";
 import { DataTable, CellMain, CellTag, type DataColumn } from "@/components/DataTable";
 import { MoreMenu, type MoreAction } from "@/components/MoreMenu";
 import { PageHeader, TabBar, ViewSwitch } from "@/components/PageHeader";
-import { StatStrip } from "@/components/TableToolbar";
+import { FilterChips, FiltersButton, StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { hasCompanies } from "@/lib/companies";
 import { useDb } from "@/hooks/useDb";
 import { auth, isAdminEmail, createAuthUser } from "@/lib/firebase";
@@ -53,6 +53,13 @@ export function EmployeesPage() {
   // The month the table's salary and orders are for ("2026-10"), or every month.
   const thisMonth = new Date().toISOString().slice(0, 7);
   const [period, setPeriod] = useState<string>(thisMonth);
+  // The month the salary paid and orders taken are for — under Filters, with the rest
+  // (this month is the start, so it doesn't count as a filter that is on).
+  const monthFilter = (): TableFilter[] => [{
+    kind: "select", label: "Month", value: period === thisMonth ? "" : period, onChange: v => setPeriod(v || thisMonth),
+    allLabel: `This month (${monthName(thisMonth)})`,
+    options: [{ value: "all", label: "All time" }, ...months.filter(m => m !== thisMonth).map(m => ({ value: m, label: monthName(m) }))],
+  }];
   const months = Array.from({ length: 24 }, (_, i) => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - i); return d.toISOString().slice(0, 7); });
   const monthName = (m: string) => new Date(`${m}-01T12:00:00`).toLocaleDateString("en-GB", { month: "long", year: "numeric" });
   const inPeriod = (iso: string | undefined) => period === "all" || (iso ?? "").slice(0, 7) === period;
@@ -260,14 +267,6 @@ export function EmployeesPage() {
             <TabBar label="Show" value={filter} onChange={setFilter}
               tabs={FILTERS.map(x => ({ key: x.key, label: x.label, count: searched.filter(x.test).length }))} />
           </div>
-          {/* Salary paid and orders taken, in the table, are for this month. */}
-          <Select value={period} onValueChange={setPeriod}>
-            <SelectTrigger className="h-9 w-auto min-w-[11rem] max-w-full rounded-xl" aria-label="Month"><span className="text-muted-foreground mr-1">Month:</span><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All time</SelectItem>
-              {months.map(m => <SelectItem key={m} value={m}>{monthName(m)}{m === thisMonth ? " (this month)" : ""}</SelectItem>)}
-            </SelectContent>
-          </Select>
         </div>
         {shownFilter.hint && <p className="px-1 text-xs text-muted-foreground">{shownFilter.hint}</p>}
       </div>
@@ -282,6 +281,8 @@ export function EmployeesPage() {
             id="employees"
             noun="employee"
             search={{ value: q, onChange: setQ, placeholder: "Search employees by name or email…" }}
+            filters={monthFilter()}
+            onClearFilters={() => setPeriod(thisMonth)}
             rows={emps}
             columns={columns}
             rowKey={u => u.id}
@@ -302,13 +303,14 @@ export function EmployeesPage() {
       {/* The grid's one toolbar row, laid out like the table's. */}
       {view === "grid" && (
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+          <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search employees by name or email…" aria-label="Search employees" className="h-9 pl-9 rounded-xl bg-white" />
+            <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search…" aria-label="Search employees by name or email" className="h-9 pl-9 rounded-xl bg-white" />
           </div>
-          <span className="ml-auto text-xs text-muted-foreground tabular-nums whitespace-nowrap">{total} employee{total !== 1 ? "s" : ""}</span>
+          <FiltersButton filters={monthFilter()} onClear={() => setPeriod(thisMonth)} />
         </div>
       )}
+      {view === "grid" && period !== thisMonth && <FilterChips filters={monthFilter()} onClear={() => setPeriod(thisMonth)} />}
 
       {view === "grid" && (
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-auto-cards">

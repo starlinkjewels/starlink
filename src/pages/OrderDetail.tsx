@@ -3052,28 +3052,36 @@ function OrderDetailPageBody() {
       {/* ── Product Photography Card ── */}
       {showPhotographySection && (
         <div style={{ order: secRank.photos }} className="card-luxe p-6 space-y-4">
-          <div className="flex items-center justify-between gap-4 flex-wrap">
-            <SectionTitle icon={Camera} title="Product Photography"
+          {/* Title on the left, its buttons beside it (as every card): the one to add,
+              and the rest under ⋯ — never dropped under the title on a phone. */}
+          <div className="flex items-start justify-between gap-3">
+            <SectionTitle className="min-w-0 flex-1" icon={Camera} title="Product Photography"
               sub={hasProductMedia ? `${order.productPhotos?.length ?? 0} photo${(order.productPhotos?.length ?? 0) !== 1 ? "s" : ""}${order.productVideo ? " + 1 video" : ""}` : "None yet"} />
-            <div className="flex items-center gap-2 flex-wrap">
-              {hasProductMedia && (
-                <AsyncButton size="sm" variant="outline" onClick={downloadAllMedia} disabled={downloadingAll} className="rounded-xl gap-2">
-                  <Download className="h-4 w-4" />
-                  {downloadingAll ? "Downloading…" : "Download All"}
-                </AsyncButton>
-              )}
+            <div className="flex items-center gap-2 shrink-0">
               {canEditStage() && (
                 <>
                   <input
                     ref={productPhotoRef} type="file" accept="image/*,video/*" multiple className="hidden"
                     onChange={async e => { if (e.target.files?.length) await addProductMedia(e.target.files); e.target.value = ""; }}
                   />
-                  <Button size="sm" variant="outline" onClick={() => productPhotoRef.current?.click()}
-                    disabled={photoUploading || videoUploading} className="rounded-xl gap-2">
+                  <Button variant="outline" onClick={() => productPhotoRef.current?.click()} aria-label={order.productVideo ? "Add photos or replace the video" : "Add photos and video"}
+                    disabled={photoUploading || videoUploading} className="rounded-xl gap-1.5 h-10 px-3">
                     <Camera className="h-4 w-4" />
-                    {photoUploading || videoUploading ? "Uploading…" : order.productVideo ? "Add Photos / Replace Video" : "Add Photos & Video"}
+                    {photoUploading || videoUploading ? "Uploading…" : <><span className="sm:hidden">Add</span><span className="max-sm:hidden">{order.productVideo ? "Add Photos / Replace Video" : "Add Photos & Video"}</span></>}
                   </Button>
                 </>
+              )}
+              {hasProductMedia && (
+                canEditStage()
+                  ? <MoreMenu title="Product photos" label="More photo actions" actions={[
+                      { label: downloadingAll ? "Downloading…" : "Download all", icon: Download, disabled: downloadingAll, onSelect: () => void downloadAllMedia() },
+                    ]} />
+                  : (
+                    <AsyncButton variant="outline" onClick={downloadAllMedia} disabled={downloadingAll} className="rounded-xl gap-1.5 h-10 px-3">
+                      <Download className="h-4 w-4" />
+                      {downloadingAll ? "Downloading…" : <><span className="sm:hidden">Download</span><span className="max-sm:hidden">Download All</span></>}
+                    </AsyncButton>
+                  )
               )}
             </div>
           </div>
@@ -3180,8 +3188,8 @@ function OrderDetailPageBody() {
       {/* ── Advance Payment Card — not on an in-house build (no client, no bill) ── */}
       {(!order.forReadyStock || advances.length > 0) && (
       <div style={{ order: secRank.payments }} className="card-luxe p-6 space-y-4">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <SectionTitle icon={Wallet} title="Payments"
+        <div className="flex items-start justify-between gap-3">
+          <SectionTitle className="min-w-0 flex-1" icon={Wallet} title="Payments"
             sub={<>{advances.length} payment{advances.length !== 1 ? "s" : ""}{advances.length > 0 && balance <= 0 && <span className="text-success font-medium"> · Paid in full</span>}</>} />
           {canEditStage() && balance > 0 && (user!.role === "admin" || can("payments", "add")) && (
             <Button size="sm" onClick={() => {
@@ -3196,8 +3204,10 @@ function OrderDetailPageBody() {
                 }
               }
               setShowAdvForm(v => !v);
-            }} className="btn-hero rounded-xl gap-2">
-              <Plus className="h-4 w-4" /> {advances.length === 0 ? "Add Advance" : "Collect Payment"}
+            }} className="btn-hero rounded-xl gap-1.5 h-10 px-3 shrink-0">
+              <Plus className="h-4 w-4" />
+              <span className="sm:hidden">{advances.length === 0 ? "Advance" : "Collect"}</span>
+              <span className="max-sm:hidden">{advances.length === 0 ? "Add Advance" : "Collect Payment"}</span>
             </Button>
           )}
         </div>
@@ -3215,7 +3225,8 @@ function OrderDetailPageBody() {
           const totalCols = 3 + extraCols;
           const gridCols = totalCols <= 3 ? "sm:grid-cols-3" : totalCols === 4 ? "sm:grid-cols-4" : totalCols === 5 ? "sm:grid-cols-5" : "sm:grid-cols-6";
           return (
-            <div className={`grid gap-3 grid-cols-2 ${gridCols}`}>
+            // Three across on a phone too — two across left the third alone on a row.
+            <div className={`grid gap-2 sm:gap-3 grid-cols-3 ${gridCols}`}>
               <div className="p-3 rounded-xl bg-secondary text-center">
                 <p className="text-xs text-muted-foreground mb-1">Order Value</p>
                 <p className="font-semibold text-sm">{fmtMoney(order.amount)}</p>
@@ -3457,7 +3468,8 @@ function OrderDetailPageBody() {
                   </div>
                   {(emp || t.department || t.remarks) && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      {emp?.name && <>By {emp.name}</>}{t.department && <> · {t.department}</>}{t.remarks && <> · {t.remarks}</>}
+                      {/* Joined with " · " only between what is there — never a dot before the first. */}
+                      {[emp?.name && `By ${emp.name}`, t.department, t.remarks].filter(Boolean).join(" · ")}
                     </p>
                   )}
                   {canEditStage() && !isDone && isActive && t.step === "Final Approval" && !readiness.ready && (
@@ -3591,36 +3603,36 @@ function OrderDetailPageBody() {
 
             return (
               <>
-                <div className="flex items-start justify-between gap-3 flex-wrap">
-                  <SectionTitle title={diamondOnly ? "Diamond" : "Manufacturing"}
+                <div className="flex items-start justify-between gap-3">
+                  <SectionTitle className="min-w-0 flex-1" title={diamondOnly ? "Diamond" : "Manufacturing"}
                     sub={diamondOnly ? "Bought for this order — nothing is made"
                       : order.clientSupplied ? `Client gives ${[order.clientSupplied.gold && `gold${order.clientSupplied.goldLossPct ? ` (${order.clientSupplied.goldLossPct}% loss)` : ""}`, order.clientSupplied.diamonds && "diamonds"].filter(Boolean).join(" + ")}`
                       : order.materialSourcing === "stock" ? "Plan: use from stock"
                       : order.materialSourcing === "purchase" ? "Plan: buy new for this order"
                       : "No sourcing plan"} />
                   {editable && (
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 shrink-0">
                       {diamondOnly ? (
                         <>
                           {otherMaterials.length > 0 ? (
-                            <MoreMenu button={{ label: "From stock", icon: Gem }} label="From stock" actions={[
+                            <MoreMenu button={{ label: "From stock", short: "Stock", icon: Gem }} label="From stock" actions={[
                               { label: "Diamonds from stock", icon: Gem, hint: "A bag or certified stones", onSelect: () => openDiamond("stock") },
                               { label: "Other material from stock", icon: Box, hint: otherMaterials.map(m => m.name).slice(0, 4).join(", "), onSelect: openOther },
                             ]} />
                           ) : (
-                            <Button variant="outline" onClick={() => openDiamond("stock")} className="rounded-xl h-10 gap-2">
-                              <Gem className="h-4 w-4" /> From stock
+                            <Button variant="outline" onClick={() => openDiamond("stock")} className="rounded-xl h-10 gap-2 px-3">
+                              <Gem className="h-4 w-4" /><span className="sm:hidden">Stock</span><span className="max-sm:hidden">From stock</span>
                             </Button>
                           )}
                           <Button onClick={() => { setShowBuyForm(true); setShowIssueForm(false); setShowDiamond(false); }}
-                            className="btn-hero rounded-xl h-10 gap-2">
-                            <Plus className="h-4 w-4" /> Buy Diamond
+                            className="btn-hero rounded-xl h-10 gap-2 px-3">
+                            <Plus className="h-4 w-4" /><span className="sm:hidden">Buy</span><span className="max-sm:hidden">Buy Diamond</span>
                           </Button>
                         </>
                       ) : faDone ? (
-                        <Button onClick={openRework} className="btn-hero rounded-xl h-10 gap-2"><RotateCcw className="h-4 w-4" /> Rework / Alteration</Button>
+                        <Button onClick={openRework} className="btn-hero rounded-xl h-10 gap-2 px-3"><RotateCcw className="h-4 w-4" /><span className="sm:hidden">Rework</span><span className="max-sm:hidden">Rework / Alteration</span></Button>
                       ) : addActions.some(a => a.show !== false) ? (
-                        <MoreMenu button={{ label: "Add material", icon: Plus, primary: true }} actions={addActions} label="Add material" />
+                        <MoreMenu button={{ label: "Add material", short: "Add", icon: Plus, primary: true }} actions={addActions} label="Add material" />
                       ) : null}
                       {!diamondOnly && <MoreMenu actions={moreActions} label="More manufacturing actions" />}
                     </div>

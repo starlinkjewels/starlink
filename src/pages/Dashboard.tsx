@@ -34,11 +34,11 @@ function Kpi({ label, value, icon: Icon, tone, sub, to }: {
   const body = (
     <div className="@container h-full min-w-0 rounded-2xl border border-border/70 bg-white px-4 py-3.5 shadow-[0_1px_2px_rgb(15_23_42/0.04)]">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-xs font-medium text-muted-foreground truncate" title={label}>{label}</p>
+        <p className="text-xs font-medium text-muted-foreground leading-snug line-clamp-2" title={label}>{label}</p>
         {Icon && <Icon className="h-4 w-4 shrink-0 text-muted-foreground/60" />}
       </div>
       <p className={`mt-1.5 text-[clamp(1rem,12cqi,1.5rem)] font-semibold tracking-tight tabular-nums leading-tight whitespace-nowrap ${tone ? TONE[tone] : "text-brand-dark"}`}>{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground truncate">{sub}</p>}
+      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground leading-snug line-clamp-2">{sub}</p>}
     </div>
   );
   return to
@@ -229,7 +229,7 @@ export function Dashboard() {
       <PushPermissionBanner />
       <PageHeader eyebrow={`Good day, ${client?.companyName || user?.name}`} title="Dashboard" />
 
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="kpi-grid grid grid-cols-2 md:grid-cols-3 gap-3">
         {stats.map(([label, val, Icon, tone, to], i) => (
           <motion.div key={label} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }} className="h-full">
             <Kpi label={label} value={val} icon={Icon} tone={tone} to={to} />
@@ -242,7 +242,7 @@ export function Dashboard() {
         <div>
           <SectionTitle className="mb-3" icon={Gift} title="Gift Cards" sub="All time"
             actions={<Link to="/gift-cards" className="text-xs font-medium text-primary hover:underline inline-flex items-center gap-1">View all <ArrowRight className="h-3 w-3" /></Link>} />
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div className="kpi-grid grid grid-cols-2 md:grid-cols-4 gap-3">
             {([
               ["Issued", fmtMoney(gc.issued), Gift, undefined],
               ["Redeemed", fmtMoney(gc.used), CheckCircle2, "in"],
@@ -260,7 +260,7 @@ export function Dashboard() {
         <div className="card-luxe p-5">
           <SectionTitle className="mb-4" title="My Financial Summary"
             actions={<Link to="/expenses" className="text-sm text-primary flex items-center gap-1 hover:underline">Manage Expenses <ArrowRight className="h-3 w-3" /></Link>} />
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="kpi-grid grid grid-cols-2 sm:grid-cols-3 gap-3">
             <Kpi label="Revenue" value={fmtMoney(myRevenue)} icon={TrendingUp} tone="in" sub="Delivered orders" />
             <Kpi label="Expenses" value={fmtCcyMix(myExpenseMix, "USD")} icon={TrendingDown} tone="out" sub={`${myExpenses.length} entries`} />
             <Kpi label="Net profit" value={`${myExpenseUsd.converted ? "≈ " : ""}${fmtMoney(myProfit)}`} icon={Wallet} tone={myProfit >= 0 ? "in" : "out"} sub="Revenue − expenses" />
@@ -286,7 +286,7 @@ export function Dashboard() {
         <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.12 }}
           className="card-luxe p-5">
           <SectionTitle className="mb-4" icon={Factory} title="Manufacturing Overview" sub="In INR" />
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+          <div className="kpi-grid grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
             <Kpi label="In production" value={ordersInProduction} icon={Package} sub="Orders" to="/orders?status=In%20Production" />
             <Kpi label="Gold reserve" value={`${goldReserveGrams.toLocaleString()} g`} icon={Coins} to="/stock" />
             <Kpi label="Diamond reserve" value={`${diamondReserveCarats.toLocaleString()} ct`} icon={Gem} to="/stock" />

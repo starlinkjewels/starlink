@@ -1007,3 +1007,28 @@ td.dt-stick-foot { background: linear-gradient(color-mix(in oklab, var(--color-s
 input[type="number"]::-webkit-outer-spin-button,
 input[type="number"]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+
+/* A row of chips (alerts over a list, the filters in use): one line you swipe
+   sideways on a phone, running to the screen's edge, instead of stacking into
+   rows; side by side, wrapping, on a computer. */
+.chip-row { display: flex; align-items: center; gap: 0.5rem; }
+@media (max-width: 639px) {
+  .chip-row {
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch;
+    margin-inline: -1rem; padding-inline: 1rem; scroll-padding-inline: 1rem;
+  }
+  .chip-row::-webkit-scrollbar { display: none; }
+  .chip-row > * { flex-shrink: 0; white-space: nowrap; }
+}
+@media (min-width: 640px) { .chip-row { flex-wrap: wrap; } }
+
+/* Tiles two across a phone: an odd one out takes the whole last row, not half of it. */
+@media (max-width: 639px) {
+  .kpi-grid > :last-child:nth-child(odd) { grid-column: span 2; }
+}
+
+/* Phones: every card the same breathing room. Cards said p-6 here and p-4 there,
+   so on a phone the edges of one card's content never lined up with the next. */
+@media (max-width: 639px) {
+  .card-luxe.p-6, .card-luxe.p-5 { padding: 1rem; }
+}

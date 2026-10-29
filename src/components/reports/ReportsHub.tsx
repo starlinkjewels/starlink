@@ -139,8 +139,10 @@ export function ReportsHub() {
       />
 
       {/* One filter row for every tab: the period (the same picker every report
-          has), then Filters — one row on every screen. */}
-      <div className="card-luxe p-2.5 sm:p-3 space-y-2.5 sm:sticky sm:top-0 z-20">
+          has), then Filters — a plain row, as on every list (not a box of its own
+          with empty space beside the two buttons). Kept in view while scrolling on
+          a computer, on the page's own background. */}
+      <div className="space-y-2.5 sm:sticky sm:top-0 z-20 sm:bg-background/95 sm:backdrop-blur sm:py-2 sm:-my-2">
         <div className="flex items-center gap-2 min-w-0">
           <PeriodPicker value={period} onChange={setPeriod} />
           <FiltersButton filters={filters} onClear={clearFilters} />

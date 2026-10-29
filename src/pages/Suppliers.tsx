@@ -245,11 +245,11 @@ export function SuppliersPage() {
       {/* The grid's one toolbar row, laid out like the table's. */}
       {tab === "suppliers" && view === "grid" && (
         <div className="flex flex-wrap items-center gap-2">
-          <div className="relative flex-1 min-w-[12rem] sm:max-w-sm max-sm:basis-full">
+          <div className="relative flex-1 min-w-[9rem] sm:max-w-sm">
             <Search className="h-4 w-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
             <Input value={q} onChange={e => setQ(e.target.value)} placeholder="Search suppliers..." aria-label="Search suppliers..." className="h-9 pl-9 rounded-xl bg-white" />
           </div>
-          <span className="ml-auto text-xs text-muted-foreground tabular-nums whitespace-nowrap">{total} supplier{total !== 1 ? "s" : ""}</span>
+          <span className="ml-auto" aria-hidden />
         </div>
       )}
 

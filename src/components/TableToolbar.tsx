@@ -147,7 +147,8 @@ export function FiltersButton({ filters, onClear, count }: { filters: TableFilte
   const trigger = (
     <button type="button" className={`${BTN} ${n ? "border-primary/40 bg-primary/[0.06] text-primary" : ""}`} aria-label={n ? `Filters, ${n} on` : "Filters"}>
       <ListFilter className="h-4 w-4" />
-      <span>Filters</span>
+      {/* On a phone the picture alone, so the search keeps the room (its badge says when filters are on). */}
+      <span className="max-sm:hidden">Filters</span>
       {n > 0 && <span className="h-5 min-w-5 px-1 grid place-items-center rounded-full bg-primary text-[11px] font-semibold text-primary-foreground tabular-nums">{n}</span>}
     </button>
   );
@@ -197,7 +198,7 @@ export function FilterChips({ filters, onClear }: { filters: TableFilter[]; onCl
   const on = filters.filter(isOn);
   if (!on.length) return null;
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
+    <div className="chip-row !gap-1.5">
       {on.map((f, i) => {
         const [name, value, clear] = f.kind === "date"
           ? [f.label ?? "Date", dateRangeText(f.from, f.to), () => f.onChange("", "")]
