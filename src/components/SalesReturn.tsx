@@ -26,6 +26,8 @@ import { MoreMenu } from "@/components/MoreMenu";
 import { useMayExport } from "@/hooks/useCan";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { zoomable } from "@/components/ImageViewer";
+import { orderPictures } from "@/lib/readyStockPhotos";
 
 /** May this person record, receive or cancel returns? (Billing changes: Invoices → Edit.) */
 export function useMayReturn(): boolean {
@@ -170,7 +172,7 @@ export function ReturnDialog({ orders, invoice, start, onClose }: {
                   return (
                     <div key={o.id} className={`rounded-xl border p-2.5 flex flex-wrap items-center gap-3 ${n > 0 ? "border-primary/50 bg-primary/5" : "border-border/60"} ${why ? "opacity-60" : ""}`}>
                       <div className="h-12 w-12 rounded-lg bg-secondary/60 overflow-hidden shrink-0 grid place-items-center">
-                        {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : <PackageCheck className="h-5 w-5 text-muted-foreground" />}
+                        {img ? <img src={img} alt="" {...zoomable(img, orderPictures(o))} className="h-full w-full object-cover cursor-zoom-in" /> : <PackageCheck className="h-5 w-5 text-muted-foreground" />}
                       </div>
                       <div className="min-w-0 flex-1 basis-[55%]">
                         <p className="font-semibold text-brand-dark text-sm truncate">{o.orderNumber} <span className="font-normal text-muted-foreground">· {describe(o)}</span></p>
@@ -418,7 +420,7 @@ export function ReturnsComingPanel() {
           return (
             <div key={ret.id} className="rounded-xl border border-border/60 p-2.5 flex items-center gap-3">
               <div className="h-11 w-11 rounded-lg bg-secondary/60 overflow-hidden shrink-0 grid place-items-center">
-                {img ? <img src={img} alt="" className="h-full w-full object-cover" /> : <PackageCheck className="h-5 w-5 text-muted-foreground" />}
+                {img ? <img src={img} alt="" {...zoomable(img, orderPictures(order))} className="h-full w-full object-cover cursor-zoom-in" /> : <PackageCheck className="h-5 w-5 text-muted-foreground" />}
               </div>
               <div className="min-w-0 flex-1">
                 <Link to={`/orders/${order.id}`} className="text-sm font-semibold text-primary hover:underline">{order.orderNumber}</Link>

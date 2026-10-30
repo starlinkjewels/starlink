@@ -105,6 +105,7 @@ import { confirmBox } from "@/lib/confirm";
 import { IfExport } from "@/components/IfExport";
 import { ReturnDialog, OrderReturns, useMayReturn } from "@/components/SalesReturn";
 import { returnBlocker } from "@/lib/salesReturn";
+import { zoomable } from "@/components/ImageViewer";
 
 const GOLD_PURITIES = ["9K", "14K", "18K", "22K", "24K"];
 
@@ -2318,7 +2319,7 @@ function OrderDetailPageBody() {
             <div className="flex items-start gap-4 sm:gap-5">
               {heroImg && (
                 <div className="h-[72px] w-[72px] sm:h-24 sm:w-24 rounded-xl overflow-hidden bg-white ring-1 ring-border/70 shrink-0">
-                  <img src={heroImg} alt="" className="w-full h-full object-contain"
+                  <img src={heroImg} alt="" {...zoomable(heroImg, orderPictures(order))} className="w-full h-full object-contain cursor-zoom-in"
                     onError={e => { const box = e.currentTarget.parentElement; if (box) box.style.display = "none"; }} />
                 </div>
               )}

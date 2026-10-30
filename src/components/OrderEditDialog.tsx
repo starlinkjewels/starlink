@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import { Info, Lock, Pencil, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import {
-  loadDb, updateDbAs, uid, findInvoiceForOrder, isDiamondOnlyOrder, fmtDate,
+  loadDb, updateDbAs, uid, findInvoiceForOrder, isDiamondOnlyOrder, fmtDate, dayOf, todayLocal,
   type Order,
 } from "@/lib/db";
 import { useDb } from "@/hooks/useDb";
@@ -47,6 +47,8 @@ type Form = {
   /** Engraving: on ("1") or off (""), its words and letters. */
   engOn: string; engText: string; engFont: string;
   designNumber: string; priority: string; expectedDelivery: string; deliveryTime: string; contactPerson: string; instructions: string;
+  /** The day the order was placed (yyyy-mm-dd) — moved back for an order entered late. */
+  placedDate: string;
   // A loose order's stones — what they are, and their details.
   stoneName: string; stoneShape: string; stoneType: string; stoneMm: string; stoneSize: string; stoneColor: string; stoneClarity: string;
 };
@@ -63,6 +65,7 @@ function formOf(o: Order): Form {
     engOn: o.engraving?.text ? "1" : "", engText: o.engraving?.text ?? "", engFont: o.engraving?.font ?? "block",
     designNumber: o.designNumber ?? "", priority: o.priority, expectedDelivery: (o.expectedDelivery ?? "").slice(0, 10),
     deliveryTime: o.deliveryTime ?? "", contactPerson: o.contactPerson ?? "", instructions: o.instructions ?? "",
+    placedDate: dayOf(o.createdAt),
     stoneName: o.stoneSpec?.stone ?? "Diamond", stoneShape: o.stoneSpec?.shape ?? "", stoneType: o.stoneSpec?.type ?? "", stoneMm: o.stoneSpec?.mm ?? "", stoneSize: o.stoneSpec?.size ?? "",
     stoneColor: o.stoneSpec?.color ?? "", stoneClarity: o.stoneSpec?.clarity ?? "",
   };
@@ -74,9 +77,10 @@ const LABEL: Record<string, string> = {
   quantity: "quantity", diamondType: "diamond type", diamondShape: "diamond shape", diamondWeight: "est. diamonds", estimatedGrossWeight: "est. gross weight",
   estimatedNetWeight: "est. net weight", rhodium: "rhodium", stamping: "stamping", engraving: "engraving", designNumber: "design no.",
   priority: "priority", expectedDelivery: "due date", deliveryTime: "delivery time", contactPerson: "contact person", instructions: "instructions",
+  createdAt: "order date",
 };
 /** What the printed invoice shows of an order — it reads them from the order itself. */
-const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec"]);
+const ON_INVOICE = new Set(["jewelleryType", "metal", "productKarats", "productColor", "productSize", "quantity", "designNumber", "stoneSpec", "createdAt"]);
 
 // Outside the panel, so typing in a field never remounts it (and loses focus).
 function Note({ children, info }: { children: ReactNode; info?: boolean }) {
@@ -164,6 +168,17 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     if (touched("engOn", "engText") && f.engOn && !f.engText.trim()) { toast.error("Engraving: type the words — or remove the engraving."); return; }
     if (touched("stamping", "stampingNote") && f.stamping === "Special Stamp" && !f.stampingNote.trim()) { toast.error("Describe the special stamp"); return; }
     if (touched("expectedDelivery") && !f.expectedDelivery) { toast.error("Pick the due date"); return; }
+    // The order date: a day, at the time of day it was first entered — never one still to come.
+    let placedAt = o.createdAt;
+    if (touched("placedDate")) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(f.placedDate)) { toast.error("Pick the order date"); return; }
+      if (f.placedDate > todayLocal()) { toast.error("The order date can't be in the future"); return; }
+      const [y, m, d] = f.placedDate.split("-").map(Number);
+      const t = new Date(o.createdAt);
+      t.setFullYear(y, m - 1, d);
+      // Today, at a time of day still to come: now.
+      placedAt = (t > new Date() ? new Date() : t).toISOString();
+    }
     const num = (s: string) => { const n = Number(s); return s.trim() && isFinite(n) && n > 0 ? n : undefined; };
     if (!diamondOnly && touched("estimatedGrossWeight", "estimatedNetWeight", "diamondWeight")) {
       const wp = weightProblem({ gross: num(f.estimatedGrossWeight), net: num(f.estimatedNetWeight), diamondCt: num(f.diamondWeight) });
@@ -191,12 +206,13 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
       deliveryTime: txt(f.deliveryTime),
       contactPerson: f.contactPerson.trim(),
       instructions: f.instructions.trim(),
+      createdAt: placedAt,
       ...(diamondOnly ? { stoneSpec: Object.fromEntries(Object.entries({ stone: f.stoneName.trim() === "Diamond" ? "" : f.stoneName, shape: f.stoneShape, type: gemOnly ? f.stoneType : "", mm: f.stoneMm, size: f.stoneSize, color: f.stoneColor, clarity: f.stoneClarity })
         .map(([k, v]) => [k, v.trim()]).filter(([, v]) => v)) } : {}),
     };
     // Which form fields each stored field is made from.
     const FROM: Partial<Record<keyof Order, (keyof Form)[]>> = {
-      productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"], engraving: ["engOn", "engText", "engFont"],
+      productKarats: ["productKarats", "metal"], stamping: ["stamping", "stampingNote"], engraving: ["engOn", "engText", "engFont"], createdAt: ["placedDate"],
       stoneSpec: ["stoneName", "stoneShape", "stoneType", "stoneMm", "stoneSize", "stoneColor", "stoneClarity"],
     };
     const same = (a: unknown, b: unknown) => (a ?? "") === (b ?? "") || (typeof a === "number" && typeof b === "number" && Math.abs(a - b) < 1e-9)
@@ -232,6 +248,11 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
     updateDbAs({ summary: `Edited ${o.orderNumber}: ${changed.map(k => LABEL[k] ?? k).join(", ")}` }, d => {
       const x = d.orders.find(y => y.id === o.id);
       if (!x) return;
+      // The day it was first submitted moves with the order date (the step said the old day).
+      if (changed.includes("createdAt")) {
+        const sub = x.timeline?.find(t => t.step === "Order Submitted");
+        if (sub?.date && dayOf(sub.date) === dayOf(o.createdAt)) sub.date = next.createdAt;
+      }
       for (const k of changed) (x as unknown as Record<string, unknown>)[k] = next[k];
       // A new due date is the one thing the client is waiting on — tell them.
       if (dueMoved && !x.forReadyStock) {
@@ -389,6 +410,9 @@ export function OrderEditDialog({ order, onClose }: { order: Order; onClose: () 
                 <SelectTrigger className="h-10 rounded-xl"><SelectValue /></SelectTrigger>
                 <SelectContent>{opts(PRIORITY, f.priority).map(x => <SelectItem key={x} value={x}>{x}</SelectItem>)}</SelectContent>
               </Select>
+            </Field>
+            <Field label="Order date">
+              <Input type="date" value={f.placedDate} max={todayLocal()} onChange={e => set("placedDate", e.target.value)} disabled={!!all} className="h-10 rounded-xl" aria-label="Order date" />
             </Field>
             <Field label="Due date">
               <Input type="date" value={f.expectedDelivery} onChange={e => set("expectedDelivery", e.target.value)} disabled={!!all} className="h-10 rounded-xl" />

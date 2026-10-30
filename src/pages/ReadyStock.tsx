@@ -34,6 +34,7 @@ import { ReadyStockItemDialog } from "@/components/ReadyStockItemDialog";
 import { officeLabel, officeOf, officeRank, officeTabs, otherLots, readyStockOffices } from "@/lib/offices";
 import { pieceTimeline, stepQty, whoOf } from "@/lib/readyStockHistory";
 import { useUrlState } from "@/hooks/useUrlState";
+import { zoomable } from "@/components/ImageViewer";
 
 const PAGE_SIZE = 24;
 /** The office tab for pieces that were never given one. */
@@ -214,7 +215,7 @@ export function ReadyStockPage() {
       cell: item => (
         <div className="flex items-center gap-3 min-w-0">
           <div className="h-12 w-12 rounded-lg bg-white ring-1 ring-border/60 overflow-hidden shrink-0 relative grid place-items-center">
-            {item.images?.[0] ? <img src={item.images[0]} alt="" loading="lazy" className="w-full h-full object-contain" /> : <Gem className="h-5 w-5 text-muted-foreground/40" />}
+            {item.images?.[0] ? <img src={item.images[0]} alt="" loading="lazy" {...zoomable(item.images[0], item.images)} className="w-full h-full object-contain cursor-zoom-in" /> : <Gem className="h-5 w-5 text-muted-foreground/40" />}
             {item.quantity === 0 && <div className="absolute inset-0 bg-black/50 grid place-items-center"><span className="text-white font-semibold text-[8px] tracking-wide">SOLD</span></div>}
             {item.video && item.quantity !== 0 && (
               <button onClick={() => setVideoView(item.video!)} title="Play video" className="absolute bottom-0.5 right-0.5 h-5 w-5 rounded-full bg-black/60 hover:bg-black/80 text-white grid place-items-center"><Play className="h-2.5 w-2.5 fill-current" /></button>
@@ -447,7 +448,7 @@ export function ReadyStockPage() {
             {/* No photo: a small tile rather than an empty square half the card high. */}
             <div className={`relative mx-2.5 sm:mx-3 rounded-xl overflow-hidden ring-1 ring-border/60 ${item.images?.[0] ? "aspect-square bg-white" : "h-24 bg-secondary/50"}`}>
               {item.images?.[0] ? (
-                <img src={item.images[0]} alt={item.name} loading="lazy" className="w-full h-full object-contain p-1" />
+                <img src={item.images[0]} alt={item.name} loading="lazy" {...zoomable(item.images[0], item.images)} className="w-full h-full object-contain p-1 cursor-zoom-in" />
               ) : (
                 <div className="w-full h-full grid place-items-center text-muted-foreground/40"><Gem className="h-7 w-7" /></div>
               )}

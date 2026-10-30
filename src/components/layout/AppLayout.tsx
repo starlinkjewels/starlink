@@ -27,6 +27,7 @@ import { useFreshKey } from "@/hooks/useDataFresh";
 import { useChatAlerts } from "@/hooks/useChatAlerts";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { noteTrail, useBackToClose, useScrollMemory } from "@/hooks/useBackNav";
+import { ImageViewer } from "@/components/ImageViewer";
 
 interface NavItem { to: string; label: string; icon: any; roles?: string[]; highlight?: boolean; }
 const NAV: NavItem[] = [
@@ -646,6 +647,8 @@ export function AppLayout() {
         </motion.main>
 
         <SyncStatus />
+        {/* A picture clicked anywhere opens large (any <img data-zoom>). */}
+        <ImageViewer />
 
         {/* ── Bottom nav (mobile) — 5 items: 4 tabs + More ── */}
         {studio ? (

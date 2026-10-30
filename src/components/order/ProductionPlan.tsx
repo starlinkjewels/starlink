@@ -10,7 +10,7 @@ import { AddNewItem } from "@/components/create/QuickCreate";
 import { BuyMaterialForm, type PlannedBuy } from "@/components/BuyMaterialForm";
 import { useDb } from "@/hooks/useDb";
 import { uid, type Order } from "@/lib/db";
-import { companyOf, hasCompanies } from "@/lib/companies";
+import { companiesOf, companyById, companyOf, hasCompanies } from "@/lib/companies";
 import { lotLabel } from "@/lib/diamondLots";
 import { bagNoOf } from "@/lib/diamondBags";
 import { deriveStockBalances, estimatedPureGoldNeeded, factoryFineGoldBalance, fmtMoneyInr } from "@/lib/manufacturing";
@@ -214,7 +214,13 @@ export function ProductionPlan({ order, factoryId, onFactory, picks, onPicks, pl
               <div className="flex items-start gap-2">
                 <div className="min-w-0 flex-1">
                   {p.kind === "loose" ? (
-                    <LotPicker value={p.key} companyId={co} onChange={k => set(p.id, { key: k })} className="h-10 rounded-lg" />
+                    <>
+                      {/* Our other companies' bags are offered too — moved across to this order's company when it is placed. */}
+                      <LotPicker value={p.key} companyId={co} fromCompany={p.fromCompany}
+                        others={multi ? companiesOf(db.settings).filter(c => c.id !== co).map(c => ({ id: c.id, name: c.name })) : undefined}
+                        onChange={(k, _lot, from) => set(p.id, { key: k, fromCompany: from && from !== co ? from : undefined })} className="h-10 rounded-lg" />
+                      {p.fromCompany && <p className="text-[11px] text-primary mt-1">From {companyById(db.settings, p.fromCompany).name} — moved across to this order&rsquo;s company when it is placed</p>}
+                    </>
                   ) : p.kind === "certified" ? (
                     <div className="max-h-40 overflow-y-auto rounded-lg border border-border/60 p-1.5 space-y-0.5">
                       {certified.map(pk => {

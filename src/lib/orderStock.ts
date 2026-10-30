@@ -7,7 +7,7 @@
 // sold out of stock onto the order (no factory).
 import { coField, companyById } from "./companies";
 import { loadDb, uid, updateDb, isDiamondOnlyOrder, type DB, type MaterialIssuance, type Order } from "./db";
-import { decreaseStockSelfHealing } from "./stock";
+import { decreaseStockSelfHealing, transferStock } from "./stock";
 import { lotBalances, lotLabel, lotParts, type LotBalance } from "./diamondLots";
 import { bagNoOf } from "./diamondBags";
 import { deriveStockBalances, fmtMoneyInr } from "./manufacturing";
@@ -32,19 +32,23 @@ export interface StockPick {
   rateInr?: number;
   /** Loose stones: the amount typed for them all, instead of a price per carat. */
   amountInr?: number;
+  /** Loose stones held by another of our companies: moved across to the order's company
+   *  (at their cost there) when issued. Unset: the order's own company. */
+  fromCompany?: string;
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const matWord = (db: Pick<DB, "settings">, k: string) => (k === "gold" || k === "diamond" ? k : materialName(db.settings, k));
 
 /** How much of what a pick takes is in stock now (the company's own). */
-export function pickAvailable(db: DB, p: Pick<StockPick, "material" | "kind" | "key" | "packetIds">, companyId: string): { qty: number; pcs?: number } {
+export function pickAvailable(db: DB, p: Pick<StockPick, "material" | "kind" | "key" | "packetIds" | "fromCompany">, companyId: string): { qty: number; pcs?: number } {
   if (p.kind === "certified") {
     const ok = (db.diamondPackets ?? []).filter(x => p.packetIds?.includes(x.id) && x.status === "in_stock");
     return { qty: r2(ok.reduce((s, x) => s + x.carat, 0)), pcs: ok.length };
   }
   if (p.kind === "loose") {
-    const lot = lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === p.key);
+    // A bag another of our companies holds is counted where it is.
+    const lot = lotBalances(db.stockMovements ?? [], p.fromCompany || companyId).find(l => l.key === p.key);
     return { qty: lot?.ct ?? 0, pcs: lot?.pcs ?? undefined };
   }
   return { qty: deriveStockBalances(db.stockMovements ?? [], p.material, companyId)[p.key] ?? 0 };
@@ -59,7 +63,7 @@ export function pickCostInr(db: DB, p: StockPick, companyId: string): number | n
   }
   if (p.kind === "loose" && p.amountInr) return r2(p.amountInr);
   if (p.kind === "loose" && p.rateInr) return r2(p.rateInr * p.qty);
-  const avg = stockAverageRate(db, p.material, p.key, new Date().toISOString(), companyId);
+  const avg = stockAverageRate(db, p.material, p.key, new Date().toISOString(), (p.kind === "loose" && p.fromCompany) || companyId);
   return avg == null ? null : r2(avg * p.qty);
 }
 
@@ -71,7 +75,7 @@ export function picksProblem(db: DB, picks: StockPick[], companyId: string): str
     // Certified stones are what is ticked — their carats are their own.
     if (p.kind === "certified") { if (!p.packetIds?.length) return "Choose the certified stones"; continue; }
     if (!(p.qty > 0)) return `${pickName(db, p)}: enter how much`;
-    const k = `${p.material}|${p.kind}|${p.key}|${(p.packetIds ?? []).join(",")}`;
+    const k = `${p.material}|${p.kind}|${p.key}|${p.fromCompany ?? ""}|${(p.packetIds ?? []).join(",")}`;
     const w = want.get(k) ?? { qty: 0, pcs: 0, pick: p };
     w.qty = r2(w.qty + p.qty); w.pcs += p.pcs ?? 0;
     want.set(k, w);
@@ -187,17 +191,36 @@ export async function issuePick(args: {
   // Loose stones: their price when given (the amount typed, or ct × price/ct) — the bag's details are its own (its lot).
   const diaRate = looseDia ? pick.rateInr ?? 0 : 0;
   const diaAmount = looseDia && pick.amountInr != null ? pick.amountInr : diaRate > 0 ? r2(diaRate * qty) : 0;
+  // A bag held by another of our companies: moved across first, at what it cost there
+  // (as the order page's own From stock does) — then used here like any of ours.
+  const movedIn = looseDia && !!pick.fromCompany && pick.fromCompany !== workCo;
+  if (movedIn) {
+    const from = pick.fromCompany!;
+    const avg = stockAverageRate(db, "diamond", purityOrQuality, now, from);
+    await transferStock({
+      material: "diamond", purityOrQuality, quantity: qty, fromCompany: from, toCompany: workCo,
+      valueInr: avg ? Math.round(avg * qty) : undefined, pieces: issuePcs, createdBy: userId,
+      note: `For ${order.orderNumber}: ${qty} ct moved from ${companyById(db.settings, from).name} to ${companyById(db.settings, workCo).name}`,
+    });
+  }
   const diamondSpec = looseDia && (diaRate > 0 || diaAmount > 0) ? {
     ratePerCaratInr: diaRate > 0 ? diaRate : diaAmount > 0 && qty > 0 ? r2(diaAmount / qty) : undefined,
     amountInr: diaAmount > 0 ? diaAmount : undefined,
   } : undefined;
 
-  await decreaseStockSelfHealing({
-    material, companyId: workCo, purityOrQuality, quantity: qty,
-    type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: userId,
-    note: soldStones && !factory ? `Sold on order ${order.orderNumber}` : `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
-    ...(looseDia ? { lot: lotParts(purityOrQuality), pieces: issuePcs } : {}),
-  }, db.stockMovements);
+  try {
+    await decreaseStockSelfHealing({
+      material, companyId: workCo, purityOrQuality, quantity: qty,
+      type: "issuance_out", refType: "materialIssuance", refId: issuanceId, createdBy: userId,
+      note: soldStones && !factory ? `Sold on order ${order.orderNumber}` : `Used by ${factory?.name || "factory"} for order ${order.orderNumber}`,
+      ...(looseDia ? { lot: lotParts(purityOrQuality), pieces: issuePcs } : {}),
+      // As it stands now — a move across just above is in it.
+    }, loadDb().stockMovements);
+  } catch (e) {
+    // Moved across, then refused: say where the stones are, so they aren't moved a second time.
+    if (movedIn) throw new Error(`${e instanceof Error ? e.message : "Couldn't issue the stones"} — the ${qty} ct were already moved to ${companyById(db.settings, workCo).name}: take them from its own stock.`);
+    throw e;
+  }
   const unit = materialUnit(db.settings, material);
   updateDb(d => {
     if (!d.materialIssuances) d.materialIssuances = [];
