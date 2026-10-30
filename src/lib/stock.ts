@@ -19,7 +19,7 @@ import {
 } from "firebase/firestore";
 import { db as fsdb } from "./firebase";
 import { ensureCollections, loadDb, uid, type StockMovement, type MaterialKey } from "./db";
-import { ensureBag } from "./diamondBags";
+import { bagOf, ensureBag } from "./diamondBags";
 import { lotParts } from "./diamondLots";
 import { assertFresh } from "./db";
 
@@ -139,9 +139,9 @@ export async function increaseStock(args: {
   companyId?: string;
   purityOrQuality: string;
   quantity: number;
-  refType: "purchase" | "manual" | "opening" | "transfer" | "supplierSale";
+  refType: "purchase" | "manual" | "opening" | "transfer" | "supplierSale" | "bagMove";
   refId?: string;
-  valueInr?: number; // an "opening" entry's ₹ valuation, or a "transfer"'s cost at the sending company
+  valueInr?: number; // an "opening" entry's ₹ valuation, or a "transfer"'s / "bagMove"'s cost where it came from
   createdBy: string;
   note?: string;
   createdAt?: string; // as-of date (opening stock) — defaults to now
@@ -193,7 +193,7 @@ export async function decreaseStock(args: {
   purityOrQuality: string;
   quantity: number;
   type: "issuance_out" | "order_direct_use";
-  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer";
+  refType: "materialIssuance" | "order" | "purchase" | "diamondSale" | "supplierSale" | "transfer" | "bagMove";
   refId?: string;
   createdBy: string;
   note?: string;
@@ -416,6 +416,103 @@ export async function transferStock(args: {
     ...(args.pieces ? { pieces: args.pieces } : {}),
   });
   return refId;
+}
+
+/**
+ * Move loose stones from one bag into another (lib/diamondBags.ts) — out of the
+ * first, floor-checked as any issue, into the second, both legs sharing one id.
+ * The stones take the second bag's lot (its shape · mm · sieve · colour ·
+ * clarity): mixing grades is the office's call. They go in at what they cost in
+ * the first bag, so the second bag's average cost is right.
+ */
+export async function moveBetweenBags(args: {
+  companyId?: string;
+  from: string;
+  to: string;
+  /** The second bag's parts, when it is a new one. */
+  toLot?: StockMovement["lot"];
+  quantity: number;
+  pieces?: number;
+  valueInr?: number;
+  createdBy: string;
+  /** "BAG-0007" of each, for the two history lines. */
+  fromNo?: string;
+  toNo?: string;
+  note?: string;
+}): Promise<string> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
+  if (args.from === args.to) throw new Error("Choose a different bag to move the stones into.");
+  const qty = Math.round(args.quantity * 1000) / 1000;
+  if (!(qty > 0)) throw new Error("Enter how many carats to move.");
+  const refId = uid("bm_");
+  const extra = args.note?.trim() ? ` — ${args.note.trim()}` : "";
+  const co = args.companyId && args.companyId !== "main" ? args.companyId : undefined;
+  const at = new Date().toISOString();
+  // A moment later, so the history reads out-then-in and both bags' lines sort the same way everywhere.
+  const atIn = new Date(+new Date(at) + 1).toISOString();
+  const outLot = lotOf("diamond", args.from, undefined);
+  const inLot = lotOf("diamond", args.to, args.toLot);
+  // Both bags are on the same counter (one company's stockLevels), so the move is
+  // one transaction: both lines are written, or neither — stones can never leave
+  // one bag without reaching the other.
+  const move = () => runTransaction(fsdb, async (tx) => {
+    const ref = stockRef(co);
+    const snap = await tx.get(ref);
+    const levels = (snap.exists() ? snap.data() : { gold: {}, diamond: {} }) as StockLevels;
+    const have = levels.diamond?.[args.from] || 0;
+    // Within half a thousandth: "All" moves the bag's balance as the history rounds it.
+    if (have + 0.0005 < qty) throw new Error(`Insufficient ${args.from} diamond stock: have ${have}, need ${qty}.`);
+    tx.set(ref, {
+      diamond: { [args.from]: Math.max(0, Math.round((have - qty) * 1000) / 1000), [args.to]: increment(qty) },
+      updatedAt: at,
+      version: increment(1),
+    }, { merge: true });
+    const outId = uid("sm_"), inId = uid("sm_");
+    tx.set(doc(collection(fsdb, "stockMovements"), outId), pruneUndefined({
+      id: outId, material: "diamond", companyId: co, type: "issuance_out", purityOrQuality: args.from, quantity: qty,
+      refType: "bagMove", refId, lot: outLot, pieces: args.pieces || undefined, createdBy: args.createdBy, createdAt: at,
+      note: `Moved to ${args.toNo ? `${args.toNo} · ` : ""}${args.to}${extra}`,
+    }));
+    tx.set(doc(collection(fsdb, "stockMovements"), inId), pruneUndefined({
+      id: inId, material: "diamond", companyId: co, type: "purchase_in", purityOrQuality: args.to, quantity: qty,
+      refType: "bagMove", refId, valueInr: args.valueInr != null ? Math.round(args.valueInr * 100) / 100 : undefined,
+      lot: inLot, pieces: args.pieces || undefined, createdBy: args.createdBy, createdAt: atIn,
+      note: `Moved in from ${args.fromNo ? `${args.fromNo} · ` : ""}${args.from}${extra}`,
+    }));
+  });
+  await ensureCollections(["stockMovements"]);
+  try {
+    await move();
+  } catch (e) {
+    // The counter can lag its history (it said "0" with stones in the bag): put it right once, as every issue does.
+    if (e instanceof Error && e.message.startsWith("Insufficient")) {
+      await recomputeStockFromHistory(loadDb().stockMovements ?? [], co);
+      await move();
+    } else throw e;
+  }
+  // The second bag gets its number if it is a new one (the form gives it one first, to name it).
+  if (!bagOf(loadDb(), args.to)) ensureBag(args.to, args.createdBy);
+  return refId;
+}
+
+/**
+ * A recount (stock-take) of one bag: how many stones are in it, counted. Moves
+ * no stock — a 0 ct line in the bag's history that sets its count from here on
+ * (lib/diamondLots.ts lotBalances).
+ */
+export async function recountBag(args: { companyId?: string; key: string; pieces: number; was?: number | null; createdBy: string; note?: string }): Promise<void> {
+  // Never from the device's saved copy (see staleCols in lib/db.ts) — refused before anything is written.
+  assertFresh();
+  const pcs = Math.round(args.pieces);
+  if (!(pcs >= 0)) throw new Error("Enter how many stones are in the bag.");
+  await addStockMovement({
+    material: "diamond",
+    ...(args.companyId && args.companyId !== "main" ? { companyId: args.companyId } : {}),
+    type: "adjustment", purityOrQuality: args.key, quantity: 0, pcsCount: pcs, refType: "manual",
+    createdBy: args.createdBy, createdAt: new Date().toISOString(),
+    note: `Recounted: ${pcs} pcs${args.was != null ? ` (was ${args.was})` : ""}${args.note?.trim() ? ` — ${args.note.trim()}` : ""}`,
+  });
 }
 
 /**

@@ -679,8 +679,9 @@ export function ReportSections({ embedded = false, show, period, clientId, scope
       if (cat === "gold" || cat === "diamond") {
         const led = movementLedger(cat);
         const r3 = (n: number) => Math.round(n * 1000) / 1000; // kill float noise (24.58999… → 24.59)
-        const totalIn = r3(led.reduce((s, r) => s + r.inQty, 0));
-        const totalOut = r3(led.reduce((s, r) => s + r.outQty, 0));
+        // A move between bags is in and out of the same stock — not in the totals.
+        const totalIn = r3(led.reduce((s, r) => s + (r.bagMove ? 0 : r.inQty), 0));
+        const totalOut = r3(led.reduce((s, r) => s + (r.bagMove ? 0 : r.outQty), 0));
         const totalAmt = led.reduce((s, r) => s + (r.amountInr || 0), 0);
         const closing = led[0]?.balance ?? 0; // newest-first → first row is the latest balance
         const rs = (n: number) => Math.round(n).toLocaleString("en-IN");

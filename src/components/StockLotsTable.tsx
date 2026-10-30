@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { useAuth } from "@/lib/auth";
 import { bagNoOf, giveBags, printBagLabels } from "@/lib/diamondBags";
@@ -14,7 +14,8 @@ import { DataTable, CellMain, CellTag, CellAmount, type DataColumn } from "@/com
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
 import { SectionTitle } from "@/components/SectionTitle";
 import { useUrlState } from "@/hooks/useUrlState";
-import { Coins, Gem, Layers, Package, Printer, Wallet, X } from "lucide-react";
+import { BagPanel } from "@/components/BagPanel";
+import { ArrowRightLeft, Coins, FolderOpen, Gem, Hash, Layers, Package, Printer, Wallet, X } from "lucide-react";
 
 /** One line of stock: a gold purity, a loose-diamond lot, or a material's grade —
  *  or, seen together, every lot of one size (every purity of one karat). */
@@ -107,6 +108,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   const [size, setSize] = useState(ALL);
   const [color, setColor] = useState(ALL);
   const [clarity, setClarity] = useState(ALL);
+  // Loose diamonds: a bag (or every bag of one size) open in the side panel.
+  const [panel, setPanel] = useState<{ keys: string[]; label?: string; start: "view" | "move" | "recount" } | null>(null);
 
   const rows: Row[] = useMemo(() => {
     const now = new Date().toISOString();
@@ -178,7 +181,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         key: `together:${k}`, label: k, members,
         shape: first.shape, variety: first.variety, mm: first.mm, size: first.size,
         type: joinParts(members.map(m => m.type)), color: joinParts(members.map(m => m.color)), clarity: joinParts(members.map(m => m.clarity)),
-        qty, pcs: pcsKnown.length ? pcsKnown.reduce((s, m) => s + (m.pcs ?? 0), 0) : null,
+        // A count only when every bag in it is counted — never part of one.
+        qty, pcs: pcsKnown.length === members.length ? pcsKnown.reduce((s, m) => s + (m.pcs ?? 0), 0) : null,
         fine: gold ? r2(members.reduce((s, m) => s + (m.fine ?? 0), 0)) : undefined,
         // The average of what was paid, weighed by how much of each is held.
         avg: value != null && pricedQty > 0 ? r2(value / pricedQty) : null,
@@ -190,6 +194,16 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
   // The search is kept in the address, so a search result ("BAG-0007") opens the table already narrowed.
   const [q, setQ] = useUrlState("q");
   const textOf = (r: Row) => (r.members ?? [r]).flatMap(m => [m.bag, m.key, m.variety, m.type, m.mm, m.size, m.color, m.clarity]).concat(r.label).filter(Boolean).join(" ").toLowerCase();
+  // A bag picked in the app's search ("?q=BAG-0007&open=bag") opens, once; the
+  // search stays, so closing it leaves the table on that bag.
+  const [openBag, setOpenBag] = useUrlState("open");
+  useEffect(() => {
+    if (!diamond || openBag !== "bag") return;
+    const want = q.trim().toUpperCase();
+    const r = rows.find(x => x.bag?.toUpperCase() === want);
+    if (r) { setOpenBag(""); setPanel({ keys: [r.key], start: "view" }); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [q, rows, diamond, openBag]);
   const tableRows = (together ? grouped : ordered).filter(r => !q.trim() || textOf(r).includes(q.trim().toLowerCase()));
 
   const keysOf = (r: Row) => (r.members ? r.members.map(m => m.key) : [r.key]);
@@ -265,8 +279,8 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         sub={selected
           ? `Showing the history of ${open && selected.length > 1 ? `${open.label} — all ${open.members!.length} ${diamond ? "bags" : "lines"}` : (() => { const r = rows.find(x => x.key === selected[0]); return r ? nameOf(r) : selected[0]; })()} below`
           : together
-            ? (gold ? "Every purity of one karat on one line — open a line for its history" : "Every bag of one size on one line — opening and bought, added up. Open a line to see its bags and history")
-            : diamond ? "Shape · type · mm · sieve · colour · clarity — open a bag for its history" : gem ? "Shape · type · mm · sieve · colour · grade — open a line for its history" : "Open a line for its history"}
+            ? (gold ? "Every purity of one karat on one line — open a line for its history" : "Every bag of one size on one line — opening and bought, added up. Open a line for its bags and their history")
+            : diamond ? "Shape · type · mm · sieve · colour · clarity — open a bag for its history, to move stones or recount" : gem ? "Shape · type · mm · sieve · colour · grade — open a line for its history" : "Open a line for its history"}
         actions={
           <span className="inline-flex items-center gap-3">
             {groupable && (
@@ -298,7 +312,7 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         { label: filtered ? "In stock · filtered" : "In stock", value: fmtQty(totalQty, unit), icon: diamond ? Gem : gold ? Coins : Layers,
           sub: together ? `${grouped.length} ${groupWord} · ${shown.length} ${lines(shown.length)}` : `${shown.length} ${lines(shown.length)}` },
         ...(diamond ? [{ label: "Pieces", value: pcsKnown.length ? totalPcs.toLocaleString() : "—", icon: Layers,
-          sub: pcsKnown.length < shown.length ? `${shown.length - pcsKnown.length} lot${shown.length - pcsKnown.length === 1 ? "" : "s"} without a count` : "Counted on every lot" }] : []),
+          sub: pcsKnown.length < shown.length ? `${pcsKnown.length ? "Counted bags only · " : ""}${shown.length - pcsKnown.length} not counted — open a bag to recount` : "Counted in every bag" }] : []),
         ...(gold ? [{ label: "Fine gold (24K)", value: fmtQty(r2(shown.reduce((s, r) => s + (r.fine ?? 0), 0)), "g"), icon: Coins }] : []),
         { label: "Value at cost", value: fmtMoneyInr(totalValue), icon: Wallet,
           sub: unpriced ? `${unpriced} without a price yet` : "Average cost × quantity" },
@@ -309,6 +323,13 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         rows={tableRows}
         rowKey={r => r.key}
         rowActions={diamond ? (r => [
+          ...(r.members && r.members.length > 1
+            ? [{ label: `Open its ${r.members.length} bags`, icon: FolderOpen, hint: "Each bag and the history of all of them", onSelect: () => setPanel({ keys: keysOf(r), label: r.label, start: "view" }) }]
+            : [
+              { label: "Open bag", icon: FolderOpen, hint: "What it holds and its history", onSelect: () => setPanel({ keys: keysOf(r), start: "view" }) },
+              { label: "Move to another bag", icon: ArrowRightLeft, hint: "Into a bag we keep, or a new one", onSelect: () => setPanel({ keys: keysOf(r), start: "move" }) },
+              { label: "Recount pieces", icon: Hash, hint: "Set how many stones are in it", onSelect: () => setPanel({ keys: keysOf(r), start: "recount" }) },
+            ]),
           r.members
             ? { label: `Print ${r.members.length === 1 ? "its bag label" : `its ${r.members.length} bag labels`}`, icon: Printer, disabled: !r.members.some(m => m.bag), hint: r.members.map(m => m.bag).filter(Boolean).join(", ") || "Give these lots bag numbers first", onSelect: () => print([r]) }
             : { label: "Print bag label", icon: Printer, disabled: !r.bag, hint: r.bag ? `${r.bag} · ${lotLabel(r.key)}` : "Give this lot a bag number first", onSelect: () => print([r]) },
@@ -318,12 +339,13 @@ export function StockLotsTable({ material, companyId, selected, onSelect }: {
         onClearFilters={() => { setShape(ALL); setVariety(ALL); setType(ALL); setMm(ALL); setSize(ALL); setColor(ALL); setClarity(ALL); }}
         search={{ value: q, onChange: setQ, placeholder: diamond ? "Search bags — e.g. BAG-0007, 1.3 mm, G-H, VS" : "Search", ariaLabel: "Search stock" }}
         defaultSort={lotLike || together ? null : { key: "qty", dir: "desc" }}
-        onRowClick={r => (sameKeys(r) ? onSelect(null) : onSelect(keysOf(r), nameOf(r)))}
+        onRowClick={r => (diamond ? setPanel({ keys: keysOf(r), label: r.label, start: "view" }) : sameKeys(r) ? onSelect(null) : onSelect(keysOf(r), nameOf(r)))}
         rowClassName={r => (sameKeys(r) || (r.members && holdsSelection(r)) || (!r.members && selected?.length === 1 && selected[0] === r.key) ? "dt-on bg-primary/[0.05]" : "")}
         exportName={`Stock-${diamond ? (together ? "Loose-Diamonds-by-Size" : "Loose-Diamond-Bags") : gold && together ? "Gold-by-Karat" : material}`}
         details={false}
         emptyText={rows.length ? "No lot matches these filters." : "Nothing in stock."}
       />
+      {diamond && <BagPanel keys={panel?.keys ?? null} label={panel?.label} start={panel?.start} companyId={companyId} onClose={() => setPanel(null)} />}
       {/* An opened line: what it is made of — each bag (purity) opens on its own. */}
       {open && open.members!.length > 1 && (
         <div className="rounded-xl border border-primary/25 bg-primary/[0.03] p-3 space-y-2">

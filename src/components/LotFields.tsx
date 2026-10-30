@@ -1,6 +1,7 @@
+import { useState } from "react";
 import { useDb } from "@/hooks/useDb";
 import { choicesOf, listOf, type ListKey } from "@/lib/optionLists";
-import { knowStoneTypes, lotBalances, lotKey, lotLabel, mmChoices, normalizeMm, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
+import { knowStoneTypes, lotBalances, lotKey, lotLabel, lotParts, LOT_SEP, mmChoices, normalizeMm, sieveChoices, sizeOrder, type LotBalance, type LotSpec } from "@/lib/diamondLots";
 import { ListCombo } from "@/components/ListCombo";
 import { bagNoOf } from "@/lib/diamondBags";
 import { stockAverageRate } from "@/lib/orderCost";
@@ -119,9 +120,11 @@ export function stoneTypeChoices(settings: Parameters<typeof listOf>[1], gem = f
  * stones). Gems are asked the same, with their own colours and a grade in place
  * of clarity. Under it: the bag the stones go into, and what that bag holds now.
  */
-export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, compact = false, gem = false, showType = true, showStone = false }: {
+export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", showBag = true, bagPicker = true, compact = false, gem = false, showType = true, showStone = false }: {
   value: LooseLotDraft; onChange: (patch: Partial<LooseLotDraft>) => void; idPrefix: string;
   companyId?: string; showBag?: boolean; compact?: boolean;
+  /** Off where the form asks the bag itself (moving stones into a new bag). */
+  bagPicker?: boolean;
   /** Gems (emerald, ruby…), not diamonds: colour, type and grade in the gem trade's words. */
   gem?: boolean;
   /** Off where the form asks the type itself (a new order's Diamond Type). */
@@ -138,9 +141,29 @@ export function LooseLotFields({ value, onChange, idPrefix, companyId = "all", s
   const lot = showBag && !gem ? lotBalances(db.stockMovements ?? [], companyId).find(l => l.key === key && l.ct > 0) : undefined;
   const lbl = compact ? "text-[11px]" : "text-xs";
   const box = compact ? "h-9 rounded-lg mt-1" : "h-10 rounded-xl mt-1";
+  // Into a bag we already keep: its lot fills the fields (one bag per lot, so the
+  // stones join it). "New bag": the grade is cleared, to be written for the new one.
+  // "New bag" stays chosen while the grade is being written — even when the bare shape
+  // ("Round") is a bag we keep. Once the lot is written out, the picker shows the bag it
+  // names, as the line under the fields does.
+  const [wantNew, setWantNew] = useState(false);
+  const pickBag = (k: string) => {
+    setWantNew(!k);
+    if (!k) { onChange({ mm: "", size: "", color: "", clarity: "" }); return; }
+    const kept = (db.stockMovements ?? []).find(m => m.material === "diamond" && m.purityOrQuality === k && m.lot?.shape)?.lot;
+    // As the bag's label reads, so the stones land in exactly that bag.
+    const s = lotKey(lotParts(k, kept)) === k ? lotParts(k, kept) : lotParts(k);
+    onChange({ shape: s.shape, type: s.type ?? "", mm: s.mm ?? "", size: s.size ?? "", color: s.color ?? "", clarity: s.clarity ?? "" });
+  };
   // Every shape takes a sieve size as well as its mm — fancy shapes and gems are sieved too.
   return (
     <div className="space-y-2">
+      {showBag && bagPicker && !gem && (
+        <div>
+          <Label htmlFor={`${idPrefix}-bag`} className={lbl}>Bag</Label>
+          <BagSelect id={`${idPrefix}-bag`} value={bag && !(wantNew && !key.includes(LOT_SEP)) ? key : ""} onChange={pickBag} companyId={companyId} className={box} newBag="New bag — write its grade below" />
+        </div>
+      )}
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
         {gem && showStone && (
           <div>
@@ -253,24 +276,32 @@ export const EMPTY_CERT: CertGradeDraft = { type: "", color: "", clarity: "", cu
  * bags this job's stones came from first (`prefer`), then every other bag the
  * business has kept, each with its number and what it holds now.
  */
-export function BagSelect({ value, onChange, prefer = [], companyId = "all", id, className = "h-10 rounded-xl" }: {
+export function BagSelect({ value, onChange, prefer = [], companyId = "all", id, className = "h-10 rounded-xl", exclude = [], newBag }: {
   value: string; onChange: (key: string) => void; prefer?: string[]; companyId?: string; id?: string; className?: string;
+  /** Bags not to offer (the one stones are moving out of). */
+  exclude?: string[];
+  /** Offer "New bag" first, with this label (a purchase): picking it gives "". */
+  newBag?: string;
 }) {
   const db = useDb();
   const now = lotBalances(db.stockMovements ?? [], companyId);
   const known = new Set<string>();
   for (const m of db.stockMovements ?? []) if (m.material === "diamond" && m.purityOrQuality !== "Certified") known.add(m.purityOrQuality);
-  const first = [...new Set(prefer.filter(Boolean))];
-  const rest = [...known].filter(k => !first.includes(k)).sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  for (const k of exclude) known.delete(k);
+  const first = [...new Set(prefer.filter(k => k && !exclude.includes(k)))];
+  // By bag number, as they are kept on the shelf; lots without one after, by name.
+  const noOf = (k: string) => Number(/(\d+)$/.exec(bagNoOf(db, k) ?? "")?.[1] ?? Infinity);
+  const rest = [...known].filter(k => !first.includes(k)).sort((a, b) => noOf(a) - noOf(b) || a.localeCompare(b, undefined, { numeric: true }));
   const label = (k: string) => {
     const bag = bagNoOf(db, k);
     const l = now.find(x => x.key === k);
     return <><span className="font-semibold text-primary">{bag ? `${bag} · ` : ""}</span>{lotLabel(k)}<span className="text-muted-foreground">{l ? ` — ${l.ct} ct${l.pcs != null ? ` · ${l.pcs} pcs` : ""}` : " — empty"}</span></>;
   };
   return (
-    <Select value={value || ""} onValueChange={onChange}>
+    <Select value={value || (newBag ? NONE : "")} onValueChange={v => onChange(v === NONE ? "" : v)}>
       <SelectTrigger id={id} className={className}><SelectValue placeholder="Choose the bag" /></SelectTrigger>
       <SelectContent className="max-h-80">
+        {newBag && <SelectItem value={NONE}><span className="font-semibold">{newBag}</span></SelectItem>}
         {first.length > 0 && <div className="px-2 pt-1.5 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">This job's bags</div>}
         {first.map(k => <SelectItem key={`p-${k}`} value={k}>{label(k)}</SelectItem>)}
         {rest.length > 0 && <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Other bags</div>}

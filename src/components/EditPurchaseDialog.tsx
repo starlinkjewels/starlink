@@ -172,7 +172,7 @@ export function EditPurchaseDialog({ purchase, onClose, onSave, lockQuantity, lo
         ) : (
           <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
             <p className="text-xs font-semibold text-brand-dark">Bag · now {bagNoOf(db, oldKey) ?? "no bag no."} · {oldKey}</p>
-            <LooseLotFields idPrefix="edit-pur" compact companyId={purchase.companyId || "main"} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />
+            <LooseLotFields idPrefix="edit-pur" compact bagPicker={false} companyId={purchase.companyId || "main"} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />
             <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
               <div>
                 <Label htmlFor="edit-pur-pcs" className="text-xs">Pcs</Label>

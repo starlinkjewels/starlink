@@ -151,7 +151,7 @@ export function OpeningStockEditSheet({ movement, onClose }: { movement: StockMo
         {loose && (
           <div className="space-y-2 rounded-xl border border-border/60 bg-secondary/30 p-3">
             <p className="text-xs font-semibold text-brand-dark">Bag · now {bagNoOf(db, m!.purityOrQuality) ?? "no bag no."} · {m!.purityOrQuality}</p>
-            <LooseLotFields idPrefix="open-edit" compact companyId={m!.companyId || "main"} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />
+            <LooseLotFields idPrefix="open-edit" compact bagPicker={false} companyId={m!.companyId || "main"} value={lot} onChange={p => setLot(l => ({ ...l, ...p }))} />
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="opening-pcs" className="text-xs">Pcs</Label>

@@ -130,7 +130,9 @@ export function docLabel(col: string, d: Record<string, unknown> | null | undefi
     case "materialIssuances": return d.material === "gold" || d.material === "diamond"
       ? `${s(d.material)} ${num(d.quantityIssued)}${d.material === "gold" ? "g" : "ct"} ${s(d.purityOrQuality)}`
       : `${num(d.quantityIssued)} ${s(d.purityOrQuality)}`;
-    case "stockMovements": return `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
+    case "stockMovements": return d.pcsCount != null ? `Recount: ${num(d.pcsCount)} pcs · ${s(d.purityOrQuality)}`
+      : d.refType === "bagMove" ? `${d.type === "purchase_in" ? "Into" : "Out of"} a bag: ${num(d.quantity)} ct ${s(d.purityOrQuality)}`
+      : `${s(d.type)} ${num(d.quantity)} ${s(d.purityOrQuality)}`;
     case "diamondPackets": return s(d.stockNumber) || s(d.certificateNumber) || id;
     case "diamondSales": return `${num(d.carat)}ct ${s(d.shape)}`;
     case "supplierSales": return `₹${num(d.totalInr)} sale`;

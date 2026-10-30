@@ -31,7 +31,7 @@ import { toast } from "sonner";
 import { confirmBox } from "@/lib/confirm";
 import { PageHeader } from "@/components/PageHeader";
 import { lotShape } from "@/lib/diamondLots";
-import { bagNoOf } from "@/lib/diamondBags";
+import { bagMoveLabel, bagNoOf } from "@/lib/diamondBags";
 import { StockLotsTable } from "@/components/StockLotsTable";
 import { ListSelect, CertGradeFields } from "@/components/LotFields";
 import { StatStrip, type TableFilter } from "@/components/TableToolbar";
@@ -169,9 +169,15 @@ function MaterialSection({ material }: { material: MaterialKey }) {
     : m.link.factoryId ? <Link to={`/factories/${m.link.factoryId}`} className="text-primary hover:underline">{m.link.label}</Link>
     : m.link.supplierId ? <Link to={`/suppliers/${m.link.supplierId}`} className="text-primary hover:underline">{m.link.label}</Link>
     : m.link.clientId ? <Link to={`/clients/${m.link.clientId}`} className="text-primary hover:underline">{m.link.label}</Link>
-    : <span>{m.link.label}</span>;
+    : <span>{bagMoveLabel(db, m) ?? m.link.label}</span>;
 
   type Movement = (typeof rows)[number];
+  // Stones moved from one bag to another, both bags in view, came in and went out of nothing in all — left out of the totals.
+  const arrivals = (list: Movement[]) => {
+    const legs = new Map<string, number>();
+    for (const m of list) if (m.refType === "bagMove" && m.refId) legs.set(m.refId, (legs.get(m.refId) ?? 0) + 1);
+    return list.filter(m => !(m.refType === "bagMove" && m.refId && (legs.get(m.refId) ?? 0) > 1));
+  };
   const sumQty = (list: Movement[]) => Math.round(list.reduce((s, m) => s + m.quantity, 0) * 1000) / 1000;
   const dash = <span className="text-muted-foreground/50">—</span>;
   // In and Out split exactly as before: a purchase is In, everything else Out.
@@ -185,13 +191,14 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         : <CellTag tone="blue">{m.purityOrQuality}</CellTag> },
     // Loose diamonds: how many stones moved, when counted.
     ...(material === "diamond" ? [{ key: "pcs", header: "Pcs", align: "right" as const, kind: "number" as const, sortValue: (m: Movement) => m.pieces ?? null,
-      cell: (m: Movement) => (m.pieces != null ? <span className="tabular-nums">{m.type === "purchase_in" ? "+" : "−"}{m.pieces}</span> : dash) }] : []),
+      cell: (m: Movement) => (m.pcsCount != null ? <CellTag tone="violet">= {m.pcsCount}</CellTag>
+        : m.pieces != null ? <span className="tabular-nums">{m.type === "purchase_in" ? "+" : "−"}{m.pieces}</span> : dash) }] : []),
     { key: "particulars", header: "Particulars", sortValue: m => m.link.label,
-      cell: m => <span>{particulars(m)}{m.note ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</span> },
+      cell: m => <span>{particulars(m)}{m.note && m.refType !== "bagMove" && !m.link.label.includes(m.note) ? <span className="text-xs text-muted-foreground"> · {m.note}</span> : null}</span> },
     { key: "in", header: `In (${unit})`, align: "right", kind: "number", sortValue: m => (m.type === "purchase_in" ? m.quantity : null),
       cell: m => (m.type === "purchase_in" ? <CellAmount tone="in">{m.quantity.toLocaleString()}</CellAmount> : dash) },
     { key: "out", header: `Out (${unit})`, align: "right", kind: "number", sortValue: m => (m.type === "purchase_in" ? null : m.quantity),
-      cell: m => (m.type === "purchase_in" ? dash : <CellAmount tone="out">{m.quantity.toLocaleString()}</CellAmount>) },
+      cell: m => (m.type === "purchase_in" || (m.pcsCount != null && !m.quantity) ? dash : <CellAmount tone="out">{m.quantity.toLocaleString()}</CellAmount>) },
     { key: "balance", header: "Balance", align: "right", kind: "number", sortValue: m => balanceById.get(m.id) ?? 0,
       cell: m => <span className="tabular-nums whitespace-nowrap font-medium text-brand-dark">{(balanceById.get(m.id) ?? 0).toLocaleString()} {unit}</span> },
     { key: "rate", header: "Rate", align: "right", kind: "number", sortValue: m => inrRateAmount(m)?.rate,
@@ -210,7 +217,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
     const forOrder = p?.orderId ? db.orders.find(o => o.id === p.orderId) : undefined;
     const mi = m.refType === "materialIssuance" && m.refId ? db.materialIssuances.find(x => x.id === m.refId) : undefined;
     return filled([
-      { label: "Movement", value: MOVE_KIND[m.type] ?? m.type },
+      { label: "Movement", value: m.pcsCount != null ? "Recount — pieces counted, no stock moved" : m.refType === "bagMove" ? (m.type === "purchase_in" ? "Into this bag from another" : "Out of this bag into another") : MOVE_KIND[m.type] ?? m.type },
       !!m.note && !m.link.label.includes(m.note) && { label: "Note", value: noteText(m.note) },
       { label: "Bill no.", value: m.link.invoiceNumber },
       !!p?.invoiceDate && { label: "Bill date", value: fmtDate(p.invoiceDate) },
@@ -271,6 +278,8 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         ...locked("Cancel the sale in Buy & Assign — this line follows it")];
     }
     if (m.refType === "transfer") return locked("Moved between companies — move it back from the Stock page");
+    if (m.refType === "bagMove") return locked("Moved between bags — open the bag above and move the stones back");
+    if (m.pcsCount != null) return locked("A recount — open the bag above and recount it again");
     // A correction, a return or a cancelled issue wrote it; point at the issue when it is still there.
     const mi = m.refId ? db.materialIssuances.find(x => x.id === m.refId) : undefined;
     const why = "Written by a correction, a return or a cancelled entry — it follows that entry and can't be changed on its own";
@@ -288,7 +297,7 @@ function MaterialSection({ material }: { material: MaterialKey }) {
         return [
           fmtDate(m.createdAt), m.purityOrQuality, m.link.label,
           m.type === "purchase_in" ? m.quantity : "",
-          m.type === "purchase_in" ? "" : m.quantity,
+          m.type === "purchase_in" || !m.quantity ? "" : m.quantity,
           balanceById.get(m.id) ?? 0,
           ra ? Math.round(ra.rate) : "",
           ra ? Math.round(ra.amount) : "",
@@ -381,8 +390,8 @@ function MaterialSection({ material }: { material: MaterialKey }) {
             details={movementDetails}
             rowActions={movementActions}
             totals={{
-              in: list => <span className="text-success">{sumQty(list.filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
-              out: list => <span className="text-destructive">{sumQty(list.filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
+              in: list => <span className="text-success">{sumQty(arrivals(list).filter(m => m.type === "purchase_in")).toLocaleString()}</span>,
+              out: list => <span className="text-destructive">{sumQty(arrivals(list).filter(m => m.type !== "purchase_in")).toLocaleString()}</span>,
             }}
             emptyText={rows.length === 0 ? "No movements yet." : "None in these dates."}
           />

@@ -99,21 +99,82 @@ export function lotLabel(key: string): string {
 
 /** Stones in each lot: carats and pieces, from the movements (one company, or "all"). */
 export interface LotBalance { key: string; spec: LotSpec; ct: number; pcs: number | null }
+
+// Pieces are only a count while every stone in and out was counted. Adding up
+// whatever movements happened to carry pieces gave "−8 pcs" in a bag and "−386"
+// on the page: stones went in uncounted and came out counted. So, in the order
+// things happened: a bag starts empty (0 pcs, known); stones in or out without
+// a count make it unknown; a recount (pcsCount) sets it; a bag emptied out is 0
+// again. A count that would fall below 0 was never right — unknown, until
+// someone recounts.
+
+/** One company's loose-diamond movements (or all, without moves between our companies), oldest first — ins before outs at a tie. */
+function lotMovements(movements: StockMovement[], companyId: string | "all", keys?: Set<string>): StockMovement[] {
+  const at = (m: StockMovement) => +new Date(m.createdAt) || 0;
+  const inFirst = (m: StockMovement) => (m.type === "purchase_in" || (m.type === "adjustment" && m.quantity > 0) ? 0 : 1);
+  return movements
+    .filter(m => m.material === "diamond" && m.purityOrQuality !== "Certified" && (!keys || keys.has(m.purityOrQuality))
+      && (companyId !== "all" ? (m.companyId || "main") === companyId : m.refType !== "transfer"))
+    .sort((a, b) => at(a) - at(b) || inFirst(a) - inFirst(b) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** A bag's carats and pieces after one more movement. */
+function stepLot(row: { ct: number; pcs: number | null }, m: StockMovement): void {
+  const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
+  const q = Math.abs(m.quantity);
+  row.ct += sign * q;
+  if (m.pcsCount != null) row.pcs = Math.max(0, Math.round(m.pcsCount));
+  else if (q > 0) {
+    row.pcs = m.pieces == null || row.pcs == null ? null : row.pcs + sign * Math.abs(m.pieces);
+    if (row.pcs != null && row.pcs < 0) row.pcs = null;
+  }
+  // Emptied: 0 again. Below empty (an out dated before its in): no count to trust.
+  if (row.ct < -0.0005) row.pcs = null;
+  else if (row.ct <= 0.0005) row.pcs = 0;
+}
+
+/** Each company's bag is counted on its own (one company's recount says nothing of
+ *  another's stones), keyed by company and lot. */
+const SEP0 = "\u0000";
+const coLot = (m: StockMovement) => `${m.companyId || "main"}${SEP0}${m.purityOrQuality}`;
+
 export function lotBalances(movements: StockMovement[], companyId: string | "all" = "all"): LotBalance[] {
-  const by = new Map<string, { ct: number; pcs: number; pcsKnown: boolean; kept?: Partial<LotSpec> }>();
-  for (const m of movements) {
-    if (m.material !== "diamond" || m.purityOrQuality === "Certified") continue;
-    if (companyId !== "all" ? (m.companyId || "main") !== companyId : m.refType === "transfer") continue;
-    const sign = m.type === "purchase_in" ? 1 : m.type === "adjustment" ? Math.sign(m.quantity || 1) : -1;
-    const row = by.get(m.purityOrQuality) ?? { ct: 0, pcs: 0, pcsKnown: false };
-    row.ct += sign * Math.abs(m.quantity);
-    if (m.pieces != null) { row.pcs += sign * Math.abs(m.pieces); row.pcsKnown = true; }
-    if (m.lot?.shape && !row.kept) row.kept = m.lot;
-    by.set(m.purityOrQuality, row);
+  const per = new Map<string, { ct: number; pcs: number | null }>();
+  const kept = new Map<string, Partial<LotSpec>>();
+  for (const m of lotMovements(movements, companyId)) {
+    const row = per.get(coLot(m)) ?? { ct: 0, pcs: 0 };
+    stepLot(row, m);
+    per.set(coLot(m), row);
+    if (m.lot?.shape && !kept.has(m.purityOrQuality)) kept.set(m.purityOrQuality, m.lot);
+  }
+  // Then one line per lot: carats added up; pieces only while every company's are counted.
+  const by = new Map<string, { ct: number; pcs: number | null }>();
+  for (const [k, r] of per) {
+    const key = k.slice(k.indexOf(SEP0) + 1);
+    const row = by.get(key) ?? { ct: 0, pcs: 0 };
+    row.ct += r.ct;
+    row.pcs = row.pcs == null || r.pcs == null ? null : row.pcs + r.pcs;
+    by.set(key, row);
   }
   return [...by.entries()]
-    .map(([key, r]) => ({ key, spec: lotParts(key, r.kept), ct: Math.round(r.ct * 1000) / 1000, pcs: r.pcsKnown ? Math.round(r.pcs) : null }))
+    .map(([key, r]) => ({ key, spec: lotParts(key, kept.get(key)), ct: Math.round(r.ct * 1000) / 1000, pcs: r.pcs == null ? null : Math.round(r.pcs) }))
     .filter(l => Math.abs(l.ct) > 0.0005);
+}
+
+/** One or more bags' movements, oldest first, each with what they held after it —
+ *  carats, and pieces while every bag was counted (each bag counted on its own). */
+export function lotHistory(movements: StockMovement[], keys: string[], companyId: string | "all" = "all"): { m: StockMovement; ct: number; pcs: number | null }[] {
+  const per = new Map<string, { ct: number; pcs: number | null }>();
+  return lotMovements(movements, companyId, new Set(keys)).map(m => {
+    const row = per.get(coLot(m)) ?? { ct: 0, pcs: 0 };
+    stepLot(row, m);
+    per.set(coLot(m), row);
+    const all = [...per.values()];
+    return {
+      m, ct: Math.round(all.reduce((s, r) => s + r.ct, 0) * 1000) / 1000,
+      pcs: all.some(r => r.pcs == null) ? null : Math.round(all.reduce((s, r) => s + (r.pcs ?? 0), 0)),
+    };
+  });
 }
 
 /* ── The usual words, as Settings → Dropdown lists starts them ─────────── */

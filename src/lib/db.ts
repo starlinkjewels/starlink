@@ -1912,8 +1912,12 @@ export interface StockMovement {
   lot?: { shape: string; variety?: string; type?: string; size?: string; mm?: string; color?: string; clarity?: string };
   /** Loose diamonds: how many stones moved, when known. */
   pieces?: number;
-  /** "transfer": moved between our companies (in at the sending company's average cost). */
-  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer";
+  /** Loose diamonds, a recount (stock-take): how many stones the bag holds — counted,
+   *  not moved. Written on an "adjustment" of 0 ct; the bag's count is this from then on. */
+  pcsCount?: number;
+  /** "transfer": moved between our companies (in at the sending company's average cost).
+   *  "bagMove": stones moved from one bag into another (in at the first bag's average cost). */
+  refType?: "purchase" | "materialIssuance" | "order" | "diamondSale" | "supplierSale" | "manual" | "opening" | "transfer" | "bagMove";
   refId?: string;
   // Value of this movement in ₹ — set for an "opening" stock entry (migration
   // stock already owned). Lets the stock ledger show the opening amount without
