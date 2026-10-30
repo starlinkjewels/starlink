@@ -13,7 +13,7 @@
 // Each bag's document id comes from its lot, so the same lot can never end up
 // with two bags, whoever adds stock to it at the same moment.
 import { showPrintPage } from "./printView";
-import { updateDb, type DB, type DiamondBag, type Purchase } from "./db";
+import { updateDb, type DB, type DiamondBag, type Purchase, type StockMovement } from "./db";
 import { purchaseBucket } from "./materials";
 import { LOT_SEP, lotParts, lotLabel, type LotSpec } from "./diamondLots";
 
@@ -88,6 +88,17 @@ export function bagSpec(bag: DiamondBag): LotSpec {
 export function lotWithBag(db: Pick<DB, "diamondBags">, key: string): string {
   const no = bagNoOf(db, key);
   return no ? `${no}${LOT_SEP}${lotLabel(key)}` : lotLabel(key);
+}
+
+/** A move between bags, as its history line reads: "Moved to BAG-0012 · Round · 1.3 mm · G-H · SI1",
+ *  named from the other leg — so a bag numbered after the move is named too. */
+export function bagMoveLabel(db: Pick<DB, "diamondBags" | "stockMovements">, m: StockMovement): string | undefined {
+  if (m.refType !== "bagMove" || !m.refId) return undefined;
+  const other = (db.stockMovements ?? []).find(x => x.refType === "bagMove" && x.refId === m.refId && x.id !== m.id);
+  if (!other) return undefined;
+  // The note the person wrote follows the first " — ".
+  const said = m.note?.includes(" — ") ? m.note.slice(m.note.indexOf(" — ")) : "";
+  return `${m.type === "purchase_in" ? "Moved in from" : "Moved to"} ${lotWithBag(db, other.purityOrQuality)}${said}`;
 }
 
 /* ── Labels to stick on the packets ─────────────────────────────────────── */

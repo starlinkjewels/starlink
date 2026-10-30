@@ -178,9 +178,9 @@ function poolAverage(db: DB, material: string, bucket: string, at: string, compa
       const pq = p ? qtyOf(p) : 0;
       // What it cost us: the bill plus any brokerage we pay on it.
       if (p && pq > 0) rate = landedInr(p) / pq;
-    } else if ((m.refType === "opening" || m.refType === "transfer") && m.valueInr != null && q > 0) {
+    } else if ((m.refType === "opening" || m.refType === "transfer" || m.refType === "bagMove") && m.valueInr != null && q > 0) {
       // Opening stock at the value it was entered with; stock moved in from
-      // another of our companies at what it cost there.
+      // another of our companies, or another bag, at what it cost there.
       rate = m.valueInr / q;
     }
 

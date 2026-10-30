@@ -432,6 +432,8 @@ export interface MaterialLedgerRow {
   rateInr: number | null;   // ₹/unit — only for purchases (linked Purchase)
   amountInr: number | null; // ₹ for this movement — only for purchases
   balance: number; // running stock level of this material AFTER this movement
+  /** Stones moved from one bag to another — in and out of the same stock, not an arrival or a use. */
+  bagMove?: boolean;
 }
 
 /** A full material ledger (gold or loose diamond): every movement — purchases IN,
@@ -482,6 +484,7 @@ export function materialLedger(
       outQty: isIn ? 0 : Math.abs(m.quantity),
       rateInr, amountInr,
       balance: balById.get(m.id) ?? 0,
+      ...(m.refType === "bagMove" ? { bagMove: true } : {}),
     };
   });
 }

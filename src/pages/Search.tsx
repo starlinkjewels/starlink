@@ -65,7 +65,7 @@ export function SearchPage() {
     { title: "Factories", icon: Factory, items: factories.map(f => ({ id: f.id, to: `/factories/${f.id}`, title: f.name, sub: [f.contactPerson, f.phone].filter(Boolean).join(" · ") })) },
     { title: "Designers", icon: PenTool, items: designers.map(x => ({ id: x.id, to: `/designers/${x.id}`, title: x.name, sub: x.kind === "inhouse" ? "In-house" : "Freelancer" })) },
     { title: "Ready Stock", icon: Gem, items: pieces.map(i => ({ id: i.id, to: `/ready-stock/${i.id}`, title: i.name, sub: [i.sku, `${i.quantity} in stock`].filter(Boolean).join(" · ") })) },
-    { title: "Diamond bags", icon: Gem, items: bags.map(b => ({ id: b.id, to: `/stock/diamond?q=${encodeURIComponent(b.no)}`, title: b.no, sub: lotLabel(b.key) })) },
+    { title: "Diamond bags", icon: Gem, items: bags.map(b => ({ id: b.id, to: `/stock/diamond?q=${encodeURIComponent(b.no)}&open=bag`, title: b.no, sub: lotLabel(b.key) })) },
     { title: "Team", icon: Briefcase, items: employees.map(u => ({ id: u.id, to: `/employees/${u.id}`, title: u.name, sub: u.department || (u.role === "admin" ? "Admin" : "") })) },
     { title: "Invoices", icon: FileText, items: invoices.map(i => ({ id: i.id, to: `/invoices?q=${encodeURIComponent(i.number)}`, title: i.number, sub: `${clientName.get(i.clientId) ?? ""} · ${fmtMoney(i.amount)}` })) },
   ].filter(g => g.items.length);
