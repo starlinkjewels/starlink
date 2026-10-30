@@ -41,6 +41,7 @@ import { meltPlan } from "@/lib/melt";
 import { needsAccess } from "@/lib/actionHints";
 import { readyStockOffices, officeLabel, officeOf } from "@/lib/offices";
 import { logItem, whoOf } from "@/lib/readyStockHistory";
+import { finishRecordOf, isReworkIssue } from "@/lib/rework";
 import { PIECE_PHOTO_MAX, dropDeletedPicture, followOrderPictures, orderPictures } from "@/lib/readyStockPhotos";
 import { exportAllowed } from "@/lib/access";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -325,6 +326,8 @@ function OrderDetailPageBody() {
   const [rwDiaPcs, setRwDiaPcs] = useState("");
   const [rwCharge, setRwCharge] = useState("");
   const [rwNote, setRwNote] = useState("");
+  /** The factory's own number for the repair bill — the voucher on its statement line. */
+  const [rwBillNo, setRwBillNo] = useState("");
   const [rwSaving, setRwSaving] = useState(false);
   const [issueDiaKind, setIssueDiaKind] = useState<"loose" | "certified">("loose");
   const [issueCertPacketIds, setIssueCertPacketIds] = useState<string[]>([]);
@@ -576,9 +579,13 @@ function OrderDetailPageBody() {
   // A finished/delivered piece comes back for changes. We ADD a fresh set of
   // MaterialIssuance records (never touching the original finish record), and
   // move stock, so factory balances + all ledgers (which are derived) update on
-  // their own. Gold/diamond ADDED is drawn from stock and passes through the
-  // factory net-zero (issued-in + used-in-piece); REMOVED material goes back to
-  // stock; the rework labour becomes a factory making charge.
+  // their own. Gold/diamond ADDED from our stock passes through the factory
+  // net-zero (issued-in + used-in-piece); added from the factory's holding, it
+  // comes off what they hold of ours. Gold TAKEN OUT stays with the factory, on
+  // our gold account there (source "rework") — as the factory books it; it no
+  // longer goes into our stock. Diamonds taken out go back into their bag. The
+  // labour becomes a making charge. Every issue of one repair shares its key and
+  // the factory's repair bill number: one line on the factory statement.
   const recordRework = async () => {
     const factoryId = rwFactoryId || order.assignedFactoryId || "";
     if (!factoryId) { toast.error("Choose a factory for the rework"); return; }
@@ -593,13 +600,13 @@ function OrderDetailPageBody() {
     setRwSaving(true);
     const now = new Date().toISOString();
     const noteBase = `Rework — ${order.orderNumber}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`;
+    const rework = { key: uid("rw_"), at: now, ...(rwBillNo.trim() ? { billNo: rwBillNo.trim() } : {}) };
     try {
       // Stock first — an insufficient-stock error aborts before any record is written.
       if (goldG > 0 && rwGoldDir === "add" && rwGoldFrom === "stock") {
         await decreaseStockSelfHealing({ material: "gold", companyId: workCo, purityOrQuality: rwGoldKarat, quantity: goldG, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${goldG}g ${rwGoldKarat} gold for ${order.orderNumber}` }, db.stockMovements);
-      } else if (goldG > 0 && rwGoldDir === "remove") {
-        await increaseStock({ material: "gold", companyId: workCo, purityOrQuality: rwGoldKarat, quantity: goldG, refType: "manual", createdBy: user!.id, note: `Rework −${goldG}g ${rwGoldKarat} gold from ${order.orderNumber} → stock` });
       }
+      // Gold taken out stays at the factory (below) — nothing comes into our stock.
       if (diaCt > 0 && rwDiaDir === "add") {
         await decreaseStockSelfHealing({ material: "diamond", companyId: workCo, purityOrQuality: rwDiaShape, quantity: diaCt, pieces: diaPcs, type: "order_direct_use", refType: "order", refId: order.id, createdBy: user!.id, note: `Rework +${diaCt}ct ${rwDiaShape} for ${order.orderNumber}` }, db.stockMovements);
       } else if (diaCt > 0 && rwDiaDir === "remove") {
@@ -621,12 +628,27 @@ function OrderDetailPageBody() {
             quantityIssued: goldG, source: rwGoldFrom === "stock" ? "stock" : "factoryPool",
             finishedNetWeight: goldG, finishedKarat: rwGoldKarat, finishedPurity: purMille,
             finishedPieces: [{ id: uid("fp_"), quantityUsed: goldG, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-            issuedAt: now, issuedBy: user!.id, status: "closed",
+            issuedAt: now, issuedBy: user!.id, status: "closed", rework,
             makingCharges: { amountInr: charge, payments: [] },
             notes: `${noteBase} (added ${goldG}g ${rwGoldKarat} gold from ${rwGoldFrom === "stock" ? "our stock" : "the factory’s holding"})`,
           } as MaterialIssuance);
           o.materialIssuanceIds.push(iid);
           chargeAttached = charge > 0;
+        }
+        // Gold TAKEN OUT → on our gold account at the factory: it reached them (in
+        // fine, by its karat) and was used in nothing, so their balance goes up.
+        // No orderId — like a melt's gold it joins the factory's holding (a later
+        // repair can use it, it can be returned or moved); the order is on `rework`.
+        if (goldG > 0 && rwGoldDir === "remove") {
+          d.materialIssuances.unshift({
+            id: uid("mi_"), factoryId, material: "gold", ...coField(workCo), purityOrQuality: rwGoldKarat,
+            quantityIssued: goldG, source: "rework", rework: { ...rework, orderId: o.id },
+            finishedPieces: [], issuedAt: now, issuedBy: user!.id, status: "closed",
+            // Its labour goes on the repair's labour line below (which is the order's),
+            // so the order's cost and profit see it.
+            makingCharges: { amountInr: 0, payments: [] },
+            notes: `${noteBase} (${goldG}g ${rwGoldKarat} gold taken out of the piece — kept by the factory, on our account)`,
+          } as MaterialIssuance);
         }
         // Diamond ADD → factory-neutral leg (issued-in + used-in-piece).
         if (diaCt > 0 && rwDiaDir === "add") {
@@ -635,7 +657,7 @@ function OrderDetailPageBody() {
             id: iid, factoryId, orderId: o.id, material: "diamond", ...coField(workCo), purityOrQuality: rwDiaShape,
             quantityIssued: diaCt, ...(diaPcs ? { piecesIssued: diaPcs } : {}), source: "stock", diamondKind: "loose", finishReturnedCt: 0,
             finishedPieces: [{ id: uid("fp_"), quantityUsed: diaCt, piecesCount: 1, recordedAt: now, recordedBy: user!.id }],
-            issuedAt: now, issuedBy: user!.id, status: "closed",
+            issuedAt: now, issuedBy: user!.id, status: "closed", rework,
             makingCharges: { amountInr: chargeAttached ? 0 : charge, payments: [] },
             notes: `${noteBase} (added ${diaCt}ct ${rwDiaShape})`,
           } as MaterialIssuance);
@@ -649,25 +671,25 @@ function OrderDetailPageBody() {
           d.materialIssuances.unshift({
             id: iid, factoryId, orderId: o.id, material: "gold", ...coField(workCo), purityOrQuality: "—",
             quantityIssued: 0, source: "factoryPool",
-            finishedPieces: [], issuedAt: now, issuedBy: user!.id, status: "closed",
+            finishedPieces: [], issuedAt: now, issuedBy: user!.id, status: "closed", rework,
             makingCharges: { amountInr: charge, payments: [] },
             notes: `${noteBase} (rework labour)`,
           } as MaterialIssuance);
           o.materialIssuanceIds.push(iid);
         }
         const parts: string[] = [];
-        if (goldG > 0) parts.push(`${rwGoldDir === "add" ? "+" : "−"}${goldG}g ${rwGoldKarat} gold`);
+        if (goldG > 0) parts.push(rwGoldDir === "add" ? `+${goldG}g ${rwGoldKarat} gold` : `−${goldG}g ${rwGoldKarat} gold (kept at the factory)`);
         if (diaCt > 0) parts.push(`${rwDiaDir === "add" ? "+" : "−"}${diaCt}ct ${rwDiaShape}`);
         if (charge > 0) parts.push(`labour ${fmtMoneyInr(charge)}`);
         o.manufacturingLog.push({
           id: uid("mlog_"), type: "making_charge_added", at: now, employeeId: user!.id, factoryId,
           material: goldG > 0 ? "gold" : "diamond", amountInr: charge || undefined,
-          remarks: `Rework at ${factory?.name || "factory"} — ${parts.join(", ")}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`,
+          remarks: `Rework at ${factory?.name || "factory"}${rework.billNo ? ` · bill ${rework.billNo}` : ""} — ${parts.join(", ")}${rwNote.trim() ? ` · ${rwNote.trim()}` : ""}`,
         });
       });
       toast.success("Rework recorded — stock, factory & ledger updated");
       setShowRework(false);
-      setRwGoldDir("none"); setRwGoldG(""); setRwDiaDir("none"); setRwDiaCt(""); setRwDiaPcs(""); setRwCharge(""); setRwNote("");
+      setRwGoldDir("none"); setRwGoldG(""); setRwDiaDir("none"); setRwDiaCt(""); setRwDiaPcs(""); setRwCharge(""); setRwNote(""); setRwBillNo("");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Rework failed");
     } finally { setRwSaving(false); }
@@ -1033,7 +1055,8 @@ function OrderDetailPageBody() {
 
   // The single "finishing" record for an order (gold net weight + labour). Used
   // to prefill the popup on re-edit and to update in place instead of duplicating.
-  const finishRecord = () => db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
+  // Never a repair's record (lib/rework.ts) — editing the actual details used to overwrite one.
+  const finishRecord = () => finishRecordOf(db.materialIssuances, order.id);
 
   /** Other materials issued for this order (Settings → Materials) — Final Approval says what came back. */
   const faXIssues = () => db.materialIssuances.filter(i => i.orderId === order.id && isOtherMaterial(i.material) && i.source !== "melt");
@@ -1254,7 +1277,7 @@ function OrderDetailPageBody() {
         if (!d.materialIssuances) d.materialIssuances = [];
         // The finishing record — update in place if it exists (re-edit), else create.
         if (factoryId) {
-          let finish = d.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.source === "factoryPool");
+          let finish = finishRecordOf(d.materialIssuances, order.id);
           if (!finish) {
             finish = {
               id: uid("mi_"), factoryId, orderId: order.id, material: "gold", ...coField(workCo), purityOrQuality: karat,
@@ -1798,7 +1821,9 @@ function OrderDetailPageBody() {
       const n = parseFloat(typed);
       return !isNaN(n) && n > 0 ? n : onFile;
     };
-    const finishNet = db.materialIssuances.find(i => i.orderId === order.id && i.material === "gold" && i.finishedNetWeight != null)?.finishedNetWeight;
+    // The finished piece's net — never a repair's record (lib/rework.ts).
+    const finGolds = db.materialIssuances.filter(i => i.orderId === order.id && i.material === "gold" && i.finishedNetWeight != null);
+    const finishNet = (finishRecordOf(finGolds, order.id) ?? finGolds.find(i => !isReworkIssue(i)))?.finishedNetWeight;
     // A platinum or silver piece: its metal is under "other metal" — the net
     // here is all of the piece's metal, not a second one beside it.
     if (isSelfMetal(order)) return {
@@ -3588,7 +3613,9 @@ function OrderDetailPageBody() {
                 disabled: faDone, onSelect: () => setCsEdit(true) },
               { label: "No diamond in this piece", icon: XCircle, show: !faDone && !order.noDiamond && !linkedIssuances.some(i => i.material === "diamond"), hint: "Gold only", onSelect: () => setNoDiamond(true) },
               { label: "This piece has diamond", icon: Gem, show: !faDone && !!order.noDiamond, onSelect: () => setNoDiamond(false) },
-              { label: "Rework / Alteration", icon: RotateCcw, show: !faDone, hint: "The piece came back for changes", onSelect: openRework },
+              // After Final Approval only: before it, the approval's own weight takes in any change,
+              // and a repair recorded as well counted the same grams twice.
+              { label: "Rework / Alteration", icon: RotateCcw, show: !faDone, disabled: true, hint: "After Final Approval — until then, add or return material here in Manufacturing", onSelect: () => {} },
             ];
 
             // ① factory · ② material · ③ Final Approval — what is done and what is next.
@@ -4178,28 +4205,37 @@ The piece then takes ours — add them from stock or buy them, as for any order.
               </div>
             }>
             <div className="space-y-3">
-                  <p className="text-xs text-muted-foreground">Added gold comes from what the factory holds of ours; removed material goes back to stock.</p>
-                  <div>
-                    <Label className="text-xs">Factory</Label>
-                    <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={addNew("factory", setRwFactoryId)}>
-                      <SelectTrigger className="rounded-xl mt-1 h-10"><SelectValue placeholder="Choose factory" /></SelectTrigger>
-                      <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
-                    </Select>
+                  {/* The factory and its repair bill — the bill number is the voucher on the factory's statement. */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <Label className="text-xs">Factory</Label>
+                      <Select value={rwFactoryId || order.assignedFactoryId || ""} onValueChange={addNew("factory", setRwFactoryId)}>
+                        <SelectTrigger className="rounded-xl mt-1 h-10"><SelectValue placeholder="Choose factory" /></SelectTrigger>
+                        <SelectContent>{db.factories.filter(f => f.active !== false).map(f => <SelectItem key={f.id} value={f.id}>{f.name}</SelectItem>)}<AddNewItem kind="factory" /></SelectContent>
+                      </Select>
+                    </div>
+                    <div>
+                      <Label htmlFor="rw-bill" className="text-xs">Factory&rsquo;s repair bill no.</Label>
+                      <Input id="rw-bill" value={rwBillNo} onChange={e => setRwBillNo(e.target.value)} className="rounded-xl mt-1 h-10" placeholder="e.g. JS3602" />
+                    </div>
                   </div>
                   <div className="rounded-xl bg-secondary/40 p-3 space-y-2">
                     <div className="flex items-center gap-2">
                       <Coins className="h-4 w-4 text-amber-600" /><span className="text-xs font-semibold">Gold</span>
                       <div className="ml-auto inline-flex rounded-lg bg-white border border-border p-0.5">
                         {(["none", "add", "remove"] as const).map(dir => (
-                          <button key={dir} onClick={() => setRwGoldDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwGoldDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Remove"}</button>
+                          <button key={dir} type="button" onClick={() => setRwGoldDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwGoldDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Take out"}</button>
                         ))}
                       </div>
                     </div>
                     {rwGoldDir !== "none" && (
                       <div className="grid grid-cols-2 gap-2">
-                        <div><Label className="text-xs">Grams to {rwGoldDir}</Label><Input type="number" step="0.001" min={0} value={rwGoldG} onChange={e => setRwGoldG(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 1.5" /></div>
+                        <div><Label className="text-xs">Grams {rwGoldDir === "add" ? "added" : "taken out"}</Label><Input type="number" step="0.001" min={0} value={rwGoldG} onChange={e => setRwGoldG(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 1.5" /></div>
                         <div><Label className="text-xs">Karat</Label><Select value={rwGoldKarat} onValueChange={setRwGoldKarat}><SelectTrigger className="rounded-xl mt-1 h-9"><SelectValue /></SelectTrigger><SelectContent>{GOLD_PURITIES.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}</SelectContent></Select></div>
                       </div>
+                    )}
+                    {rwGoldDir === "remove" && (
+                      <p className="text-[11px] text-muted-foreground">Stays with the factory, on our gold account there — their gold balance goes up by its fine (24K) weight. Nothing comes into our stock.</p>
                     )}
                     {rwGoldDir === "add" && (
                       <div>
@@ -4225,7 +4261,7 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                       <Gem className="h-4 w-4 text-blue-500" /><span className="text-xs font-semibold">Diamond</span>
                       <div className="ml-auto inline-flex rounded-lg bg-white border border-border p-0.5">
                         {(["none", "add", "remove"] as const).map(dir => (
-                          <button key={dir} onClick={() => setRwDiaDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwDiaDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Remove"}</button>
+                          <button key={dir} type="button" onClick={() => setRwDiaDir(dir)} className={`px-2.5 h-7 rounded-md text-xs font-medium transition-colors ${rwDiaDir === dir ? "bg-primary text-white" : "text-muted-foreground hover:text-foreground"}`}>{dir === "none" ? "No change" : dir === "add" ? "Add" : "Take out"}</button>
                         ))}
                       </div>
                     </div>
@@ -4238,15 +4274,26 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                             : <><Label className="text-xs">Back into bag</Label><BagSelect value={rwDiaShape} onChange={setRwDiaShape} companyId={workCo} className="rounded-xl mt-1 h-9"
                                 prefer={linkedIssuances.filter(i => i.material === "diamond" && i.diamondKind !== "certified").map(i => i.purityOrQuality)} /></>}
                         </div>
-                        <div><Label htmlFor="rw-dia-ct" className="text-xs">Carats to {rwDiaDir}</Label><Input id="rw-dia-ct" type="number" step="0.001" min={0} value={rwDiaCt} onChange={e => setRwDiaCt(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 0.5" /></div>
+                        <div><Label htmlFor="rw-dia-ct" className="text-xs">Carats {rwDiaDir === "add" ? "added" : "taken out"}</Label><Input id="rw-dia-ct" type="number" step="0.001" min={0} value={rwDiaCt} onChange={e => setRwDiaCt(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. 0.5" /></div>
                         <div><Label htmlFor="rw-dia-pcs" className="text-xs">Pcs</Label><Input id="rw-dia-pcs" type="number" step="1" min={0} value={rwDiaPcs} onChange={e => setRwDiaPcs(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="Optional" /></div>
                       </div>
                     )}
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <div><Label className="text-xs">Rework charge (₹)</Label><Input type="number" min={0} value={rwCharge} onChange={e => setRwCharge(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="factory labour" /></div>
+                    <div><Label className="text-xs">Labour on the bill (₹)</Label><Input type="number" min={0} value={rwCharge} onChange={e => setRwCharge(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="0" /></div>
                     <div><Label className="text-xs">Note (optional)</Label><Input value={rwNote} onChange={e => setRwNote(e.target.value)} className="rounded-xl mt-1 h-9" placeholder="e.g. resize, add stone" /></div>
                   </div>
+                  {/* What the factory statement will show — read before it is saved. */}
+                  {(Number(rwGoldG) > 0 && rwGoldDir !== "none") || (Number(rwDiaCt) > 0 && rwDiaDir !== "none") || Number(rwCharge) > 0 ? (
+                    <p className="rounded-xl border border-border/70 bg-white px-3 py-2 text-xs text-muted-foreground">
+                      On the factory statement: <span className="font-medium text-brand-dark">Repair{rwBillNo.trim() ? ` · ${rwBillNo.trim()}` : ""}</span>
+                      {rwGoldDir !== "none" && Number(rwGoldG) > 0 && <> · gold {rwGoldDir === "add"
+                        ? (rwGoldFrom === "stock" ? `${rwGoldG} g given and used (no change to their balance)` : `${rwGoldG} g used from their holding (their balance −${toPureGold(Number(rwGoldG), rwGoldKarat).toFixed(3)} g fine)`)
+                        : `${rwGoldG} g kept by them (their balance +${toPureGold(Number(rwGoldG), rwGoldKarat).toFixed(3)} g fine)`}</>}
+                      {rwDiaDir !== "none" && Number(rwDiaCt) > 0 && <> · {rwDiaCt} ct {rwDiaDir === "add" ? "added from our bag" : "back into our bag"}</>}
+                      {Number(rwCharge) > 0 && <> · labour {fmtMoneyInr(Number(rwCharge))}</>}
+                    </p>
+                  ) : null}
             </div>
           </ActionSheet>
         </div>
@@ -4470,6 +4517,11 @@ The piece then takes ours — add them from stock or buy them, as for any order.
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">
                     Gold used{needsGold ? "" : " (optional)"}
                   </p>
+                  {db.materialIssuances.some(i => isReworkIssue(i) && (i.orderId === order.id || i.rework?.orderId === order.id)) && (
+                    <p className="mb-2 rounded-lg bg-amber-500/10 px-2.5 py-1.5 text-[11px] text-amber-800">
+                      This piece has been repaired: enter the weight as it was first finished — each repair is recorded on its own, so its grams are not counted twice.
+                    </p>
+                  )}
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="space-y-2">
                       <div>

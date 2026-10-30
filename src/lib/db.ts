@@ -1840,7 +1840,13 @@ export interface MaterialIssuance {
   /** "transfer": a share of a factory's pool moved from one company to another. */
   /** "client": the client's own material (clientId), sent to the factory for
    *  them — not from our stock, no cost to us. */
-  source: "stock" | "purchase" | "factoryPool" | "melt" | "transfer" | "client";
+  /** "rework": gold the factory took out of a piece in a repair and KEPT — on our
+   *  account at the factory (it never came back to our stock). Like a melt's gold it
+   *  has no orderId (it joins the factory's holding); the order is on `rework`. */
+  source: "stock" | "purchase" | "factoryPool" | "melt" | "transfer" | "client" | "rework";
+  /** Part of a repair (rework) of a finished piece: the issues of one repair share
+   *  its key, and carry the factory's repair bill number for the statement. */
+  rework?: { key: string; at: string; billNo?: string; orderId?: string };
   /** source "client": whose material it is. */
   clientId?: string;
   /** source "client" gold: the order it was sent for (it goes into the

@@ -27,6 +27,7 @@ import {
   type DB, type Order, type MaterialIssuance, type OrderMelt,
 } from "./db";
 import { issuanceUsed } from "./manufacturing";
+import { finishRecordOf, isReworkIssue } from "./rework";
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 
@@ -61,7 +62,8 @@ export interface MeltPlan {
  *  on older orders, the gold issue the finished piece was received against. */
 function finishRecord(db: DB, o: Order): MaterialIssuance | undefined {
   const gold = (db.materialIssuances ?? []).filter(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
-  return gold.find(i => i.source === "factoryPool") ?? gold[0];
+  // Never a repair's record (lib/rework.ts), unless it already holds the finish.
+  return finishRecordOf(gold, o.id) ?? gold.find(i => !isReworkIssue(i)) ?? gold[0];
 }
 
 /** What melting this order's piece would give back — and whether it may be melted. */
