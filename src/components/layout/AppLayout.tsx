@@ -6,7 +6,7 @@ import { useStudio } from "@/lib/studio";
 import { studioSidebarGroups, StudioTabBar, StudioBackButton, parentPath } from "@/components/layout/StudioShell";
 import { applyAppearance, appearanceOf, rememberAppearance, type AppearanceUi } from "@/lib/appearance";
 import { QuickCreateProvider } from "@/components/create/QuickCreate";
-import { Outlet, NavLink, useNavigate, useLocation } from "react-router-dom";
+import { Outlet, NavLink, useNavigate, useLocation, useNavigationType } from "react-router-dom";
 import { LayoutDashboard, Package, Users, Briefcase, MessageSquare, Bell, FileText, BarChart3, Settings, Search, LogOut, Plus, User, ChevronDown, UserCircle, ListTodo, MoreHorizontal, X, ChevronRight, Search as SearchIcon, Wallet, BookOpen, FolderOpen, Sparkles, Landmark, Truck, Boxes, Factory, Gem, CreditCard, ShoppingCart, Camera, Gift, ScanLine, History, Workflow, AlarmClock, PenTool } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 import { motion, AnimatePresence } from "framer-motion";
@@ -239,9 +239,19 @@ function PageData({ children, isClient }: { children: React.ReactNode; isClient:
   return <>{children}</>;
 }
 
+/**
+ * Pages drawn again from the start when the server's answer replaces the saved
+ * copy they opened from: the ones that copy what they show into a form of their
+ * own (a new order, Settings, an Autopilot pipeline, the profile). Every other
+ * page reads the data as it changes, so it simply updates in place — drawing it
+ * again blanked its pictures (a blink) and lost the place in its list.
+ */
+const REDRAW_WHEN_FRESH = /^\/(orders\/new|settings|autopilot\/|profile)/;
+
 export function AppLayout() {
   const { user, logout } = useAuth();
   const db = useDb();
+  const navType = useNavigationType();
   // A page drawn from the device's saved copy is drawn again from the server's answer.
   const freshKey = useFreshKey();
   // A message coming in, on any page: a tone and a pop-up (Messages, see useChatAlerts).
@@ -616,9 +626,11 @@ export function AppLayout() {
             instead of the real viewport. */}
         <motion.main
           key={loc.pathname}
-          initial={{ opacity: 0 }}
+          // Back (or forward) to a page shows it at once, as it was — a fade from
+          // blank read as a blink on a phone. A page opened anew fades in, briefly.
+          initial={navType === "POP" ? false : { opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ duration: 0.25 }}
+          transition={{ duration: 0.15 }}
           className="app-main flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain pb-[calc(env(safe-area-inset-bottom)+7.5rem)] md:pb-8 px-4 md:px-8 2xl:px-10 pt-[calc(env(safe-area-inset-top)+4rem+1.5rem)] md:pt-6">
           {/* Pages are lazy-loaded (route-level code splitting) so the app opens
               fast — only the shell + current screen download. This spinner shows
@@ -633,7 +645,7 @@ export function AppLayout() {
             {/* One frame for every page: as wide as the screen allows (Settings →
                 Appearance → Page width), the same on every page. */}
             <div className="app-page">
-            {roleAllows(loc.pathname) ? <PageData key={freshKey} isClient={user?.role === "client"}><Outlet /></PageData> : (
+            {roleAllows(loc.pathname) ? <PageData key={REDRAW_WHEN_FRESH.test(loc.pathname) ? freshKey : 0} isClient={user?.role === "client"}><Outlet /></PageData> : (
               <div className="card-luxe max-w-lg mx-auto mt-10 p-8 text-center">
                 <Lock className="h-8 w-8 text-muted-foreground/50 mx-auto mb-3" />
                 <h2 className="font-display text-xl text-brand-dark">Not part of your access</h2>

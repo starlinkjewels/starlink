@@ -15,10 +15,14 @@ import { getMessaging, onBackgroundMessage } from "firebase/messaging/sw";
 
 declare let self: ServiceWorkerGlobalScope;
 
-// A new deploy's worker activates immediately and takes control of open tabs,
-// and old precaches are dropped — so after the vite:preloadError refresh in
-// main.tsx, requests resolve against the fresh chunk hashes, not stale ones.
-self.skipWaiting();
+// A new version WAITS while the app is open: taking over at once dropped the old
+// version's files from under the screen in use, so the next page it opened was
+// missing and the app reloaded itself mid-work (a blink). It takes over when the
+// person taps Update (lib/appUpdate.ts sends SKIP_WAITING), or by itself the next
+// time the app is opened after being closed.
+self.addEventListener("message", (event) => {
+  if ((event.data as { type?: string } | undefined)?.type === "SKIP_WAITING") void self.skipWaiting();
+});
 self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
 
 // ── Precache (replaces generateSW's auto-precache of the build output) ──
