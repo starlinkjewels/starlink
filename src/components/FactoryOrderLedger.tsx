@@ -100,7 +100,9 @@ export function buildFactoryOrderRows(
       row = {
         rowId: key,
         orderId: mi.orderId || "",
-        orderNo: order?.orderNumber || (mi.orderId ? "—" : "Bulk delivery"),
+        orderNo: order?.orderNumber || (mi.orderId ? "—" : mi.source === "rework"
+          ? `Repair${orders.find(o => o.id === mi.rework?.orderId)?.orderNumber ? ` ${orders.find(o => o.id === mi.rework?.orderId)!.orderNumber}` : ""}${mi.rework?.billNo ? ` · ${mi.rework.billNo}` : ""}`
+          : "Bulk delivery"),
         date: mi.issuedAt,
         jewellery: order?.jewelleryType || `${materialName(settings, mi.material)} ${mi.purityOrQuality}`,
         goldOut: 0, goldIn: 0, diaOut: 0, diaIn: 0, silverIn: 0, otherIn: 0,
@@ -149,6 +151,7 @@ export function buildFactoryOrderRows(
           id: mi.id + "-gin", date: mi.issuedAt, kind: "out",
           text: mi.source === "melt"
             ? `Melted piece back to the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}`
+            : mi.source === "rework" ? `Taken out of the piece in a repair — kept by the factory — ${mi.quantityIssued}g ${mi.purityOrQuality}`
             : `Gold given${mi.orderId ? "" : " (bulk delivery)"} — ${mi.quantityIssued}g ${mi.purityOrQuality}`,
           qty: `${toPureGold(mi.quantityIssued, mi.purityOrQuality).toFixed(3)} g fine`,
         });

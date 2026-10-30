@@ -64,6 +64,9 @@ export function canEditIssuance(db: DB, mi: MaterialIssuance): { ok: boolean; re
   if (mi.source === "melt") {
     return { ok: false, reason: "This came back from melting a finished piece — it is part of that melt on the order." };
   }
+  if (mi.source === "rework") {
+    return { ok: false, reason: "Gold the factory took out of the piece in a repair and kept — part of that repair. To take it back into a piece, record another repair that adds gold from the factory's holding." };
+  }
   if (mi.source === "transfer") {
     return { ok: false, reason: "This was moved here from another company's share — move it back with Move between companies on the factory's page." };
   }

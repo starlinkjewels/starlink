@@ -50,6 +50,8 @@ import { downloadCsv, downloadLedgerPdf, downloadLedgerPdfMulti, fmtInrPlain } f
 import { ExportDialog, inDateRange } from "@/components/ExportDialog";
 import { FullLedgerTable, type MovementRow } from "@/components/FullLedgerTable";
 import { FactoryOrderLedger, buildFactoryOrderRows } from "@/components/FactoryOrderLedger";
+import { FactoryStatement } from "@/components/FactoryStatement";
+import { buildFactoryStatement } from "@/lib/factoryStatement";
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
@@ -136,6 +138,15 @@ function FactoryHistoryPageBody() {
   const advances = firstCo ? (db.factoryPayments ?? []).filter(x => x.factoryId === id) : [];
   const account = factoryAccount(issuances, firstCo ? factory : undefined, advances);
   const [movingPool, setMovingPool] = useState(false);
+  // The account as a statement (one line per voucher, the balance carried down —
+  // as the factory's own books), or order by order. Remembered on this device.
+  const [ledgerView, setLedgerViewRaw] = useState<"statement" | "orders">(() => {
+    try { return localStorage.getItem("factory-ledger-view") === "orders" ? "orders" : "statement"; } catch { return "statement"; }
+  });
+  const setLedgerView = (v: "statement" | "orders") => { setLedgerViewRaw(v); try { localStorage.setItem("factory-ledger-view", v); } catch { /* private mode */ } };
+  const statement = buildFactoryStatement({
+    issuances, orders: db.orders, advances, factoryId: id!, opening: firstCo ? factory : undefined,
+  });
 
   // ── Opening balance (migration) ──
   const [obOpen, setObOpen] = useState(false);
@@ -486,7 +497,7 @@ function FactoryHistoryPageBody() {
     try {
       // Only material that CAME from stock goes back to stock. A purchase bought
       // for this order never entered stock, so returning it must not inflate the pool.
-      if (issuance.source === "stock" || issuance.source === "melt") {
+      if (issuance.source === "stock" || issuance.source === "melt" || issuance.source === "rework") {
         await increaseStock({
           material: issuance.material, companyId: companyOf(issuance), purityOrQuality: issuance.purityOrQuality, quantity: qty,
           refType: "manual", createdBy: user!.id,
@@ -509,7 +520,7 @@ function FactoryHistoryPageBody() {
           });
         }
       });
-      toast.success(issuance.source === "stock" || issuance.source === "melt" ? `${qty}${unit} returned to stock`
+      toast.success(issuance.source === "stock" || issuance.source === "melt" || issuance.source === "rework" ? `${qty}${unit} returned to stock`
         : issuance.source === "client" ? `${qty}${unit} returned — the client's own, held for them (not our stock)`
         : `${qty}${unit} returned (was bought for this order — not added to stock)`);
       closeAction();
@@ -616,7 +627,7 @@ function FactoryHistoryPageBody() {
 
   const ADMIN_ONLY = "Only an admin can change what was issued to a factory";
   const issuanceActions = (mi: MaterialIssuance): MoreAction[] => {
-    const order = db.orders.find(o => o.id === (mi.orderId ?? mi.meltOf));
+    const order = db.orders.find(o => o.id === (mi.orderId ?? mi.meltOf ?? mi.rework?.orderId));
     const purchase = mi.source === "purchase" ? db.purchases.find(p => p.id === mi.sourcePurchaseId) : undefined;
     const supplierName = purchase ? db.suppliers.find(s => s.id === purchase.supplierId)?.name : undefined;
     const edit = canEditIssuance(db, mi);
@@ -1145,7 +1156,22 @@ function FactoryHistoryPageBody() {
           on the same row as the order they belong to. It replaced a separate
           account statement, gold ledger, diamond ledger and movement sheet,
           which meant four tables to cross-reference for one job. */}
-      <FactoryOrderLedger
+      {/* Statement (as the factory keeps it) or order by order — the same records. */}
+      <div className="flex items-center justify-between gap-3">
+        <div role="tablist" aria-label="Ledger" className="inline-flex rounded-xl bg-secondary p-1 border border-border/60">
+          {([["statement", "Statement"], ["orders", "By order"]] as const).map(([v, label]) => (
+            <button key={v} type="button" role="tab" aria-selected={ledgerView === v} onClick={() => setLedgerView(v)}
+              className={`h-8 px-3.5 rounded-lg text-xs font-medium transition-colors ${ledgerView === v ? "bg-white text-brand-dark shadow-soft" : "text-muted-foreground hover:text-foreground"}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {ledgerView === "statement" && (
+        <FactoryStatement lines={statement.lines} check={statement.check} factoryName={factory.name}
+          orderNo={oid => db.orders.find(o => o.id === oid)?.orderNumber} />
+      )}
+      {ledgerView === "orders" && <FactoryOrderLedger
         rows={orderRows}
         factoryName={factory.name}
         // The opening fine gold is the first company's (as on the account card
@@ -1153,7 +1179,7 @@ function FactoryHistoryPageBody() {
         openingFineGold={firstCo ? factory.openingFineGold || 0 : 0}
         account={account}
         onExport={() => setShowExport(true)}
-      />
+      />}
 
 
       <div className="space-y-3">
@@ -1173,6 +1199,8 @@ function FactoryHistoryPageBody() {
                     <p className="font-semibold text-[15px] min-w-0">
                       {mi.orderId ? (order ? <Link to={`/orders/${order.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{order.orderNumber}</Link> : "Unknown order") : mi.source === "melt" ? (
                         <span className="inline-flex items-center gap-1 text-muted-foreground">Melted {(() => { const mo = db.orders.find(o => o.id === mi.meltOf); return mo ? <Link to={`/orders/${mo.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{mo.orderNumber}</Link> : "piece"; })()} — {mi.quantityIssued > 0 ? "back in the factory's pool" : "melting charge"}</span>
+                      ) : mi.source === "rework" ? (
+                        <span className="inline-flex items-center gap-1 text-muted-foreground">Repair {(() => { const ro = db.orders.find(o => o.id === mi.rework?.orderId); return ro ? <Link to={`/orders/${ro.id}`} className="inline-block py-2.5 -my-2.5 text-primary hover:underline">{ro.orderNumber}</Link> : ""; })()} — taken out, kept in the factory&rsquo;s holding{mi.rework?.billNo ? ` · bill ${mi.rework.billNo}` : ""}</span>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-muted-foreground"><Truck className="h-3.5 w-3.5" /> Bulk delivery (factory pool)</span>
                       )}

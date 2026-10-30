@@ -1,4 +1,5 @@
 import { CARAT_TO_GRAM, type MaterialIssuance, type Order } from "./db";
+import { finishRecordOf, isReworkIssue } from "./rework";
 
 /**
  * Jewellery weights, the way the trade reads them.
@@ -109,7 +110,9 @@ export function isSelfMetal(o: Pick<Order, "metal" | "otherMetal" | "otherMetalW
  * diamonds' own weight — so it can never come out under the net.
  */
 export function pieceWeights(o: Order, issuances: MaterialIssuance[] = []): PieceWeights {
-  const finish = issuances.find(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
+  // The piece's own finish — never a repair's record (lib/rework.ts), whose weight is only what the repair added.
+  const golds = issuances.filter(i => i.orderId === o.id && i.material === "gold" && i.finishedNetWeight != null);
+  const finish = finishRecordOf(golds, o.id) ?? golds.find(i => !isReworkIssue(i));
   const diamondCt = pos(o.actualDiamondWeight ?? o.diamondWeight);
   const actualNet = o.actualNetWeight ?? finish?.finishedNetWeight;
   if (isSelfMetal(o)) {

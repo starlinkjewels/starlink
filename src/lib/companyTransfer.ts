@@ -29,10 +29,13 @@ export function applyPoolTransfer(
 ): MaterialIssuance | undefined {
   if (poolTransferBlocker(d, { ...a })) return undefined;
   let left = Math.round(a.quantity * 1000) / 1000;
-  // The sender's deliveries into this pool, newest first, give up the amount.
+  // The sender's deliveries into this pool, newest first, give up the amount — a
+  // repair's or a melt's gold last, so their own lines on the statement keep what
+  // they say for as long as anything else can give.
+  const kept = (i: MaterialIssuance) => (i.source === "rework" || i.source === "melt" ? 1 : 0);
   const deliveries = (d.materialIssuances ?? [])
     .filter(i => i.factoryId === a.factoryId && i.material === a.material && i.purityOrQuality === a.bucket && !i.orderId && companyOf(i) === a.from)
-    .sort((x, y) => +new Date(y.issuedAt) - +new Date(x.issuedAt));
+    .sort((x, y) => kept(x) - kept(y) || +new Date(y.issuedAt) - +new Date(x.issuedAt));
   for (const i of deliveries) {
     if (left <= 0.0005) break;
     const take = Math.min(i.quantityIssued, left);
